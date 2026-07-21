@@ -671,9 +671,10 @@ local function buildLevel()
 		end
 	end)
 
-	-- Respawn alle spillere ved den nye starten
+	-- Respawn alle spillere ved den nye starten. pcall så en spiller som er
+	-- på vei ut (LoadCharacter kan feile) ikke stopper resten av respawn-løkka.
 	for _, plr in ipairs(Players:GetPlayers()) do
-		plr:LoadCharacter()
+		pcall(function() plr:LoadCharacter() end)
 	end
 end
 
@@ -696,7 +697,10 @@ onEscape = function(plr)
 
 	if CONFIG.MultipleLevels then currentLevel += 1 end
 	task.wait(0.4)
-	buildLevel()
+	-- advancing MÅ nullstilles selv om buildLevel skulle feile, ellers låser
+	-- progresjonen seg for godt (ingen kommer videre før server-omstart).
+	local ok, err = pcall(buildLevel)
+	if not ok then warn("[Labyrint] buildLevel feilet: " .. tostring(err)) end
 	advancing = false
 end
 
