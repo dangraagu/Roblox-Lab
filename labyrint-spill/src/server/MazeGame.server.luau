@@ -80,6 +80,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Themes = require(ReplicatedStorage:WaitForChild("Themes"))
 local ShopService = require(ReplicatedStorage:WaitForChild("ShopService"))
 local Medals = require(ReplicatedStorage:WaitForChild("Medals"))
+local PerkDefs = require(ReplicatedStorage:WaitForChild("PerkDefs"))
+local PerkService = require(ReplicatedStorage:WaitForChild("PerkService"))
+
+-- Engangs-gaver: navngitte spillere får startkapital FØRSTE gang de blir med.
+-- Gis bare én gang og lagres, så det ikke gjentas ved ny innlogging. Match på
+-- Roblox-brukernavn (user). Bytter han navn, sett heller userId = <tall> for å
+-- være trygg (finn UserId på profilsiden hans / rprxy.com eller users API).
+local GIFTS = {
+	{ id = "mio_starter", user = "MioSpille", coins = 999999, gems = 999999 },
+}
 
 -- Robux -> edelstener. SKRUS PÅ SENERE PÅ ROBLOX. Så lenge EnableRobux = false
 -- gis INGEN Robux-kjøp. For å skru på: lag Developer Products på create.roblox.com,
@@ -161,6 +171,13 @@ local currentPassages = {}    -- Vector3-punkter for tilfeldig monster-vandring
 
 local playerData = {}         -- [player] = {coins, gems, trophies, best}
 local startClock = {}         -- [player] = os.clock() ved level-start
+local shieldUsed = {}         -- [player] = true hvis skjold-perk er brukt på gjeldende nivå
+local invulnUntil = {}        -- [player] = os.clock()-tid uskadelig til (kort vindu etter skjold)
+
+local function ownsPerk(plr, id)
+	local d = playerData[plr]
+	return d ~= nil and d.perks ~= nil and d.perks[id] == true
+end
 
 --==========================  HJELPERE  ===========================--
 local function halfOf(n) return (n - 1) / 2 end
@@ -278,6 +295,15 @@ local function killTouch(hit)
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	local plr = Players:GetPlayerFromCharacter(char)
 	if plr and hum and hum.Health > 0 then
+		-- Ett dødelig treff = mange Touched (flere lemmer + felle-trigger). Et kort
+		-- uskadelig-vindu gjør at skjoldet tar ÉN hendelse, ikke bare den første.
+		if os.clock() < (invulnUntil[plr] or 0) then return end
+		if ownsPerk(plr, "shield") and not shieldUsed[plr] then
+			shieldUsed[plr] = true                 -- skjoldet tar ett treff pr liv
+			invulnUntil[plr] = os.clock() + 1.0
+			if playFx then playFx(plr, "shield") end
+			return
+		end
 		hum.Health = 0
 		if playFx then playFx(plr, "death") end
 	end
@@ -321,9 +347,11 @@ end
 --============================  LAGRING  ==========================--
 local function loadPlayer(plr)
 	local d = { coins = 0, gems = 0, trophies = 0, best = math.huge,
-		owned = { classic = true }, theme = Themes.default, receipts = {}, bestByLevel = {} }
+		owned = { classic = true }, theme = Themes.default, receipts = {}, bestByLevel = {}, perks = {}, gifts = {} }
+	local loadOk = true
 	if dataStore then
 		local ok, saved = pcall(function() return dataStore:GetAsync("p_" .. plr.UserId) end)
+		if not ok then loadOk = false end  -- lese-feil: ikke lagre over ekte data senere
 		if ok and typeof(saved) == "table" then
 			if typeof(saved.coins) == "number" then d.coins = saved.coins end
 			if typeof(saved.gems) == "number" then d.gems = saved.gems end
@@ -343,10 +371,19 @@ local function loadPlayer(plr)
 					if typeof(t) == "number" then d.bestByLevel[lvl] = t end
 				end
 			end
+			if typeof(saved.perks) == "table" then
+				for id in pairs(saved.perks) do
+					if PerkDefs.byId(id) then d.perks[id] = true end
+				end
+			end
+			if typeof(saved.gifts) == "table" then
+				for id in pairs(saved.gifts) do d.gifts[id] = true end
+			end
 		end
 	end
 	d.owned.classic = true                                    -- classic eies alltid
 	if not d.owned[d.theme] then d.theme = Themes.default end -- kan ikke ha valgt et uleid tema
+	d.canSave = loadOk                                       -- false hvis GetAsync feilet
 	playerData[plr] = d
 	refreshStats(plr)
 end
@@ -354,12 +391,15 @@ end
 local function savePlayer(plr)
 	local d = playerData[plr]
 	if not d or not dataStore then return false end
+	if d.canSave == false then return false end  -- lasten feilet: ikke overskriv ekte lagring
 	local ok = pcall(function()
 		dataStore:SetAsync("p_" .. plr.UserId, {
 			coins = d.coins, gems = d.gems, trophies = d.trophies,
 			best = (d.best < math.huge) and d.best or nil,
 			owned = d.owned, theme = d.theme, receipts = d.receipts,
 			bestByLevel = d.bestByLevel,
+			perks = d.perks,
+			gifts = d.gifts,
 		})
 	end)
 	return ok
@@ -947,6 +987,62 @@ sendLevelInfo = function(plr)
 	})
 end
 
+--============================  PERKS (OPPGRADERINGER)  ===========--
+local perkFolder = Instance.new("Folder")
+perkFolder.Name = "PerkRemotes"
+perkFolder.Parent = ReplicatedStorage
+
+local buyPerkFn = Instance.new("RemoteFunction")
+buyPerkFn.Name = "BuyPerk"
+buyPerkFn.Parent = perkFolder
+
+local perkDataEvent = Instance.new("RemoteEvent")
+perkDataEvent.Name = "PerkData"
+perkDataEvent.Parent = perkFolder
+
+local applyPerks  -- fylles ut nedenfor (kjøps-handleren bruker den for å virke med en gang)
+
+local function sendPerkData(plr)
+	local d = playerData[plr]; if not d then return end
+	perkDataEvent:FireClient(plr, { coins = d.coins, perks = d.perks })
+end
+
+buyPerkFn.OnServerInvoke = function(plr, perkId)
+	local d = playerData[plr]
+	if not d then return { ok = false, reason = "noplayer", coins = 0, perks = {} } end
+	if typeof(perkId) ~= "string" then
+		return { ok = false, reason = "badinput", coins = d.coins, perks = d.perks }
+	end
+	local ok, reason = PerkService.buy(PerkDefs, d, perkId)
+	if ok then
+		refreshStats(plr)
+		scheduleSave(plr)
+		sendPerkData(plr)
+		if plr.Character then applyPerks(plr, plr.Character) end  -- fart/fakkel virker med en gang
+	end
+	return { ok = ok, reason = reason, coins = d.coins, perks = d.perks }
+end
+
+-- Bruk perk-effekter på spilleren: fart + fakkel-rekkevidde. Kalles ved spawn og
+-- rett etter kjøp. (skjold og minikart håndteres av killTouch / klienten.)
+applyPerks = function(plr, char)
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		local sp = PerkDefs.byId("speed")
+		local bonus = (ownsPerk(plr, "speed") and sp and sp.speedBonus) or 0
+		hum.WalkSpeed = CONFIG.PlayerWalkSpeed + bonus
+	end
+	if CONFIG.Darkness then
+		local root = char:FindFirstChild("HumanoidRootPart")
+		local torch = root and root:FindFirstChild("Torch")
+		if torch then
+			local tp = PerkDefs.byId("torch")
+			local bonus = (ownsPerk(plr, "torch") and tp and tp.torchBonus) or 0
+			torch.Range = CONFIG.TorchRange + bonus
+		end
+	end
+end
+
 local function stateFor(plr, ok, reason)
 	local d = playerData[plr]
 	return {
@@ -1035,13 +1131,41 @@ end
 --========================  SPILLER-HENDELSER  ====================--
 local function onCharacterAdded(plr, char)
 	startClock[plr] = os.clock()
+	shieldUsed[plr] = false          -- skjold nullstilles ved hver respawn / nytt nivå
 	giveTorch(char)
+	applyPerks(plr, char)
 	sendShopData(plr)  -- send saldo/eierskap/valgt tema når klienten sikkert er lastet
 	if sendLevelInfo then sendLevelInfo(plr) end
+	sendPerkData(plr)
 end
 
 local function onPlayerAdded(plr)
 	loadPlayer(plr)
+
+	-- Del ut engangs-gaver (startkapital) til navngitte spillere.
+	-- Bare hvis lasten gikk bra, ellers kunne vi gitt gaven på nytt + overskrevet ekte data.
+	local d = playerData[plr]
+	if d and d.canSave ~= false then
+		local gifted = false
+		for _, g in ipairs(GIFTS) do
+			local match = (g.user and plr.Name == g.user) or (g.userId and plr.UserId == g.userId)
+			if match then
+				d.gifts = d.gifts or {}
+				if not d.gifts[g.id] then
+					d.coins += (g.coins or 0)
+					d.gems += (g.gems or 0)
+					d.gifts[g.id] = true
+					gifted = true
+				end
+			end
+		end
+		if gifted then
+			refreshStats(plr)
+			savePlayer(plr)  -- lagre straks så gaven ikke deles ut på nytt
+			sendShopData(plr)
+		end
+	end
+
 	plr.CharacterAdded:Connect(function(char) onCharacterAdded(plr, char) end)
 	if plr.Character then onCharacterAdded(plr, plr.Character) end
 end
@@ -1054,6 +1178,8 @@ Players.PlayerRemoving:Connect(function(plr)
 	playerData[plr] = nil
 	startClock[plr] = nil
 	saveScheduled[plr] = nil
+	shieldUsed[plr] = nil
+	invulnUntil[plr] = nil
 end)
 
 game:BindToClose(function()

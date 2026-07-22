@@ -23,6 +23,7 @@ Sounds.Fx = {
 	complete = { id = PING, volume = 0.60, speed = 1.3 },
 	medal    = { id = PING, volume = 0.70, speed = 1.7 },
 	record   = { id = PING, volume = 0.90, speed = 2.0 },
+	shield   = { id = PING, volume = 0.60, speed = 1.1 },
 }
 
 return Sounds
