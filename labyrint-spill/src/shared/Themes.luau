@@ -23,6 +23,7 @@ Themes.List = {
 	{ id = "autumn",    name = "Høstskog",        wall = {190, 125, 75},  secret = {195, 115, 65}, floor = {120, 110, 85},  coinPrice = 800,  gemPrice = 40, material = "WoodPlanks" },
 	{ id = "christmas", name = "Jul",             wall = {210, 70, 72},   secret = {218, 90, 82},  floor = {222, 233, 245}, coinPrice = 800,  gemPrice = 40, material = "Brick" },
 	{ id = "halloween", name = "Halloween",       wall = {245, 160, 55},  secret = {250, 175, 75}, floor = {120, 100, 165}, coinPrice = 800,  gemPrice = 40, material = "Cobblestone" },
+	{ id = "lava",      name = "Lava",            wall = {210, 80, 28},   secret = {230, 100, 40}, floor = {46, 22, 16},    coinPrice = 2000, gemPrice = 75, material = "CrackedLava" },
 	{ id = "nebula",    name = "Stjernetåke",     wall = {55, 105, 205},  secret = {70, 110, 198}, floor = {48, 52, 98},    coinPrice = 1000, gemPrice = 45, material = "Slate" },
 	{ id = "alienhive", name = "Romvesenbol",     wall = {35, 178, 140},  secret = {48, 176, 126}, floor = {28, 68, 60},    coinPrice = 1000, gemPrice = 45, material = "Foil" },
 	{ id = "synthwave", name = "Synthwave",       wall = {230, 65, 150},  secret = {216, 82, 158}, floor = {62, 52, 125},   coinPrice = 1200, gemPrice = 55, material = "Metal" },
