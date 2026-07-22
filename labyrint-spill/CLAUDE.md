@@ -78,6 +78,30 @@ Kosmetisk butikk der spilleren kjøper vegg-temaer med in-game-valuta.
 - Remotes: `ReplicatedStorage/ShopRemotes` (BuyTheme/SelectTheme RemoteFunctions,
   ShopData RemoteEvent).
 
+## HUD, medaljer og rekorder — BYGGET
+TrackMania-inspirert nivå-HUD + oppsummering.
+- **HUD** (`src/client/HudClient.client.luau`, øverst på skjermen): "Nivå N", global
+  rekord for nivået (tid + navn), og din beste tid på nivået. Oppdateres via
+  `HudRemotes/LevelInfo` (server sender ved hver bygging + spawn).
+- **Nivå-fullført-kort** (samme fil): medalje-badge (farge/navn), din tid, din beste
+  (med "Ny personlig rekord!" hvis slått), rekorden (med "NY REKORD!" hvis slått),
+  og en rad med medalje-mål-tidene. Vises via `HudRemotes/LevelComplete` (kun til den
+  som kom seg ut). Auto-lukkes etter ~4.5s.
+- **Medaljer** = Bronse/Sølv/Gull/Diamant. "Optimal tid" (par) regnes AUTOMATISK pr
+  nivå i `src/shared/Medals.luau` (ren logikk, 21/21 luau-tester): grådig BFS-rute
+  som samler alt utgangen krever og så når utgangen -> par = steg×CellSize/gangfart.
+  Medaljene = par × { Diamant 1.3, Gull 1.8, Sølv 2.5, Bronse 4.0 } (juster i
+  `Medals.mult`). Deterministisk => medalje-tidene er like for alle. Par er lange på
+  høye nivåer fordi man må samle ALLE mynter i store labyrinter — meningen er å
+  speedrunne nivåer man kan (levels er deterministiske).
+- **Rekorder**: personlig beste pr nivå lagres i spillerens DataStore-tabell
+  (`bestByLevel`, nøkkel = `tostring(level)` fordi DataStore gjør heltalls-nøkler om
+  til tekst). Global rekord pr nivå i egen DataStore `LabyrintRekord_v1` (atomisk
+  `UpdateAsync`, cachet, oppdatering skjer async så nivå-bygging ikke bremses).
+- **Kjent begrensning**: Roblox har klient-styrt bevegelse, så en juksemaker kan
+  teleportere til utgangen for falsk tid/rekord. Plattform-begrensning (ingen
+  server-side bevegelses-validering her) — greit for et lite venne-spill.
+
 ## v2 — resten (ikke bygget ennå)
 Bevisst parkert for å få v1 til å funke først. Lagringen er allerede på plass,
 så saldoen finnes når butikkene bygges.

@@ -25,6 +25,9 @@ local CONFIG = {
 	-- for å trekke om alle nivåene på nytt — de forblir fortsatt like for alle.
 	WorldSeed = 20260721,
 
+	-- Spillerens gangfart (studs/s), brukt til å regne "optimal tid" for medaljer.
+	PlayerWalkSpeed = 16,
+
 	-- Monster
 	MonsterDetectRange = 34,  -- hvor nær du må være før monsteret jakter
 
@@ -76,6 +79,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Themes = require(ReplicatedStorage:WaitForChild("Themes"))
 local ShopService = require(ReplicatedStorage:WaitForChild("ShopService"))
+local Medals = require(ReplicatedStorage:WaitForChild("Medals"))
 
 -- Robux -> edelstener. SKRUS PÅ SENERE PÅ ROBLOX. Så lenge EnableRobux = false
 -- gis INGEN Robux-kjøp. For å skru på: lag Developer Products på create.roblox.com,
@@ -94,9 +98,51 @@ if CONFIG.SaveData then
 	if ok then dataStore = ds end
 end
 
+-- Globale nivå-rekorder (én delt rekord pr nivå, på tvers av alle servere).
+local recordStore = nil
+if CONFIG.SaveData then
+	local ok, ds = pcall(function()
+		return DataStoreService:GetDataStore("LabyrintRekord_v1")
+	end)
+	if ok then recordStore = ds end
+end
+local recordCache = {}  -- [level] = { time = number?, name = string? }
+
+local function getRecord(level)
+	if recordCache[level] then return recordCache[level] end
+	local rec = { time = nil, name = nil }
+	if recordStore then
+		local ok, saved = pcall(function() return recordStore:GetAsync("lvl_" .. level) end)
+		if ok and typeof(saved) == "table" and typeof(saved.time) == "number" then
+			rec.time = saved.time
+			rec.name = (typeof(saved.name) == "string") and saved.name or "?"
+		end
+	end
+	recordCache[level] = rec
+	return rec
+end
+
+-- Atomisk skriving av ny rekord hvis bedre (trygt selv om to servere prøver
+-- samtidig). Kalles asynkront så den ikke bremser nivå-byggingen.
+local function tryUpdateRecord(level, time, name)
+	if not recordStore then return end
+	pcall(function()
+		recordStore:UpdateAsync("lvl_" .. level, function(old)
+			if typeof(old) ~= "table" or typeof(old.time) ~= "number" or time < old.time then
+				return { time = time, name = name }
+			end
+			return nil  -- ikke bedre: avbryt skrivingen
+		end)
+	end)
+end
+
 --============================  STATE  ============================--
 local currentLevel = 1
 local currentGen = 0          -- økes hver bygging; gamle monster-løkker stopper
+local currentPar = nil        -- optimal tid (sekunder) for gjeldende nivå
+local currentThresholds = nil -- medalje-terskler for gjeldende nivå
+local sendLevelInfo           -- fylles ut i HUD-seksjonen
+local levelCompleteEvent      -- fylles ut i HUD-seksjonen
 local advancing = false
 local mazeFolder = nil
 
@@ -127,7 +173,7 @@ local function cellCenterWorld(cx, cy, gCols, gRows)
 	return gridToWorld(2 * cx + 1, 2 * cy + 1, gCols, gRows)
 end
 
-local function fmtTime(t) return string.format("%.1fs", t) end
+local function fmtTime(t) return Medals.fmtTime(t) end
 
 --========================  PROGRESJONSKURVE  =====================--
 local function getDifficulty(L)
@@ -273,7 +319,7 @@ end
 --============================  LAGRING  ==========================--
 local function loadPlayer(plr)
 	local d = { coins = 0, gems = 0, trophies = 0, best = math.huge,
-		owned = { classic = true }, theme = Themes.default, receipts = {} }
+		owned = { classic = true }, theme = Themes.default, receipts = {}, bestByLevel = {} }
 	if dataStore then
 		local ok, saved = pcall(function() return dataStore:GetAsync("p_" .. plr.UserId) end)
 		if ok and typeof(saved) == "table" then
@@ -290,6 +336,11 @@ local function loadPlayer(plr)
 				d.theme = saved.theme
 			end
 			if typeof(saved.receipts) == "table" then d.receipts = saved.receipts end
+			if typeof(saved.bestByLevel) == "table" then
+				for lvl, t in pairs(saved.bestByLevel) do
+					if typeof(t) == "number" then d.bestByLevel[lvl] = t end
+				end
+			end
 		end
 	end
 	d.owned.classic = true                                    -- classic eies alltid
@@ -306,6 +357,7 @@ local function savePlayer(plr)
 			coins = d.coins, gems = d.gems, trophies = d.trophies,
 			best = (d.best < math.huge) and d.best or nil,
 			owned = d.owned, theme = d.theme, receipts = d.receipts,
+			bestByLevel = d.bestByLevel,
 		})
 	end)
 	return ok
@@ -695,6 +747,28 @@ local function buildLevel()
 		if mc then makeMonster(cellCenterWorld(mc[1], mc[2], gCols, gRows), gen, diff.monsterSpeed) end
 	end
 
+	-- "Optimal tid" (par) + medalje-terskler for dette nivået: korteste rute som
+	-- samler det utgangen krever og så når utgangen. Deterministisk => like for alle.
+	do
+		local reqCells
+		if CONFIG.UnlockExitBy == "gems" then
+			reqCells = gemCells
+		elseif CONFIG.UnlockExitBy == "coins" then
+			reqCells = coinCells
+		else
+			reqCells = {}
+		end
+		local mustVisit = {}
+		for _, c in ipairs(reqCells) do
+			table.insert(mustVisit, { 2 * c[1] + 1, 2 * c[2] + 1 })  -- celle -> finrute
+		end
+		local startFine = { 1, 1 }
+		local exitFine = { 2 * (cols - 1) + 1, 2 * (rows - 1) + 1 }
+		local steps = Medals.solveRoute(grid, gCols, gRows, startFine, exitFine, mustVisit)
+		currentPar = Medals.parTime(steps, CONFIG.CellSize, CONFIG.PlayerWalkSpeed)
+		currentThresholds = Medals.thresholds(currentPar)
+	end
+
 	tryUnlockExit()  -- åpen med en gang hvis ingen krav / ingen mynter
 
 	-- Spinn på mynter/edelstener
@@ -718,6 +792,12 @@ local function buildLevel()
 	for _, plr in ipairs(Players:GetPlayers()) do
 		pcall(function() plr:LoadCharacter() end)
 	end
+
+	-- Oppdater HUD/leaderstats for ALLE spillere (ikke bare den som kom seg ut).
+	for _, plr in ipairs(Players:GetPlayers()) do
+		refreshStats(plr)
+		if sendLevelInfo then sendLevelInfo(plr) end
+	end
 end
 
 --======================  ESCAPE / NESTE NIVÅ  ====================--
@@ -731,10 +811,38 @@ onEscape = function(plr)
 		if st then
 			local elapsed = os.clock() - st
 			if elapsed < d.best then d.best = elapsed end
+
+			-- Per-nivå: personlig rekord, medalje, global rekord, oppsummering.
+			local level = currentLevel
+			local lkey = tostring(level)  -- DataStore lagrer heltalls-nøkler som tekst
+			d.bestByLevel = d.bestByLevel or {}
+			local prevPB = d.bestByLevel[lkey]
+			local isNewPB = (prevPB == nil) or (elapsed < prevPB)
+			if isNewPB then d.bestByLevel[lkey] = elapsed end
+
+			local medal = Medals.medalFor(elapsed, currentThresholds)
+			local rec = getRecord(level)
+			local isNewRecord = (rec.time == nil) or (elapsed < rec.time)
+			local recForClient = rec
+			if isNewRecord then
+				recForClient = { time = elapsed, name = plr.Name }
+				recordCache[level] = recForClient
+				task.spawn(function() tryUpdateRecord(level, elapsed, plr.Name) end)
+			end
+
+			if levelCompleteEvent then
+				levelCompleteEvent:FireClient(plr, {
+					level = level, time = elapsed,
+					yourBest = d.bestByLevel[lkey],
+					record = recForClient, medal = medal,
+					isNewPB = isNewPB, isNewRecord = isNewRecord,
+					thresholds = currentThresholds,
+				})
+			end
 		end
 		d.trophies += 1
 		refreshStats(plr)
-		savePlayer(plr)
+		task.spawn(function() savePlayer(plr) end)  -- async: ikke frys nivå-fremgangen på et DataStore-skriv
 	end
 
 	if CONFIG.MultipleLevels then currentLevel += 1 end
@@ -788,6 +896,31 @@ selectThemeFn.Parent = shopFolder
 local shopDataEvent = Instance.new("RemoteEvent")
 shopDataEvent.Name = "ShopData"
 shopDataEvent.Parent = shopFolder
+
+--============================  HUD / MEDALJER  ===================--
+local hudFolder = Instance.new("Folder")
+hudFolder.Name = "HudRemotes"
+hudFolder.Parent = ReplicatedStorage
+
+local levelInfoEvent = Instance.new("RemoteEvent")
+levelInfoEvent.Name = "LevelInfo"
+levelInfoEvent.Parent = hudFolder
+
+-- levelCompleteEvent er forhånds-deklarert lenger oppe (brukes i onEscape).
+levelCompleteEvent = Instance.new("RemoteEvent")
+levelCompleteEvent.Name = "LevelComplete"
+levelCompleteEvent.Parent = hudFolder
+
+-- sendLevelInfo er forhånds-deklarert lenger oppe (brukes i buildLevel).
+sendLevelInfo = function(plr)
+	local d = playerData[plr]
+	levelInfoEvent:FireClient(plr, {
+		level = currentLevel,
+		thresholds = currentThresholds,
+		record = getRecord(currentLevel),
+		yourBest = (d and d.bestByLevel) and d.bestByLevel[tostring(currentLevel)] or nil,
+	})
+end
 
 local function stateFor(plr, ok, reason)
 	local d = playerData[plr]
@@ -879,6 +1012,7 @@ local function onCharacterAdded(plr, char)
 	startClock[plr] = os.clock()
 	giveTorch(char)
 	sendShopData(plr)  -- send saldo/eierskap/valgt tema når klienten sikkert er lastet
+	if sendLevelInfo then sendLevelInfo(plr) end
 end
 
 local function onPlayerAdded(plr)
