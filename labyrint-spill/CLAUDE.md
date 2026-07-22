@@ -116,6 +116,11 @@ TrackMania-inspirert nivå-HUD + oppsummering.
   Match på brukernavn (eller sett `userId`).
 - **Data-vern**: `d.canSave` (load-success sentinel) — serveren nekter å lagre hvis
   DataStore-lasten feilet, så ekte data aldri overskrives med default.
+- **Gudemodus** (`src/shared/GodUsers.luau` allow-list, kun MioSpille): fly + gå
+  gjennom vegger + udødelig. `GodRemotes/SetGodMode`; serveren gir udødelighet KUN
+  til GodUsers (verifisert på brukernavn). Klient `GodModeClient.client.luau` — fly
+  via `humanoid.MoveDirection` (mobil-joystick) + ▲/▼-knapper, noclip via CanCollide.
+  Gudemodus-runder setter IKKE global rekord (beskytter tavla).
 - **Lyd**: `src/shared/Sounds.luau` (innebygd ping, byttbar) + `SoundClient.client.luau`
   (pickup/død/medalje/rekord via Fx-event + LevelComplete). Musikk opt-in.
 - **Polish**: monstre = server-network-owner (jevnere); feller har høy usynlig trigger.
