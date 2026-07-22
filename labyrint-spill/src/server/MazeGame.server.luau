@@ -82,6 +82,7 @@ local ShopService = require(ReplicatedStorage:WaitForChild("ShopService"))
 local Medals = require(ReplicatedStorage:WaitForChild("Medals"))
 local PerkDefs = require(ReplicatedStorage:WaitForChild("PerkDefs"))
 local PerkService = require(ReplicatedStorage:WaitForChild("PerkService"))
+local GodUsers = require(ReplicatedStorage:WaitForChild("GodUsers"))
 
 -- Engangs-gaver: navngitte spillere får startkapital FØRSTE gang de blir med.
 -- Gis bare én gang og lagres, så det ikke gjentas ved ny innlogging. Match på
@@ -173,6 +174,7 @@ local playerData = {}         -- [player] = {coins, gems, trophies, best}
 local startClock = {}         -- [player] = os.clock() ved level-start
 local shieldUsed = {}         -- [player] = true hvis skjold-perk er brukt på gjeldende nivå
 local invulnUntil = {}        -- [player] = os.clock()-tid uskadelig til (kort vindu etter skjold)
+local godActive = {}          -- [player] = true hvis gudemodus er på (kun GodUsers)
 
 local function ownsPerk(plr, id)
 	local d = playerData[plr]
@@ -295,6 +297,7 @@ local function killTouch(hit)
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	local plr = Players:GetPlayerFromCharacter(char)
 	if plr and hum and hum.Health > 0 then
+		if godActive[plr] then return end  -- gudemodus: udødelig
 		-- Ett dødelig treff = mange Touched (flere lemmer + felle-trigger). Et kort
 		-- uskadelig-vindu gjør at skjoldet tar ÉN hendelse, ikke bare den første.
 		if os.clock() < (invulnUntil[plr] or 0) then return end
@@ -880,7 +883,7 @@ onEscape = function(plr)
 			local rec = getRecord(level)
 			local isNewRecord = (rec.time == nil) or (elapsed < rec.time)
 			local recForClient = rec
-			if isNewRecord then
+			if isNewRecord and not godActive[plr] then   -- gudemodus setter ikke global rekord
 				recForClient = { time = elapsed, name = plr.Name }
 				recordCache[level] = recForClient
 				task.spawn(function() tryUpdateRecord(level, elapsed, plr.Name) end)
@@ -1001,6 +1004,22 @@ perkDataEvent.Name = "PerkData"
 perkDataEvent.Parent = perkFolder
 
 local applyPerks  -- fylles ut nedenfor (kjøps-handleren bruker den for å virke med en gang)
+
+-- Gudemodus (kun GodUsers): klienten slår av/på og gjør fly + gå-gjennom-vegger
+-- lokalt; serveren gjør spilleren udødelig (verifisert på brukernavn her).
+local godFolder = Instance.new("Folder")
+godFolder.Name = "GodRemotes"
+godFolder.Parent = ReplicatedStorage
+
+local setGodEvent = Instance.new("RemoteEvent")
+setGodEvent.Name = "SetGodMode"
+setGodEvent.Parent = godFolder
+
+setGodEvent.OnServerEvent:Connect(function(plr, enabled)
+	if GodUsers[plr.Name] then
+		godActive[plr] = enabled and true or false
+	end
+end)
 
 local function sendPerkData(plr)
 	local d = playerData[plr]; if not d then return end
@@ -1180,6 +1199,7 @@ Players.PlayerRemoving:Connect(function(plr)
 	saveScheduled[plr] = nil
 	shieldUsed[plr] = nil
 	invulnUntil[plr] = nil
+	godActive[plr] = nil
 end)
 
 game:BindToClose(function()
