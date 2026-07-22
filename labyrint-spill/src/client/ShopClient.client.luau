@@ -78,6 +78,11 @@ local function recolorPart(part, theme)
 	if rgb then
 		part.Color = c3(rgb)
 	end
+	-- Materiale gir ekte overflate-detalj/mønster — kun på veggene, ikke gulvet.
+	if (field == "wall" or field == "secret") and theme.material then
+		local ok, mat = pcall(function() return Enum.Material[theme.material] end)
+		if ok and mat then part.Material = mat end
+	end
 end
 
 -- Mal ALLE veggene/gulvet i labyrinten om til et gitt tema. Tåler at
