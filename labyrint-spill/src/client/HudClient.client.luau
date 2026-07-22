@@ -127,11 +127,18 @@ local hudPanel = Instance.new("Frame")
 hudPanel.Name = "NivaaPanel"
 hudPanel.AnchorPoint = Vector2.new(0.5, 0)
 hudPanel.Position = UDim2.new(0.5, 0, 0, 6)
-hudPanel.Size = UDim2.fromOffset(300, 84)
+-- Skala-basert bredde med tak: krymper på smale telefoner, uendret på desktop.
+-- Blir liggende TOPP-MIDT, godt klar av mobil-kontrollene (styrepinne nede-
+-- venstre, hopp nede-høyre).
+hudPanel.Size = UDim2.new(0.82, 0, 0, 84)
 hudPanel.BackgroundColor3 = Color3.fromRGB(26, 29, 40)
 hudPanel.BorderSizePixel = 0
 hudPanel.Parent = gui
 corner(hudPanel, 12)
+local hudSize = Instance.new("UISizeConstraint")
+hudSize.MaxSize = Vector2.new(300, 84)
+hudSize.MinSize = Vector2.new(240, 84)
+hudSize.Parent = hudPanel
 stroke(hudPanel, Color3.fromRGB(70, 78, 100), 1, 0.1)
 depthGradient(hudPanel, Color3.fromRGB(40, 44, 60), Color3.fromRGB(22, 24, 34))
 
@@ -141,11 +148,15 @@ levelLabel.Size = UDim2.new(1, -16, 0, 34)
 levelLabel.Position = UDim2.fromOffset(8, 6)
 levelLabel.BackgroundTransparency = 1
 levelLabel.Font = Enum.Font.GothamBold
-levelLabel.TextSize = 26
+levelLabel.TextScaled = true
 levelLabel.TextColor3 = Color3.new(1, 1, 1)
 levelLabel.TextXAlignment = Enum.TextXAlignment.Center
 levelLabel.Text = "Nivå …"
 levelLabel.Parent = hudPanel
+local levelTsc = Instance.new("UITextSizeConstraint")
+levelTsc.MaxTextSize = 28
+levelTsc.MinTextSize = 16
+levelTsc.Parent = levelLabel
 
 -- Mindre: nivåets rekord.
 local recordLabel = Instance.new("TextLabel")
@@ -153,12 +164,16 @@ recordLabel.Size = UDim2.new(1, -16, 0, 18)
 recordLabel.Position = UDim2.fromOffset(8, 44)
 recordLabel.BackgroundTransparency = 1
 recordLabel.Font = Enum.Font.GothamMedium
-recordLabel.TextSize = 13
+recordLabel.TextScaled = true
 recordLabel.TextColor3 = Color3.fromRGB(240, 215, 150)
 recordLabel.TextXAlignment = Enum.TextXAlignment.Center
 recordLabel.TextTruncate = Enum.TextTruncate.AtEnd
 recordLabel.Text = "🏆 Rekord: —"
 recordLabel.Parent = hudPanel
+local recordTsc = Instance.new("UITextSizeConstraint")
+recordTsc.MaxTextSize = 14
+recordTsc.MinTextSize = 10
+recordTsc.Parent = recordLabel
 
 -- Mindre: din egen beste tid.
 local bestLabel = Instance.new("TextLabel")
@@ -166,11 +181,16 @@ bestLabel.Size = UDim2.new(1, -16, 0, 18)
 bestLabel.Position = UDim2.fromOffset(8, 62)
 bestLabel.BackgroundTransparency = 1
 bestLabel.Font = Enum.Font.GothamMedium
-bestLabel.TextSize = 13
+bestLabel.TextScaled = true
 bestLabel.TextColor3 = Color3.fromRGB(205, 212, 225)
 bestLabel.TextXAlignment = Enum.TextXAlignment.Center
+bestLabel.TextTruncate = Enum.TextTruncate.AtEnd
 bestLabel.Text = "Din beste: —"
 bestLabel.Parent = hudPanel
+local bestTsc = Instance.new("UITextSizeConstraint")
+bestTsc.MaxTextSize = 14
+bestTsc.MinTextSize = 10
+bestTsc.Parent = bestLabel
 
 -- Oppdater HUD-en fra en LevelInfo-nyttelast. Alt er nil-sjekket: manglende
 -- felt gir bare en pen "—" i stedet for en feil.
@@ -220,6 +240,33 @@ card.Parent = gui
 corner(card, 16)
 stroke(card, Color3.fromRGB(80, 88, 115), 1.5, 0)
 depthGradient(card, Color3.fromRGB(44, 48, 66), Color3.fromRGB(24, 26, 38))
+
+-- Skaler HELE kortet ned på små/smale skjermer (telefon) så det aldri stikker
+-- utenfor kanten. Kortet er offset-basert (fast bredde + dynamisk høyde), så én
+-- UIScale på kortet er reneste løsning: alt innholdet krymper likt, og midt-
+-- stillingen (AnchorPoint 0.5,0.5) holder. På desktop blir skalaen 1 → utseendet
+-- er uendret. (Vi legger IKKE UIScale på hele ScreenGui-en, for da ville HUD-
+-- panelet — som allerede er skala-basert — blitt dobbelt-skalert.)
+local cardScale = Instance.new("UIScale")
+cardScale.Parent = card
+
+local SCREEN_MARGIN = 24
+local function fitCard()
+	local vp = gui.AbsoluteSize -- = skjermstørrelsen for en ScreenGui
+	if vp.X <= 0 or vp.Y <= 0 then
+		return
+	end
+	local h = card.Size.Y.Offset -- gjeldende korthøyde (settes i populateCard)
+	if h <= 0 then
+		h = 360
+	end
+	local sw = (vp.X - SCREEN_MARGIN) / CARD_W
+	local sh = (vp.Y - SCREEN_MARGIN) / h
+	cardScale.Scale = math.clamp(math.min(sw, sh), 0.5, 1)
+end
+
+gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitCard)
+fitCard()
 
 -- Stor medalje-"badge": en farget sirkel med en stjerne i.
 local badge = Instance.new("Frame")
@@ -410,6 +457,7 @@ local function populateCard(p)
 
 	y = y - GAP + PAD_BOTTOM
 	card.Size = UDim2.fromOffset(CARD_W, y)
+	fitCard() -- oppdater telefon-skaleringen mot den nye korthøyden
 	return true
 end
 

@@ -187,29 +187,51 @@ end
 -- Knapp øverst til høyre som åpner/lukker butikken.
 local toggle = Instance.new("TextButton")
 toggle.Name = "ButikkKnapp"
-toggle.Size = UDim2.fromOffset(128, 40)
+-- Stort trykk-mål (48px høyt) for telefon. Blir liggende ØVERST til høyre,
+-- godt klar av mobil-kontrollene (styrepinne nede-venstre, hopp nede-høyre).
+toggle.Size = UDim2.fromOffset(140, 48)
 toggle.AnchorPoint = Vector2.new(1, 0)
 toggle.Position = UDim2.new(1, -12, 0, 12)
 toggle.BackgroundColor3 = Color3.fromRGB(52, 58, 78)
 toggle.TextColor3 = Color3.new(1, 1, 1)
 toggle.Font = Enum.Font.GothamBold
-toggle.TextSize = 18
+toggle.TextScaled = true
 toggle.Text = "🎨 Butikk"
 toggle.AutoButtonColor = true
 toggle.Parent = gui
 corner(toggle, 8)
+-- Tekst-tilpasning: fyll knappen pent, men ikke bli enorm på desktop.
+local toggleTsc = Instance.new("UITextSizeConstraint")
+toggleTsc.MaxTextSize = 20
+toggleTsc.MinTextSize = 12
+toggleTsc.Parent = toggle
+local togglePad = Instance.new("UIPadding")
+togglePad.PaddingLeft = UDim.new(0, 10)
+togglePad.PaddingRight = UDim.new(0, 10)
+togglePad.PaddingTop = UDim.new(0, 6)
+togglePad.PaddingBottom = UDim.new(0, 6)
+togglePad.Parent = toggle
 
 -- Selve panelet (skjult til man trykker).
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
-panel.Size = UDim2.fromOffset(370, 452)
+-- Skala-basert størrelse (andel av skjermen) med tak nedenfor. På en liten
+-- telefon blir panelet ≤80% av skjermhøyden, så de 17 radene MÅ rulles; på
+-- desktop kapper UISizeConstraint det så det ikke blir enormt.
+panel.Size = UDim2.new(0.94, 0, 0.8, 0)
 panel.AnchorPoint = Vector2.new(1, 0)
-panel.Position = UDim2.new(1, -12, 0, 60)
+panel.Position = UDim2.new(1, -12, 0, 66)
 panel.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
 panel.BorderSizePixel = 0
 panel.Visible = false
 panel.Parent = gui
 corner(panel, 10)
+-- Tak/gulv på panel-størrelsen: aldri større enn dette på desktop, aldri så
+-- lite at innholdet klemmes på en bitteliten skjerm.
+local panelSize = Instance.new("UISizeConstraint")
+panelSize.MaxSize = Vector2.new(380, 620)
+panelSize.MinSize = Vector2.new(300, 300)
+panelSize.Parent = panel
 
 local panelStroke = Instance.new("UIStroke")
 panelStroke.Color = Color3.fromRGB(70, 78, 100)
@@ -218,24 +240,28 @@ panelStroke.Parent = panel
 
 -- ---- Topptekst: tittel, saldo, lukkeknapp, status ----
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -50, 0, 26)
+title.Size = UDim2.new(1, -66, 0, 28)
 title.Position = UDim2.fromOffset(14, 10)
 title.BackgroundTransparency = 1
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.new(1, 1, 1)
 title.Font = Enum.Font.GothamBold
-title.TextSize = 19
+title.TextScaled = true
 title.Text = "🎨 Tema-butikk"
 title.Parent = panel
+local titleTsc = Instance.new("UITextSizeConstraint")
+titleTsc.MaxTextSize = 20
+titleTsc.MinTextSize = 12
+titleTsc.Parent = title
 
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.fromOffset(30, 30)
+closeBtn.Size = UDim2.fromOffset(44, 44)  -- 44px = komfortabelt trykk-mål på telefon
 closeBtn.AnchorPoint = Vector2.new(1, 0)
 closeBtn.Position = UDim2.new(1, -10, 0, 8)
 closeBtn.BackgroundColor3 = Color3.fromRGB(70, 50, 58)
 closeBtn.TextColor3 = Color3.new(1, 1, 1)
 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 16
+closeBtn.TextSize = 24
 closeBtn.Text = "✕"
 closeBtn.Parent = panel
 corner(closeBtn, 6)
@@ -247,9 +273,13 @@ balance.BackgroundTransparency = 1
 balance.TextXAlignment = Enum.TextXAlignment.Left
 balance.TextColor3 = Color3.fromRGB(235, 220, 150)
 balance.Font = Enum.Font.GothamMedium
-balance.TextSize = 15
+balance.TextScaled = true
 balance.Text = "🪙 0 mynter    💎 0 edelstener"
 balance.Parent = panel
+local balanceTsc = Instance.new("UITextSizeConstraint")
+balanceTsc.MaxTextSize = 16
+balanceTsc.MinTextSize = 10
+balanceTsc.Parent = balance
 
 local status = Instance.new("TextLabel")
 status.Size = UDim2.new(1, -28, 0, 18)
@@ -258,9 +288,13 @@ status.BackgroundTransparency = 1
 status.TextXAlignment = Enum.TextXAlignment.Left
 status.TextColor3 = Color3.fromRGB(255, 150, 140)
 status.Font = Enum.Font.GothamMedium
-status.TextSize = 14
+status.TextScaled = true
 status.Text = ""
 status.Parent = panel
+local statusTsc = Instance.new("UITextSizeConstraint")
+statusTsc.MaxTextSize = 15
+statusTsc.MinTextSize = 10
+statusTsc.Parent = status
 
 -- ---- Listen med temaer (kan rulles) ----
 local scroll = Instance.new("ScrollingFrame")
@@ -269,7 +303,7 @@ scroll.Size = UDim2.new(1, -16, 1, -96)
 scroll.Position = UDim2.fromOffset(8, 90)
 scroll.BackgroundTransparency = 1
 scroll.BorderSizePixel = 0
-scroll.ScrollBarThickness = 6
+scroll.ScrollBarThickness = 10  -- litt bredere så det er lett å ta tak i med finger
 scroll.ScrollBarImageColor3 = Color3.fromRGB(120, 128, 150)
 scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -356,12 +390,24 @@ local function makeButton(parent, text, size, position, color)
 	b.BackgroundColor3 = color
 	b.TextColor3 = Color3.new(1, 1, 1)
 	b.Font = Enum.Font.GothamBold
-	b.TextSize = 13
+	-- TextScaled + tak: pris-teksten fyller knappen og krymper for å få plass,
+	-- så ingenting flyter over på en liten telefon-skjerm.
+	b.TextScaled = true
 	b.TextTruncate = Enum.TextTruncate.AtEnd
 	b.Text = text
 	b.AutoButtonColor = true
 	b.Parent = parent
 	corner(b, 6)
+	local tsc = Instance.new("UITextSizeConstraint")
+	tsc.MaxTextSize = 16
+	tsc.MinTextSize = 9
+	tsc.Parent = b
+	local bp = Instance.new("UIPadding")
+	bp.PaddingLeft = UDim.new(0, 8)
+	bp.PaddingRight = UDim.new(0, 8)
+	bp.PaddingTop = UDim.new(0, 4)
+	bp.PaddingBottom = UDim.new(0, 4)
+	bp.Parent = b
 	return b
 end
 
@@ -377,9 +423,39 @@ function refreshRows()
 		local owned = (t.id == Themes.default) or (state.owned[t.id] == true)
 		local selected = (state.theme == t.id)
 
+		-- Finn kjøp-knappene FØRST, så vi vet hvor høy raden må være: hver knapp
+		-- skal være et komfortabelt trykk-mål (~44px) på telefon. (Samme betingelse
+		-- som "else"-grenen under: bare når temaet verken er eid eller valgt.)
+		local buys = {}
+		if (not owned) and (not selected) then
+			if t.coinPrice and t.coinPrice > 0 then
+				table.insert(buys, {
+					text = "Kjøp: " .. t.coinPrice .. " mynter",
+					pay = "coins",
+					color = Color3.fromRGB(198, 156, 44),
+				})
+			end
+			if t.gemPrice and t.gemPrice > 0 then
+				table.insert(buys, {
+					text = t.gemPrice .. " edelstener",
+					pay = "gems",
+					color = Color3.fromRGB(150, 92, 216),
+				})
+			end
+		end
+
+		local BTN_H, BTN_GAP, ROW_PAD = 44, 8, 10
+		local nBuys = #buys
+		local rowH = 64
+		if nBuys > 1 then
+			-- To knapper stables loddrett -> raden må være høyere. Panelet ruller,
+			-- så det er greit at raden blir høy.
+			rowH = nBuys * BTN_H + (nBuys - 1) * BTN_GAP + ROW_PAD * 2
+		end
+
 		local row = Instance.new("Frame")
 		row.Name = "Rad_" .. t.id
-		row.Size = UDim2.new(1, -6, 0, 56)
+		row.Size = UDim2.new(1, -6, 0, rowH)
 		row.BackgroundColor3 = selected and Color3.fromRGB(40, 62, 46) or Color3.fromRGB(42, 46, 60)
 		row.BorderSizePixel = 0
 		row.LayoutOrder = i
@@ -392,10 +468,12 @@ function refreshRows()
 			rs.Parent = row
 		end
 
-		-- Fargeprøve: tre bittesmå ruter (vegg / hemmelig / gulv).
+		-- Fargeprøve: tre bittesmå ruter (vegg / hemmelig / gulv). Sentrert loddrett
+		-- så den sitter fint uansett radhøyde.
 		local swatch = Instance.new("Frame")
+		swatch.AnchorPoint = Vector2.new(0, 0.5)
 		swatch.Size = UDim2.fromOffset(18, 42)
-		swatch.Position = UDim2.fromOffset(8, 7)
+		swatch.Position = UDim2.new(0, 8, 0.5, 0)
 		swatch.BackgroundTransparency = 1
 		swatch.Parent = row
 		local function chip(idx, rgb)
@@ -411,40 +489,49 @@ function refreshRows()
 		chip(2, t.secret)
 		chip(3, t.floor)
 
-		-- Navn på temaet.
+		-- Navn på temaet (sentrert loddrett; teksten krymper for å få plass).
 		local name = Instance.new("TextLabel")
-		name.Size = UDim2.new(1, -204, 0, 24)
-		name.Position = UDim2.fromOffset(34, 16)
+		name.AnchorPoint = Vector2.new(0, 0.5)
+		name.Size = UDim2.new(1, -214, 0, 26)
+		name.Position = UDim2.new(0, 34, 0.5, 0)
 		name.BackgroundTransparency = 1
 		name.TextXAlignment = Enum.TextXAlignment.Left
 		name.TextTruncate = Enum.TextTruncate.AtEnd
 		name.TextColor3 = Color3.new(1, 1, 1)
 		name.Font = Enum.Font.GothamMedium
-		name.TextSize = 15
+		name.TextScaled = true
 		name.Text = t.name
 		name.Parent = row
+		local nameTsc = Instance.new("UITextSizeConstraint")
+		nameTsc.MaxTextSize = 16
+		nameTsc.MinTextSize = 10
+		nameTsc.Parent = name
 
 		-- Handlings-området til høyre.
 		if selected then
 			-- Eid + valgt: bare et fremhevet "Valgt"-merke.
 			local valgt = Instance.new("TextLabel")
-			valgt.Size = UDim2.fromOffset(94, 28)
+			valgt.Size = UDim2.fromOffset(168, 40)
 			valgt.AnchorPoint = Vector2.new(1, 0.5)
 			valgt.Position = UDim2.new(1, -8, 0.5, 0)
 			valgt.BackgroundColor3 = Color3.fromRGB(60, 200, 90)
 			valgt.TextColor3 = Color3.fromRGB(15, 35, 20)
 			valgt.Font = Enum.Font.GothamBold
-			valgt.TextSize = 14
+			valgt.TextScaled = true
 			valgt.Text = "✓ Valgt"
 			valgt.Parent = row
 			corner(valgt, 6)
+			local valgtTsc = Instance.new("UITextSizeConstraint")
+			valgtTsc.MaxTextSize = 16
+			valgtTsc.MinTextSize = 10
+			valgtTsc.Parent = valgt
 		elseif owned then
-			-- Eid, men ikke valgt: en "Velg"-knapp.
+			-- Eid, men ikke valgt: en "Velg"-knapp (44px høyt trykk-mål).
 			local velg = makeButton(
 				row,
 				"Velg",
-				UDim2.fromOffset(94, 28),
-				UDim2.new(1, -102, 0.5, -14),
+				UDim2.fromOffset(168, BTN_H),
+				UDim2.new(1, -176, 0.5, -BTN_H / 2),
 				Color3.fromRGB(60, 140, 210)
 			)
 			velg.Activated:Connect(function()
@@ -452,34 +539,16 @@ function refreshRows()
 			end)
 		else
 			-- Ikke eid: vis kjøp-knapp for hver valuta som faktisk har en pris.
-			local buys = {}
-			if t.coinPrice and t.coinPrice > 0 then
-				table.insert(buys, {
-					text = "Kjøp: " .. t.coinPrice .. " mynter",
-					pay = "coins",
-					color = Color3.fromRGB(198, 156, 44),
-				})
-			end
-			if t.gemPrice and t.gemPrice > 0 then
-				table.insert(buys, {
-					text = t.gemPrice .. " edelstener",
-					pay = "gems",
-					color = Color3.fromRGB(150, 92, 216),
-				})
-			end
-			-- Plasser 1 eller 2 knapper pent stablet på høyre side.
-			local n = #buys
+			-- Knappene stables loddrett, midtstilt, hver 44px høy (telefon-vennlig).
+			local totalH = nBuys * BTN_H + (nBuys - 1) * BTN_GAP
+			local yTop = (rowH - totalH) / 2
 			for idx, opt in ipairs(buys) do
-				local h = 20
-				local gap = 4
-				local totalH = n * h + (n - 1) * gap
-				local yTop = (56 - totalH) / 2
-				local y = yTop + (idx - 1) * (h + gap)
+				local y = yTop + (idx - 1) * (BTN_H + BTN_GAP)
 				local b = makeButton(
 					row,
 					opt.text,
-					UDim2.fromOffset(160, h),
-					UDim2.new(1, -168, 0, y),
+					UDim2.fromOffset(168, BTN_H),
+					UDim2.new(1, -176, 0, y),
 					opt.color
 				)
 				b.Activated:Connect(function()
