@@ -143,6 +143,7 @@ local currentPar = nil        -- optimal tid (sekunder) for gjeldende nivå
 local currentThresholds = nil -- medalje-terskler for gjeldende nivå
 local sendLevelInfo           -- fylles ut i HUD-seksjonen
 local levelCompleteEvent      -- fylles ut i HUD-seksjonen
+local playFx                  -- fylles ut i HUD-seksjonen (lyd-Fx)
 local advancing = false
 local mazeFolder = nil
 
@@ -278,6 +279,7 @@ local function killTouch(hit)
 	local plr = Players:GetPlayerFromCharacter(char)
 	if plr and hum and hum.Health > 0 then
 		hum.Health = 0
+		if playFx then playFx(plr, "death") end
 	end
 end
 
@@ -440,6 +442,7 @@ local function makeMonster(worldPos, gen, speed)
 	model.PrimaryPart = root
 	root.Touched:Connect(killTouch)
 	model.Parent = mazeFolder
+	pcall(function() root:SetNetworkOwner(nil) end)  -- server eier fysikken => jevnere monster, mindre rykk
 
 	task.spawn(function()
 		local function moveTo(pos)
@@ -659,6 +662,7 @@ local function buildLevel()
 			grabbed = true
 			coin:Destroy()
 			local d = playerData[plr]; if d then d.coins += 1; refreshStats(plr) end
+			if playFx then playFx(plr, "coin") end
 			coinsCollected += 1
 			tryUnlockExit()
 		end)
@@ -688,6 +692,7 @@ local function buildLevel()
 			grabbed = true
 			gem:Destroy()
 			local d = playerData[plr]; if d then d.gems += 1; refreshStats(plr) end
+			if playFx then playFx(plr, "gem") end
 			gemsGrabbedCount += 1
 			tryUnlockExit()
 		end)
@@ -706,6 +711,16 @@ local function buildLevel()
 		})
 		trap.Parent = folder
 		trap.Touched:Connect(killTouch)
+		-- Usynlig, høyere trigger så man ikke sklir/hopper "over" den tynne fella i fart.
+		local trapTrigger = makePart({
+			Name = "TrapTrigger",
+			Size = Vector3.new(S - 2, 10, S - 2),
+			Position = Vector3.new(w.X, 5, w.Z),
+			Transparency = 1,
+			CanCollide = false,
+		})
+		trapTrigger.Parent = folder
+		trapTrigger.Touched:Connect(killTouch)
 	end
 
 	-- Knapper (åpner hemmelige vegger)
@@ -732,6 +747,7 @@ local function buildLevel()
 			local plr = Players:GetPlayerFromCharacter(hit.Parent)
 			if not plr then return end
 			used = true
+			if playFx then playFx(plr, "button") end
 			btn.Color = Color3.fromRGB(30, 90, 100)
 			if doorPart and doorPart.Parent then
 				doorPart.CanCollide = false
@@ -910,6 +926,15 @@ levelInfoEvent.Parent = hudFolder
 levelCompleteEvent = Instance.new("RemoteEvent")
 levelCompleteEvent.Name = "LevelComplete"
 levelCompleteEvent.Parent = hudFolder
+
+local fxEvent = Instance.new("RemoteEvent")
+fxEvent.Name = "Fx"
+fxEvent.Parent = hudFolder
+
+-- playFx er forhånds-deklarert (brukes i killTouch + pickup-handlere lenger oppe).
+playFx = function(plr, key)
+	fxEvent:FireClient(plr, key)
+end
 
 -- sendLevelInfo er forhånds-deklarert lenger oppe (brukes i buildLevel).
 sendLevelInfo = function(plr)
