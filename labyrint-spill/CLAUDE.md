@@ -102,6 +102,25 @@ TrackMania-inspirert nivå-HUD + oppsummering.
   teleportere til utgangen for falsk tid/rekord. Plattform-begrensning (ingen
   server-side bevegelses-validering her) — greit for et lite venne-spill.
 
+## Perk-butikk + polish + lyd + mobil + gaver — BYGGET
+- **Perk-butikk** (mynter): `src/shared/PerkDefs.luau` (torch/shield/speed/minimap) +
+  `src/shared/PerkService.luau` (ren kjøpslogikk, 14/14 tester), server-autoritativ.
+  Klient `src/client/PerkClient.client.luau` ("⚡ Oppgraderinger" oppe til venstre).
+  Effekter pr spiller: fart+fakkel i `applyPerks` (spawn + rett etter kjøp), skjold i
+  `killTouch` (1s uskadelig-vindu så ett treff = én bruk), minikart klient-side.
+  Remotes `ReplicatedStorage/PerkRemotes` (BuyPerk/PerkData); eide perks lagres.
+- **Minikart**: `src/client/MinimapClient.client.luau` — kun synlig hvis minikart-perk
+  eies; vegger/utgang/start + live spillerprikk fra `workspace.MazeGame` (cap 2200 dots).
+- **Engangs-gaver** (`GIFTS` i serveren): navngitte spillere får startkapital første
+  gang de blir med (MioSpille = 999999 mynter + edelstener), gis ÉN gang og lagres.
+  Match på brukernavn (eller sett `userId`).
+- **Data-vern**: `d.canSave` (load-success sentinel) — serveren nekter å lagre hvis
+  DataStore-lasten feilet, så ekte data aldri overskrives med default.
+- **Lyd**: `src/shared/Sounds.luau` (innebygd ping, byttbar) + `SoundClient.client.luau`
+  (pickup/død/medalje/rekord via Fx-event + LevelComplete). Musikk opt-in.
+- **Polish**: monstre = server-network-owner (jevnere); feller har høy usynlig trigger.
+- **Mobil**: shop/HUD/kort skalert for telefon (44px-knapper, TextScaled, MaxSize).
+
 ## v2 — resten (ikke bygget ennå)
 Bevisst parkert for å få v1 til å funke først. Lagringen er allerede på plass,
 så saldoen finnes når butikkene bygges.
