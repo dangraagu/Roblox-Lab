@@ -71,6 +71,20 @@ local Lighting = game:GetService("Lighting")
 local TweenService = game:GetService("TweenService")
 local PathfindingService = game:GetService("PathfindingService")
 local DataStoreService = game:GetService("DataStoreService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Themes = require(ReplicatedStorage:WaitForChild("Themes"))
+local ShopService = require(ReplicatedStorage:WaitForChild("ShopService"))
+
+-- Robux -> edelstener. SKRUS PÅ SENERE PÅ ROBLOX. Så lenge EnableRobux = false
+-- gis INGEN Robux-kjøp. For å skru på: lag Developer Products på create.roblox.com,
+-- fyll inn { [produktId] = antallGems } under, sett EnableRobux = true. GJENNOMGÅ
+-- ProcessReceipt-koden før du skrur på ekte penger.
+local RobuxConfig = {
+	EnableRobux = false,
+	RobuxGemProducts = {},  -- [developerProductId] = gems å gi
+}
 
 local dataStore = nil
 if CONFIG.SaveData then
@@ -258,28 +272,56 @@ end
 
 --============================  LAGRING  ==========================--
 local function loadPlayer(plr)
-	local d = { coins = 0, gems = 0, trophies = 0, best = math.huge }
+	local d = { coins = 0, gems = 0, trophies = 0, best = math.huge,
+		owned = { classic = true }, theme = Themes.default, receipts = {} }
 	if dataStore then
 		local ok, saved = pcall(function() return dataStore:GetAsync("p_" .. plr.UserId) end)
 		if ok and typeof(saved) == "table" then
-			d.coins = saved.coins or 0
-			d.gems = saved.gems or 0
-			d.trophies = saved.trophies or 0
-			d.best = saved.best or math.huge
+			if typeof(saved.coins) == "number" then d.coins = saved.coins end
+			if typeof(saved.gems) == "number" then d.gems = saved.gems end
+			if typeof(saved.trophies) == "number" then d.trophies = saved.trophies end
+			if typeof(saved.best) == "number" then d.best = saved.best end
+			if typeof(saved.owned) == "table" then
+				for id in pairs(saved.owned) do
+					if Themes.byId(id) then d.owned[id] = true end
+				end
+			end
+			if typeof(saved.theme) == "string" and Themes.byId(saved.theme) then
+				d.theme = saved.theme
+			end
+			if typeof(saved.receipts) == "table" then d.receipts = saved.receipts end
 		end
 	end
+	d.owned.classic = true                                    -- classic eies alltid
+	if not d.owned[d.theme] then d.theme = Themes.default end -- kan ikke ha valgt et uleid tema
 	playerData[plr] = d
 	refreshStats(plr)
 end
 
 local function savePlayer(plr)
 	local d = playerData[plr]
-	if not d or not dataStore then return end
-	pcall(function()
+	if not d or not dataStore then return false end
+	local ok = pcall(function()
 		dataStore:SetAsync("p_" .. plr.UserId, {
 			coins = d.coins, gems = d.gems, trophies = d.trophies,
 			best = (d.best < math.huge) and d.best or nil,
+			owned = d.owned, theme = d.theme, receipts = d.receipts,
 		})
+	end)
+	return ok
+end
+
+-- Debouncet lagring for hyppige, ikke-kritiske endringer (kjøp/valg av tema).
+-- Slår sammen mange raske endringer til én SetAsync, så en klient ikke kan
+-- spamme DataStore-skriv og strupe/miste de ekte lagringene (mynter/pokaler).
+local saveScheduled = {}
+local SAVE_DEBOUNCE = 6
+local function scheduleSave(plr)
+	if saveScheduled[plr] then return end
+	saveScheduled[plr] = true
+	task.delay(SAVE_DEBOUNCE, function()
+		saveScheduled[plr] = nil
+		if playerData[plr] then savePlayer(plr) end
 	end)
 end
 
@@ -728,10 +770,115 @@ local function giveTorch(char)
 	light.Parent = root
 end
 
+--============================  TEMA-BUTIKK  ======================--
+-- Serveren eier all valuta og alt eierskap. Klienten sender bare ønsker via
+-- Remotes; vi validerer med ShopService (ren logikk, testet) og lagrer.
+local shopFolder = Instance.new("Folder")
+shopFolder.Name = "ShopRemotes"
+shopFolder.Parent = ReplicatedStorage
+
+local buyThemeFn = Instance.new("RemoteFunction")
+buyThemeFn.Name = "BuyTheme"
+buyThemeFn.Parent = shopFolder
+
+local selectThemeFn = Instance.new("RemoteFunction")
+selectThemeFn.Name = "SelectTheme"
+selectThemeFn.Parent = shopFolder
+
+local shopDataEvent = Instance.new("RemoteEvent")
+shopDataEvent.Name = "ShopData"
+shopDataEvent.Parent = shopFolder
+
+local function stateFor(plr, ok, reason)
+	local d = playerData[plr]
+	return {
+		ok = ok, reason = reason,
+		coins = d and d.coins or 0,
+		gems = d and d.gems or 0,
+		owned = d and d.owned or {},
+		theme = d and d.theme or Themes.default,
+	}
+end
+
+local function sendShopData(plr)
+	local d = playerData[plr]; if not d then return end
+	shopDataEvent:FireClient(plr, {
+		coins = d.coins, gems = d.gems, owned = d.owned, theme = d.theme,
+	})
+end
+
+buyThemeFn.OnServerInvoke = function(plr, themeId, payWith)
+	local d = playerData[plr]
+	if not d then return { ok = false, reason = "noplayer" } end
+	if typeof(themeId) ~= "string" or typeof(payWith) ~= "string" then
+		return stateFor(plr, false, "badinput")
+	end
+	local ok, reason = ShopService.buy(Themes, d, themeId, payWith)
+	if ok then
+		refreshStats(plr)       -- leaderstats oppdateres straks (spilleren ser trekket)
+		scheduleSave(plr)       -- DataStore lagres debouncet
+		sendShopData(plr)
+	end
+	return stateFor(plr, ok, reason)
+end
+
+selectThemeFn.OnServerInvoke = function(plr, themeId)
+	local d = playerData[plr]
+	if not d then return { ok = false, reason = "noplayer" } end
+	if typeof(themeId) ~= "string" then return stateFor(plr, false, "badinput") end
+	local prev = d.theme
+	local ok, reason = ShopService.select(Themes, d, themeId)
+	if ok and d.theme ~= prev then   -- bare lagre/sende hvis valget faktisk endret seg
+		scheduleSave(plr)
+		sendShopData(plr)
+	end
+	return stateFor(plr, ok, reason)
+end
+
+-- Robux -> edelstener. AV som standard (RobuxConfig.EnableRobux = false).
+-- Roblox kaller ProcessReceipt når en ekte Developer Product kjøpes; den er
+-- idempotent via d.receipts (Roblox kan kalle den flere ganger for samme kjøp).
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	if not RobuxConfig.EnableRobux then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	local gems = RobuxConfig.RobuxGemProducts[receiptInfo.ProductId]
+	if not gems then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	local plr = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not plr then
+		return Enum.ProductPurchaseDecision.NotProcessedYet  -- prøv igjen når spiller er tilbake
+	end
+	local d = playerData[plr]
+	if not d then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	local key = tostring(receiptInfo.PurchaseId)
+	d.receipts = d.receipts or {}
+	if d.receipts[key] then
+		return Enum.ProductPurchaseDecision.PurchaseGranted  -- allerede gitt, ikke gi dobbelt
+	end
+	d.gems = (d.gems or 0) + gems
+	d.receipts[key] = true
+	refreshStats(plr)
+	-- Ekte penger: gi BARE PurchaseGranted når lagringen faktisk gikk gjennom.
+	-- Feiler den, rull tilbake i minnet så Roblox kan prøve igjen rent (idempotent).
+	if not savePlayer(plr) then
+		d.gems = d.gems - gems
+		d.receipts[key] = nil
+		refreshStats(plr)
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	sendShopData(plr)
+	return Enum.ProductPurchaseDecision.PurchaseGranted
+end
+
 --========================  SPILLER-HENDELSER  ====================--
 local function onCharacterAdded(plr, char)
 	startClock[plr] = os.clock()
 	giveTorch(char)
+	sendShopData(plr)  -- send saldo/eierskap/valgt tema når klienten sikkert er lastet
 end
 
 local function onPlayerAdded(plr)
@@ -744,9 +891,10 @@ Players.PlayerAdded:Connect(onPlayerAdded)
 for _, plr in ipairs(Players:GetPlayers()) do onPlayerAdded(plr) end
 
 Players.PlayerRemoving:Connect(function(plr)
-	savePlayer(plr)
+	savePlayer(plr)                 -- flush umiddelbart (fanger evt. debouncet endring)
 	playerData[plr] = nil
 	startClock[plr] = nil
+	saveScheduled[plr] = nil
 end)
 
 game:BindToClose(function()

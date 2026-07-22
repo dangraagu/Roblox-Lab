@@ -58,7 +58,27 @@ da får du et helt nytt sett baner, og de er igjen identiske for alle etterpå.
 Unntak med vilje: monstrenes vandring er fortsatt tilfeldig. Det er levende
 oppførsel i sanntid, ikke en del av selve bane-oppsettet, så den styres ikke av frøet.
 
-## v2 — neste steg (ikke bygget ennå)
+## Tema-butikk (vegg-temaer) — BYGGET
+Kosmetisk butikk der spilleren kjøper vegg-temaer med in-game-valuta.
+- **17 temaer** (`src/shared/Themes.luau`, ren data): `classic` (gratis, eid fra
+  start) + 16 kjøpbare (Tyggegummi, LEGO, Isgrotte, Synthwave, Jul, Halloween,
+  Gulltempel osv.). Hvert tema = wall/secret/floor-farge + pris i BEGGE valutaer.
+- **Kjøp med Mynter ELLER Edelstener** — hvert tema har `coinPrice` og `gemPrice`.
+- **Ren kjøpslogikk** i `src/shared/ShopService.luau` (server-autoritativ,
+  muterer bare ved suksess). Testet med luau-CLI (24/24) — se `docs/` / scratch.
+- **Per-spiller utseende**: `src/client/ShopClient.client.luau` farger om
+  Wall/SecretWall/Floor LOKALT til spillerens valgte tema (klient-endring
+  replikeres ikke), så alle ser sitt eget tema på den delte labyrinten.
+  `classic` = ingen omfarging (serverens originalfarger).
+- **Eierskap + valgt tema lagres** i samme DataStore-tabell (`owned`, `theme`).
+- **Robux -> edelstener**: `MarketplaceService.ProcessReceipt`-stub i serveren,
+  idempotent via `receipts`. AV som standard (`RobuxConfig.EnableRobux = false`).
+  Skru på senere: lag Developer Products på Roblox, fyll inn `RobuxGemProducts`,
+  sett `EnableRobux = true`. GJENNOMGÅ før ekte penger skrus på.
+- Remotes: `ReplicatedStorage/ShopRemotes` (BuyTheme/SelectTheme RemoteFunctions,
+  ShopData RemoteEvent).
+
+## v2 — resten (ikke bygget ennå)
 Bevisst parkert for å få v1 til å funke først. Lagringen er allerede på plass,
 så saldoen finnes når butikkene bygges.
 1. **Mynt-butikk = perks** (forbedrer spillopplevelsen): lengre fakkel, litt mer
