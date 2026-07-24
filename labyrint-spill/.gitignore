@@ -10,6 +10,7 @@
 
 # Secrets — ALDRI commit API-nokler
 roblox_api_key.txt
+publish_live.bat
 
 # Editor
 .vscode/
