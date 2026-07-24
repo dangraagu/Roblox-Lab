@@ -45,14 +45,15 @@ local CONFIG = {
 	-- Alle "MaxX" nås omtrent ved level 500. Juster fritt.
 	------------------------------------------------------------------
 	Curve = {
-		-- Størrelse: starter 6x6 (lite!), vokser +1 hver 20. level opp til 30x30
-		StartSize = 6, SizeEveryNLevels = 20, MaxSize = 30,
+		-- Størrelse: starter 6x6 (lite!), vokser +1 hver 10. level opp til 30x30
+		-- (raskere vekst = hvert nivå merkbart større og vanskeligere enn før).
+		StartSize = 6, SizeEveryNLevels = 10, MaxSize = 30,
 
-		-- Feller: ingen før level 3, +1 hver 17. level opp til 30
-		FirstTrapLevel = 3, TrapEveryNLevels = 17, MaxTraps = 30,
+		-- Feller: ingen før level 3, +1 hver 9. level opp til 30
+		FirstTrapLevel = 3, TrapEveryNLevels = 9, MaxTraps = 30,
 
-		-- Monstre: ingen før level 4, +1 hver 50. level opp til 10
-		FirstMonsterLevel = 4, MonsterEveryNLevels = 50, MaxMonsters = 10,
+		-- Monstre: ingen før level 4, +1 hver 25. level opp til 10
+		FirstMonsterLevel = 4, MonsterEveryNLevels = 25, MaxMonsters = 10,
 		-- Fart: fra 7 og øker sakte til 15 (spilleren går 16, så du kan alltid rømme)
 		MonsterSpeedStart = 7, MonsterSpeedPerLevel = 0.02, MonsterSpeedMax = 15,
 
@@ -346,7 +347,10 @@ end
 --============================  LAGRING  ==========================--
 local function loadPlayer(plr)
 	local d = { coins = 0, gems = 0, trophies = 0, best = math.huge,
-		owned = { classic = true }, theme = Themes.default, receipts = {}, bestByLevel = {}, perks = {}, gifts = {} }
+		owned = { classic = true }, theme = Themes.default, receipts = {}, bestByLevel = {}, perks = {}, gifts = {},
+		level = 1,          -- nivået spilleren skal fortsette på (lagres, se resume)
+		rewardDay = 0,      -- siste dag daglig-belønning ble gitt (UTC-dagnummer)
+		streak = 0 }        -- antall dager på rad med daglig-belønning
 	local loadOk = true
 	if dataStore then
 		local ok, saved = pcall(function() return dataStore:GetAsync("p_" .. plr.UserId) end)
@@ -378,6 +382,13 @@ local function loadPlayer(plr)
 			if typeof(saved.gifts) == "table" then
 				for id in pairs(saved.gifts) do d.gifts[id] = true end
 			end
+			-- Fortsett-på-nivå + daglig-belønning (bak-kompatibelt: gamle lagringer
+			-- mangler feltene og faller tilbake til default-verdiene over).
+			if typeof(saved.level) == "number" and saved.level >= 1 then
+				d.level = math.floor(saved.level)
+			end
+			if typeof(saved.rewardDay) == "number" then d.rewardDay = saved.rewardDay end
+			if typeof(saved.streak) == "number" then d.streak = saved.streak end
 		end
 	end
 	d.owned.classic = true                                    -- classic eies alltid
@@ -399,6 +410,9 @@ local function savePlayer(plr)
 			bestByLevel = d.bestByLevel,
 			perks = d.perks,
 			gifts = d.gifts,
+			level = d.level,
+			rewardDay = d.rewardDay,
+			streak = d.streak,
 		})
 	end)
 	return ok
@@ -557,7 +571,10 @@ local function buildLevel()
 	-- nøyaktig samme labyrint og plassering for alle spillere, hver gang.
 	-- Monstrenes vandring (lenger nede) bruker med vilje vanlig tilfeldighet —
 	-- det er oppførsel, ikke en del av selve bane-layouten.
-	local rng = Random.new(CONFIG.WorldSeed + currentLevel)
+	-- Vi sprer frøet kraftig pr level (i stedet for +1) så to nabo-nivåer får
+	-- HELT ulike labyrinter (før føltes de like fordi frøene lå rett ved siden av
+	-- hverandre). Begge ledd holder seg innenfor eksakt heltalls-område (< 2^53).
+	local rng = Random.new(CONFIG.WorldSeed * 1000003 + currentLevel * 2654435761)
 
 	local grid, gCols, gRows = generateMaze(cols, rows, rng)
 
@@ -900,7 +917,18 @@ onEscape = function(plr)
 		task.spawn(function() savePlayer(plr) end)  -- async: ikke frys nivå-fremgangen på et DataStore-skriv
 	end
 
-	if CONFIG.MultipleLevels then currentLevel += 1 end
+	if CONFIG.MultipleLevels then
+		currentLevel += 1
+		-- Lagre nivået pr spiller så alle som er med fortsetter her neste gang de
+		-- logger inn (debouncet skriv; PlayerRemoving/BindToClose flusher det siste).
+		for _, p in ipairs(Players:GetPlayers()) do
+			local pd = playerData[p]
+			if pd then
+				pd.level = math.max(pd.level or 1, currentLevel)
+				scheduleSave(p)
+			end
+		end
+	end
 	task.wait(0.4)
 	-- advancing MÅ nullstilles selv om buildLevel skulle feile, ellers låser
 	-- progresjonen seg for godt (ingen kommer videre før server-omstart).
@@ -969,6 +997,11 @@ levelCompleteEvent.Parent = hudFolder
 local fxEvent = Instance.new("RemoteEvent")
 fxEvent.Name = "Fx"
 fxEvent.Parent = hudFolder
+
+-- Daglig-belønning-toast (serveren varsler klienten om dagens belønning + streak).
+local rewardEvent = Instance.new("RemoteEvent")
+rewardEvent.Name = "Reward"
+rewardEvent.Parent = hudFolder
 
 -- playFx er forhånds-deklarert (brukes i killTouch + pickup-handlere lenger oppe).
 playFx = function(plr, key)
@@ -1152,6 +1185,17 @@ local function onCharacterAdded(plr, char)
 	sendShopData(plr)  -- send saldo/eierskap/valgt tema når klienten sikkert er lastet
 	if sendLevelInfo then sendLevelInfo(plr) end
 	sendPerkData(plr)
+
+	-- Daglig belønning: vis ÉN gang etter at spilleren har spawnet (da er klient-
+	-- HUD-en garantert oppe, så toasten ikke går tapt). Nullstill så den ikke gjentas.
+	local d = playerData[plr]
+	if d and d.pendingReward and rewardEvent then
+		local rw = d.pendingReward
+		d.pendingReward = nil
+		task.delay(2.5, function()
+			if plr.Parent then rewardEvent:FireClient(plr, rw) end
+		end)
+	end
 end
 
 local function onPlayerAdded(plr)
@@ -1172,8 +1216,57 @@ local function onPlayerAdded(plr)
 		end
 	end
 
+	-- Daglig belønning (retention): første innlogging på en ny UTC-dag gir mynter,
+	-- og en streak-bonus som vokser den første uka + en liten edelsten-bonus hver
+	-- 7. dag. Stashes i d.pendingReward og vises som en toast ved første spawn.
+	if d and d.canSave ~= false then
+		local today = math.floor(os.time() / 86400)
+		if d.rewardDay ~= today then
+			if d.rewardDay == today - 1 then
+				d.streak = (d.streak or 0) + 1   -- to dager på rad: streaken vokser
+			else
+				d.streak = 1                     -- hull i rekka (eller første gang): start på nytt
+			end
+			d.rewardDay = today
+			local coinReward = 150 * math.min(d.streak, 7)      -- 150 .. 1050
+			local gemReward = (d.streak % 7 == 0) and 5 or 0     -- gullbonus hver 7. dag
+			d.coins += coinReward
+			d.gems += gemReward
+			d.pendingReward = { coins = coinReward, gems = gemReward, streak = d.streak }
+			refreshStats(plr)
+			savePlayer(plr)  -- lagre straks så belønningen ikke gis to ganger samme dag
+		end
+	end
+
 	plr.CharacterAdded:Connect(function(char) onCharacterAdded(plr, char) end)
-	if plr.Character then onCharacterAdded(plr, plr.Character) end
+
+	-- Fortsett-på-nivået-du-forlot. Labyrinten er DELT (én bane, alle avanserer
+	-- sammen), så vi kan bare resume når spilleren er ALENE/først inne — da bygger
+	-- vi om til nivået deres (som også spawner dem der). Er andre alt i gang, blir
+	-- man med der de er, men beholder egen fremgang (mister ikke lagret nivå).
+	local rebuilt = false
+	-- Feilet DataStore-lasten (canSave == false), stol IKKE på d.level (den er
+	-- da bare default) — la spilleren bli med på gjeldende nivå i stedet.
+	if d and d.canSave ~= false then
+		if #Players:GetPlayers() <= 1 then
+			local resumeAt = math.max(1, d.level or 1)
+			-- Ikke bygg om midt i en pågående escape-rebuild (advancing) — da kunne
+			-- to buildLevel-kall kollidert. Er vi midt i en, hopper vi over resume;
+			-- spilleren blir med på nivået som er på vei inn.
+			if resumeAt ~= currentLevel and not advancing then
+				currentLevel = resumeAt
+				local ok, err = pcall(buildLevel)  -- bygger nivået + respawner spilleren der
+				if ok then rebuilt = true else warn("[Labyrint] resume-bygg feilet: " .. tostring(err)) end
+			end
+		else
+			d.level = math.max(d.level or 1, currentLevel)
+		end
+	end
+
+	-- Bygde vi om (over), spawnet buildLevel spilleren og trigget onCharacterAdded
+	-- via CharacterAdded — da SKAL vi ikke kalle den igjen. Ellers: har spilleren
+	-- alt en auto-lastet karakter, kjør oppsettet for den nå.
+	if not rebuilt and plr.Character then onCharacterAdded(plr, plr.Character) end
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)

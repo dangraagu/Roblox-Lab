@@ -482,6 +482,58 @@ local function showComplete(p)
 	end)
 end
 
+--==================  DAGLIG-BELØNNING-TOAST  ====================--
+-- Liten banner som spretter opp øverst når serveren gir dagens belønning. Bygges
+-- én gang (skjult), fylles på nytt hver gang. All spiller-synlig tekst er engelsk.
+local rewardToast = Instance.new("Frame")
+rewardToast.Name = "DagligBelonning"
+rewardToast.AnchorPoint = Vector2.new(0.5, 0)
+rewardToast.Position = UDim2.new(0.5, 0, 0, 96)   -- rett under det faste HUD-panelet
+rewardToast.Size = UDim2.fromOffset(300, 66)
+rewardToast.BackgroundColor3 = Color3.fromRGB(32, 40, 30)
+rewardToast.BorderSizePixel = 0
+rewardToast.Visible = false
+rewardToast.ZIndex = 8
+rewardToast.Parent = gui
+corner(rewardToast, 12)
+stroke(rewardToast, Color3.fromRGB(120, 210, 120), 1.5, 0.05)
+depthGradient(rewardToast, Color3.fromRGB(52, 70, 46), Color3.fromRGB(26, 34, 24))
+local rewardSize = Instance.new("UISizeConstraint")
+rewardSize.MaxSize = Vector2.new(320, 66)
+rewardSize.MinSize = Vector2.new(240, 66)
+rewardSize.Parent = rewardToast
+
+local rewardTitle = mkLabel(rewardToast, 288, 26, 18, Enum.Font.GothamBold, Color3.fromRGB(180, 245, 170))
+rewardTitle.Position = UDim2.new(0.5, 0, 0, 8)
+rewardTitle.Text = "Daily reward!"
+rewardTitle.ZIndex = 9
+
+local rewardDetail = mkLabel(rewardToast, 288, 24, 15, Enum.Font.GothamSemibold, Color3.fromRGB(232, 240, 228))
+rewardDetail.Position = UDim2.new(0.5, 0, 0, 34)
+rewardDetail.Text = ""
+rewardDetail.ZIndex = 9
+
+local rewardToken = 0
+local function showReward(p)
+	if type(p) ~= "table" then return end
+	local coins = tonumber(p.coins) or 0
+	local gems = tonumber(p.gems) or 0
+	local streak = tonumber(p.streak) or 1
+
+	local parts = { "+" .. coins .. " coins" }
+	if gems > 0 then table.insert(parts, "+" .. gems .. " gems") end
+	local line = table.concat(parts, "   ")
+	if streak > 1 then line = line .. "   ·   " .. streak .. "-day streak 🔥" end
+	rewardDetail.Text = line
+
+	rewardToast.Visible = true
+	rewardToken += 1
+	local mine = rewardToken
+	task.delay(5, function()
+		if mine == rewardToken then rewardToast.Visible = false end
+	end)
+end
+
 --==================  KOBLE TIL SERVERENS REMOTES  ===============--
 -- Serveren lager mappa "HudRemotes" med "LevelInfo" og "LevelComplete". Vi
 -- venter litt på dem uten å blokkere resten. Mangler de, står HUD-en bare med
@@ -507,6 +559,13 @@ task.spawn(function()
 	if levelComplete then
 		levelComplete.OnClientEvent:Connect(function(p)
 			pcall(showComplete, p)
+		end)
+	end
+
+	local reward = hud:WaitForChild("Reward", 15)
+	if reward then
+		reward.OnClientEvent:Connect(function(p)
+			pcall(showReward, p)
 		end)
 	end
 end)
