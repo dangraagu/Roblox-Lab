@@ -11,8 +11,8 @@ REM      spillet, og lim den inn i  roblox_api_key.txt  (samme mappe).
 REM      Den fila er git-ignorert og skal ALDRI committes.
 REM ===================================================================
 
-set "UNIVERSE_ID=SETT_INN_UNIVERSE_ID"
-set "PLACE_ID=SETT_INN_PLACE_ID"
+set "UNIVERSE_ID=10547716861"
+set "PLACE_ID=121268951050692"
 
 cd /d "%~dp0"
 if not exist roblox_api_key.txt (

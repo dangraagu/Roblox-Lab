@@ -12,7 +12,7 @@ REM  (Vil du ha den mer robuste maaten senere: se deploy_to_roblox.bat
 REM   + DEPLOY.md for Open Cloud API-nokkel.)
 REM ===================================================================
 
-set "PLACE_ID=SETT_INN_PLACE_ID"
+set "PLACE_ID=121268951050692"
 
 cd /d "%~dp0"
 if "%PLACE_ID%"=="SETT_INN_PLACE_ID" (
