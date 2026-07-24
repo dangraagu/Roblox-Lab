@@ -6,10 +6,10 @@
 local Perks = {}
 
 Perks.List = {
-	{ id = "torch",   name = "Lengre fakkel", desc = "Større lyskule rundt deg.",           coinPrice = 300, torchBonus = 22 },
-	{ id = "shield",  name = "Ekstra liv",    desc = "Overlev ett treff pr nivå (skjold).", coinPrice = 600 },
-	{ id = "speed",   name = "Fartsboost",    desc = "Litt raskere gange.",                 coinPrice = 500, speedBonus = 3 },
-	{ id = "minimap", name = "Minikart",      desc = "Se et lite kart over labyrinten.",    coinPrice = 800 },
+	{ id = "torch",   name = "Longer torch",  desc = "Bigger light around you.",            coinPrice = 300, torchBonus = 22 },
+	{ id = "shield",  name = "Extra life",    desc = "Survive one hit per level (shield).", coinPrice = 600 },
+	{ id = "speed",   name = "Speed boost",   desc = "Walk a little faster.",               coinPrice = 500, speedBonus = 3 },
+	{ id = "minimap", name = "Minimap",       desc = "See a small map of the maze.",        coinPrice = 800 },
 }
 
 local index = {}

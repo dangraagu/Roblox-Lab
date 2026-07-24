@@ -151,7 +151,7 @@ levelLabel.Font = Enum.Font.GothamBold
 levelLabel.TextScaled = true
 levelLabel.TextColor3 = Color3.new(1, 1, 1)
 levelLabel.TextXAlignment = Enum.TextXAlignment.Center
-levelLabel.Text = "Nivå …"
+levelLabel.Text = "Level …"
 levelLabel.Parent = hudPanel
 local levelTsc = Instance.new("UITextSizeConstraint")
 levelTsc.MaxTextSize = 28
@@ -168,7 +168,7 @@ recordLabel.TextScaled = true
 recordLabel.TextColor3 = Color3.fromRGB(240, 215, 150)
 recordLabel.TextXAlignment = Enum.TextXAlignment.Center
 recordLabel.TextTruncate = Enum.TextTruncate.AtEnd
-recordLabel.Text = "🏆 Rekord: —"
+recordLabel.Text = "🏆 Record: —"
 recordLabel.Parent = hudPanel
 local recordTsc = Instance.new("UITextSizeConstraint")
 recordTsc.MaxTextSize = 14
@@ -185,7 +185,7 @@ bestLabel.TextScaled = true
 bestLabel.TextColor3 = Color3.fromRGB(205, 212, 225)
 bestLabel.TextXAlignment = Enum.TextXAlignment.Center
 bestLabel.TextTruncate = Enum.TextTruncate.AtEnd
-bestLabel.Text = "Din beste: —"
+bestLabel.Text = "Your best: —"
 bestLabel.Parent = hudPanel
 local bestTsc = Instance.new("UITextSizeConstraint")
 bestTsc.MaxTextSize = 14
@@ -200,23 +200,23 @@ local function updateInfo(p)
 	end
 
 	local lvl = tonumber(p.level)
-	levelLabel.Text = "Nivå " .. (lvl and tostring(lvl) or "—")
+	levelLabel.Text = "Level " .. (lvl and tostring(lvl) or "—")
 
 	-- Rekord: vis tid (+ navn) hvis den finnes, ellers bare "—" uten navn.
 	local rec = p.record
 	if type(rec) == "table" and type(rec.time) == "number" then
 		local nm = (type(rec.name) == "string" and rec.name ~= "")
 			and (" (" .. rec.name .. ")") or ""
-		recordLabel.Text = "🏆 Rekord: " .. Medals.fmtTime(rec.time) .. nm
+		recordLabel.Text = "🏆 Record: " .. Medals.fmtTime(rec.time) .. nm
 	else
-		recordLabel.Text = "🏆 Rekord: —"
+		recordLabel.Text = "🏆 Record: —"
 	end
 
 	-- Din beste: tall -> pen tid, ellers "—".
 	if type(p.yourBest) == "number" then
-		bestLabel.Text = "Din beste: " .. Medals.fmtTime(p.yourBest)
+		bestLabel.Text = "Your best: " .. Medals.fmtTime(p.yourBest)
 	else
-		bestLabel.Text = "Din beste: —"
+		bestLabel.Text = "Your best: —"
 	end
 end
 
@@ -312,7 +312,7 @@ bestLine.ZIndex = 6
 -- Fremhevet "Ny personlig rekord!"-pille (vises bare ved ny PB).
 local pbBar = mkBar(card, 320, 26, 14, Enum.Font.GothamBold,
 	Color3.fromRGB(255, 205, 60), Color3.fromRGB(50, 36, 0))
-pbBar.Text = "Ny personlig rekord! ⭐"
+pbBar.Text = "New personal best! ⭐"
 pbBar.ZIndex = 6
 pbBar.Visible = false
 
@@ -323,7 +323,7 @@ recordLine.ZIndex = 6
 -- Stor gull-banner ved helt ny nivå-rekord.
 local banner = mkBar(card, 320, 34, 20, Enum.Font.GothamBlack,
 	Color3.fromRGB(255, 200, 40), Color3.fromRGB(60, 42, 0))
-banner.Text = "NY REKORD! 🏆"
+banner.Text = "NEW RECORD! 🏆"
 banner.ZIndex = 6
 banner.Visible = false
 -- Litt gull-glans på banneret.
@@ -399,15 +399,15 @@ local function populateCard(p)
 	local disp = Medals.display[mkey] or Medals.display.none
 	local col = c3(disp.color)
 	badge.BackgroundColor3 = col
-	medalName.Text = disp.name or "Fullført"
+	medalName.Text = disp.name or "Finished"
 	medalName.TextColor3 = col
 
 	local lvl = tonumber(p.level)
-	title.Text = "Nivå " .. (lvl and tostring(lvl) or "—") .. " fullført!"
+	title.Text = "Level " .. (lvl and tostring(lvl) or "—") .. " complete!"
 
 	-- fmtTime tåler nil ("-"); alle tider går gjennom den.
-	timeLine.Text = "Din tid: " .. Medals.fmtTime(p.time)
-	bestLine.Text = "Din beste: " .. Medals.fmtTime(p.yourBest)
+	timeLine.Text = "Your time: " .. Medals.fmtTime(p.time)
+	bestLine.Text = "Your best: " .. Medals.fmtTime(p.yourBest)
 
 	local showPB = (p.isNewPB == true)
 	pbBar.Visible = showPB
@@ -417,9 +417,9 @@ local function populateCard(p)
 	if type(rec) == "table" and type(rec.time) == "number" then
 		local nm = (type(rec.name) == "string" and rec.name ~= "")
 			and (" — " .. rec.name) or ""
-		recordLine.Text = "🏆 Rekord: " .. Medals.fmtTime(rec.time) .. nm
+		recordLine.Text = "🏆 Record: " .. Medals.fmtTime(rec.time) .. nm
 	else
-		recordLine.Text = "🏆 Rekord: —"
+		recordLine.Text = "🏆 Record: —"
 	end
 
 	local showBanner = (p.isNewRecord == true)

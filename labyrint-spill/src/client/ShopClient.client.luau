@@ -61,12 +61,12 @@ local PART_FIELD = {
 
 -- Norske forklaringer på hvorfor et kjøp/valg ikke gikk (server-grunner).
 local REASON_NO = {
-	insufficient = "Ikke nok",
-	owned = "Eier allerede",
-	notowned = "Ikke kjøpt",
-	unknown = "Ukjent tema",
-	badcurrency = "Ikke til salgs",
-	notforsale = "Ikke til salgs",
+	insufficient = "Not enough",
+	owned = "Already owned",
+	notowned = "Not purchased",
+	unknown = "Unknown theme",
+	badcurrency = "Not for sale",
+	notforsale = "Not for sale",
 }
 
 --==================  JOBB 2: FARG OM VEGGENE  ====================--
@@ -201,7 +201,7 @@ toggle.BackgroundColor3 = Color3.fromRGB(52, 58, 78)
 toggle.TextColor3 = Color3.new(1, 1, 1)
 toggle.Font = Enum.Font.GothamBold
 toggle.TextScaled = true
-toggle.Text = "🎨 Butikk"
+toggle.Text = "🎨 Shop"
 toggle.AutoButtonColor = true
 toggle.Parent = gui
 corner(toggle, 8)
@@ -252,7 +252,7 @@ title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.new(1, 1, 1)
 title.Font = Enum.Font.GothamBold
 title.TextScaled = true
-title.Text = "🎨 Tema-butikk"
+title.Text = "🎨 Theme shop"
 title.Parent = panel
 local titleTsc = Instance.new("UITextSizeConstraint")
 titleTsc.MaxTextSize = 20
@@ -279,7 +279,7 @@ balance.TextXAlignment = Enum.TextXAlignment.Left
 balance.TextColor3 = Color3.fromRGB(235, 220, 150)
 balance.Font = Enum.Font.GothamMedium
 balance.TextScaled = true
-balance.Text = "🪙 0 mynter    💎 0 edelstener"
+balance.Text = "🪙 0 coins    💎 0 gems"
 balance.Parent = panel
 local balanceTsc = Instance.new("UITextSizeConstraint")
 balanceTsc.MaxTextSize = 16
@@ -326,7 +326,7 @@ pad.Parent = scroll
 
 --==========================  UI-OPPFRISK  ========================--
 function refreshHeader()
-	balance.Text = string.format("🪙 %d mynter    💎 %d edelstener", state.coins, state.gems)
+	balance.Text = string.format("🪙 %d coins    💎 %d gems", state.coins, state.gems)
 end
 
 -- Vis en kort beskjed (grunn/kvittering) som forsvinner av seg selv.
@@ -346,12 +346,12 @@ end
 -- Send et kjøps-/valg-svar inn i staten, og vis grunn/kvittering.
 local function handleActionResult(res, successMsg)
 	if type(res) ~= "table" then
-		showStatus("Nettverksfeil, prøv igjen")
+		showStatus("Network error, try again")
 		return
 	end
 	applyServerState(res) -- oppdater fra fasit (coins/gems/owned/theme)
 	if res.ok == false then
-		showStatus(REASON_NO[res.reason] or "Gikk ikke")
+		showStatus(REASON_NO[res.reason] or "Failed")
 	elseif successMsg then
 		showStatus(successMsg, true)
 	end
@@ -359,31 +359,31 @@ end
 
 local function doBuy(themeId, payWith)
 	if not BuyTheme then
-		showStatus("Butikken laster ...")
+		showStatus("Loading shop…")
 		return
 	end
 	local ok, res = pcall(function()
 		return BuyTheme:InvokeServer(themeId, payWith)
 	end)
 	if ok then
-		handleActionResult(res, "Kjøpt!")
+		handleActionResult(res, "Bought!")
 	else
-		showStatus("Nettverksfeil, prøv igjen")
+		showStatus("Network error, try again")
 	end
 end
 
 local function doSelect(themeId)
 	if not SelectTheme then
-		showStatus("Butikken laster ...")
+		showStatus("Loading shop…")
 		return
 	end
 	local ok, res = pcall(function()
 		return SelectTheme:InvokeServer(themeId)
 	end)
 	if ok then
-		handleActionResult(res, "Valgt!")
+		handleActionResult(res, "Selected!")
 	else
-		showStatus("Nettverksfeil, prøv igjen")
+		showStatus("Network error, try again")
 	end
 end
 
@@ -435,14 +435,14 @@ function refreshRows()
 		if (not owned) and (not selected) then
 			if t.coinPrice and t.coinPrice > 0 then
 				table.insert(buys, {
-					text = "Kjøp: " .. t.coinPrice .. " mynter",
+					text = "Buy: " .. t.coinPrice .. " coins",
 					pay = "coins",
 					color = Color3.fromRGB(198, 156, 44),
 				})
 			end
 			if t.gemPrice and t.gemPrice > 0 then
 				table.insert(buys, {
-					text = t.gemPrice .. " edelstener",
+					text = t.gemPrice .. " gems",
 					pay = "gems",
 					color = Color3.fromRGB(150, 92, 216),
 				})
@@ -523,7 +523,7 @@ function refreshRows()
 			valgt.TextColor3 = Color3.fromRGB(15, 35, 20)
 			valgt.Font = Enum.Font.GothamBold
 			valgt.TextScaled = true
-			valgt.Text = "✓ Valgt"
+			valgt.Text = "✓ Selected"
 			valgt.Parent = row
 			corner(valgt, 6)
 			local valgtTsc = Instance.new("UITextSizeConstraint")
@@ -534,7 +534,7 @@ function refreshRows()
 			-- Eid, men ikke valgt: en "Velg"-knapp (44px høyt trykk-mål).
 			local velg = makeButton(
 				row,
-				"Velg",
+				"Select",
 				UDim2.fromOffset(168, BTN_H),
 				UDim2.new(1, -176, 0.5, -BTN_H / 2),
 				Color3.fromRGB(60, 140, 210)
@@ -582,9 +582,9 @@ refreshHeader()
 refreshRows()
 
 --==================  SPEIL LEADERSTATS (valgfritt)  ==============--
--- ShopData er fasit, men leaderstats (Mynter/Edelstener) oppdateres også når
--- man plukker mynter ute i labyrinten. Speil dem så saldoen i toppen holder
--- seg fersk under vanlig spilling. Best-effort, aldri kritisk.
+-- ShopData er fasit, men leaderstats (Coins/Gems) oppdateres også når man
+-- plukker mynter ute i labyrinten. Speil dem så saldoen i toppen holder seg
+-- fersk under vanlig spilling. Best-effort, aldri kritisk.
 task.spawn(function()
 	local ls = player:WaitForChild("leaderstats", 15)
 	if not ls then return end
@@ -597,8 +597,8 @@ task.spawn(function()
 			refreshHeader()
 		end)
 	end
-	hook("Mynter", "coins")
-	hook("Edelstener", "gems")
+	hook("Coins", "coins")
+	hook("Gems", "gems")
 	refreshHeader()
 end)
 

@@ -116,6 +116,20 @@ if CONFIG.SaveData then
 end
 local recordCache = {}  -- [level] = { time = number?, name = string? }
 
+-- Global toppliste: HØYESTE nivå hver spiller har nådd, delt på tvers av alle
+-- servere (OrderedDataStore). Vises på en tavle ved starten av hvert nivå. Egen
+-- store så den ikke blandes med per-nivå-tidsrekordene over.
+local topStore = nil
+if CONFIG.SaveData then
+	local ok, ds = pcall(function()
+		return DataStoreService:GetOrderedDataStore("LabyrintTopp_v1")
+	end)
+	if ok then topStore = ds end
+end
+local leaderboardCache = {}   -- { { name = string, level = number }, ... } høyest først
+local nameCache = {}          -- [userId] = navn (unngå gjentatte navne-oppslag)
+local leaderboardLabels = {}  -- tekst-etiketter på gjeldende tavle (oppdateres ved refresh)
+
 local function getRecord(level)
 	if recordCache[level] then return recordCache[level] end
 	local rec = { time = nil, name = nil }
@@ -326,22 +340,106 @@ local function ensureLeaderstats(plr)
 		return v
 	end
 	return {
-		Niva = num("Niva"),
-		Mynter = num("Mynter"),
-		Edelstener = num("Edelstener"),
-		Pokaler = num("Pokaler"),
-		BesteTid = str("BesteTid"),
+		Level = num("Level"),
+		Coins = num("Coins"),
+		Gems = num("Gems"),
+		Trophies = num("Trophies"),
+		BestTime = str("Best Time"),
 	}
 end
 
 local function refreshStats(plr)
 	local d = playerData[plr]; if not d then return end
 	local s = ensureLeaderstats(plr)
-	s.Niva.Value = currentLevel
-	s.Mynter.Value = d.coins
-	s.Edelstener.Value = d.gems
-	s.Pokaler.Value = d.trophies
-	s.BesteTid.Value = (d.best < math.huge) and fmtTime(d.best) or "-"
+	s.Level.Value = currentLevel
+	s.Coins.Value = d.coins
+	s.Gems.Value = d.gems
+	s.Trophies.Value = d.trophies
+	s.BestTime.Value = (d.best < math.huge) and fmtTime(d.best) or "-"
+end
+
+--========================  TOPPLISTE (TAVLE)  ====================--
+-- Bygg tavle-teksten fra cachen (ren streng, engelsk — spiller-synlig).
+local function renderLeaderboardText()
+	if #leaderboardCache == 0 then
+		return "Be the first to climb!\nReach a high level to appear here."
+	end
+	local lines = {}
+	for i, e in ipairs(leaderboardCache) do
+		lines[i] = string.format("%d.  %s  —  Level %d", i, e.name, e.level)
+	end
+	return table.concat(lines, "\n")
+end
+
+-- Oppdater alle tekst-etikettene på tavla (front + bak). Nil-/parent-sjekket så
+-- en tavle som er revet (nivå-bygging) ikke gir feil.
+local function updateLeaderboardBoards()
+	local txt = renderLeaderboardText()
+	for i = #leaderboardLabels, 1, -1 do
+		local lbl = leaderboardLabels[i]
+		if lbl and lbl.Parent then
+			lbl.Text = txt
+		else
+			table.remove(leaderboardLabels, i)  -- rydd bort døde referanser
+		end
+	end
+end
+
+-- Navn fra userId (online spiller først; ellers cachet API-oppslag). Faller pent
+-- tilbake til "Player" hvis oppslaget feiler.
+local function resolveName(userId)
+	local online = Players:GetPlayerByUserId(userId)
+	if online then return online.Name end
+	if nameCache[userId] then return nameCache[userId] end
+	local nm = "Player"
+	local ok, res = pcall(function() return Players:GetNameFromUserIdAsync(userId) end)
+	if ok and typeof(res) == "string" and res ~= "" then nm = res end
+	nameCache[userId] = nm
+	return nm
+end
+
+-- Hent topp 10 (høyeste nivå) og oppdater cachen + tavla. Kjøres asynkront så den
+-- aldri bremser nivå-byggingen; alt er pcall-et (DataStore kan feile/strupe).
+-- Struped så raske nivå-hopp ikke spammer GetSortedAsync (les-grense pr minutt).
+local lastLeaderboardRefresh = -1e9
+local function refreshLeaderboard()
+	if not topStore then return end
+	local now = os.clock()
+	if now - lastLeaderboardRefresh < 12 then return end
+	lastLeaderboardRefresh = now
+	task.spawn(function()
+		local ok, pages = pcall(function()
+			return topStore:GetSortedAsync(false, 10)  -- false = synkende: høyest nivå først
+		end)
+		if not ok or not pages then return end
+		local ok2, top = pcall(function() return pages:GetCurrentPage() end)
+		if not ok2 or typeof(top) ~= "table" then return end
+		local list = {}
+		for _, entry in ipairs(top) do
+			local uid = tonumber(entry.key)
+			local lvl = tonumber(entry.value)
+			if uid and lvl then
+				list[#list + 1] = { name = resolveName(uid), level = lvl }
+			end
+		end
+		leaderboardCache = list
+		updateLeaderboardBoards()
+	end)
+end
+
+-- Send inn en spillers nådde nivå (bare hvis høyere enn før). Asynkront + pcall.
+local function submitTopScore(userId, level)
+	if not topStore or typeof(level) ~= "number" then return end
+	task.spawn(function()
+		pcall(function()
+			topStore:UpdateAsync(tostring(userId), function(old)
+				if typeof(old) ~= "number" or level > old then
+					return level
+				end
+				return nil  -- ikke høyere: ikke skriv
+			end)
+		end)
+	end)
 end
 
 --============================  LAGRING  ==========================--
@@ -438,14 +536,14 @@ local function updateExitVisual()
 	if exitUnlocked then
 		exitPad.Color = Color3.fromRGB(60, 200, 90)
 		exitPad.Material = Enum.Material.Neon
-		if exitBillboard then exitBillboard.Text = "UTGANG APEN!" end
+		if exitBillboard then exitBillboard.Text = "EXIT OPEN!" end
 	else
 		exitPad.Color = Color3.fromRGB(200, 60, 60)
 		if exitBillboard then
 			if CONFIG.UnlockExitBy == "gems" then
-				exitBillboard.Text = "LAST - " .. (gemsTotalInLevel - gemsGrabbedCount) .. " edelsten igjen"
+				exitBillboard.Text = "LOCKED - " .. (gemsTotalInLevel - gemsGrabbedCount) .. " gems left"
 			else
-				exitBillboard.Text = "LAST - " .. (coinsTotal - coinsCollected) .. " mynt igjen"
+				exitBillboard.Text = "LOCKED - " .. (coinsTotal - coinsCollected) .. " coins left"
 			end
 		end
 	end
@@ -661,6 +759,77 @@ local function buildLevel()
 	spawn.Material = Enum.Material.Neon
 	spawn.Duration = 0
 	spawn.Parent = folder
+
+	-- Toppliste-tavle: står ved starten (bygges pr nivå så den alltid er ved spawn).
+	-- Dobbeltsidig (tekst på begge flater) så den er lesbar uansett hvilken vei man
+	-- ser, og skjøvet litt UT fra labyrinten så den ikke klipper innervegger.
+	do
+		leaderboardLabels = {}                 -- gammel tavle røk med folder-destroy over
+		local boardW, boardH = 22, 13
+		local flat = Vector3.new(sw.X, 0, sw.Z)
+		local outDir = flat                    -- retning ut fra midten (0,0,0)
+		if outDir.Magnitude < 0.1 then outDir = Vector3.new(0, 0, 1) end
+		outDir = outDir.Unit
+		local boardPos = flat + outDir * (S * 1.6) + Vector3.new(0, boardH / 2 + 1, 0)
+
+		local board = makePart({
+			Name = "Leaderboard",
+			Size = Vector3.new(boardW, boardH, 0.6),
+			Position = boardPos,
+			Color = Color3.fromRGB(18, 20, 30),
+			Material = Enum.Material.SmoothPlastic,
+		})
+		board.CanCollide = false
+		board.CFrame = CFrame.lookAt(boardPos, Vector3.new(0, boardPos.Y, 0))  -- vend mot midten
+		board.Parent = folder
+
+		-- Bygg en SurfaceGui (tittel + rangering) på én flate; kall for Front + Back.
+		local function addFace(face)
+			local sg = Instance.new("SurfaceGui")
+			sg.Name = "LeaderboardGui"
+			sg.Face = face
+			sg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+			sg.CanvasSize = Vector2.new(560, 400)
+			sg.LightInfluence = 0            -- alltid lesbar, også i mørket
+			sg.Parent = board
+
+			local bg = Instance.new("Frame")
+			bg.Size = UDim2.fromScale(1, 1)
+			bg.BackgroundColor3 = Color3.fromRGB(16, 18, 28)
+			bg.BorderSizePixel = 0
+			bg.Parent = sg
+
+			local title = Instance.new("TextLabel")
+			title.Size = UDim2.new(1, -24, 0, 78)
+			title.Position = UDim2.fromOffset(12, 8)
+			title.BackgroundTransparency = 1
+			title.Font = Enum.Font.GothamBlack
+			title.TextScaled = true
+			title.TextColor3 = Color3.fromRGB(255, 210, 90)
+			title.TextXAlignment = Enum.TextXAlignment.Center
+			title.Text = "🏆 TOP CLIMBERS"
+			title.Parent = bg
+
+			local body = Instance.new("TextLabel")
+			body.Size = UDim2.new(1, -36, 1, -96)
+			body.Position = UDim2.fromOffset(18, 90)
+			body.BackgroundTransparency = 1
+			body.Font = Enum.Font.Code
+			body.TextSize = 26
+			body.TextColor3 = Color3.fromRGB(235, 240, 248)
+			body.TextXAlignment = Enum.TextXAlignment.Left
+			body.TextYAlignment = Enum.TextYAlignment.Top
+			body.TextWrapped = false
+			body.RichText = false
+			body.Text = ""
+			body.Parent = bg
+
+			leaderboardLabels[#leaderboardLabels + 1] = body
+		end
+		addFace(Enum.NormalId.Front)
+		addFace(Enum.NormalId.Back)
+		updateLeaderboardBoards()   -- fyll fra gjeldende cache med en gang
+	end
 
 	-- Utgang
 	local ew = cellCenterWorld(cols - 1, rows - 1, gCols, gRows)
@@ -921,13 +1090,21 @@ onEscape = function(plr)
 		currentLevel += 1
 		-- Lagre nivået pr spiller så alle som er med fortsetter her neste gang de
 		-- logger inn (debouncet skriv; PlayerRemoving/BindToClose flusher det siste).
+		-- Send også inn til den globale topplista (tavla ved starten).
 		for _, p in ipairs(Players:GetPlayers()) do
 			local pd = playerData[p]
 			if pd then
 				pd.level = math.max(pd.level or 1, currentLevel)
 				scheduleSave(p)
+				-- Gude-spillere (Mio) holdes UTENFOR den globale tavla — de har fått
+				-- gude-modus/gaver, så nivået deres skal ikke rangeres. De ser fortsatt
+				-- sine egne stats i leaderstats/HUD/butikk.
+				if pd.canSave ~= false and not GodUsers.has(p) then
+					submitTopScore(p.UserId, pd.level)
+				end
 			end
 		end
+		refreshLeaderboard()  -- hent oppdatert topp 10 (async) og oppdater tavla
 	end
 	task.wait(0.4)
 	-- advancing MÅ nullstilles selv om buildLevel skulle feile, ellers låser
@@ -1289,4 +1466,5 @@ end)
 --============================  START  ============================--
 applyDarkness()
 buildLevel()
+refreshLeaderboard()  -- fyll topplista-tavla ved oppstart
 print("[Labyrint] Lastet. Level " .. currentLevel .. " bygget. Lykke til!")

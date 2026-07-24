@@ -117,7 +117,7 @@ toggle.BackgroundColor3 = COL_OFF
 toggle.TextColor3 = Color3.new(1, 1, 1)
 toggle.Font = Enum.Font.GothamBold
 toggle.TextScaled = true
-toggle.Text = "✈️ Gudemodus AV"
+toggle.Text = "✈️ God mode OFF"
 toggle.AutoButtonColor = true
 toggle.Parent = gui
 corner(toggle, 10)
@@ -252,13 +252,13 @@ end
 local function applyGod(on)
 	godOn = on
 	if on then
-		toggle.Text = "✈️ Gudemodus PÅ"
+		toggle.Text = "✈️ God mode ON"
 		toggle.BackgroundColor3 = COL_ON
 		setArrowsVisible(true)
 		startLoop()
 		fireGod(true)       -- serveren gir udødelighet
 	else
-		toggle.Text = "✈️ Gudemodus AV"
+		toggle.Text = "✈️ God mode OFF"
 		toggle.BackgroundColor3 = COL_OFF
 		setArrowsVisible(false)
 		stopLoop()          -- slutt å overstyre farten

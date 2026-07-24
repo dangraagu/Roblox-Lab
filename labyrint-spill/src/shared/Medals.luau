@@ -15,11 +15,11 @@ Medals.order = { "diamant", "gull", "solv", "bronse" }  -- raskest -> tregest
 Medals.mult = { diamant = 1.3, gull = 1.8, solv = 2.5, bronse = 4.0 }
 
 Medals.display = {
-	diamant = { name = "Diamant",  color = { 120, 225, 240 } },
-	gull    = { name = "Gull",     color = { 255, 215, 0 } },
-	solv    = { name = "Sølv",     color = { 205, 205, 210 } },
-	bronse  = { name = "Bronse",   color = { 205, 127, 50 } },
-	none    = { name = "Fullført", color = { 180, 180, 180 } },
+	diamant = { name = "Diamond",  color = { 120, 225, 240 } },
+	gull    = { name = "Gold",     color = { 255, 215, 0 } },
+	solv    = { name = "Silver",   color = { 205, 205, 210 } },
+	bronse  = { name = "Bronze",   color = { 205, 127, 50 } },
+	none    = { name = "Finished", color = { 180, 180, 180 } },
 }
 
 -- Nøkkel for en finrute-celle

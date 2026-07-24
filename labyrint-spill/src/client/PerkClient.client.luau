@@ -44,11 +44,11 @@ local BuyPerk = nil
 
 -- Norske forklaringer på hvorfor et kjøp ikke gikk (server-grunner).
 local REASON_NO = {
-	insufficient = "Ikke nok mynter",
-	owned = "Eid allerede",
-	unknown = "Ukjent",
-	notforsale = "Ikke til salgs",
-	badinput = "Ikke til salgs",
+	insufficient = "Not enough coins",
+	owned = "Already owned",
+	unknown = "Unknown",
+	notforsale = "Not for sale",
+	badinput = "Not for sale",
 }
 
 -- Bare én grunn-melding vises av gangen, ved raden den hører til. Overlever
@@ -91,7 +91,7 @@ toggle.BackgroundColor3 = Color3.fromRGB(78, 58, 96)
 toggle.TextColor3 = Color3.new(1, 1, 1)
 toggle.Font = Enum.Font.GothamBold
 toggle.TextScaled = true
-toggle.Text = "⚡ Oppgraderinger"
+toggle.Text = "⚡ Upgrades"
 toggle.AutoButtonColor = true
 toggle.Parent = gui
 corner(toggle, 8)
@@ -139,7 +139,7 @@ title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.new(1, 1, 1)
 title.Font = Enum.Font.GothamBold
 title.TextScaled = true
-title.Text = "⚡ Oppgraderinger"
+title.Text = "⚡ Upgrades"
 title.Parent = panel
 local titleTsc = Instance.new("UITextSizeConstraint")
 titleTsc.MaxTextSize = 20
@@ -166,7 +166,7 @@ balance.TextXAlignment = Enum.TextXAlignment.Left
 balance.TextColor3 = Color3.fromRGB(235, 220, 150)
 balance.Font = Enum.Font.GothamMedium
 balance.TextScaled = true
-balance.Text = "🪙 0 mynter"
+balance.Text = "🪙 0 coins"
 balance.Parent = panel
 local balanceTsc = Instance.new("UITextSizeConstraint")
 balanceTsc.MaxTextSize = 17
@@ -200,7 +200,7 @@ pad.Parent = scroll
 
 --==========================  UI-OPPFRISK  ========================--
 local function refreshHeader()
-	balance.Text = string.format("🪙 %d mynter", state.coins)
+	balance.Text = string.format("🪙 %d coins", state.coins)
 end
 
 local refreshRows -- fylles ut like nedenfor
@@ -231,19 +231,19 @@ end
 -- Kjøp et perk. pcall rundt nettverkskallet; oppdater fra fasiten i svaret.
 local function doBuy(id)
 	if not BuyPerk then
-		setReason(id, "Butikken laster ...")
+		setReason(id, "Loading shop…")
 		return
 	end
 	local ok, res = pcall(function()
 		return BuyPerk:InvokeServer(id)
 	end)
 	if not ok or type(res) ~= "table" then
-		setReason(id, "Nettverksfeil")
+		setReason(id, "Network error")
 		return
 	end
 	applyServerData(res) -- coins + perks fra fasit
 	if res.ok == false then
-		setReason(id, REASON_NO[res.reason] or "Gikk ikke")
+		setReason(id, REASON_NO[res.reason] or "Failed")
 	end
 end
 
@@ -366,7 +366,7 @@ function refreshRows()
 			eid.TextColor3 = Color3.fromRGB(15, 35, 20)
 			eid.Font = Enum.Font.GothamBold
 			eid.TextScaled = true
-			eid.Text = "Eid ✓"
+			eid.Text = "Owned ✓"
 			eid.Parent = row
 			corner(eid, 6)
 			local eidTsc = Instance.new("UITextSizeConstraint")
@@ -377,7 +377,7 @@ function refreshRows()
 			-- Ikke eid: kjøp-knapp. Gyllen når du har råd, dempet ellers
 			-- (server validerer uansett, så knappen er alltid trykkbar).
 			local btnColor = affordable and Color3.fromRGB(198, 156, 44) or Color3.fromRGB(96, 92, 74)
-			local buy = makeButton(row, "Kjøp: " .. tostring(p.coinPrice or 0) .. " mynter", btnColor)
+			local buy = makeButton(row, "Buy: " .. tostring(p.coinPrice or 0) .. " coins", btnColor)
 			buy.Activated:Connect(function()
 				doBuy(p.id)
 			end)
