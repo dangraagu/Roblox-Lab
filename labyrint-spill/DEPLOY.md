@@ -6,6 +6,16 @@ endringer skal bli synlige for spillere.
 
 Du har to måter:
 
+## Enklest — ett klikk UTEN API-nokkel: `publish_now.bat`
+Bruker Roblox-innloggingen din direkte (rojo finner den fra maskinen — du maa
+vaere logget inn i Roblox Studio).
+1. Aapne `publish_now.bat`, sett `PLACE_ID` = tallet i spillets URL
+   (`roblox.com/games/<PLACE_ID>/...`). Ikke hemmelig, ingen nokkel-fil.
+2. Dobbeltklikk `publish_now.bat`. Ferdig.
+
+Feiler den paa innlogging (Roblox strammer av og til inn cookie-publisering),
+bruk Studio (A) eller Open Cloud (B) i stedet.
+
 ## A) Raskt / manuelt (Roblox Studio)
 1. Åpne `Labyrint.rbxlx` i Studio (eller `rojo serve` + koble til).
 2. **File → Publish to Roblox** (ikke "As" — velg det eksisterende spillet så du
