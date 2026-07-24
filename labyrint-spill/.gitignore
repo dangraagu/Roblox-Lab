@@ -8,6 +8,9 @@
 /bin/
 .rokit/
 
+# Secrets — ALDRI commit API-nokler
+roblox_api_key.txt
+
 # Editor
 .vscode/
 .idea/
