@@ -84,13 +84,9 @@ local PerkDefs = require(ReplicatedStorage:WaitForChild("PerkDefs"))
 local PerkService = require(ReplicatedStorage:WaitForChild("PerkService"))
 local GodUsers = require(ReplicatedStorage:WaitForChild("GodUsers"))
 
--- Engangs-gaver: navngitte spillere får startkapital FØRSTE gang de blir med.
--- Gis bare én gang og lagres, så det ikke gjentas ved ny innlogging. Match på
--- Roblox-brukernavn (user). Bytter han navn, sett heller userId = <tall> for å
--- være trygg (finn UserId på profilsiden hans / rprxy.com eller users API).
-local GIFTS = {
-	{ id = "mio_starter", user = "MioSpille", coins = 999999, gems = 999999 },
-}
+-- Start-gave: de spesielle spillerne (samme liste som gudemodus, se GodUsers)
+-- får startkapital FØRSTE gang de blir med. Gis én gang og lagres.
+local STARTER_GIFT = { id = "starter2", coins = 999999, gems = 999999 }
 
 -- Robux -> edelstener. SKRUS PÅ SENERE PÅ ROBLOX. Så lenge EnableRobux = false
 -- gis INGEN Robux-kjøp. For å skru på: lag Developer Products på create.roblox.com,
@@ -1016,7 +1012,7 @@ setGodEvent.Name = "SetGodMode"
 setGodEvent.Parent = godFolder
 
 setGodEvent.OnServerEvent:Connect(function(plr, enabled)
-	if GodUsers[plr.Name] then
+	if GodUsers.has(plr) then
 		godActive[plr] = enabled and true or false
 	end
 end)
@@ -1161,24 +1157,15 @@ end
 local function onPlayerAdded(plr)
 	loadPlayer(plr)
 
-	-- Del ut engangs-gaver (startkapital) til navngitte spillere.
-	-- Bare hvis lasten gikk bra, ellers kunne vi gitt gaven på nytt + overskrevet ekte data.
+	-- Del ut start-gaven til spesielle spillere (samme liste som gudemodus).
+	-- Bare hvis lasten gikk bra, ellers kunne vi overskrevet ekte data.
 	local d = playerData[plr]
-	if d and d.canSave ~= false then
-		local gifted = false
-		for _, g in ipairs(GIFTS) do
-			local match = (g.user and plr.Name == g.user) or (g.userId and plr.UserId == g.userId)
-			if match then
-				d.gifts = d.gifts or {}
-				if not d.gifts[g.id] then
-					d.coins += (g.coins or 0)
-					d.gems += (g.gems or 0)
-					d.gifts[g.id] = true
-					gifted = true
-				end
-			end
-		end
-		if gifted then
+	if d and d.canSave ~= false and GodUsers.has(plr) then
+		d.gifts = d.gifts or {}
+		if not d.gifts[STARTER_GIFT.id] then
+			d.coins += STARTER_GIFT.coins
+			d.gems += STARTER_GIFT.gems
+			d.gifts[STARTER_GIFT.id] = true
 			refreshStats(plr)
 			savePlayer(plr)  -- lagre straks så gaven ikke deles ut på nytt
 			sendShopData(plr)

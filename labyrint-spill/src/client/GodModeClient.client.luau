@@ -33,7 +33,7 @@ local UserInputService = game:GetService("UserInputService")
 local GodUsers = require(ReplicatedStorage:WaitForChild("GodUsers"))
 local LocalPlayer = Players.LocalPlayer
 
-if not GodUsers[LocalPlayer.Name] then
+if not GodUsers.has(LocalPlayer) then
 	return
 end
 
