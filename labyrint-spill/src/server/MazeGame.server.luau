@@ -1253,6 +1253,9 @@ sendLevelInfo = function(plr)
 		thresholds = currentThresholds,
 		records = getRecord(currentLevel),   -- topp-3 raskeste tider (raskest først)
 		yourBest = (d and d.bestByLevel) and d.bestByLevel[tostring(currentLevel)] or nil,
+		accepted = d and d.accepted or 0,    -- spillerens sekvensielle "accepted"-nivå
+		-- Gude-spillere (Mio) ser sitt eget skille rent/gud; andre får ikke feltet.
+		bestWithGod = (d and GodUsers.has(plr)) and d.bestWithGod or nil,
 	})
 end
 

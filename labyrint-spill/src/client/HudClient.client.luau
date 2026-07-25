@@ -129,13 +129,13 @@ local hudPanel = Instance.new("Frame")
 hudPanel.Name = "NivaaPanel"
 hudPanel.AnchorPoint = Vector2.new(0.5, 0)
 hudPanel.Position = UDim2.new(0.5, 0, 0, 6)
-hudPanel.Size = UDim2.new(0.82, 0, 0, 60)
+hudPanel.Size = UDim2.new(0.82, 0, 0, 78)
 hudPanel.BackgroundTransparency = 1        -- gjennomsiktig felt (ingen boks)
 hudPanel.BorderSizePixel = 0
 hudPanel.Parent = gui
 local hudSize = Instance.new("UISizeConstraint")
-hudSize.MaxSize = Vector2.new(320, 60)
-hudSize.MinSize = Vector2.new(240, 60)
+hudSize.MaxSize = Vector2.new(320, 78)
+hudSize.MinSize = Vector2.new(240, 78)
 hudSize.Parent = hudPanel
 
 -- Stor: hvilket nivå.
@@ -173,6 +173,24 @@ bestTsc.MinTextSize = 10
 bestTsc.Parent = bestLabel
 stroke(bestLabel, Color3.fromRGB(0, 0, 0), 1.5, 0.1)
 
+-- Mindre: ditt sekvensielle "accepted"-nivå (og for gude-spillere: rent vs gud).
+local acceptedLabel = Instance.new("TextLabel")
+acceptedLabel.Size = UDim2.new(1, -16, 0, 18)
+acceptedLabel.Position = UDim2.fromOffset(8, 60)
+acceptedLabel.BackgroundTransparency = 1
+acceptedLabel.Font = Enum.Font.GothamMedium
+acceptedLabel.TextScaled = true
+acceptedLabel.TextColor3 = Color3.fromRGB(170, 235, 180)
+acceptedLabel.TextXAlignment = Enum.TextXAlignment.Center
+acceptedLabel.TextTruncate = Enum.TextTruncate.AtEnd
+acceptedLabel.Text = "Accepted: —"
+acceptedLabel.Parent = hudPanel
+local acceptedTsc = Instance.new("UITextSizeConstraint")
+acceptedTsc.MaxTextSize = 14
+acceptedTsc.MinTextSize = 10
+acceptedTsc.Parent = acceptedLabel
+stroke(acceptedLabel, Color3.fromRGB(0, 0, 0), 1.5, 0.1)
+
 -- Oppdater HUD-en fra en LevelInfo-nyttelast (bare level + din beste her nå;
 -- rekordene vises i topp-høyre-panelet). Alt nil-sjekket.
 local function updateInfo(p)
@@ -185,6 +203,13 @@ local function updateInfo(p)
 		bestLabel.Text = "Your best: " .. Medals.fmtTime(p.yourBest)
 	else
 		bestLabel.Text = "Your best: —"
+	end
+	-- Accepted-nivå. Har vi bestWithGod (kun gude-spillere), vis rent vs gud-skille.
+	local acc = tonumber(p.accepted)
+	if type(p.bestWithGod) == "number" then
+		acceptedLabel.Text = "Clean " .. (acc or 0) .. "  ·  God " .. math.floor(p.bestWithGod)
+	else
+		acceptedLabel.Text = "Accepted: " .. (acc and tostring(acc) or "—")
 	end
 end
 
