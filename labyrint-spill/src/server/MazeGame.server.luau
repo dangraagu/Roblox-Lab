@@ -1537,6 +1537,14 @@ for _, plr in ipairs(Players:GetPlayers()) do onPlayerAdded(plr) end
 
 Players.PlayerRemoving:Connect(function(plr)
 	savePlayer(plr)                 -- flush umiddelbart (fanger evt. debouncet endring)
+	-- Lobby-modus: forlot spilleren en instans, riv den (ellers lekker folder +
+	-- monster/spinn-løkker kjører for alltid).
+	local inst = playerInstance[plr]
+	if inst then
+		playerInstance[plr] = nil
+		inst.gen = (inst.gen or 0) + 1
+		if inst.folder then inst.folder:Destroy() end
+	end
 	playerData[plr] = nil
 	startClock[plr] = nil
 	saveScheduled[plr] = nil
@@ -1851,6 +1859,11 @@ end
 -- Fullfør en kjøring: del ut accepted/rekord (Progression, per-instans hadGod),
 -- riv instansen, send spilleren tilbake til lobbyen.
 finishRun = function(plr, inst)
+	-- Idempotent: utgangen gir MANGE Touched (flere lemmer), og getRecord under kan
+	-- yield'e (DataStore). Krev at spilleren fortsatt er i DENNE instansen og claim
+	-- den med en gang, så en runde bare belønnes ÉN gang.
+	if playerInstance[plr] ~= inst then return end
+	playerInstance[plr] = nil
 	local d = playerData[plr]
 	local level = inst.level
 	if d then
@@ -1902,8 +1915,7 @@ finishRun = function(plr, inst)
 		end
 		task.spawn(function() savePlayer(plr) end)
 	end
-	-- Riv instansen + send til lobby
-	playerInstance[plr] = nil
+	-- Riv instansen + send til lobby (playerInstance er alt nullstilt øverst).
 	inst.gen = (inst.gen or 0) + 1  -- stopp løkker
 	if inst.folder then inst.folder:Destroy() end
 	local char = plr.Character
