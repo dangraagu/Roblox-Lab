@@ -1,0 +1,167 @@
+--[[==================================================================
+	LABYRINT-SPILL  -  REKORDER / TOPPLISTE (klient, ØVERST-TIL-HØYRE)
+	Laget for Marius & onkel :)
+
+	Et lite alltid-synlig panel øverst-til-høyre med TO seksjoner:
+	  • 🏆 Fastest — de 3 raskeste tidene på GJELDENDE nivå (fra HudRemotes/LevelInfo).
+	  • ⛰️ Top Climbers — de 3 spillerne med HØYEST nivå (fra HudRemotes/Leaderboard).
+	Serveren er fasit; klienten bare tegner. All tekst er engelsk, alt nil-sjekket.
+==================================================================]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local Medals = require(ReplicatedStorage:WaitForChild("Medals"))
+
+local TOP_N = 3
+
+--==========================  GUI  ===============================--
+local old = playerGui:FindFirstChild("Records")
+if old then old:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "Records"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 9
+gui.Parent = playerGui
+
+-- Øverst-til-høyre, rett under "🎨 Shop"-knappen (~12..60).
+local panel = Instance.new("Frame")
+panel.Name = "Panel"
+panel.AnchorPoint = Vector2.new(1, 0)
+panel.Position = UDim2.new(1, -8, 0, 66)
+panel.Size = UDim2.new(0, 212, 0, 0)
+panel.AutomaticSize = Enum.AutomaticSize.Y
+panel.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
+panel.BackgroundTransparency = 0.2
+panel.BorderSizePixel = 0
+panel.Active = false
+panel.Parent = gui
+
+local sizeC = Instance.new("UISizeConstraint")
+sizeC.MaxSize = Vector2.new(212, 240)
+sizeC.MinSize = Vector2.new(150, 0)
+sizeC.Parent = panel
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = panel
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(90, 80, 50)
+stroke.Thickness = 1
+stroke.Transparency = 0.25
+stroke.Parent = panel
+
+local pad = Instance.new("UIPadding")
+pad.PaddingTop = UDim.new(0, 6)
+pad.PaddingBottom = UDim.new(0, 6)
+pad.PaddingLeft = UDim.new(0, 10)
+pad.PaddingRight = UDim.new(0, 10)
+pad.Parent = panel
+
+local layout = Instance.new("UIListLayout")
+layout.FillDirection = Enum.FillDirection.Vertical
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Padding = UDim.new(0, 1)
+layout.Parent = panel
+
+-- Liten fabrikk for en tekst-linje i panelet.
+local function mkLine(order, size, color, font, xalign)
+	local l = Instance.new("TextLabel")
+	l.LayoutOrder = order
+	l.Size = UDim2.new(1, 0, 0, 16)
+	l.BackgroundTransparency = 1
+	l.Font = font or Enum.Font.GothamMedium
+	l.TextSize = size or 13
+	l.TextColor3 = color or Color3.fromRGB(232, 236, 244)
+	l.TextXAlignment = xalign or Enum.TextXAlignment.Left
+	l.TextTruncate = Enum.TextTruncate.AtEnd
+	l.RichText = false
+	l.Text = ""
+	l.Parent = panel
+	return l
+end
+
+-- Seksjon 1: raskeste tider på nivået.
+local fastHeader = mkLine(0, 13, Color3.fromRGB(255, 210, 90), Enum.Font.GothamBold)
+fastHeader.Text = "🏆 Fastest"
+local fastRows = { mkLine(1), mkLine(2), mkLine(3) }
+local fastEmpty = mkLine(4, 12, Color3.fromRGB(150, 156, 170))
+fastEmpty.Text = "No times yet"
+
+-- Liten luft mellom seksjonene.
+local spacer = Instance.new("Frame")
+spacer.LayoutOrder = 5
+spacer.Size = UDim2.new(1, 0, 0, 6)
+spacer.BackgroundTransparency = 1
+spacer.Parent = panel
+
+-- Seksjon 2: høyeste nivå (klatrerne).
+local climbHeader = mkLine(6, 13, Color3.fromRGB(140, 200, 255), Enum.Font.GothamBold)
+climbHeader.Text = "⛰️ Top Climbers"
+local climbRows = { mkLine(7), mkLine(8), mkLine(9) }
+local climbEmpty = mkLine(10, 12, Color3.fromRGB(150, 156, 170))
+climbEmpty.Text = "Be the first to climb!"
+
+--==========================  RENDER  ============================--
+-- Fyll en rad-liste fra data; skjul ubrukte rader, vis "empty" om ingen.
+local function fillRows(rows, emptyLbl, count, textFor)
+	emptyLbl.Visible = (count == 0)
+	for i = 1, TOP_N do
+		local r = rows[i]
+		if i <= count then
+			r.Text = textFor(i)
+			r.Visible = true
+		else
+			r.Visible = false
+		end
+	end
+end
+
+-- LevelInfo: { level, records = { {time, name}, ... }, yourBest }.
+local function onLevelInfo(p)
+	if type(p) ~= "table" then return end
+	local lvl = tonumber(p.level)
+	fastHeader.Text = "🏆 Fastest" .. (lvl and (" — Lvl " .. lvl) or "")
+	local recs = (type(p.records) == "table") and p.records or {}
+	local n = math.min(#recs, TOP_N)
+	fillRows(fastRows, fastEmpty, n, function(i)
+		local e = recs[i]
+		if type(e) ~= "table" then return i .. ". —" end
+		local nm = (type(e.name) == "string" and e.name ~= "") and e.name or "?"
+		local t = (type(e.time) == "number") and e.time or nil
+		return string.format("%d. %s  %s", i, Medals.fmtTime(t), nm)
+	end)
+end
+
+-- Leaderboard: array { {name, level}, ... } (høyest først).
+local function onLeaderboard(list)
+	if type(list) ~= "table" then list = {} end
+	local n = math.min(#list, TOP_N)
+	fillRows(climbRows, climbEmpty, n, function(i)
+		local e = list[i]
+		local nm = (type(e) == "table" and type(e.name) == "string" and e.name ~= "") and e.name or "Player"
+		local lvl = (type(e) == "table" and tonumber(e.level)) or 0
+		return string.format("%d. %s · Lvl %d", i, nm, lvl)
+	end)
+end
+
+--==================  KOBLE TIL SERVEREN  ========================--
+task.spawn(function()
+	local hud = ReplicatedStorage:WaitForChild("HudRemotes", 30)
+	if not hud then return end
+
+	local levelInfo = hud:WaitForChild("LevelInfo", 15)
+	if levelInfo then
+		levelInfo.OnClientEvent:Connect(function(p) pcall(onLevelInfo, p) end)
+	end
+
+	local leaderboard = hud:WaitForChild("Leaderboard", 15)
+	if leaderboard then
+		leaderboard.OnClientEvent:Connect(function(list) pcall(onLeaderboard, list) end)
+	end
+end)

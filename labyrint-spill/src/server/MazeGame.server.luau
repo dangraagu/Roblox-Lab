@@ -15,8 +15,9 @@
 local CONFIG = {
 	-- Grunnleggende
 	CellSize = 9,             -- studs pr celle (gjør større hvis spilleren sitter fast)
-	WallHeight = 16,
-	UnlockExitBy = "coins",   -- "coins" | "gems" | "none": hva som må samles for å åpne utgangen
+	WallHeight = 24,          -- høyere vegger så spillere ikke kan booste hverandre over
+	UnlockExitBy = "none",    -- "coins" | "gems" | "none": hva som må samles for å åpne utgangen
+	                          -- "none" = utgangen er ALLTID åpen (ingen innsamling kreves)
 	MultipleLevels = true,
 	MaxLevel = 500,           -- der kurven er på sitt vanskeligste (spillet fortsetter uansett)
 
@@ -77,6 +78,8 @@ local PathfindingService = game:GetService("PathfindingService")
 local DataStoreService = game:GetService("DataStoreService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextChatService = game:GetService("TextChatService")
+local TextService = game:GetService("TextService")
 
 local Themes = require(ReplicatedStorage:WaitForChild("Themes"))
 local ShopService = require(ReplicatedStorage:WaitForChild("ShopService"))
@@ -128,32 +131,53 @@ if CONFIG.SaveData then
 end
 local leaderboardCache = {}   -- { { name = string, level = number }, ... } høyest først
 local nameCache = {}          -- [userId] = navn (unngå gjentatte navne-oppslag)
-local leaderboardLabels = {}  -- tekst-etiketter på gjeldende tavle (oppdateres ved refresh)
+local leaderboardEvent        -- RemoteEvent (fylles ut i HUD-seksjonen): sender topplista til klientene
 
-local function getRecord(level)
-	if recordCache[level] then return recordCache[level] end
-	local rec = { time = nil, name = nil }
-	if recordStore then
-		local ok, saved = pcall(function() return recordStore:GetAsync("lvl_" .. level) end)
-		if ok and typeof(saved) == "table" and typeof(saved.time) == "number" then
-			rec.time = saved.time
-			rec.name = (typeof(saved.name) == "string") and saved.name or "?"
+-- Normaliser lagret rekord-data til en liste { {time, name}, ... }. Bakover-
+-- kompatibel: gammelt format var ÉN {time, name}; nytt format er en array.
+local function normalizeRecords(saved)
+	local list = {}
+	if typeof(saved) == "table" then
+		if typeof(saved.time) == "number" then
+			list[1] = { time = saved.time, name = (typeof(saved.name) == "string") and saved.name or "?" }
+		else
+			for _, e in ipairs(saved) do
+				if typeof(e) == "table" and typeof(e.time) == "number" then
+					list[#list + 1] = { time = e.time, name = (typeof(e.name) == "string") and e.name or "?" }
+				end
+			end
 		end
 	end
-	recordCache[level] = rec
-	return rec
+	table.sort(list, function(a, b) return a.time < b.time end)
+	return list
 end
 
--- Atomisk skriving av ny rekord hvis bedre (trygt selv om to servere prøver
--- samtidig). Kalles asynkront så den ikke bremser nivå-byggingen.
+-- Topp-3 raskeste tider for et nivå: liste { {time, name}, ... } sortert raskest
+-- først (kan være tom). Cachet.
+local function getRecord(level)
+	if recordCache[level] then return recordCache[level] end
+	local list = {}
+	if recordStore then
+		local ok, saved = pcall(function() return recordStore:GetAsync("lvl_" .. level) end)
+		if ok then list = normalizeRecords(saved) end
+	end
+	recordCache[level] = list
+	return list
+end
+
+-- Sett en tid inn i topp-3 for nivået (atomisk, trygt om to servere prøver
+-- samtidig). Skriver bare hvis tiden faktisk kom med i topp-3. Kalles asynkront.
 local function tryUpdateRecord(level, time, name)
 	if not recordStore then return end
 	pcall(function()
 		recordStore:UpdateAsync("lvl_" .. level, function(old)
-			if typeof(old) ~= "table" or typeof(old.time) ~= "number" or time < old.time then
-				return { time = time, name = name }
-			end
-			return nil  -- ikke bedre: avbryt skrivingen
+			local list = normalizeRecords(old)
+			local qualifies = (#list < 3) or (time < list[#list].time)
+			if not qualifies then return nil end  -- kom ikke med i topp-3: ikke skriv
+			list[#list + 1] = { time = time, name = name }
+			table.sort(list, function(a, b) return a.time < b.time end)
+			while #list > 3 do table.remove(list) end
+			return list
 		end)
 	end)
 end
@@ -358,30 +382,16 @@ local function refreshStats(plr)
 	s.BestTime.Value = (d.best < math.huge) and fmtTime(d.best) or "-"
 end
 
---========================  TOPPLISTE (TAVLE)  ====================--
--- Bygg tavle-teksten fra cachen (ren streng, engelsk — spiller-synlig).
-local function renderLeaderboardText()
-	if #leaderboardCache == 0 then
-		return "Be the first to climb!\nReach a high level to appear here."
-	end
-	local lines = {}
-	for i, e in ipairs(leaderboardCache) do
-		lines[i] = string.format("%d.  %s  —  Level %d", i, e.name, e.level)
-	end
-	return table.concat(lines, "\n")
-end
-
--- Oppdater alle tekst-etikettene på tavla (front + bak). Nil-/parent-sjekket så
--- en tavle som er revet (nivå-bygging) ikke gir feil.
-local function updateLeaderboardBoards()
-	local txt = renderLeaderboardText()
-	for i = #leaderboardLabels, 1, -1 do
-		local lbl = leaderboardLabels[i]
-		if lbl and lbl.Parent then
-			lbl.Text = txt
-		else
-			table.remove(leaderboardLabels, i)  -- rydd bort døde referanser
-		end
+--========================  TOPPLISTE (PÅ SKJERM)  ================--
+-- Send gjeldende topp-liste til klientene, som tegner den i et panel PÅ SKJERMEN
+-- (mye lettere å SE enn en tavle inne i den mørke labyrinten). Med `plr` = bare
+-- til den ene (ved innlogging); uten = til alle.
+local function broadcastLeaderboard(plr)
+	if not leaderboardEvent then return end
+	if plr then
+		leaderboardEvent:FireClient(plr, leaderboardCache)
+	else
+		leaderboardEvent:FireAllClients(leaderboardCache)
 	end
 end
 
@@ -423,7 +433,7 @@ local function refreshLeaderboard()
 			end
 		end
 		leaderboardCache = list
-		updateLeaderboardBoards()
+		broadcastLeaderboard()
 	end)
 end
 
@@ -760,81 +770,9 @@ local function buildLevel()
 	spawn.Duration = 0
 	spawn.Parent = folder
 
-	-- Toppliste-tavle: montert på den MOTSATTE ytterveggen av åpningen (spawn-hjørnet).
-	-- Spawn ligger i ett hjørne; tavla settes i det speilvendte hjørnet (motsatt vegg),
-	-- HEVET rett over labyrint-veggene så den ruver over banen og sees fra åpningen, og
-	-- vendt TILBAKE mot åpningen. Dobbeltsidig. Bygges pr nivå (folder-destroy rydder).
-	do
-		leaderboardLabels = {}                 -- gammel tavle røk med folder-destroy over
-		local boardW, boardH = 30, 20
-		local opening = Vector3.new(sw.X, 0, sw.Z)         -- åpningen (der spilleren spawner)
-		local far = Vector3.new(-sw.X, 0, -sw.Z)           -- motsatt hjørne (speilet om midten)
-		local outDir = far
-		if outDir.Magnitude < 0.1 then outDir = Vector3.new(0, 0, 1) end
-		outDir = outDir.Unit
-		-- litt UT forbi ytterveggen, og løftet så bunnen av tavla ligger rett over
-		-- vegg-toppen (WallHeight) — da ser man den over labyrinten helt fra starten.
-		local boardPos = far + outDir * (S * 1.2) + Vector3.new(0, CONFIG.WallHeight + boardH / 2, 0)
-
-		local board = makePart({
-			Name = "Leaderboard",
-			Size = Vector3.new(boardW, boardH, 0.6),
-			Position = boardPos,
-			Color = Color3.fromRGB(18, 20, 30),
-			Material = Enum.Material.SmoothPlastic,
-		})
-		board.CanCollide = false
-		-- vend forsiden tilbake mot åpningen (spawn) så spilleren ser den ved start
-		board.CFrame = CFrame.lookAt(boardPos, Vector3.new(opening.X, boardPos.Y, opening.Z))
-		board.Parent = folder
-
-		-- Bygg en SurfaceGui (tittel + rangering) på én flate; kall for Front + Back.
-		local function addFace(face)
-			local sg = Instance.new("SurfaceGui")
-			sg.Name = "LeaderboardGui"
-			sg.Face = face
-			sg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
-			sg.CanvasSize = Vector2.new(560, 400)
-			sg.LightInfluence = 0            -- alltid lesbar, også i mørket
-			sg.Parent = board
-
-			local bg = Instance.new("Frame")
-			bg.Size = UDim2.fromScale(1, 1)
-			bg.BackgroundColor3 = Color3.fromRGB(16, 18, 28)
-			bg.BorderSizePixel = 0
-			bg.Parent = sg
-
-			local title = Instance.new("TextLabel")
-			title.Size = UDim2.new(1, -24, 0, 78)
-			title.Position = UDim2.fromOffset(12, 8)
-			title.BackgroundTransparency = 1
-			title.Font = Enum.Font.GothamBlack
-			title.TextScaled = true
-			title.TextColor3 = Color3.fromRGB(255, 210, 90)
-			title.TextXAlignment = Enum.TextXAlignment.Center
-			title.Text = "🏆 TOP CLIMBERS"
-			title.Parent = bg
-
-			local body = Instance.new("TextLabel")
-			body.Size = UDim2.new(1, -36, 1, -96)
-			body.Position = UDim2.fromOffset(18, 90)
-			body.BackgroundTransparency = 1
-			body.Font = Enum.Font.Code
-			body.TextSize = 26
-			body.TextColor3 = Color3.fromRGB(235, 240, 248)
-			body.TextXAlignment = Enum.TextXAlignment.Left
-			body.TextYAlignment = Enum.TextYAlignment.Top
-			body.TextWrapped = false
-			body.RichText = false
-			body.Text = ""
-			body.Parent = bg
-
-			leaderboardLabels[#leaderboardLabels + 1] = body
-		end
-		addFace(Enum.NormalId.Front)
-		addFace(Enum.NormalId.Back)
-		updateLeaderboardBoards()   -- fyll fra gjeldende cache med en gang
-	end
+	-- (Topplista vises nå PÅ SKJERMEN hos hver spiller — se broadcastLeaderboard +
+	-- HudRemotes/Leaderboard + klient-panelet — i stedet for en tavle inne i den
+	-- mørke labyrinten, som var vanskelig å se.)
 
 	-- Utgang
 	local ew = cellCenterWorld(cols - 1, rows - 1, gCols, gRows)
@@ -1067,12 +1005,20 @@ onEscape = function(plr)
 			if isNewPB then d.bestByLevel[lkey] = elapsed end
 
 			local medal = Medals.medalFor(elapsed, currentThresholds)
-			local rec = getRecord(level)
-			local isNewRecord = (rec.time == nil) or (elapsed < rec.time)
-			local recForClient = rec
-			if isNewRecord and not godActive[plr] then   -- gudemodus setter ikke global rekord
-				recForClient = { time = elapsed, name = plr.Name }
-				recordCache[level] = recForClient
+			local recs = getRecord(level)                       -- topp-3 (raskest først)
+			local bestTime = recs[1] and recs[1].time or nil
+			local isNewRecord = (bestTime == nil) or (elapsed < bestTime)  -- ny #1?
+			-- Kom tiden med i topp-3? (gude-modus teller ikke — beskytter tavla.)
+			local worst = recs[3] and recs[3].time or nil
+			local qualifies = (#recs < 3) or (worst and elapsed < worst)
+			if qualifies and not godActive[plr] then
+				local newList = {}
+				for _, e in ipairs(recs) do newList[#newList + 1] = { time = e.time, name = e.name } end
+				newList[#newList + 1] = { time = elapsed, name = plr.Name }
+				table.sort(newList, function(a, b) return a.time < b.time end)
+				while #newList > 3 do table.remove(newList) end
+				recordCache[level] = newList
+				recs = newList
 				task.spawn(function() tryUpdateRecord(level, elapsed, plr.Name) end)
 			end
 
@@ -1080,7 +1026,7 @@ onEscape = function(plr)
 				levelCompleteEvent:FireClient(plr, {
 					level = level, time = elapsed,
 					yourBest = d.bestByLevel[lkey],
-					record = recForClient, medal = medal,
+					record = recs[1], records = recs, medal = medal,
 					isNewPB = isNewPB, isNewRecord = isNewRecord,
 					thresholds = currentThresholds,
 				})
@@ -1185,6 +1131,50 @@ local rewardEvent = Instance.new("RemoteEvent")
 rewardEvent.Name = "Reward"
 rewardEvent.Parent = hudFolder
 
+-- Toppliste til klientene (tegnes i et panel på skjermen). leaderboardEvent er
+-- forhånds-deklarert lenger oppe (brukes av broadcastLeaderboard).
+leaderboardEvent = Instance.new("RemoteEvent")
+leaderboardEvent.Name = "Leaderboard"
+leaderboardEvent.Parent = hudFolder
+
+-- Admin-kringkasting (/bc): vises i et gjennomsiktig felt øverst hos ALLE spillere.
+-- Samme RemoteEvent begge veier: klienten FireServer(text) for å be om kringkasting;
+-- serveren verifiserer admin + filtrerer + FireAllClients(navn, tekst) for å vise.
+local broadcastEvent = Instance.new("RemoteEvent")
+broadcastEvent.Name = "Broadcast"
+broadcastEvent.Parent = hudFolder
+
+-- Admin = spillets eier (deg) ELLER gude-spillerne (Mio). CreatorId gjelder når
+-- spillet er eid av en BRUKER (ikke gruppe) — som her.
+local function isAdmin(plr)
+	if game.CreatorType == Enum.CreatorType.User and plr.UserId == game.CreatorId then
+		return true
+	end
+	return GodUsers.has(plr)
+end
+
+-- Chat-kommando "/bc <tekst>". Triggered fyrer på klienten som skrev den; klienten
+-- (AdminBroadcastClient) sender resten hit via broadcastEvent:FireServer.
+local bcCmd = Instance.new("TextChatCommand")
+bcCmd.Name = "BroadcastCommand"
+bcCmd.PrimaryAlias = "/bc"
+bcCmd.Parent = TextChatService
+
+broadcastEvent.OnServerEvent:Connect(function(plr, text)
+	if not isAdmin(plr) then return end                 -- server-autoritativt: bare admin
+	if typeof(text) ~= "string" then return end
+	text = string.sub(text, 1, 200)
+	if string.gsub(text, "%s", "") == "" then return end
+	-- Filtrer (Roblox-krav: tekst vist til andre spillere må filtreres). Feiler
+	-- filteret, kringkaster vi IKKE (heller ingen melding enn ufiltrert).
+	local ok, filtered = pcall(function()
+		local obj = TextService:FilterStringAsync(text, plr.UserId)
+		return obj:GetNonChatStringForBroadcastAsync()
+	end)
+	if not ok or typeof(filtered) ~= "string" then return end
+	broadcastEvent:FireAllClients(plr.DisplayName, filtered)
+end)
+
 -- playFx er forhånds-deklarert (brukes i killTouch + pickup-handlere lenger oppe).
 playFx = function(plr, key)
 	fxEvent:FireClient(plr, key)
@@ -1196,7 +1186,7 @@ sendLevelInfo = function(plr)
 	levelInfoEvent:FireClient(plr, {
 		level = currentLevel,
 		thresholds = currentThresholds,
-		record = getRecord(currentLevel),
+		records = getRecord(currentLevel),   -- topp-3 raskeste tider (raskest først)
 		yourBest = (d and d.bestByLevel) and d.bestByLevel[tostring(currentLevel)] or nil,
 	})
 end
@@ -1367,6 +1357,7 @@ local function onCharacterAdded(plr, char)
 	sendShopData(plr)  -- send saldo/eierskap/valgt tema når klienten sikkert er lastet
 	if sendLevelInfo then sendLevelInfo(plr) end
 	sendPerkData(plr)
+	broadcastLeaderboard(plr)  -- fyll spillerens topp-liste-panel med gjeldende cache
 
 	-- Daglig belønning: vis ÉN gang etter at spilleren har spawnet (da er klient-
 	-- HUD-en garantert oppe, så toasten ikke går tapt). Nullstill så den ikke gjentas.

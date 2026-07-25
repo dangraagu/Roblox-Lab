@@ -123,29 +123,25 @@ gui.DisplayOrder = 12             -- over tema-butikken (10)
 gui.Parent = playerGui
 
 --==================  JOBB 1: FAST HUD (topp-midten)  =============--
+-- Gjennomsiktig "Level"-felt: bare flytende tekst med svart kant (lesbar over
+-- selve spillet). Rekorden vises nå øverst-til-HØYRE (eget panel), ikke her.
 local hudPanel = Instance.new("Frame")
 hudPanel.Name = "NivaaPanel"
 hudPanel.AnchorPoint = Vector2.new(0.5, 0)
 hudPanel.Position = UDim2.new(0.5, 0, 0, 6)
--- Skala-basert bredde med tak: krymper på smale telefoner, uendret på desktop.
--- Blir liggende TOPP-MIDT, godt klar av mobil-kontrollene (styrepinne nede-
--- venstre, hopp nede-høyre).
-hudPanel.Size = UDim2.new(0.82, 0, 0, 84)
-hudPanel.BackgroundColor3 = Color3.fromRGB(26, 29, 40)
+hudPanel.Size = UDim2.new(0.82, 0, 0, 60)
+hudPanel.BackgroundTransparency = 1        -- gjennomsiktig felt (ingen boks)
 hudPanel.BorderSizePixel = 0
 hudPanel.Parent = gui
-corner(hudPanel, 12)
 local hudSize = Instance.new("UISizeConstraint")
-hudSize.MaxSize = Vector2.new(300, 84)
-hudSize.MinSize = Vector2.new(240, 84)
+hudSize.MaxSize = Vector2.new(320, 60)
+hudSize.MinSize = Vector2.new(240, 60)
 hudSize.Parent = hudPanel
-stroke(hudPanel, Color3.fromRGB(70, 78, 100), 1, 0.1)
-depthGradient(hudPanel, Color3.fromRGB(40, 44, 60), Color3.fromRGB(22, 24, 34))
 
 -- Stor: hvilket nivå.
 local levelLabel = Instance.new("TextLabel")
-levelLabel.Size = UDim2.new(1, -16, 0, 34)
-levelLabel.Position = UDim2.fromOffset(8, 6)
+levelLabel.Size = UDim2.new(1, -16, 0, 36)
+levelLabel.Position = UDim2.fromOffset(8, 4)
 levelLabel.BackgroundTransparency = 1
 levelLabel.Font = Enum.Font.GothamBold
 levelLabel.TextScaled = true
@@ -154,35 +150,19 @@ levelLabel.TextXAlignment = Enum.TextXAlignment.Center
 levelLabel.Text = "Level …"
 levelLabel.Parent = hudPanel
 local levelTsc = Instance.new("UITextSizeConstraint")
-levelTsc.MaxTextSize = 28
+levelTsc.MaxTextSize = 30
 levelTsc.MinTextSize = 16
 levelTsc.Parent = levelLabel
-
--- Mindre: nivåets rekord.
-local recordLabel = Instance.new("TextLabel")
-recordLabel.Size = UDim2.new(1, -16, 0, 18)
-recordLabel.Position = UDim2.fromOffset(8, 44)
-recordLabel.BackgroundTransparency = 1
-recordLabel.Font = Enum.Font.GothamMedium
-recordLabel.TextScaled = true
-recordLabel.TextColor3 = Color3.fromRGB(240, 215, 150)
-recordLabel.TextXAlignment = Enum.TextXAlignment.Center
-recordLabel.TextTruncate = Enum.TextTruncate.AtEnd
-recordLabel.Text = "🏆 Record: —"
-recordLabel.Parent = hudPanel
-local recordTsc = Instance.new("UITextSizeConstraint")
-recordTsc.MaxTextSize = 14
-recordTsc.MinTextSize = 10
-recordTsc.Parent = recordLabel
+stroke(levelLabel, Color3.fromRGB(0, 0, 0), 2, 0)     -- svart kant = lesbar på gjennomsiktig
 
 -- Mindre: din egen beste tid.
 local bestLabel = Instance.new("TextLabel")
 bestLabel.Size = UDim2.new(1, -16, 0, 18)
-bestLabel.Position = UDim2.fromOffset(8, 62)
+bestLabel.Position = UDim2.fromOffset(8, 42)
 bestLabel.BackgroundTransparency = 1
 bestLabel.Font = Enum.Font.GothamMedium
 bestLabel.TextScaled = true
-bestLabel.TextColor3 = Color3.fromRGB(205, 212, 225)
+bestLabel.TextColor3 = Color3.fromRGB(215, 222, 235)
 bestLabel.TextXAlignment = Enum.TextXAlignment.Center
 bestLabel.TextTruncate = Enum.TextTruncate.AtEnd
 bestLabel.Text = "Your best: —"
@@ -191,28 +171,16 @@ local bestTsc = Instance.new("UITextSizeConstraint")
 bestTsc.MaxTextSize = 14
 bestTsc.MinTextSize = 10
 bestTsc.Parent = bestLabel
+stroke(bestLabel, Color3.fromRGB(0, 0, 0), 1.5, 0.1)
 
--- Oppdater HUD-en fra en LevelInfo-nyttelast. Alt er nil-sjekket: manglende
--- felt gir bare en pen "—" i stedet for en feil.
+-- Oppdater HUD-en fra en LevelInfo-nyttelast (bare level + din beste her nå;
+-- rekordene vises i topp-høyre-panelet). Alt nil-sjekket.
 local function updateInfo(p)
 	if type(p) ~= "table" then
 		return
 	end
-
 	local lvl = tonumber(p.level)
 	levelLabel.Text = "Level " .. (lvl and tostring(lvl) or "—")
-
-	-- Rekord: vis tid (+ navn) hvis den finnes, ellers bare "—" uten navn.
-	local rec = p.record
-	if type(rec) == "table" and type(rec.time) == "number" then
-		local nm = (type(rec.name) == "string" and rec.name ~= "")
-			and (" (" .. rec.name .. ")") or ""
-		recordLabel.Text = "🏆 Record: " .. Medals.fmtTime(rec.time) .. nm
-	else
-		recordLabel.Text = "🏆 Record: —"
-	end
-
-	-- Din beste: tall -> pen tid, ellers "—".
 	if type(p.yourBest) == "number" then
 		bestLabel.Text = "Your best: " .. Medals.fmtTime(p.yourBest)
 	else
