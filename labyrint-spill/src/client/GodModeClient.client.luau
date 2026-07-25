@@ -105,14 +105,15 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 15           -- over de andre panelene
 gui.Parent = playerGui
 
--- ---- Av/på-knappen: HØYRE kant, loddrett midtstilt ----
--- Stort trykk-mål (>=44px) midt på høyre side — klar av styrepinne (nede-venstre),
--- hopp (nede-høyre) og knapperaden øverst.
+-- ---- Av/på-knappen: HØYRE kant, LITT UNDER midten ----
+-- Flyttet ned (0.5, +60) så den ikke krasjer med rekord-panelet øverst-til-høyre,
+-- men fortsatt over hopp-knappen (nede-høyre). Fly-pilene ligger på VENSTRE side
+-- (se makeArrow), klar av rekord-panelet.
 local toggle = Instance.new("TextButton")
 toggle.Name = "GudeKnapp"
 toggle.Size = UDim2.fromOffset(160, 50)
 toggle.AnchorPoint = Vector2.new(1, 0.5)
-toggle.Position = UDim2.new(1, -14, 0.5, 0)
+toggle.Position = UDim2.new(1, -14, 0.5, 60)
 toggle.BackgroundColor3 = COL_OFF
 toggle.TextColor3 = Color3.new(1, 1, 1)
 toggle.Font = Enum.Font.GothamBold
@@ -136,8 +137,8 @@ local function makeArrow(name, glyph, yOffset)
 	local b = Instance.new("TextButton")
 	b.Name = name
 	b.Size = UDim2.fromOffset(76, 76)              -- godt over 56px
-	b.AnchorPoint = Vector2.new(1, 1)
-	b.Position = UDim2.new(1, -14, 0.5, yOffset)
+	b.AnchorPoint = Vector2.new(0, 1)
+	b.Position = UDim2.new(0, 14, 0.5, yOffset)   -- VENSTRE side, midt-på (klar av rekord-panelet til høyre)
 	b.BackgroundColor3 = COL_ARROW
 	b.TextColor3 = Color3.new(1, 1, 1)
 	b.Font = Enum.Font.GothamBold
@@ -159,10 +160,10 @@ local function makeArrow(name, glyph, yOffset)
 	return b
 end
 
--- Stablet OVER av/på-knappen: ▲ øverst, ▼ under, begge over knappen.
--- (Knappen er 50px høy og midtstilt, så toppen ligger ca. -25 fra midten.)
-local upBtn = makeArrow("FlyOpp", "▲", -25 - 12 - 76 - 8) -- øverst
-local downBtn = makeArrow("FlyNed", "▼", -25 - 12)        -- rett over av/på-knappen
+-- Fly-pilene ligger på VENSTRE side, loddrett midtstilt (klar av "⚡ Upgrades"
+-- øverst-venstre og styrepinnen nede-venstre). ▲ øverst, ▼ under.
+local upBtn = makeArrow("FlyOpp", "▲", -44)  -- øverst (bunn ~ midt - 44)
+local downBtn = makeArrow("FlyNed", "▼", 40) -- under (bunn ~ midt + 40)
 
 --==========================  NOCLIP + FLY  =======================--
 -- Sett CanCollide tilbake til normalt. I en standard Roblox-figur skal

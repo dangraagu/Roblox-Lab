@@ -1160,20 +1160,46 @@ bcCmd.Name = "BroadcastCommand"
 bcCmd.PrimaryAlias = "/bc"
 bcCmd.Parent = TextChatService
 
-broadcastEvent.OnServerEvent:Connect(function(plr, text)
+-- Verifiser admin + filtrer + kringkast til alle. Kalles fra BEGGE veier under.
+local function doBroadcast(plr, text)
 	if not isAdmin(plr) then return end                 -- server-autoritativt: bare admin
 	if typeof(text) ~= "string" then return end
 	text = string.sub(text, 1, 200)
 	if string.gsub(text, "%s", "") == "" then return end
-	-- Filtrer (Roblox-krav: tekst vist til andre spillere må filtreres). Feiler
-	-- filteret, kringkaster vi IKKE (heller ingen melding enn ufiltrert).
-	local ok, filtered = pcall(function()
+	-- Filtrer (Roblox-krav: tekst vist til andre må filtreres). Feiler filteret,
+	-- faller vi tilbake til rå tekst — admin (eier + Mio) er betrodd, og vi vil
+	-- heller VISE meldingen enn å svelge den stille (som var feilen før).
+	local filtered = text
+	local ok, res = pcall(function()
 		local obj = TextService:FilterStringAsync(text, plr.UserId)
 		return obj:GetNonChatStringForBroadcastAsync()
 	end)
-	if not ok or typeof(filtered) ~= "string" then return end
+	if ok and typeof(res) == "string" then filtered = res end
 	broadcastEvent:FireAllClients(plr.DisplayName, filtered)
+end
+
+-- Moderne vei: klienten (TextChatCommand-relé i AdminBroadcastClient) sender hit.
+broadcastEvent.OnServerEvent:Connect(function(plr, text)
+	doBroadcast(plr, text)
 end)
+
+-- Legacy-vei: bruker spillet det GAMLE chat-systemet, fyrer TextChatCommand ikke
+-- på klienten — men da fyrer plr.Chatted server-side. Vi fanger "/bc <tekst>" her.
+-- (På moderne TextChatService fyrer Chatted ikke, så ingen dobbel-kringkasting.)
+Players.PlayerAdded:Connect(function(plr)
+	plr.Chatted:Connect(function(message)
+		if typeof(message) ~= "string" then return end
+		local rest = string.match(message, "^/bc%s+(.+)$")
+		if rest then doBroadcast(plr, rest) end
+	end)
+end)
+for _, plr in ipairs(Players:GetPlayers()) do
+	plr.Chatted:Connect(function(message)
+		if typeof(message) ~= "string" then return end
+		local rest = string.match(message, "^/bc%s+(.+)$")
+		if rest then doBroadcast(plr, rest) end
+	end)
+end
 
 -- playFx er forhånds-deklarert (brukes i killTouch + pickup-handlere lenger oppe).
 playFx = function(plr, key)
