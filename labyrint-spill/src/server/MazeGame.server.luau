@@ -87,6 +87,7 @@ local Medals = require(ReplicatedStorage:WaitForChild("Medals"))
 local PerkDefs = require(ReplicatedStorage:WaitForChild("PerkDefs"))
 local PerkService = require(ReplicatedStorage:WaitForChild("PerkService"))
 local GodUsers = require(ReplicatedStorage:WaitForChild("GodUsers"))
+local Progression = require(ReplicatedStorage:WaitForChild("Progression"))
 
 -- Start-gave: de spesielle spillerne (samme liste som gudemodus, se GodUsers)
 -- får startkapital FØRSTE gang de blir med. Gis én gang og lagres.
@@ -458,7 +459,9 @@ local function loadPlayer(plr)
 		owned = { classic = true }, theme = Themes.default, receipts = {}, bestByLevel = {}, perks = {}, gifts = {},
 		level = 1,          -- nivået spilleren skal fortsette på (lagres, se resume)
 		rewardDay = 0,      -- siste dag daglig-belønning ble gitt (UTC-dagnummer)
-		streak = 0 }        -- antall dager på rad med daglig-belønning
+		streak = 0,         -- antall dager på rad med daglig-belønning
+		accepted = 0,       -- høyeste nivå fullført I SEKVENS uten gud (toppliste-grunnlag)
+		bestWithGod = 0 }   -- høyeste nivå nådd inkl. gud-runder (kun skryt, aldri toppliste)
 	local loadOk = true
 	if dataStore then
 		local ok, saved = pcall(function() return dataStore:GetAsync("p_" .. plr.UserId) end)
@@ -497,8 +500,17 @@ local function loadPlayer(plr)
 			end
 			if typeof(saved.rewardDay) == "number" then d.rewardDay = saved.rewardDay end
 			if typeof(saved.streak) == "number" then d.streak = saved.streak end
+			if typeof(saved.accepted) == "number" then d.accepted = math.floor(saved.accepted) end
+			if typeof(saved.bestWithGod) == "number" then d.bestWithGod = math.floor(saved.bestWithGod) end
 		end
 	end
+	-- Migrering: mangler spilleren "accepted" (nytt felt), seed fra personlige
+	-- rekorder — høyeste sammenhengende nivå de faktisk har fullført. Slik beholdes
+	-- ekte fremgang uten å importere oppblåste/carry-tall.
+	if d.accepted == 0 then
+		d.accepted = Progression.seedAccepted(d.bestByLevel)
+	end
+	d.bestWithGod = math.max(d.bestWithGod, d.accepted, d.level or 0)
 	d.owned.classic = true                                    -- classic eies alltid
 	if not d.owned[d.theme] then d.theme = Themes.default end -- kan ikke ha valgt et uleid tema
 	d.canSave = loadOk                                       -- false hvis GetAsync feilet
@@ -521,6 +533,8 @@ local function savePlayer(plr)
 			level = d.level,
 			rewardDay = d.rewardDay,
 			streak = d.streak,
+			accepted = d.accepted,
+			bestWithGod = d.bestWithGod,
 		})
 	end)
 	return ok
