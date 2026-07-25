@@ -28,11 +28,13 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 9
 gui.Parent = playerGui
 
--- Øverst-til-høyre, rett under "🎨 Shop"-knappen (~12..60).
+-- Øverst-til-høyre. Ligger rett under "🎨 Shop"-knappen (~12..60) NÅR minikartet
+-- ikke vises; eier spilleren minikartet (som står øverst i samme kolonne), legger
+-- panelet seg UNDER kartet (se reposition() nederst). Høyre kant følger Shop/kart (-12).
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.AnchorPoint = Vector2.new(1, 0)
-panel.Position = UDim2.new(1, -8, 0, 66)
+panel.Position = UDim2.new(1, -12, 0, 66)
 panel.Size = UDim2.new(0, 212, 0, 0)
 panel.AutomaticSize = Enum.AutomaticSize.Y
 panel.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
@@ -149,6 +151,41 @@ local function onLeaderboard(list)
 		return string.format("%d. %s · Lvl %d", i, nm, lvl)
 	end)
 end
+
+--==================  PLASSERING RUNDT MINIKARTET  ===============--
+-- Minikartet (perk) står øverst-til-høyre på y=66. Eies det + vises det, legger
+-- vi rekord-panelet RETT UNDER kartet; ellers rett under Shop-knappen (y=66).
+local TOP_Y = 66
+local function reposition()
+	local mini = playerGui:FindFirstChild("Minikart")
+	local frame = mini and mini:FindFirstChild("Kart")
+	if frame and frame.Visible and frame.AbsoluteSize.Y > 0 then
+		panel.Position = UDim2.new(1, -12, 0, TOP_Y + frame.AbsoluteSize.Y + 8)
+	else
+		panel.Position = UDim2.new(1, -12, 0, TOP_Y)
+	end
+end
+
+task.spawn(function()
+	local function hookFrame(frame)
+		frame:GetPropertyChangedSignal("Visible"):Connect(reposition)
+		frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(reposition)
+		reposition()
+	end
+	reposition()
+	local mini = playerGui:FindFirstChild("Minikart")
+	if mini then
+		local f = mini:FindFirstChild("Kart")
+		if f then hookFrame(f) end
+	end
+	-- Minikart-GUI-en kan bli lagd ETTER dette skriptet (perk lastes async).
+	playerGui.ChildAdded:Connect(function(ch)
+		if ch.Name == "Minikart" then
+			local f = ch:WaitForChild("Kart", 5)
+			if f then hookFrame(f) end
+		end
+	end)
+end)
 
 --==================  KOBLE TIL SERVEREN  ========================--
 task.spawn(function()
