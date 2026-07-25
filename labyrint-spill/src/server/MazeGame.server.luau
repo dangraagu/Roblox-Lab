@@ -126,7 +126,9 @@ local recordCache = {}  -- [level] = { time = number?, name = string? }
 local topStore = nil
 if CONFIG.SaveData then
 	local ok, ds = pcall(function()
-		return DataStoreService:GetOrderedDataStore("LabyrintTopp_v1")
+		-- v2: nytt navn for en REN topp-liste basert på "accepted" (sekvensielt,
+		-- gud-fritt). v1 kunne ha carry-/gud-oppblåste tall — de arves ikke.
+		return DataStoreService:GetOrderedDataStore("LabyrintTopp_v2")
 	end)
 	if ok then topStore = ds end
 end
@@ -1010,24 +1012,27 @@ onEscape = function(plr)
 		local st = startClock[plr]
 		if st then
 			local elapsed = os.clock() - st
-			if elapsed < d.best then d.best = elapsed end
+			-- "clean" = INGEN brukte gud på dette nivået. Gud-runder oppdaterer ingen
+			-- tider/rekorder (kun bestWithGod, se accepted-blokka lenger nede).
+			local clean = not levelHadGod
+			if clean and elapsed < d.best then d.best = elapsed end
 
 			-- Per-nivå: personlig rekord, medalje, global rekord, oppsummering.
 			local level = currentLevel
 			local lkey = tostring(level)  -- DataStore lagrer heltalls-nøkler som tekst
 			d.bestByLevel = d.bestByLevel or {}
 			local prevPB = d.bestByLevel[lkey]
-			local isNewPB = (prevPB == nil) or (elapsed < prevPB)
+			local isNewPB = clean and ((prevPB == nil) or (elapsed < prevPB))
 			if isNewPB then d.bestByLevel[lkey] = elapsed end
 
 			local medal = Medals.medalFor(elapsed, currentThresholds)
 			local recs = getRecord(level)                       -- topp-3 (raskest først)
 			local bestTime = recs[1] and recs[1].time or nil
-			local isNewRecord = (bestTime == nil) or (elapsed < bestTime)  -- ny #1?
-			-- Kom tiden med i topp-3? (gude-modus teller ikke — beskytter tavla.)
+			local isNewRecord = clean and ((bestTime == nil) or (elapsed < bestTime))  -- ny #1?
+			-- Kom tiden med i topp-3? (gude-runder teller ikke — beskytter tavla.)
 			local worst = recs[3] and recs[3].time or nil
 			local qualifies = (#recs < 3) or (worst and elapsed < worst)
-			if qualifies and not godActive[plr] then
+			if clean and qualifies then
 				local newList = {}
 				for _, e in ipairs(recs) do newList[#newList + 1] = { time = e.time, name = e.name } end
 				newList[#newList + 1] = { time = elapsed, name = plr.Name }
@@ -1053,21 +1058,39 @@ onEscape = function(plr)
 		task.spawn(function() savePlayer(plr) end)  -- async: ikke frys nivå-fremgangen på et DataStore-skriv
 	end
 
+	-- Progresjon ("accepted") for ALLE som er med i runden: hver tjener bare sitt
+	-- EGET accepted hvis dette nivået er nøyaktig deres accepted+1 OG ingen brukte
+	-- gud (carry gir ingenting, gud gir ingenting). bestWithGod oppdateres uansett.
+	-- Regnes FØR currentLevel økes, mot nivået som nettopp ble løst.
+	local solvedLevel = currentLevel
+	local acceptedGainers = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		local pd = playerData[p]
+		if pd then
+			local res = Progression.resolveClear({
+				level = solvedLevel, accepted = pd.accepted, bestWithGod = pd.bestWithGod,
+				hadGod = levelHadGod, mode = "group", isHostLevel = true,
+			})
+			pd.accepted = res.newAccepted
+			pd.bestWithGod = res.newBestWithGod
+			if res.acceptedGained then acceptedGainers[p] = true end
+		end
+	end
+
 	if CONFIG.MultipleLevels then
 		currentLevel += 1
-		-- Lagre nivået pr spiller så alle som er med fortsetter her neste gang de
-		-- logger inn (debouncet skriv; PlayerRemoving/BindToClose flusher det siste).
-		-- Send også inn til den globale topplista (tavla ved starten).
+		-- Lagre resume-nivået pr spiller (uendret oppførsel) + send ACCEPTED til
+		-- den globale topplista.
 		for _, p in ipairs(Players:GetPlayers()) do
 			local pd = playerData[p]
 			if pd then
 				pd.level = math.max(pd.level or 1, currentLevel)
 				scheduleSave(p)
-				-- Gude-spillere (Mio) holdes UTENFOR den globale tavla — de har fått
-				-- gude-modus/gaver, så nivået deres skal ikke rangeres. De ser fortsatt
-				-- sine egne stats i leaderstats/HUD/butikk.
-				if pd.canSave ~= false and not GodUsers.has(p) then
-					submitTopScore(p.UserId, pd.level)
+				-- Toppliste bruker ACCEPTED (sekvensielt, gud-fritt) — ikke pd.level.
+				-- Send bare de som faktisk ØKTE accepted denne runden, og aldri
+				-- GodUsers (Mio holdes utenfor den globale tavla uansett).
+				if pd.canSave ~= false and acceptedGainers[p] and not GodUsers.has(p) then
+					submitTopScore(p.UserId, pd.accepted)
 				end
 			end
 		end
