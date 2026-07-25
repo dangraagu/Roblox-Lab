@@ -211,6 +211,7 @@ local startClock = {}         -- [player] = os.clock() ved level-start
 local shieldUsed = {}         -- [player] = true hvis skjold-perk er brukt på gjeldende nivå
 local invulnUntil = {}        -- [player] = os.clock()-tid uskadelig til (kort vindu etter skjold)
 local godActive = {}          -- [player] = true hvis gudemodus er på (kun GodUsers)
+local levelHadGod = false     -- true hvis NOEN brukte gud på gjeldende nivå (nullstilles pr bygging)
 
 local function ownsPerk(plr, id)
 	local d = playerData[plr]
@@ -675,6 +676,7 @@ local function buildLevel()
 	currentPassages = {}
 	coinsCollected = 0
 	gemsGrabbedCount = 0
+	levelHadGod = false           -- nytt nivå: nullstill gud-brukt-flagget
 
 	if mazeFolder then mazeFolder:Destroy() end
 	local folder = Instance.new("Folder")
@@ -1259,6 +1261,7 @@ setGodEvent.Parent = godFolder
 setGodEvent.OnServerEvent:Connect(function(plr, enabled)
 	if GodUsers.has(plr) then
 		godActive[plr] = enabled and true or false
+		if godActive[plr] then levelHadGod = true end  -- gud brukt på dette nivået = ingen kreditt
 	end
 end)
 
