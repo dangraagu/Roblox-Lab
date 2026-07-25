@@ -21,6 +21,13 @@ local CONFIG = {
 	MultipleLevels = true,
 	MaxLevel = 500,           -- der kurven er på sitt vanskeligste (spillet fortsetter uansett)
 
+	-- LOBBY-MODUS: true = ny lobby + doors + per-spiller-instanser (sekvensiell
+	-- progresjon, ingen carry). false = det gamle, verifiserte enkelt-maze-spillet
+	-- (v14). Dette er ROLLBACK-spaken: bryter lobbyen live, sett false + publiser
+	-- på nytt for å være tilbake på det som funket.
+	-- STÅR PÅ false til lobby-koden er ferdigbygd + gjennomgått (bygges nå).
+	UseLobby = false,
+
 	-- Verden-frø: samme frø + samme level gir NØYAKTIG samme bane for ALLE
 	-- spillere, hver gang (level 4 er alltid den samme level 4). Endre tallet
 	-- for å trekke om alle nivåene på nytt — de forblir fortsatt like for alle.
