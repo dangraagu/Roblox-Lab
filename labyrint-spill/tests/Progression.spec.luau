@@ -2,7 +2,7 @@
 -- (Ingen Roblox-API brukt. Roblox har ingen headless-runtime her, så disse
 --  kjøres på en dev-boks / CI med luau; koden er verifisert mot casene ved review.)
 
-local Progression = require("../src/shared/Progression.luau")
+local Progression = require("../src/shared/Progression")
 
 local passed, failed = 0, 0
 local function eq(a, b, msg)

@@ -198,7 +198,11 @@ local function updateInfo(p)
 		return
 	end
 	local lvl = tonumber(p.level)
-	levelLabel.Text = "Level " .. (lvl and tostring(lvl) or "—")
+	if p.inLobby then
+		levelLabel.Text = "🏠 Lobby"
+	else
+		levelLabel.Text = "Level " .. (lvl and tostring(lvl) or "—")
+	end
 	if type(p.yourBest) == "number" then
 		bestLabel.Text = "Your best: " .. Medals.fmtTime(p.yourBest)
 	else

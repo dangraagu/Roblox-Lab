@@ -95,6 +95,7 @@ local PerkDefs = require(ReplicatedStorage:WaitForChild("PerkDefs"))
 local PerkService = require(ReplicatedStorage:WaitForChild("PerkService"))
 local GodUsers = require(ReplicatedStorage:WaitForChild("GodUsers"))
 local Progression = require(ReplicatedStorage:WaitForChild("Progression"))
+local MazeGen = require(ReplicatedStorage:WaitForChild("MazeGen"))
 
 -- Start-gave: de spesielle spillerne (samme liste som gudemodus, se GodUsers)
 -- får startkapital FØRSTE gang de blir med. Gis én gang og lagres.
@@ -221,6 +222,8 @@ local shieldUsed = {}         -- [player] = true hvis skjold-perk er brukt på g
 local invulnUntil = {}        -- [player] = os.clock()-tid uskadelig til (kort vindu etter skjold)
 local godActive = {}          -- [player] = true hvis gudemodus er på (kun GodUsers)
 local levelHadGod = false     -- true hvis NOEN brukte gud på gjeldende nivå (nullstilles pr bygging)
+local playerInstance = {}     -- LOBBY-MODUS: [player] = instansen de er inne i (nil = lobbyen)
+local handleLobbySpawn        -- forhånds-deklarert; fylles ut i lobby-seksjonen
 
 local function ownsPerk(plr, id)
 	local d = playerData[plr]
@@ -1294,7 +1297,11 @@ setGodEvent.Parent = godFolder
 setGodEvent.OnServerEvent:Connect(function(plr, enabled)
 	if GodUsers.has(plr) then
 		godActive[plr] = enabled and true or false
-		if godActive[plr] then levelHadGod = true end  -- gud brukt på dette nivået = ingen kreditt
+		if godActive[plr] then
+			levelHadGod = true  -- gammel enkelt-maze-modus: gud brukt = ingen kreditt
+			-- Lobby-modus: marker spillerens EGEN instans (per-instans-rettferdighet).
+			if CONFIG.UseLobby and playerInstance[plr] then playerInstance[plr].hadGod = true end
+		end
 	end
 end)
 
@@ -1431,7 +1438,12 @@ local function onCharacterAdded(plr, char)
 	giveTorch(char)
 	applyPerks(plr, char)
 	sendShopData(plr)  -- send saldo/eierskap/valgt tema når klienten sikkert er lastet
-	if sendLevelInfo then sendLevelInfo(plr) end
+	if CONFIG.UseLobby then
+		-- Lobby-modus: hvert spawn skjer i lobbyen (også etter død i en instans).
+		if handleLobbySpawn then handleLobbySpawn(plr) end
+	elseif sendLevelInfo then
+		sendLevelInfo(plr)
+	end
 	sendPerkData(plr)
 	broadcastLeaderboard(plr)  -- fyll spillerens topp-liste-panel med gjeldende cache
 
@@ -1494,9 +1506,11 @@ local function onPlayerAdded(plr)
 	-- vi om til nivået deres (som også spawner dem der). Er andre alt i gang, blir
 	-- man med der de er, men beholder egen fremgang (mister ikke lagret nivå).
 	local rebuilt = false
+	-- Lobby-modus: ingen delt maze/resume — spilleren spawner i lobbyen og velger
+	-- en dør. (onCharacterAdded -> handleLobbySpawn driver HUD-en.)
 	-- Feilet DataStore-lasten (canSave == false), stol IKKE på d.level (den er
 	-- da bare default) — la spilleren bli med på gjeldende nivå i stedet.
-	if d and d.canSave ~= false then
+	if not CONFIG.UseLobby and d and d.canSave ~= false then
 		if #Players:GetPlayers() <= 1 then
 			local resumeAt = math.max(1, d.level or 1)
 			-- Ikke bygg om midt i en pågående escape-rebuild (advancing) — da kunne
@@ -1535,8 +1549,425 @@ game:BindToClose(function()
 	for _, plr in ipairs(Players:GetPlayers()) do savePlayer(plr) end
 end)
 
+--====================  LOBBY + PER-SPILLER-INSTANSER  ============--
+-- Ny modus (CONFIG.UseLobby). En lobby-hub der alle spawner + går inn i "doors";
+-- hver kjøring bygger en EGEN labyrint-instans langt unna de andre, så ingen dras
+-- med på et for høyt nivå. Gjenbruker MazeGen + makePart + killTouch +
+-- findNearestPlayerRoot. Utgangen er alltid åpen (CONFIG.UnlockExitBy = "none").
+local LOBBY_ORIGIN = Vector3.new(0, 0, 0)
+local INSTANCE_SPACING = 6000       -- studs mellom instanser (godt utenfor sikt/range)
+local LOBBY_FOG = 90                -- huben er lys; instansene bruker samme globale tåke
+local INSTANCE_FOG = 45            -- fast sikt i instansene (per-spiller-tåke kommer senere)
+-- playerInstance er forhånds-deklarert i STATE-seksjonen (brukes av onCharacterAdded
+-- + SetGodMode lenger oppe).
+local nextInstanceId = 0
+
+-- Instans-bevisst monster (som makeMonster, men bundet til instansens folder/gen/
+-- passasjer i stedet for globalene). Chase bruker findNearestPlayerRoot (range 34);
+-- instanser står 6000 fra hverandre, så et monster ser bare spillere i EGEN instans.
+local function makeInstanceMonster(inst, worldPos, speed)
+	local model = Instance.new("Model")
+	model.Name = "Monster"
+	local root = makePart({
+		Name = "HumanoidRootPart", Size = Vector3.new(3.5, 5, 3.5),
+		Color = Color3.fromRGB(150, 20, 20), Material = Enum.Material.Neon,
+		Anchored = false, CanCollide = true,
+		CFrame = CFrame.new(worldPos + Vector3.new(0, 3, 0)),
+	})
+	root.Parent = model
+	local eye = makePart({
+		Name = "Eye", Size = Vector3.new(3.6, 1.2, 0.2),
+		Color = Color3.fromRGB(255, 240, 120), Material = Enum.Material.Neon,
+		Anchored = false, CanCollide = false, CFrame = root.CFrame * CFrame.new(0, 0.8, -1.8),
+	})
+	eye.Parent = model
+	local weld = Instance.new("WeldConstraint"); weld.Part0 = root; weld.Part1 = eye; weld.Parent = root
+	local hum = Instance.new("Humanoid"); hum.WalkSpeed = speed; hum.HipHeight = 0; hum.Parent = model
+	model.PrimaryPart = root
+	root.Touched:Connect(killTouch)
+	model.Parent = inst.folder
+	pcall(function() root:SetNetworkOwner(nil) end)
+	local myGen = inst.gen
+	task.spawn(function()
+		local function moveTo(pos)
+			local reached = false
+			local conn = hum.MoveToFinished:Once(function() reached = true end)
+			hum:MoveTo(pos)
+			local t = 0
+			while not reached and t < 1.2 and inst.gen == myGen and model.Parent do t += task.wait(0.1) end
+			if conn then conn:Disconnect() end
+		end
+		while inst.gen == myGen and model.Parent do
+			local targetRoot = findNearestPlayerRoot(root.Position, CONFIG.MonsterDetectRange)
+			local goal
+			if targetRoot then
+				goal = targetRoot.Position
+			elseif #inst.passages > 0 then
+				goal = inst.passages[math.random(#inst.passages)]
+			end
+			if goal then
+				local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = false })
+				local ok = pcall(function() path:ComputeAsync(root.Position, goal) end)
+				if ok and path.Status == Enum.PathStatus.Success then
+					local wps = path:GetWaypoints()
+					for i = 2, math.min(#wps, 5) do
+						if inst.gen ~= myGen or not model.Parent then break end
+						moveTo(wps[i].Position)
+					end
+				else task.wait(0.3) end
+			else task.wait(0.3) end
+			task.wait(0.05)
+		end
+	end)
+end
+
+local finishRun  -- forward-deklarert (buildInstance kobler exit-touch til den)
+
+-- Bygg labyrinten for en instans på inst.origin, nivå inst.level. Utgangen er
+-- alltid åpen; mynter/edelstener gir valuta ved berøring; feller dreper; monstre
+-- vandrer/jager i instansen. Setter inst.folder/spawnPos/thresholds.
+local function buildInstance(inst)
+	inst.gen = (inst.gen or 0) + 1
+	if inst.folder then inst.folder:Destroy() end
+	local folder = Instance.new("Folder"); folder.Name = "Maze_" .. inst.id; folder.Parent = workspace
+	inst.folder = folder
+	inst.spinners = {}
+	inst.passages = {}
+	inst.hadGod = false
+
+	local diff = MazeGen.getDifficulty(inst.level, CONFIG.Curve)
+	local cols, rows = diff.size, diff.size
+	local S = CONFIG.CellSize
+	local origin = inst.origin
+	local rng = Random.new(CONFIG.WorldSeed * 1000003 + inst.level * 2654435761)
+	local grid, gCols, gRows = MazeGen.generate(cols, rows, rng)
+
+	makePart({ Name = "Floor", Size = Vector3.new(gCols * S, 1, gRows * S),
+		Position = origin + Vector3.new(0, -0.5, 0), Color = Color3.fromRGB(60, 62, 70),
+		Material = Enum.Material.SmoothPlastic }).Parent = folder
+
+	-- Hemmelige-dør-kandidater + valg
+	local doorCandidates = {}
+	for cy = 0, rows - 1 do
+		for cx = 0, cols - 1 do
+			local gx, gy = 2 * cx + 1, 2 * cy + 1
+			if cx + 1 < cols and grid[gy][gx + 1] then table.insert(doorCandidates, { gx + 1, gy }) end
+			if cy + 1 < rows and grid[gy + 1][gx] then table.insert(doorCandidates, { gx, gy + 1 }) end
+		end
+	end
+	local doorSet = {}
+	for _ = 1, math.min(diff.buttons, #doorCandidates) do
+		local c = table.remove(doorCandidates, rng:NextInteger(1, #doorCandidates))
+		doorSet[c[1] .. "," .. c[2]] = true
+	end
+	local doorParts = {}
+	for y = 0, gRows - 1 do
+		for x = 0, gCols - 1 do
+			if grid[y][x] then
+				local wp = MazeGen.gridToWorld(x, y, gCols, gRows, S, origin)
+				local isDoor = doorSet[x .. "," .. y]
+				local wall = makePart({
+					Name = isDoor and "SecretWall" or "Wall",
+					Size = Vector3.new(S, CONFIG.WallHeight, S),
+					Position = Vector3.new(wp.X, CONFIG.WallHeight / 2, wp.Z),
+					Color = isDoor and Color3.fromRGB(70, 66, 78) or Color3.fromRGB(90, 94, 105),
+					Material = Enum.Material.Slate,
+				})
+				wall.Parent = folder
+				if isDoor then doorParts[x .. "," .. y] = wall end
+			end
+		end
+	end
+
+	-- Passasjeceller (plassering + monster-vandring) + plukk-pool
+	local passageCells = {}
+	for cy = 0, rows - 1 do
+		for cx = 0, cols - 1 do
+			table.insert(passageCells, { cx, cy })
+			table.insert(inst.passages, MazeGen.cellCenterWorld(cx, cy, gCols, gRows, S, origin) + Vector3.new(0, 2, 0))
+		end
+	end
+	local function isReserved(cx, cy) return (cx == 0 and cy == 0) or (cx == cols - 1 and cy == rows - 1) end
+	local pool = {}
+	for _, c in ipairs(passageCells) do if not isReserved(c[1], c[2]) then table.insert(pool, c) end end
+	for i = #pool, 2, -1 do local j = rng:NextInteger(1, i); pool[i], pool[j] = pool[j], pool[i] end
+	local function take(n)
+		local out = {}
+		for _ = 1, math.min(n, #pool) do table.insert(out, table.remove(pool)) end
+		return out
+	end
+
+	-- Start + utgang
+	local sw = MazeGen.cellCenterWorld(0, 0, gCols, gRows, S, origin)
+	inst.spawnPos = Vector3.new(sw.X, 4, sw.Z)
+	local ew = MazeGen.cellCenterWorld(cols - 1, rows - 1, gCols, gRows, S, origin)
+	local pad = makePart({ Name = "Exit", Size = Vector3.new(S - 3, 1, S - 3),
+		Position = Vector3.new(ew.X, 0.6, ew.Z), Color = Color3.fromRGB(60, 200, 90),
+		Material = Enum.Material.Neon, CanCollide = false })
+	pad.Parent = folder
+	local bb = Instance.new("BillboardGui"); bb.Size = UDim2.fromScale(6, 1.5)
+	bb.StudsOffset = Vector3.new(0, 4, 0); bb.AlwaysOnTop = true; bb.Parent = pad
+	local lbl = Instance.new("TextLabel"); lbl.Size = UDim2.fromScale(1, 1); lbl.BackgroundTransparency = 1
+	lbl.TextColor3 = Color3.new(1, 1, 1); lbl.TextStrokeTransparency = 0; lbl.TextScaled = true
+	lbl.Font = Enum.Font.GothamBold; lbl.Text = "EXIT"; lbl.Parent = bb
+	pad.Touched:Connect(function(hit)
+		local plr = Players:GetPlayerFromCharacter(hit.Parent)
+		if plr and playerInstance[plr] == inst and finishRun then finishRun(plr, inst) end
+	end)
+
+	-- Mynter
+	for _, c in ipairs(take(diff.coins)) do
+		local w = MazeGen.cellCenterWorld(c[1], c[2], gCols, gRows, S, origin)
+		local coin = makePart({ Name = "Coin", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.4, 2, 2),
+			Color = Color3.fromRGB(250, 205, 50), Material = Enum.Material.Neon, CanCollide = false,
+			CFrame = CFrame.new(w + Vector3.new(0, 3, 0)) * CFrame.Angles(0, 0, math.rad(90)) })
+		coin.Parent = folder
+		table.insert(inst.spinners, coin)
+		local grabbed = false
+		coin.Touched:Connect(function(hit)
+			if grabbed then return end
+			local plr = Players:GetPlayerFromCharacter(hit.Parent); if not plr then return end
+			grabbed = true; coin:Destroy()
+			local d = playerData[plr]; if d then d.coins += 1; refreshStats(plr) end
+			if playFx then playFx(plr, "coin") end
+		end)
+	end
+	-- Edelstener
+	for _, c in ipairs(take(diff.gems)) do
+		local w = MazeGen.cellCenterWorld(c[1], c[2], gCols, gRows, S, origin)
+		local gem = makePart({ Name = "Gem", Shape = Enum.PartType.Ball, Size = Vector3.new(2, 2, 2),
+			Position = w + Vector3.new(0, 3.2, 0), Color = Color3.fromRGB(170, 90, 240),
+			Material = Enum.Material.Neon, CanCollide = false })
+		gem.Parent = folder
+		table.insert(inst.spinners, gem)
+		local grabbed = false
+		gem.Touched:Connect(function(hit)
+			if grabbed then return end
+			local plr = Players:GetPlayerFromCharacter(hit.Parent); if not plr then return end
+			grabbed = true; gem:Destroy()
+			local d = playerData[plr]; if d then d.gems += 1; refreshStats(plr) end
+			if playFx then playFx(plr, "gem") end
+		end)
+	end
+	-- Feller
+	for _, c in ipairs(take(diff.traps)) do
+		local w = MazeGen.cellCenterWorld(c[1], c[2], gCols, gRows, S, origin)
+		makePart({ Name = "Trap", Size = Vector3.new(S - 2, 0.6, S - 2), Position = Vector3.new(w.X, 0.3, w.Z),
+			Color = Color3.fromRGB(230, 90, 30), Material = Enum.Material.Neon, CanCollide = false })
+			.Touched:Connect(killTouch)
+		local trig = makePart({ Name = "TrapTrigger", Size = Vector3.new(S - 2, 10, S - 2),
+			Position = Vector3.new(w.X, 5, w.Z), Transparency = 1, CanCollide = false })
+		trig.Parent = folder
+		trig.Touched:Connect(killTouch)
+	end
+	-- Skjulte knapper (senker en SecretWall)
+	for _, c in ipairs(take(math.min(diff.buttons, 4))) do
+		local key = next(doorParts)
+		if not key then break end
+		local doorPart = doorParts[key]; doorParts[key] = nil
+		local w = MazeGen.cellCenterWorld(c[1], c[2], gCols, gRows, S, origin)
+		local btn = makePart({ Name = "SecretButton", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 3, 3),
+			Color = Color3.fromRGB(60, 200, 220), Material = Enum.Material.Neon, CanCollide = false,
+			CFrame = CFrame.new(w + Vector3.new(0, 1.5, 0)) * CFrame.Angles(0, 0, math.rad(90)) })
+		btn.Parent = folder
+		local used = false
+		btn.Touched:Connect(function(hit)
+			if used then return end
+			local plr = Players:GetPlayerFromCharacter(hit.Parent); if not plr then return end
+			used = true; btn.Color = Color3.fromRGB(30, 90, 100)
+			if doorPart and doorPart.Parent then
+				doorPart.CanCollide = false
+				TweenService:Create(doorPart, TweenInfo.new(0.7, Enum.EasingStyle.Quad),
+					{ Position = doorPart.Position - Vector3.new(0, CONFIG.WallHeight + 2, 0) }):Play()
+			end
+		end)
+	end
+	-- Monstre
+	for _, mc in ipairs(take(diff.monsters)) do
+		makeInstanceMonster(inst, MazeGen.cellCenterWorld(mc[1], mc[2], gCols, gRows, S, origin), diff.monsterSpeed)
+	end
+
+	-- Par + medalje-terskler (utgang alltid åpen => korteste rute til utgangen).
+	local startFine = { 1, 1 }
+	local exitFine = { 2 * (cols - 1) + 1, 2 * (rows - 1) + 1 }
+	local steps = Medals.solveRoute(grid, gCols, gRows, startFine, exitFine, {})
+	inst.par = Medals.parTime(steps, CONFIG.CellSize, CONFIG.PlayerWalkSpeed)
+	inst.thresholds = Medals.thresholds(inst.par)
+
+	-- Spinn på mynter/edelstener
+	local myGen = inst.gen
+	task.spawn(function()
+		while inst.gen == myGen and folder.Parent do
+			for _, p in ipairs(inst.spinners) do
+				if p.Parent then
+					if p.Name == "Coin" then p.CFrame = p.CFrame * CFrame.Angles(math.rad(4), 0, 0)
+					else p.CFrame = p.CFrame * CFrame.Angles(0, math.rad(4), 0) end
+				end
+			end
+			task.wait(0.03)
+		end
+	end)
+end
+
+-- Send HUD-info for spillerens gjeldende instans (nivå + rekorder + accepted).
+local function sendInstanceInfo(plr, inst)
+	local d = playerData[plr]
+	levelInfoEvent:FireClient(plr, {
+		level = inst and inst.level or 0,
+		thresholds = inst and inst.thresholds or nil,
+		records = inst and getRecord(inst.level) or {},
+		yourBest = (d and inst and d.bestByLevel) and d.bestByLevel[tostring(inst.level)] or nil,
+		accepted = d and d.accepted or 0,
+		bestWithGod = (d and GodUsers.has(plr)) and d.bestWithGod or nil,
+		inLobby = (inst == nil),
+	})
+end
+
+-- Start en solo-kjøring på et nivå (kan ikke over accepted+1).
+local function startRun(plr, level)
+	local d = playerData[plr]; if not d then return end
+	level = math.clamp(math.floor(level or (d.accepted + 1)), 1, d.accepted + 1)
+	if playerInstance[plr] then return end  -- alt i en instans
+	nextInstanceId += 1
+	local inst = {
+		id = nextInstanceId, level = level,
+		origin = Vector3.new(nextInstanceId * INSTANCE_SPACING, 0, 0),
+		participants = { [plr] = true },
+	}
+	playerInstance[plr] = inst
+	local ok, err = pcall(function() buildInstance(inst) end)
+	if not ok then
+		warn("[Labyrint] buildInstance feilet: " .. tostring(err))
+		playerInstance[plr] = nil
+		return
+	end
+	local char = plr.Character
+	if char then pcall(function() char:PivotTo(CFrame.new(inst.spawnPos)) end) end
+	startClock[plr] = os.clock()
+	shieldUsed[plr] = false
+	sendInstanceInfo(plr, inst)
+end
+
+-- Fullfør en kjøring: del ut accepted/rekord (Progression, per-instans hadGod),
+-- riv instansen, send spilleren tilbake til lobbyen.
+finishRun = function(plr, inst)
+	local d = playerData[plr]
+	local level = inst.level
+	if d then
+		local st = startClock[plr]
+		local elapsed = st and (os.clock() - st) or nil
+		local clean = not inst.hadGod
+		local medal, isNewPB, isNewRecord, recs
+		if elapsed then
+			if clean and elapsed < d.best then d.best = elapsed end
+			local lkey = tostring(level)
+			d.bestByLevel = d.bestByLevel or {}
+			local prevPB = d.bestByLevel[lkey]
+			isNewPB = clean and ((prevPB == nil) or (elapsed < prevPB))
+			if isNewPB then d.bestByLevel[lkey] = elapsed end
+			medal = Medals.medalFor(elapsed, inst.thresholds)
+			recs = getRecord(level)
+			local bestTime = recs[1] and recs[1].time or nil
+			isNewRecord = clean and ((bestTime == nil) or (elapsed < bestTime))
+			local worst = recs[3] and recs[3].time or nil
+			local qualifies = (#recs < 3) or (worst and elapsed < worst)
+			if clean and qualifies then
+				local nl = {}
+				for _, e in ipairs(recs) do nl[#nl + 1] = { time = e.time, name = e.name } end
+				nl[#nl + 1] = { time = elapsed, name = plr.Name }
+				table.sort(nl, function(a, b) return a.time < b.time end)
+				while #nl > 3 do table.remove(nl) end
+				recordCache[level] = nl; recs = nl
+				task.spawn(function() tryUpdateRecord(level, elapsed, plr.Name) end)
+			end
+		end
+		-- Progresjon: accepted +1 kun ved rent klarert accepted+1.
+		local res = Progression.resolveClear({
+			level = level, accepted = d.accepted, bestWithGod = d.bestWithGod,
+			hadGod = inst.hadGod, mode = "solo", isHostLevel = true,
+		})
+		d.accepted = res.newAccepted; d.bestWithGod = res.newBestWithGod
+		d.trophies += 1
+		refreshStats(plr)
+		if levelCompleteEvent and elapsed then
+			levelCompleteEvent:FireClient(plr, {
+				level = level, time = elapsed, yourBest = d.bestByLevel[tostring(level)],
+				record = recs and recs[1] or nil, records = recs, medal = medal,
+				isNewPB = isNewPB, isNewRecord = isNewRecord, thresholds = inst.thresholds,
+			})
+		end
+		if res.acceptedGained and d.canSave ~= false and not GodUsers.has(plr) then
+			submitTopScore(plr.UserId, d.accepted)
+			refreshLeaderboard()
+		end
+		task.spawn(function() savePlayer(plr) end)
+	end
+	-- Riv instansen + send til lobby
+	playerInstance[plr] = nil
+	inst.gen = (inst.gen or 0) + 1  -- stopp løkker
+	if inst.folder then inst.folder:Destroy() end
+	local char = plr.Character
+	if char then pcall(function() char:PivotTo(CFrame.new(LOBBY_ORIGIN + Vector3.new(0, 5, 0))) end) end
+	sendInstanceInfo(plr, nil)
+end
+
+-- Bygg lobby-huben: gulv, spawn, og en "Solo Climb"-dør (ProximityPrompt).
+local function buildLobby()
+	local hub = Instance.new("Folder"); hub.Name = "Lobby"; hub.Parent = workspace
+	makePart({ Name = "LobbyFloor", Size = Vector3.new(60, 2, 60),
+		Position = LOBBY_ORIGIN + Vector3.new(0, -1, 0), Color = Color3.fromRGB(45, 48, 62),
+		Material = Enum.Material.SmoothPlastic }).Parent = hub
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Name = "LobbySpawn"; spawn.Anchored = true; spawn.Size = Vector3.new(8, 1, 8)
+	spawn.Position = LOBBY_ORIGIN + Vector3.new(0, 0.5, 0); spawn.Color = Color3.fromRGB(60, 200, 90)
+	spawn.Material = Enum.Material.Neon; spawn.Duration = 0; spawn.Parent = hub
+
+	local door = makePart({ Name = "SoloDoor", Size = Vector3.new(8, 10, 2),
+		Position = LOBBY_ORIGIN + Vector3.new(0, 5, -20), Color = Color3.fromRGB(70, 120, 200),
+		Material = Enum.Material.Neon })
+	door.Parent = hub
+	local sign = Instance.new("BillboardGui"); sign.Size = UDim2.fromScale(8, 2)
+	sign.StudsOffset = Vector3.new(0, 6, 0); sign.AlwaysOnTop = true; sign.Parent = door
+	local sl = Instance.new("TextLabel"); sl.Size = UDim2.fromScale(1, 1); sl.BackgroundTransparency = 1
+	sl.TextColor3 = Color3.new(1, 1, 1); sl.TextStrokeTransparency = 0; sl.TextScaled = true
+	sl.Font = Enum.Font.GothamBold; sl.Text = "🧗 Solo Climb"; sl.Parent = sign
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Climb"; prompt.ObjectText = "Solo"; prompt.HoldDuration = 0.2
+	prompt.MaxActivationDistance = 12; prompt.RequiresLineOfSight = false; prompt.Parent = door
+	prompt.Triggered:Connect(function(plr)
+		if playerInstance[plr] then return end
+		local d = playerData[plr]
+		startRun(plr, d and (d.accepted + 1) or 1)
+	end)
+end
+
+-- Kalles fra onCharacterAdded ved hvert spawn i lobby-modus. Døde spilleren i en
+-- instans, spawner Roblox dem på LobbySpawn — da river vi den forlatte instansen
+-- og viser lobby-HUD. Første spawn (ingen instans): bare vis lobby-HUD.
+handleLobbySpawn = function(plr)
+	local inst = playerInstance[plr]
+	if inst then
+		playerInstance[plr] = nil
+		inst.gen = (inst.gen or 0) + 1
+		if inst.folder then inst.folder:Destroy() end
+	end
+	sendInstanceInfo(plr, nil)
+end
+
 --============================  START  ============================--
-applyDarkness()
-buildLevel()
-refreshLeaderboard()  -- fyll topplista-tavla ved oppstart
-print("[Labyrint] Lastet. Level " .. currentLevel .. " bygget. Lykke til!")
+if CONFIG.UseLobby then
+	Lighting.FogEnd = INSTANCE_FOG
+	if CONFIG.Darkness then
+		Lighting.ClockTime = 0; Lighting.Brightness = 1
+		Lighting.OutdoorAmbient = Color3.fromRGB(20, 20, 28)
+		Lighting.FogColor = Color3.fromRGB(8, 8, 12); Lighting.FogStart = 0
+	end
+	buildLobby()
+	refreshLeaderboard()
+	print("[Labyrint] Lobby-modus lastet.")
+else
+	applyDarkness()
+	buildLevel()
+	refreshLeaderboard()  -- fyll topplista-tavla ved oppstart
+	print("[Labyrint] Lastet. Level " .. currentLevel .. " bygget. Lykke til!")
+end
