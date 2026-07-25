@@ -760,17 +760,21 @@ local function buildLevel()
 	spawn.Duration = 0
 	spawn.Parent = folder
 
-	-- Toppliste-tavle: står ved starten (bygges pr nivå så den alltid er ved spawn).
-	-- Dobbeltsidig (tekst på begge flater) så den er lesbar uansett hvilken vei man
-	-- ser, og skjøvet litt UT fra labyrinten så den ikke klipper innervegger.
+	-- Toppliste-tavle: montert på den MOTSATTE ytterveggen av åpningen (spawn-hjørnet).
+	-- Spawn ligger i ett hjørne; tavla settes i det speilvendte hjørnet (motsatt vegg),
+	-- HEVET rett over labyrint-veggene så den ruver over banen og sees fra åpningen, og
+	-- vendt TILBAKE mot åpningen. Dobbeltsidig. Bygges pr nivå (folder-destroy rydder).
 	do
 		leaderboardLabels = {}                 -- gammel tavle røk med folder-destroy over
-		local boardW, boardH = 22, 13
-		local flat = Vector3.new(sw.X, 0, sw.Z)
-		local outDir = flat                    -- retning ut fra midten (0,0,0)
+		local boardW, boardH = 30, 20
+		local opening = Vector3.new(sw.X, 0, sw.Z)         -- åpningen (der spilleren spawner)
+		local far = Vector3.new(-sw.X, 0, -sw.Z)           -- motsatt hjørne (speilet om midten)
+		local outDir = far
 		if outDir.Magnitude < 0.1 then outDir = Vector3.new(0, 0, 1) end
 		outDir = outDir.Unit
-		local boardPos = flat + outDir * (S * 1.6) + Vector3.new(0, boardH / 2 + 1, 0)
+		-- litt UT forbi ytterveggen, og løftet så bunnen av tavla ligger rett over
+		-- vegg-toppen (WallHeight) — da ser man den over labyrinten helt fra starten.
+		local boardPos = far + outDir * (S * 1.2) + Vector3.new(0, CONFIG.WallHeight + boardH / 2, 0)
 
 		local board = makePart({
 			Name = "Leaderboard",
@@ -780,7 +784,8 @@ local function buildLevel()
 			Material = Enum.Material.SmoothPlastic,
 		})
 		board.CanCollide = false
-		board.CFrame = CFrame.lookAt(boardPos, Vector3.new(0, boardPos.Y, 0))  -- vend mot midten
+		-- vend forsiden tilbake mot åpningen (spawn) så spilleren ser den ved start
+		board.CFrame = CFrame.lookAt(boardPos, Vector3.new(opening.X, boardPos.Y, opening.Z))
 		board.Parent = folder
 
 		-- Bygg en SurfaceGui (tittel + rangering) på én flate; kall for Front + Back.
