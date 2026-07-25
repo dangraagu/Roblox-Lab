@@ -137,8 +137,8 @@ local function makeArrow(name, glyph, yOffset)
 	local b = Instance.new("TextButton")
 	b.Name = name
 	b.Size = UDim2.fromOffset(76, 76)              -- godt over 56px
-	b.AnchorPoint = Vector2.new(0, 1)
-	b.Position = UDim2.new(0, 14, 0.5, yOffset)   -- VENSTRE side, midt-på (klar av rekord-panelet til høyre)
+	b.AnchorPoint = Vector2.new(1, 1)
+	b.Position = UDim2.new(1, -14, 0.5, yOffset)  -- HØYRE side, rett over av/på-knappen
 	b.BackgroundColor3 = COL_ARROW
 	b.TextColor3 = Color3.new(1, 1, 1)
 	b.Font = Enum.Font.GothamBold
@@ -160,10 +160,10 @@ local function makeArrow(name, glyph, yOffset)
 	return b
 end
 
--- Fly-pilene ligger på VENSTRE side, loddrett midtstilt (klar av "⚡ Upgrades"
--- øverst-venstre og styrepinnen nede-venstre). ▲ øverst, ▼ under.
-local upBtn = makeArrow("FlyOpp", "▲", -44)  -- øverst (bunn ~ midt - 44)
-local downBtn = makeArrow("FlyNed", "▼", 40) -- under (bunn ~ midt + 40)
+-- Fly-pilene på HØYRE side, stablet rett over av/på-knappen (som står på 0.5,+60).
+-- ▲ øverst, ▼ under. (Vises kun når gudemodus er PÅ.)
+local upBtn = makeArrow("FlyOpp", "▲", 60 - 25 - 12 - 76 - 8) -- øverst
+local downBtn = makeArrow("FlyNed", "▼", 60 - 25 - 12)        -- rett over av/på-knappen
 
 --==========================  NOCLIP + FLY  =======================--
 -- Sett CanCollide tilbake til normalt. I en standard Roblox-figur skal

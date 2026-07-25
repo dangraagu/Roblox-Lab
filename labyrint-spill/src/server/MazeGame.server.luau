@@ -50,8 +50,8 @@ local CONFIG = {
 		-- (raskere vekst = hvert nivå merkbart større og vanskeligere enn før).
 		StartSize = 6, SizeEveryNLevels = 10, MaxSize = 30,
 
-		-- Feller: ingen før level 3, +1 hver 9. level opp til 30
-		FirstTrapLevel = 3, TrapEveryNLevels = 9, MaxTraps = 30,
+		-- Feller (lava/feller): mildere nå — ingen før level 6, +1 hver 16. level, tak 12
+		FirstTrapLevel = 6, TrapEveryNLevels = 16, MaxTraps = 12,
 
 		-- Monstre: ingen før level 4, +1 hver 25. level opp til 10
 		FirstMonsterLevel = 4, MonsterEveryNLevels = 25, MaxMonsters = 10,
