@@ -224,6 +224,7 @@ local godActive = {}          -- [player] = true hvis gudemodus er på (kun GodU
 local levelHadGod = false     -- true hvis NOEN brukte gud på gjeldende nivå (nullstilles pr bygging)
 local playerInstance = {}     -- LOBBY-MODUS: [player] = instansen de er inne i (nil = lobbyen)
 local handleLobbySpawn        -- forhånds-deklarert; fylles ut i lobby-seksjonen
+local teardownPlayerInstance  -- forhånds-deklarert; fjerner spiller fra instans + rydder
 
 local function ownsPerk(plr, id)
 	local d = playerData[plr]
@@ -1537,18 +1538,8 @@ for _, plr in ipairs(Players:GetPlayers()) do onPlayerAdded(plr) end
 
 Players.PlayerRemoving:Connect(function(plr)
 	savePlayer(plr)                 -- flush umiddelbart (fanger evt. debouncet endring)
-	-- Lobby-modus: forlot spilleren en instans, fjern dem. Er instansen tom nå, riv
-	-- den (ellers lekker folder + monster/spinn-løkker kjører for alltid). Er det
-	-- fortsatt folk igjen (group/friends), lever instansen videre.
-	local inst = playerInstance[plr]
-	if inst then
-		playerInstance[plr] = nil
-		if inst.participants then inst.participants[plr] = nil end
-		if not inst.participants or not next(inst.participants) then
-			inst.gen = (inst.gen or 0) + 1
-			if inst.folder then inst.folder:Destroy() end
-		end
-	end
+	-- Lobby-modus: forlot spilleren en instans, fjern dem (riv om tom, prune lister).
+	if teardownPlayerInstance then teardownPlayerInstance(plr) end
 	playerData[plr] = nil
 	startClock[plr] = nil
 	saveScheduled[plr] = nil
@@ -1764,9 +1755,10 @@ local function buildInstance(inst)
 	-- Feller
 	for _, c in ipairs(take(diff.traps)) do
 		local w = MazeGen.cellCenterWorld(c[1], c[2], gCols, gRows, S, origin)
-		makePart({ Name = "Trap", Size = Vector3.new(S - 2, 0.6, S - 2), Position = Vector3.new(w.X, 0.3, w.Z),
+		local trap = makePart({ Name = "Trap", Size = Vector3.new(S - 2, 0.6, S - 2), Position = Vector3.new(w.X, 0.3, w.Z),
 			Color = Color3.fromRGB(230, 90, 30), Material = Enum.Material.Neon, CanCollide = false })
-			.Touched:Connect(killTouch)
+		trap.Parent = folder                 -- MÅ parentes ellers vises den ikke / fyrer ikke Touched
+		trap.Touched:Connect(killTouch)
 		local trig = makePart({ Name = "TrapTrigger", Size = Vector3.new(S - 2, 10, S - 2),
 			Position = Vector3.new(w.X, 5, w.Z), Transparency = 1, CanCollide = false })
 		trig.Parent = folder
@@ -1850,6 +1842,33 @@ local function countParticipants(inst)
 	return n
 end
 
+-- Øyeblikksbilde av deltakerne (trygt å iterere selv om settet endres under).
+local function participantList(inst)
+	local out = {}
+	for p in pairs(inst.participants) do out[#out + 1] = p end
+	return out
+end
+
+-- Fjern en instans fra matchmaking-listene (så de ikke vokser i det uendelige).
+local function removeInstanceFromLists(inst)
+	for i = #groupInstances, 1, -1 do if groupInstances[i] == inst then table.remove(groupInstances, i) end end
+	for i = #friendsInstances, 1, -1 do if friendsInstances[i] == inst then table.remove(friendsInstances, i) end end
+end
+
+-- Fjern spilleren fra sin instans (forlot/døde). Tom instans -> riv + prune.
+-- Forhånds-deklarert i STATE så PlayerRemoving (definert over) kan kalle den.
+teardownPlayerInstance = function(plr)
+	local inst = playerInstance[plr]
+	if not inst then return end
+	playerInstance[plr] = nil
+	if inst.participants then inst.participants[plr] = nil end
+	if not inst.participants or not next(inst.participants) then
+		inst.gen = (inst.gen or 0) + 1
+		if inst.folder then inst.folder:Destroy() end
+		removeInstanceFromLists(inst)
+	end
+end
+
 local endInstance, advanceInstance
 
 -- Plasser en spiller inn i en (allerede bygd) instans.
@@ -1914,7 +1933,7 @@ end
 
 -- Riv en instans og send ALLE deltakere til lobbyen.
 endInstance = function(inst)
-	for p in pairs(inst.participants) do
+	for _, p in ipairs(participantList(inst)) do
 		playerInstance[p] = nil
 		local char = p.Character
 		if char then pcall(function() char:PivotTo(CFrame.new(LOBBY_ORIGIN + Vector3.new(0, 5, 0))) end) end
@@ -1923,6 +1942,7 @@ endInstance = function(inst)
 	inst.participants = {}
 	inst.gen = (inst.gen or 0) + 1
 	if inst.folder then inst.folder:Destroy() end
+	removeInstanceFromLists(inst)
 end
 
 -- Avanser en (group/friends) instans til neste nivå: bygg om, respawn alle.
@@ -1930,7 +1950,7 @@ advanceInstance = function(inst)
 	inst.level += 1
 	local ok, err = pcall(function() buildInstance(inst) end)
 	if not ok then warn("[Labyrint] advance-bygg feilet: " .. tostring(err)); endInstance(inst); return end
-	for p in pairs(inst.participants) do
+	for _, p in ipairs(participantList(inst)) do
 		local char = p.Character
 		if char then pcall(function() char:PivotTo(CFrame.new(inst.spawnPos)) end) end
 		startClock[p] = os.clock()
@@ -1987,7 +2007,7 @@ finishRun = function(solverPlr, inst)
 	end
 	-- Accepted til ALLE deltakere (hver tjener bare sitt eget accepted+1, gud-fritt).
 	local anyGain = false
-	for p in pairs(inst.participants) do
+	for _, p in ipairs(participantList(inst)) do
 		local pd = playerData[p]
 		if pd then
 			local res = Progression.resolveClear({
@@ -2069,16 +2089,7 @@ end
 -- instans, spawner Roblox dem på LobbySpawn — da river vi den forlatte instansen
 -- og viser lobby-HUD. Første spawn (ingen instans): bare vis lobby-HUD.
 handleLobbySpawn = function(plr)
-	local inst = playerInstance[plr]
-	if inst then
-		playerInstance[plr] = nil
-		if inst.participants then inst.participants[plr] = nil end
-		-- Tom instans (siste forlot/døde): riv den. Ellers lever den videre for resten.
-		if not inst.participants or not next(inst.participants) then
-			inst.gen = (inst.gen or 0) + 1
-			if inst.folder then inst.folder:Destroy() end
-		end
-	end
+	teardownPlayerInstance(plr)   -- døde i en instans -> ut av den (riv hvis tom)
 	sendInstanceInfo(plr, nil)
 end
 
