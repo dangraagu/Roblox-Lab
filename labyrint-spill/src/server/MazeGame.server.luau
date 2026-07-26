@@ -1537,13 +1537,17 @@ for _, plr in ipairs(Players:GetPlayers()) do onPlayerAdded(plr) end
 
 Players.PlayerRemoving:Connect(function(plr)
 	savePlayer(plr)                 -- flush umiddelbart (fanger evt. debouncet endring)
-	-- Lobby-modus: forlot spilleren en instans, riv den (ellers lekker folder +
-	-- monster/spinn-løkker kjører for alltid).
+	-- Lobby-modus: forlot spilleren en instans, fjern dem. Er instansen tom nå, riv
+	-- den (ellers lekker folder + monster/spinn-løkker kjører for alltid). Er det
+	-- fortsatt folk igjen (group/friends), lever instansen videre.
 	local inst = playerInstance[plr]
 	if inst then
 		playerInstance[plr] = nil
-		inst.gen = (inst.gen or 0) + 1
-		if inst.folder then inst.folder:Destroy() end
+		if inst.participants then inst.participants[plr] = nil end
+		if not inst.participants or not next(inst.participants) then
+			inst.gen = (inst.gen or 0) + 1
+			if inst.folder then inst.folder:Destroy() end
+		end
 	end
 	playerData[plr] = nil
 	startClock[plr] = nil
@@ -1831,24 +1835,27 @@ local function sendInstanceInfo(plr, inst)
 	})
 end
 
--- Start en solo-kjøring på et nivå (kan ikke over accepted+1).
-local function startRun(plr, level)
-	local d = playerData[plr]; if not d then return end
-	level = math.clamp(math.floor(level or (d.accepted + 1)), 1, d.accepted + 1)
-	if playerInstance[plr] then return end  -- alt i en instans
-	nextInstanceId += 1
-	local inst = {
-		id = nextInstanceId, level = level,
-		origin = Vector3.new(nextInstanceId * INSTANCE_SPACING, 0, 0),
-		participants = { [plr] = true },
-	}
+local groupInstances = {}          -- åpne GROUP-instanser (matchet på nivå)
+local friendsInstances = {}        -- FRIENDS-instanser (bli med hos en venn)
+
+-- Klient-lobby-remotes: server ber klienten åpne nivå-velgeren; klienten sender
+-- valgt {level, mode} tilbake.
+local lobbyFolder = Instance.new("Folder"); lobbyFolder.Name = "LobbyRemotes"; lobbyFolder.Parent = ReplicatedStorage
+local openPickerEvent = Instance.new("RemoteEvent"); openPickerEvent.Name = "OpenPicker"; openPickerEvent.Parent = lobbyFolder
+local startRunEvent = Instance.new("RemoteEvent"); startRunEvent.Name = "StartRun"; startRunEvent.Parent = lobbyFolder
+
+local function countParticipants(inst)
+	local n = 0
+	for _ in pairs(inst.participants) do n += 1 end
+	return n
+end
+
+local endInstance, advanceInstance
+
+-- Plasser en spiller inn i en (allerede bygd) instans.
+local function placeInInstance(plr, inst)
+	inst.participants[plr] = true
 	playerInstance[plr] = inst
-	local ok, err = pcall(function() buildInstance(inst) end)
-	if not ok then
-		warn("[Labyrint] buildInstance feilet: " .. tostring(err))
-		playerInstance[plr] = nil
-		return
-	end
 	local char = plr.Character
 	if char then pcall(function() char:PivotTo(CFrame.new(inst.spawnPos)) end) end
 	startClock[plr] = os.clock()
@@ -1856,28 +1863,103 @@ local function startRun(plr, level)
 	sendInstanceInfo(plr, inst)
 end
 
--- Fullfør en kjøring: del ut accepted/rekord (Progression, per-instans hadGod),
--- riv instansen, send spilleren tilbake til lobbyen.
-finishRun = function(plr, inst)
-	-- Idempotent: utgangen gir MANGE Touched (flere lemmer), og getRecord under kan
-	-- yield'e (DataStore). Krev at spilleren fortsatt er i DENNE instansen og claim
-	-- den med en gang, så en runde bare belønnes ÉN gang.
-	if playerInstance[plr] ~= inst then return end
-	playerInstance[plr] = nil
-	local d = playerData[plr]
+-- Lag en ny instans (bygd) med `plr` som første deltaker.
+local function createInstance(plr, level, mode)
+	nextInstanceId += 1
+	local inst = {
+		id = nextInstanceId, level = level, mode = mode,
+		origin = Vector3.new(nextInstanceId * INSTANCE_SPACING, 0, 0),
+		participants = {}, hostUserId = plr.UserId, solving = false,
+	}
+	local ok, err = pcall(function() buildInstance(inst) end)
+	if not ok then warn("[Labyrint] buildInstance feilet: " .. tostring(err)); return nil end
+	placeInInstance(plr, inst)
+	return inst
+end
+
+-- Solo: din egen instans på valgt nivå (<= accepted+1).
+local function startSolo(plr, level)
+	local d = playerData[plr]; if not d or playerInstance[plr] then return end
+	createInstance(plr, math.clamp(math.floor(level or (d.accepted + 1)), 1, d.accepted + 1), "solo")
+end
+
+-- Group: matches med andre i serveren på SAMME nivå (accepted+1). Ingen carry.
+local function startGroup(plr)
+	local d = playerData[plr]; if not d or playerInstance[plr] then return end
+	local want = d.accepted + 1
+	for _, inst in ipairs(groupInstances) do
+		if inst.folder and inst.folder.Parent and inst.mode == "group"
+			and inst.level == want and countParticipants(inst) < 4 then
+			placeInInstance(plr, inst); return
+		end
+	end
+	local inst = createInstance(plr, want, "group")
+	if inst then table.insert(groupInstances, inst) end
+end
+
+-- Friends: bli med hos en VENN som allerede er vert her; ellers vert selv (velger nivå).
+local function startFriendsJoinOrHost(plr, hostLevel)
+	local d = playerData[plr]; if not d or playerInstance[plr] then return end
+	for _, inst in ipairs(friendsInstances) do
+		if inst.folder and inst.folder.Parent and inst.mode == "friends" and countParticipants(inst) < 4 then
+			local ok, isFriend = pcall(function() return plr:IsFriendsWith(inst.hostUserId) end)
+			if ok and isFriend then placeInInstance(plr, inst); return end
+		end
+	end
+	-- Ingen venn er vert: bli vert selv på valgt nivå (<= accepted+1).
+	local lvl = math.clamp(math.floor(hostLevel or (d.accepted + 1)), 1, d.accepted + 1)
+	local inst = createInstance(plr, lvl, "friends")
+	if inst then table.insert(friendsInstances, inst) end
+end
+
+-- Riv en instans og send ALLE deltakere til lobbyen.
+endInstance = function(inst)
+	for p in pairs(inst.participants) do
+		playerInstance[p] = nil
+		local char = p.Character
+		if char then pcall(function() char:PivotTo(CFrame.new(LOBBY_ORIGIN + Vector3.new(0, 5, 0))) end) end
+		sendInstanceInfo(p, nil)
+	end
+	inst.participants = {}
+	inst.gen = (inst.gen or 0) + 1
+	if inst.folder then inst.folder:Destroy() end
+end
+
+-- Avanser en (group/friends) instans til neste nivå: bygg om, respawn alle.
+advanceInstance = function(inst)
+	inst.level += 1
+	local ok, err = pcall(function() buildInstance(inst) end)
+	if not ok then warn("[Labyrint] advance-bygg feilet: " .. tostring(err)); endInstance(inst); return end
+	for p in pairs(inst.participants) do
+		local char = p.Character
+		if char then pcall(function() char:PivotTo(CFrame.new(inst.spawnPos)) end) end
+		startClock[p] = os.clock()
+		shieldUsed[p] = false
+		sendInstanceInfo(p, inst)
+	end
+end
+
+-- Løsning: solverens tid/rekord/kort + accepted til ALLE deltakere (Progression,
+-- per-instans hadGod). Så: solo -> lobby ; group/friends -> avanser. Idempotent.
+finishRun = function(solverPlr, inst)
+	if inst.solving then return end                -- én løsning pr nivå (mange Touched)
+	if not inst.participants[solverPlr] then return end
+	inst.solving = true
 	local level = inst.level
-	if d then
-		local st = startClock[plr]
-		local elapsed = st and (os.clock() - st) or nil
+	local sd = playerData[solverPlr]
+	local elapsed
+	if sd then
+		local st = startClock[solverPlr]
+		elapsed = st and (os.clock() - st) or nil
 		local clean = not inst.hadGod
 		local medal, isNewPB, isNewRecord, recs
 		if elapsed then
-			if clean and elapsed < d.best then d.best = elapsed end
+			if clean and elapsed < sd.best then sd.best = elapsed end
 			local lkey = tostring(level)
-			d.bestByLevel = d.bestByLevel or {}
-			local prevPB = d.bestByLevel[lkey]
+			sd.bestByLevel = sd.bestByLevel or {}
+			local prevPB = sd.bestByLevel[lkey]
 			isNewPB = clean and ((prevPB == nil) or (elapsed < prevPB))
-			if isNewPB then d.bestByLevel[lkey] = elapsed end
+			if isNewPB then sd.bestByLevel[lkey] = elapsed end
 			medal = Medals.medalFor(elapsed, inst.thresholds)
 			recs = getRecord(level)
 			local bestTime = recs[1] and recs[1].time or nil
@@ -1887,46 +1969,72 @@ finishRun = function(plr, inst)
 			if clean and qualifies then
 				local nl = {}
 				for _, e in ipairs(recs) do nl[#nl + 1] = { time = e.time, name = e.name } end
-				nl[#nl + 1] = { time = elapsed, name = plr.Name }
+				nl[#nl + 1] = { time = elapsed, name = solverPlr.Name }
 				table.sort(nl, function(a, b) return a.time < b.time end)
 				while #nl > 3 do table.remove(nl) end
 				recordCache[level] = nl; recs = nl
-				task.spawn(function() tryUpdateRecord(level, elapsed, plr.Name) end)
+				task.spawn(function() tryUpdateRecord(level, elapsed, solverPlr.Name) end)
 			end
 		end
-		-- Progresjon: accepted +1 kun ved rent klarert accepted+1.
-		local res = Progression.resolveClear({
-			level = level, accepted = d.accepted, bestWithGod = d.bestWithGod,
-			hadGod = inst.hadGod, mode = "solo", isHostLevel = true,
-		})
-		d.accepted = res.newAccepted; d.bestWithGod = res.newBestWithGod
-		d.trophies += 1
-		refreshStats(plr)
+		sd.trophies += 1  -- pokal til den som kom seg ut
 		if levelCompleteEvent and elapsed then
-			levelCompleteEvent:FireClient(plr, {
-				level = level, time = elapsed, yourBest = d.bestByLevel[tostring(level)],
+			levelCompleteEvent:FireClient(solverPlr, {
+				level = level, time = elapsed, yourBest = sd.bestByLevel[tostring(level)],
 				record = recs and recs[1] or nil, records = recs, medal = medal,
 				isNewPB = isNewPB, isNewRecord = isNewRecord, thresholds = inst.thresholds,
 			})
 		end
-		if res.acceptedGained and d.canSave ~= false and not GodUsers.has(plr) then
-			submitTopScore(plr.UserId, d.accepted)
-			refreshLeaderboard()
-		end
-		task.spawn(function() savePlayer(plr) end)
 	end
-	-- Riv instansen + send til lobby (playerInstance er alt nullstilt øverst).
-	inst.gen = (inst.gen or 0) + 1  -- stopp løkker
-	if inst.folder then inst.folder:Destroy() end
-	local char = plr.Character
-	if char then pcall(function() char:PivotTo(CFrame.new(LOBBY_ORIGIN + Vector3.new(0, 5, 0))) end) end
-	sendInstanceInfo(plr, nil)
+	-- Accepted til ALLE deltakere (hver tjener bare sitt eget accepted+1, gud-fritt).
+	local anyGain = false
+	for p in pairs(inst.participants) do
+		local pd = playerData[p]
+		if pd then
+			local res = Progression.resolveClear({
+				level = level, accepted = pd.accepted, bestWithGod = pd.bestWithGod,
+				hadGod = inst.hadGod, mode = inst.mode,
+			})
+			pd.accepted = res.newAccepted; pd.bestWithGod = res.newBestWithGod
+			refreshStats(p)
+			if res.acceptedGained and pd.canSave ~= false and not GodUsers.has(p) then
+				submitTopScore(p.UserId, pd.accepted); anyGain = true
+			end
+			task.spawn(function() savePlayer(p) end)
+		end
+	end
+	if anyGain then refreshLeaderboard() end
+	-- Neste
+	if inst.mode == "solo" then endInstance(inst) else advanceInstance(inst) end
+	inst.solving = false
 end
 
--- Bygg lobby-huben: gulv, spawn, og en "Solo Climb"-dør (ProximityPrompt).
+-- Klienten sender valgt nivå fra velgeren.
+startRunEvent.OnServerEvent:Connect(function(plr, level, mode)
+	if playerInstance[plr] then return end
+	if typeof(level) ~= "number" then return end
+	if mode == "friends" then startFriendsJoinOrHost(plr, level)
+	else startSolo(plr, level) end
+end)
+
+-- Bygg en dør i lobbyen (part + skilt + ProximityPrompt).
+local function makeDoor(hub, name, label, actionText, pos, color, onTrigger)
+	local door = makePart({ Name = name, Size = Vector3.new(8, 10, 2), Position = pos, Color = color, Material = Enum.Material.Neon })
+	door.Parent = hub
+	local sign = Instance.new("BillboardGui"); sign.Size = UDim2.fromScale(9, 2)
+	sign.StudsOffset = Vector3.new(0, 6, 0); sign.AlwaysOnTop = true; sign.Parent = door
+	local sl = Instance.new("TextLabel"); sl.Size = UDim2.fromScale(1, 1); sl.BackgroundTransparency = 1
+	sl.TextColor3 = Color3.new(1, 1, 1); sl.TextStrokeTransparency = 0; sl.TextScaled = true
+	sl.Font = Enum.Font.GothamBold; sl.Text = label; sl.Parent = sign
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = actionText; prompt.ObjectText = ""; prompt.HoldDuration = 0.2
+	prompt.MaxActivationDistance = 12; prompt.RequiresLineOfSight = false; prompt.Parent = door
+	prompt.Triggered:Connect(function(plr) pcall(onTrigger, plr) end)
+end
+
+-- Bygg lobby-huben: gulv, spawn, tre dører.
 local function buildLobby()
 	local hub = Instance.new("Folder"); hub.Name = "Lobby"; hub.Parent = workspace
-	makePart({ Name = "LobbyFloor", Size = Vector3.new(60, 2, 60),
+	makePart({ Name = "LobbyFloor", Size = Vector3.new(70, 2, 70),
 		Position = LOBBY_ORIGIN + Vector3.new(0, -1, 0), Color = Color3.fromRGB(45, 48, 62),
 		Material = Enum.Material.SmoothPlastic }).Parent = hub
 	local spawn = Instance.new("SpawnLocation")
@@ -1934,23 +2042,27 @@ local function buildLobby()
 	spawn.Position = LOBBY_ORIGIN + Vector3.new(0, 0.5, 0); spawn.Color = Color3.fromRGB(60, 200, 90)
 	spawn.Material = Enum.Material.Neon; spawn.Duration = 0; spawn.Parent = hub
 
-	local door = makePart({ Name = "SoloDoor", Size = Vector3.new(8, 10, 2),
-		Position = LOBBY_ORIGIN + Vector3.new(0, 5, -20), Color = Color3.fromRGB(70, 120, 200),
-		Material = Enum.Material.Neon })
-	door.Parent = hub
-	local sign = Instance.new("BillboardGui"); sign.Size = UDim2.fromScale(8, 2)
-	sign.StudsOffset = Vector3.new(0, 6, 0); sign.AlwaysOnTop = true; sign.Parent = door
-	local sl = Instance.new("TextLabel"); sl.Size = UDim2.fromScale(1, 1); sl.BackgroundTransparency = 1
-	sl.TextColor3 = Color3.new(1, 1, 1); sl.TextStrokeTransparency = 0; sl.TextScaled = true
-	sl.Font = Enum.Font.GothamBold; sl.Text = "🧗 Solo Climb"; sl.Parent = sign
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = "Climb"; prompt.ObjectText = "Solo"; prompt.HoldDuration = 0.2
-	prompt.MaxActivationDistance = 12; prompt.RequiresLineOfSight = false; prompt.Parent = door
-	prompt.Triggered:Connect(function(plr)
-		if playerInstance[plr] then return end
-		local d = playerData[plr]
-		startRun(plr, d and (d.accepted + 1) or 1)
-	end)
+	makeDoor(hub, "SoloDoor", "🧗 Solo Climb", "Solo",
+		LOBBY_ORIGIN + Vector3.new(-16, 5, -22), Color3.fromRGB(70, 120, 200), function(plr)
+			if playerInstance[plr] then return end
+			openPickerEvent:FireClient(plr, { accepted = (playerData[plr] and playerData[plr].accepted) or 0, mode = "solo" })
+		end)
+	makeDoor(hub, "GroupDoor", "👥 Group", "Group",
+		LOBBY_ORIGIN + Vector3.new(0, 5, -22), Color3.fromRGB(90, 180, 110), function(plr)
+			startGroup(plr)
+		end)
+	makeDoor(hub, "FriendsDoor", "🤝 Play with Friends", "Friends",
+		LOBBY_ORIGIN + Vector3.new(16, 5, -22), Color3.fromRGB(200, 140, 70), function(plr)
+			if playerInstance[plr] then return end
+			-- Er en venn allerede vert? bli med direkte. Ellers åpne velger (du blir vert).
+			for _, inst in ipairs(friendsInstances) do
+				if inst.folder and inst.folder.Parent and inst.mode == "friends" and countParticipants(inst) < 4 then
+					local ok, isFriend = pcall(function() return plr:IsFriendsWith(inst.hostUserId) end)
+					if ok and isFriend then placeInInstance(plr, inst); return end
+				end
+			end
+			openPickerEvent:FireClient(plr, { accepted = (playerData[plr] and playerData[plr].accepted) or 0, mode = "friends" })
+		end)
 end
 
 -- Kalles fra onCharacterAdded ved hvert spawn i lobby-modus. Døde spilleren i en
@@ -1960,8 +2072,12 @@ handleLobbySpawn = function(plr)
 	local inst = playerInstance[plr]
 	if inst then
 		playerInstance[plr] = nil
-		inst.gen = (inst.gen or 0) + 1
-		if inst.folder then inst.folder:Destroy() end
+		if inst.participants then inst.participants[plr] = nil end
+		-- Tom instans (siste forlot/døde): riv den. Ellers lever den videre for resten.
+		if not inst.participants or not next(inst.participants) then
+			inst.gen = (inst.gen or 0) + 1
+			if inst.folder then inst.folder:Destroy() end
+		end
 	end
 	sendInstanceInfo(plr, nil)
 end
