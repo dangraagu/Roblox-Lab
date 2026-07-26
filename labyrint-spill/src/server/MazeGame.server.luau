@@ -1625,7 +1625,8 @@ local function makeInstanceMonster(inst, worldPos, speed)
 	end)
 end
 
-local finishRun  -- forward-deklarert (buildInstance kobler exit-touch til den)
+local finishRun       -- forward-deklarert (buildInstance kobler exit-touch til den)
+local returnToLobby   -- forward-deklarert (buildInstance kobler retur-døra til den)
 
 -- Bygg labyrinten for en instans på inst.origin, nivå inst.level. Utgangen er
 -- alltid åpen; mynter/edelstener gir valuta ved berøring; feller dreper; monstre
@@ -1717,6 +1718,24 @@ local function buildInstance(inst)
 	pad.Touched:Connect(function(hit)
 		local plr = Players:GetPlayerFromCharacter(hit.Parent)
 		if plr and playerInstance[plr] == inst and finishRun then finishRun(plr, inst) end
+	end)
+
+	-- Retur-dør ved STARTEN (motsatt vei av utgangen): gå bort til den + trykk for å
+	-- gå tilbake til lobbyen uten å fullføre nivået. Står på start-cellas bakvegg.
+	local retDoor = makePart({ Name = "LobbyDoor", Size = Vector3.new(S - 3, 7, 1),
+		Position = Vector3.new(sw.X, 4, sw.Z - (S / 2) + 0.6),
+		Color = Color3.fromRGB(210, 80, 80), Material = Enum.Material.Neon, CanCollide = false })
+	retDoor.Parent = folder
+	local rbb = Instance.new("BillboardGui"); rbb.Size = UDim2.fromScale(6, 1.5)
+	rbb.StudsOffset = Vector3.new(0, 3.5, 0); rbb.AlwaysOnTop = true; rbb.Parent = retDoor
+	local rl = Instance.new("TextLabel"); rl.Size = UDim2.fromScale(1, 1); rl.BackgroundTransparency = 1
+	rl.TextColor3 = Color3.new(1, 1, 1); rl.TextStrokeTransparency = 0; rl.TextScaled = true
+	rl.Font = Enum.Font.GothamBold; rl.Text = "🚪 Lobby"; rl.Parent = rbb
+	local rprompt = Instance.new("ProximityPrompt")
+	rprompt.ActionText = "Return to Lobby"; rprompt.ObjectText = ""; rprompt.HoldDuration = 0.3
+	rprompt.MaxActivationDistance = 10; rprompt.RequiresLineOfSight = false; rprompt.Parent = retDoor
+	rprompt.Triggered:Connect(function(plr)
+		if playerInstance[plr] == inst and returnToLobby then returnToLobby(plr) end
 	end)
 
 	-- Mynter
@@ -1870,11 +1889,21 @@ teardownPlayerInstance = function(plr)
 	end
 end
 
+-- Frivillig retur til lobbyen (retur-døra inne i labyrinten). Ut av instansen +
+-- teleporter til lobbyen + vis lobby-HUD.
+returnToLobby = function(plr)
+	teardownPlayerInstance(plr)
+	local char = plr.Character
+	if char then pcall(function() char:PivotTo(CFrame.new(LOBBY_ORIGIN + Vector3.new(0, 5, 0))) end) end
+	sendInstanceInfo(plr, nil)
+end
+
 local endInstance, advanceInstance
 
 -- Plasser en spiller inn i en (allerede bygd) instans.
 local function placeInInstance(plr, inst)
 	inst.participants[plr] = true
+	if godActive[plr] then inst.hadGod = true end   -- gikk inn med gud på = nivået teller ikke
 	playerInstance[plr] = inst
 	local char = plr.Character
 	if char then pcall(function() char:PivotTo(CFrame.new(inst.spawnPos)) end) end
@@ -1952,6 +1981,7 @@ advanceInstance = function(inst)
 	local ok, err = pcall(function() buildInstance(inst) end)
 	if not ok then warn("[Labyrint] advance-bygg feilet: " .. tostring(err)); endInstance(inst); return end
 	for _, p in ipairs(participantList(inst)) do
+		if godActive[p] then inst.hadGod = true end   -- flyr fortsatt inn i nytt nivå = teller ikke
 		local char = p.Character
 		if char then pcall(function() char:PivotTo(CFrame.new(inst.spawnPos)) end) end
 		startClock[p] = os.clock()
@@ -1967,12 +1997,17 @@ finishRun = function(solverPlr, inst)
 	if not inst.participants[solverPlr] then return end
 	inst.solving = true
 	local level = inst.level
+	-- Effektiv gud-status: inst.hadGod (gud aktivert i løpet av nivået) ELLER en
+	-- deltaker flyr NÅ (aktiverte gud i lobbyen før de gikk inn, eller skrudde av
+	-- rett før mål). Fanger ALLE gud-veier — ellers kunne Mio "rent" løse nivået.
+	local hadGod = inst.hadGod
+	for p in pairs(inst.participants) do if godActive[p] then hadGod = true end end
 	local sd = playerData[solverPlr]
 	local elapsed
 	if sd then
 		local st = startClock[solverPlr]
 		elapsed = st and (os.clock() - st) or nil
-		local clean = not inst.hadGod
+		local clean = not hadGod
 		local medal, isNewPB, isNewRecord, recs
 		if elapsed then
 			if clean and elapsed < sd.best then sd.best = elapsed end
@@ -2013,7 +2048,7 @@ finishRun = function(solverPlr, inst)
 		if pd then
 			local res = Progression.resolveClear({
 				level = level, accepted = pd.accepted, bestWithGod = pd.bestWithGod,
-				hadGod = inst.hadGod, mode = inst.mode,
+				hadGod = hadGod, mode = inst.mode,
 			})
 			pd.accepted = res.newAccepted; pd.bestWithGod = res.newBestWithGod
 			refreshStats(p)
@@ -2025,7 +2060,9 @@ finishRun = function(solverPlr, inst)
 	end
 	if anyGain then refreshLeaderboard() end
 	-- Neste
-	if inst.mode == "solo" then endInstance(inst) else advanceInstance(inst) end
+	-- Alle modus: fortsett til neste nivå (bli i labyrinten). Retur til lobby skjer
+	-- via retur-døra inne i labyrinten (eller død).
+	advanceInstance(inst)
 	inst.solving = false
 end
 
