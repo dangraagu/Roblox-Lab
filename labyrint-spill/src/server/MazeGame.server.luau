@@ -25,8 +25,9 @@ local CONFIG = {
 	-- progresjon, ingen carry). false = det gamle, verifiserte enkelt-maze-spillet
 	-- (v14). Dette er ROLLBACK-spaken: bryter lobbyen live, sett false + publiser
 	-- på nytt for å være tilbake på det som funket.
-	-- STÅR PÅ false til lobby-koden er ferdigbygd + gjennomgått (bygges nå).
-	UseLobby = false,
+	-- Ferdigbygd + gjennomgått: lobby PÅ. (Bryter noe live: sett false + publiser
+	-- på nytt for umiddelbar rollback til v14-enkeltmaze-loopen.)
+	UseLobby = true,
 
 	-- Verden-frø: samme frø + samme level gir NØYAKTIG samme bane for ALLE
 	-- spillere, hver gang (level 4 er alltid den samme level 4). Endre tallet
