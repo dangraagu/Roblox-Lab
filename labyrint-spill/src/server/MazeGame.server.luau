@@ -2121,6 +2121,42 @@ local function buildLobby()
 			end
 			openPickerEvent:FireClient(plr, { accepted = (playerData[plr] and playerData[plr].accepted) or 0, mode = "friends" })
 		end)
+
+	-- 3x-statue av Mios ekte avatar, bak spawn og vendt mot dørene. Alt pcall-et:
+	-- feiler avatar-henting (nett/ukjent navn), står lobbyen bare uten statue.
+	local ped = makePart({ Name = "Pedestal", Size = Vector3.new(14, 4, 14),
+		Position = LOBBY_ORIGIN + Vector3.new(0, 2, 22), Color = Color3.fromRGB(60, 64, 84),
+		Material = Enum.Material.Marble })
+	ped.Parent = hub
+	task.spawn(function()
+		local ok, uid = pcall(function() return Players:GetUserIdFromNameAsync("MioSpille") end)
+		if not ok or type(uid) ~= "number" then return end
+		local ok2, model = pcall(function() return Players:CreateHumanoidModelFromUserId(uid) end)
+		if not ok2 or not model then return end
+		model.Name = "MioStatue"
+		local hum = model:FindFirstChildOfClass("Humanoid")
+		if hum then
+			hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+			hum.EvaluateStateMachine = false
+			pcall(function() hum:ChangeState(Enum.HumanoidStateType.Physics) end)
+		end
+		-- Forankre alt (statisk), så 3x-skaler, så plasser på sokkelen vendt mot spawn.
+		for _, p in ipairs(model:GetDescendants()) do
+			if p:IsA("BasePart") then p.Anchored = true; p.CanCollide = false end
+		end
+		pcall(function() model:ScaleTo(3) end)
+		pcall(function()
+			model:PivotTo(CFrame.new(LOBBY_ORIGIN + Vector3.new(0, 12, 22)) * CFrame.Angles(0, math.pi, 0))
+		end)
+		model.Parent = hub
+		-- Navneplate over hodet.
+		local anchor = model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or ped
+		local plate = Instance.new("BillboardGui"); plate.Size = UDim2.fromScale(8, 2)
+		plate.StudsOffset = Vector3.new(0, 4, 0); plate.AlwaysOnTop = true; plate.Parent = anchor
+		local pl = Instance.new("TextLabel"); pl.Size = UDim2.fromScale(1, 1); pl.BackgroundTransparency = 1
+		pl.TextColor3 = Color3.fromRGB(255, 220, 120); pl.TextStrokeTransparency = 0; pl.TextScaled = true
+		pl.Font = Enum.Font.GothamBold; pl.Text = "⭐ Mio ⭐"; pl.Parent = plate
+	end)
 end
 
 -- Kalles fra onCharacterAdded ved hvert spawn i lobby-modus. Døde spilleren i en
