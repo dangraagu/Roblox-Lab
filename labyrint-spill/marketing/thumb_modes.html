@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1920px; height:1080px; overflow:hidden; }
+  body {
+    font-family:"Arial Black", Impact, system-ui, sans-serif;
+    background:
+      radial-gradient(120% 90% at 74% 44%, rgba(16,66,90,.55), rgba(0,0,0,0) 58%),
+      radial-gradient(140% 120% at 30% 30%, #141b26 0%, #0a0f18 45%, #05070c 100%);
+    position:relative;
+  }
+  .grid { position:absolute; inset:0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.03) 2px, transparent 2px),
+      linear-gradient(90deg, rgba(255,255,255,.03) 2px, transparent 2px);
+    background-size:80px 80px,80px 80px;
+    mask: radial-gradient(90% 90% at 50% 50%, #000 40%, transparent 85%); }
+  .vignette { position:absolute; inset:0; box-shadow: inset 0 0 340px 90px rgba(0,0,0,.9); }
+
+  .brand { position:absolute; top:70px; left:96px;
+    font-family:"Segoe UI",Arial,sans-serif; font-weight:900; letter-spacing:.06em; font-size:38px;
+    background:linear-gradient(180deg,#fff2c4,#f3c65a 45%,#c8892a);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter:drop-shadow(0 2px 6px rgba(0,0,0,.7)); }
+
+  .wrap { position:absolute; inset:0; display:flex; align-items:center; }
+  .left { width:56%; padding:0 40px 0 96px; }
+  .kicker { font-family:"Segoe UI",Arial,sans-serif; font-weight:800; letter-spacing:.3em;
+    font-size:34px; color:#7fd7ff; text-transform:uppercase; margin-bottom:14px;
+    text-shadow:0 2px 10px rgba(0,0,0,.8); }
+  .title { font-size:120px; line-height:.9; letter-spacing:-2px; text-transform:uppercase; color:#fff;
+    filter:drop-shadow(0 6px 0 #0a1c2a) drop-shadow(0 14px 22px rgba(0,0,0,.7)); }
+  .title .g {
+    background:linear-gradient(180deg,#fff2c4,#f3c65a 45%,#c8892a);
+    -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { font-family:"Segoe UI",Arial,sans-serif; font-weight:800; font-size:44px; color:#fff;
+    margin-top:28px; text-shadow:0 3px 12px rgba(0,0,0,.8); }
+  .tag { font-family:"Segoe UI",Arial,sans-serif; font-weight:900; letter-spacing:.05em; font-size:36px;
+    color:#ffd24a; margin-top:20px; }
+
+  .right { position:absolute; right:70px; top:50%; transform:translateY(-50%);
+    filter:drop-shadow(0 30px 50px rgba(0,0,0,.6)); }
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="brand">LABYRINTH MARIOZO</div>
+
+  <div class="wrap">
+    <div class="left">
+      <div class="kicker">Climb together</div>
+      <div class="title">Race your<br><span class="g">Friends</span></div>
+      <div class="sub">Solo Climb · Group Race · Play with Friends</div>
+      <div class="tag">⏱ TOP THE LEADERBOARD — TIME &amp; LEVEL</div>
+    </div>
+
+    <div class="right">
+      <svg width="700" height="700" viewBox="0 0 100 100">
+        <defs>
+          <linearGradient id="floor" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#111a2c"/><stop offset="1" stop-color="#0a1020"/>
+          </linearGradient>
+          <filter id="glow"><feGaussianBlur stdDeviation="1.2" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        <rect x="4" y="4" width="92" height="92" rx="5" fill="url(#floor)" stroke="#243a56" stroke-width="1.5"/>
+        <!-- three lanes -->
+        <g stroke-width="5" fill="none" stroke-linecap="round" opacity=".28">
+          <path d="M14 90 V54 H30 V18 H50" stroke="#e0453f"/>
+          <path d="M32 90 V60 H48 V30 H66" stroke="#3aa0ff"/>
+          <path d="M50 90 V66 H66 V26 H82" stroke="#37e07a"/>
+        </g>
+        <g stroke-width="3.2" fill="none" stroke-linecap="round" filter="url(#glow)">
+          <path d="M14 90 V54 H30 V34" stroke="#e0453f"/>
+          <path d="M32 90 V60 H48 V44" stroke="#3aa0ff"/>
+          <path d="M50 90 V66 H66 V40" stroke="#37e07a"/>
+        </g>
+        <!-- racers -->
+        <circle cx="30" cy="33" r="4" fill="#e0453f" filter="url(#glow)"/>
+        <circle cx="48" cy="43" r="4" fill="#3aa0ff" filter="url(#glow)"/>
+        <circle cx="66" cy="39" r="4" fill="#37e07a" filter="url(#glow)"/>
+        <!-- finish flag top-right -->
+        <g transform="translate(84,14)">
+          <rect x="-0.8" y="-8" width="1.6" height="16" fill="#e9edf5"/>
+          <g>
+            <rect x="0.8" y="-8" width="9" height="7" fill="#fff"/>
+            <rect x="0.8" y="-8" width="3" height="3.5" fill="#111"/><rect x="6.8" y="-8" width="3" height="3.5" fill="#111"/>
+            <rect x="3.8" y="-4.5" width="3" height="3.5" fill="#111"/>
+          </g>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <div class="vignette"></div>
+</body>
+</html>
