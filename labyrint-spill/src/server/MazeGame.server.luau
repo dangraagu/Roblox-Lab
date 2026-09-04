@@ -2173,8 +2173,41 @@ local function buildLobby()
 	if #clist > 0 then
 		cbody.Text = "Thank you!\n\n\u{2605} " .. table.concat(clist, "\n\u{2605} ")
 	else
-		cbody.Text = "Help capture gameplay on our\nReddit and your name goes here\n(plus an in-game reward)!"
+		cbody.Text = "Help make content (screenshots / clips)\non our Reddit and get "
+			.. Contributors.REWARD.coins .. " coins,\n" .. Contributors.REWARD.gems
+			.. " gems + your name up here!"
 	end
+
+	-- "DAILY REWARD"-tavle: markedsfører den daglige innloggings-belønningen så
+	-- spillere ser at det lønner seg å komme tilbake (retention -> engaged players).
+	local dpole = makePart({ Name = "DailyRewardPole", Size = Vector3.new(1.2, 12, 1.2),
+		Position = LOBBY_ORIGIN + Vector3.new(20, 6, 16), Color = Color3.fromRGB(72, 60, 30),
+		Material = Enum.Material.Metal })
+	dpole.Parent = hub
+	local dbb = Instance.new("BillboardGui")
+	dbb.Name = "DailyRewardBoard"; dbb.Size = UDim2.fromScale(11, 7)
+	dbb.StudsOffset = Vector3.new(0, 8, 0); dbb.MaxDistance = 140; dbb.Parent = dpole
+	local dframe = Instance.new("Frame"); dframe.Size = UDim2.fromScale(1, 1)
+	dframe.BackgroundColor3 = Color3.fromRGB(38, 32, 16); dframe.BackgroundTransparency = 0.1
+	dframe.Parent = dbb
+	local duic = Instance.new("UICorner"); duic.CornerRadius = UDim.new(0, 14); duic.Parent = dframe
+	local dpad = Instance.new("UIPadding")
+	dpad.PaddingTop = UDim.new(0, 10); dpad.PaddingBottom = UDim.new(0, 10)
+	dpad.PaddingLeft = UDim.new(0, 10); dpad.PaddingRight = UDim.new(0, 10); dpad.Parent = dframe
+	local dlay = Instance.new("UIListLayout"); dlay.SortOrder = Enum.SortOrder.LayoutOrder
+	dlay.Padding = UDim.new(0, 6); dlay.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	dlay.Parent = dframe
+	local dtitle = Instance.new("TextLabel"); dtitle.Size = UDim2.new(1, 0, 0, 28)
+	dtitle.BackgroundTransparency = 1; dtitle.Font = Enum.Font.GothamBold; dtitle.TextScaled = true
+	dtitle.TextColor3 = Color3.fromRGB(255, 224, 130); dtitle.Text = "🎁 DAILY REWARD"
+	dtitle.LayoutOrder = 1; dtitle.Parent = dframe
+	local dtsc = Instance.new("UITextSizeConstraint"); dtsc.MaxTextSize = 28; dtsc.Parent = dtitle
+	local dbody = Instance.new("TextLabel"); dbody.Size = UDim2.new(1, 0, 1, -34)
+	dbody.BackgroundTransparency = 1; dbody.Font = Enum.Font.Gotham; dbody.TextColor3 = Color3.new(1, 1, 1)
+	dbody.TextWrapped = true; dbody.TextScaled = true; dbody.TextYAlignment = Enum.TextYAlignment.Top
+	dbody.LayoutOrder = 2; dbody.Parent = dframe
+	local dbsc = Instance.new("UITextSizeConstraint"); dbsc.MaxTextSize = 20; dbsc.Parent = dbody
+	dbody.Text = "Log in EVERY DAY!\n\n🔥 Streak = more coins\n(up to +1050 / day)\n💎 Day 7 = BONUS gems!"
 
 	-- 3x-statue av Mios ekte avatar, bak spawn og vendt mot dørene. Alt pcall-et:
 	-- feiler avatar-henting (nett/ukjent navn), står lobbyen bare uten statue.

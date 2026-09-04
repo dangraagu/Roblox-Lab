@@ -482,33 +482,44 @@ end
 --==================  DAGLIG-BELØNNING-TOAST  ====================--
 -- Liten banner som spretter opp øverst når serveren gir dagens belønning. Bygges
 -- én gang (skjult), fylles på nytt hver gang. All spiller-synlig tekst er engelsk.
-local rewardToast = Instance.new("Frame")
-rewardToast.Name = "DagligBelonning"
-rewardToast.AnchorPoint = Vector2.new(0.5, 0)
-rewardToast.Position = UDim2.new(0.5, 0, 0, 96)   -- rett under det faste HUD-panelet
-rewardToast.Size = UDim2.fromOffset(300, 66)
-rewardToast.BackgroundColor3 = Color3.fromRGB(32, 40, 30)
-rewardToast.BorderSizePixel = 0
-rewardToast.Visible = false
-rewardToast.ZIndex = 8
-rewardToast.Parent = gui
-corner(rewardToast, 12)
-stroke(rewardToast, Color3.fromRGB(120, 210, 120), 1.5, 0.05)
-depthGradient(rewardToast, Color3.fromRGB(52, 70, 46), Color3.fromRGB(26, 34, 24))
-local rewardSize = Instance.new("UISizeConstraint")
-rewardSize.MaxSize = Vector2.new(320, 66)
-rewardSize.MinSize = Vector2.new(240, 66)
-rewardSize.Parent = rewardToast
+-- STOR, animert daglig-belønning-popup MIDT på skjermen (godt synlig = spilleren
+-- ser verdien og vil komme tilbake i morgen). Spretter inn, teaser for neste dag,
+-- lukker seg selv. All spiller-synlig tekst er engelsk.
+local RewardTween = game:GetService("TweenService")
 
-local rewardTitle = mkLabel(rewardToast, 288, 26, 18, Enum.Font.GothamBold, Color3.fromRGB(180, 245, 170))
-rewardTitle.Position = UDim2.new(0.5, 0, 0, 8)
-rewardTitle.Text = "Daily reward!"
-rewardTitle.ZIndex = 9
+local rewardCard = Instance.new("Frame")
+rewardCard.Name = "DagligBelonning"
+rewardCard.AnchorPoint = Vector2.new(0.5, 0.5)
+rewardCard.Position = UDim2.fromScale(0.5, 0.42)
+rewardCard.Size = UDim2.fromOffset(360, 250)
+rewardCard.BackgroundColor3 = Color3.fromRGB(30, 26, 16)
+rewardCard.BorderSizePixel = 0
+rewardCard.Visible = false
+rewardCard.ZIndex = 30
+rewardCard.Parent = gui
+corner(rewardCard, 18)
+stroke(rewardCard, Color3.fromRGB(255, 210, 90), 3, 0)
+depthGradient(rewardCard, Color3.fromRGB(58, 48, 22), Color3.fromRGB(24, 20, 12))
+local rewardScale = Instance.new("UIScale"); rewardScale.Scale = 1; rewardScale.Parent = rewardCard
+local rewardFit = Instance.new("UISizeConstraint")
+rewardFit.MaxSize = Vector2.new(380, 260); rewardFit.MinSize = Vector2.new(300, 220)
+rewardFit.Parent = rewardCard
 
-local rewardDetail = mkLabel(rewardToast, 288, 24, 15, Enum.Font.GothamSemibold, Color3.fromRGB(232, 240, 228))
-rewardDetail.Position = UDim2.new(0.5, 0, 0, 34)
-rewardDetail.Text = ""
-rewardDetail.ZIndex = 9
+local rewardTitle = mkLabel(rewardCard, 344, 34, 26, Enum.Font.GothamBold, Color3.fromRGB(255, 224, 130))
+rewardTitle.Position = UDim2.new(0.5, 0, 0, 14); rewardTitle.Text = "🎁 DAILY REWARD"; rewardTitle.ZIndex = 31
+
+local rewardStreak = mkLabel(rewardCard, 344, 28, 20, Enum.Font.GothamBold, Color3.fromRGB(255, 150, 80))
+rewardStreak.Position = UDim2.new(0.5, 0, 0, 52); rewardStreak.Text = ""; rewardStreak.ZIndex = 31
+
+local rewardBig = mkLabel(rewardCard, 344, 50, 40, Enum.Font.GothamBold, Color3.fromRGB(255, 236, 150))
+rewardBig.Position = UDim2.new(0.5, 0, 0, 88); rewardBig.Text = ""; rewardBig.ZIndex = 31
+
+local rewardGems = mkLabel(rewardCard, 344, 30, 20, Enum.Font.GothamBold, Color3.fromRGB(120, 220, 240))
+rewardGems.Position = UDim2.new(0.5, 0, 0, 140); rewardGems.Text = ""; rewardGems.ZIndex = 31
+
+local rewardTease = mkLabel(rewardCard, 330, 46, 14, Enum.Font.GothamSemibold, Color3.fromRGB(205, 198, 175))
+rewardTease.Position = UDim2.new(0.5, 0, 1, -50); rewardTease.Text = ""; rewardTease.ZIndex = 31
+rewardTease.TextWrapped = true; rewardTease.TextTruncate = Enum.TextTruncate.None
 
 local rewardToken = 0
 local function showReward(p)
@@ -517,17 +528,32 @@ local function showReward(p)
 	local gems = tonumber(p.gems) or 0
 	local streak = tonumber(p.streak) or 1
 
-	local parts = { "+" .. coins .. " coins" }
-	if gems > 0 then table.insert(parts, "+" .. gems .. " gems") end
-	local line = table.concat(parts, "   ")
-	if streak > 1 then line = line .. "   ·   " .. streak .. "-day streak 🔥" end
-	rewardDetail.Text = line
+	rewardStreak.Text = "🔥 DAY " .. streak .. " STREAK"
+	rewardBig.Text = "+" .. coins .. " COINS"
+	if gems > 0 then
+		rewardGems.Text = "+" .. gems .. " GEMS 💎  weekly bonus!"
+		rewardGems.Visible = true
+	else
+		rewardGems.Visible = false
+	end
+	-- Teaser: hva i morgen gir + hvor langt til 7-dagers gullbonus (må matche serveren).
+	local nextCoins = 150 * math.min(streak + 1, 7)
+	local toBonus = (streak % 7 == 0) and 7 or (7 - (streak % 7))
+	rewardTease.Text = "Come back tomorrow: +" .. nextCoins .. " coins!   Day 7 = 💎 bonus (" .. toBonus .. " to go)"
 
-	rewardToast.Visible = true
 	rewardToken += 1
 	local mine = rewardToken
-	task.delay(5, function()
-		if mine == rewardToken then rewardToast.Visible = false end
+	rewardCard.Visible = true
+	rewardScale.Scale = 0.3
+	RewardTween:Create(rewardScale, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	task.delay(6, function()
+		if mine == rewardToken and rewardCard.Parent then
+			local out = RewardTween:Create(rewardScale, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.3 })
+			out.Completed:Connect(function()
+				if mine == rewardToken then rewardCard.Visible = false end
+			end)
+			out:Play()
+		end
 	end)
 end
 
