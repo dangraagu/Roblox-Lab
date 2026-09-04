@@ -95,6 +95,7 @@ local Medals = require(ReplicatedStorage:WaitForChild("Medals"))
 local PerkDefs = require(ReplicatedStorage:WaitForChild("PerkDefs"))
 local PerkService = require(ReplicatedStorage:WaitForChild("PerkService"))
 local GodUsers = require(ReplicatedStorage:WaitForChild("GodUsers"))
+local Contributors = require(ReplicatedStorage:WaitForChild("Contributors"))
 local Progression = require(ReplicatedStorage:WaitForChild("Progression"))
 local MazeGen = require(ReplicatedStorage:WaitForChild("MazeGen"))
 
@@ -1479,6 +1480,22 @@ local function onPlayerAdded(plr)
 		end
 	end
 
+	-- Bidragsyter-belønning: hjelpere hvis content-bidrag FAKTISK er tatt i bruk
+	-- (se Contributors-lista) får en engangs-bonus første gang de blir med. Samme
+	-- idempotens-mønster som start-gaven (d.gifts[REWARD.id]). Navnet vises også på
+	-- "Content Contributors"-tavla i lobbyen.
+	if d and d.canSave ~= false and Contributors.has(plr) then
+		d.gifts = d.gifts or {}
+		if Contributors.shouldReward(true, d.gifts) then
+			d.coins += Contributors.REWARD.coins
+			d.gems += Contributors.REWARD.gems
+			d.gifts[Contributors.REWARD.id] = true
+			refreshStats(plr)
+			savePlayer(plr)  -- lagre straks så belønningen ikke deles ut på nytt
+			sendShopData(plr)
+		end
+	end
+
 	-- Daglig belønning (retention): første innlogging på en ny UTC-dag gir mynter,
 	-- og en streak-bonus som vokser den første uka + en liten edelsten-bonus hver
 	-- 7. dag. Stashes i d.pendingReward og vises som en toast ved første spawn.
@@ -2121,6 +2138,43 @@ local function buildLobby()
 			end
 			openPickerEvent:FireClient(plr, { accepted = (playerData[plr] and playerData[plr].accepted) or 0, mode = "friends" })
 		end)
+
+	-- "Content Contributors"-tavle: takker hjelpere hvis content-bidrag er brukt
+	-- (navn fra Contributors.list()). BillboardGui = alltid vendt mot kamera, så
+	-- ingen face-orientering å bomme på. Tom liste -> oppfordring om å hjelpe.
+	local pole = makePart({ Name = "ContributorsPole", Size = Vector3.new(1.2, 12, 1.2),
+		Position = LOBBY_ORIGIN + Vector3.new(-20, 6, 16), Color = Color3.fromRGB(50, 54, 72),
+		Material = Enum.Material.Metal })
+	pole.Parent = hub
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "ContributorsBoard"; bb.Size = UDim2.fromScale(11, 7)
+	bb.StudsOffset = Vector3.new(0, 8, 0); bb.MaxDistance = 140; bb.Parent = pole
+	local frame = Instance.new("Frame"); frame.Size = UDim2.fromScale(1, 1)
+	frame.BackgroundColor3 = Color3.fromRGB(24, 26, 38); frame.BackgroundTransparency = 0.1
+	frame.Parent = bb
+	local uic = Instance.new("UICorner"); uic.CornerRadius = UDim.new(0, 14); uic.Parent = frame
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop = UDim.new(0, 10); pad.PaddingBottom = UDim.new(0, 10)
+	pad.PaddingLeft = UDim.new(0, 10); pad.PaddingRight = UDim.new(0, 10); pad.Parent = frame
+	local lay = Instance.new("UIListLayout"); lay.SortOrder = Enum.SortOrder.LayoutOrder
+	lay.Padding = UDim.new(0, 6); lay.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	lay.Parent = frame
+	local ctitle = Instance.new("TextLabel"); ctitle.Size = UDim2.new(1, 0, 0, 26)
+	ctitle.BackgroundTransparency = 1; ctitle.Font = Enum.Font.GothamBold; ctitle.TextScaled = true
+	ctitle.TextColor3 = Color3.fromRGB(255, 220, 120); ctitle.Text = "Content Contributors"
+	ctitle.LayoutOrder = 1; ctitle.Parent = frame
+	local tsc = Instance.new("UITextSizeConstraint"); tsc.MaxTextSize = 26; tsc.Parent = ctitle
+	local cbody = Instance.new("TextLabel"); cbody.Size = UDim2.new(1, 0, 1, -32)
+	cbody.BackgroundTransparency = 1; cbody.Font = Enum.Font.Gotham; cbody.TextColor3 = Color3.new(1, 1, 1)
+	cbody.TextWrapped = true; cbody.TextScaled = true; cbody.TextYAlignment = Enum.TextYAlignment.Top
+	cbody.LayoutOrder = 2; cbody.Parent = frame
+	local bsc = Instance.new("UITextSizeConstraint"); bsc.MaxTextSize = 20; bsc.Parent = cbody
+	local clist = Contributors.list()
+	if #clist > 0 then
+		cbody.Text = "Thank you!\n\n\u{2605} " .. table.concat(clist, "\n\u{2605} ")
+	else
+		cbody.Text = "Help capture gameplay on our\nReddit and your name goes here\n(plus an in-game reward)!"
+	end
 
 	-- 3x-statue av Mios ekte avatar, bak spawn og vendt mot dørene. Alt pcall-et:
 	-- feiler avatar-henting (nett/ukjent navn), står lobbyen bare uten statue.
