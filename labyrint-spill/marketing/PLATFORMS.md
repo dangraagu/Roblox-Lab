@@ -8,7 +8,7 @@ Legend:
 - **[launch]** — wait until age verification clears (player-facing; a locked game bounces players)
 - **[needs you]** — requires your logged-in account or captured footage; I can't create accounts
 
-Game link: https://www.roblox.com/games/10547716861/
+Game link: https://www.roblox.com/games/121268951050692/Labyrinth-Mariozo-Maze-Obby
 
 ---
 

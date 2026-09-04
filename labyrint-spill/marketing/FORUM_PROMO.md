@@ -3,7 +3,7 @@
 Copy-paste-ready posts for promoting the game on forums and communities, plus an
 honest note on what's worth doing now vs. after verification clears.
 
-Game link: https://www.roblox.com/games/10547716861/
+Game link: https://www.roblox.com/games/121268951050692/Labyrinth-Mariozo-Maze-Obby
 
 ---
 
@@ -56,7 +56,7 @@ https://devforum.roblox.com  →  Help and Feedback → Creations Feedback
 > 2. Is the difficulty framing ("harder every level") appealing or intimidating?
 > 3. Anything in the description that's unclear?
 >
-> Game: https://www.roblox.com/games/10547716861/
+> Game: https://www.roblox.com/games/121268951050692/Labyrinth-Mariozo-Maze-Obby
 > Thanks! (It's a small game I'm making with my nephew.)
 
 ### 2. Reddit — r/RobloxGameDev and r/RobloxDevelopers
@@ -70,7 +70,7 @@ Dev-focused subs; feedback posts are welcome. Read each sub's rules/pinned post 
 > with traps/monsters, best-time leaderboards, and solo/group/friends modes; progress
 > saves between sessions. I just redid the thumbnails (happy to link them) and would
 > love feedback on the thumbnails and whether the difficulty framing lands.
-> Link: https://www.roblox.com/games/10547716861/
+> Link: https://www.roblox.com/games/121268951050692/Labyrinth-Mariozo-Maze-Obby
 
 ### 3. Roblox dev Discords
 The DevForum has an official community Discord, and there are big "Roblox Studio" /
@@ -79,7 +79,7 @@ channel, with a line of context — never DM people the link.
 
 **One-liner:**
 > Made a 500-level maze obby with my nephew — Labyrinth Mariozo. Just redid the
-> thumbnails, would love a quick look/feedback 🙏 https://www.roblox.com/games/10547716861/
+> thumbnails, would love a quick look/feedback 🙏 https://www.roblox.com/games/121268951050692/Labyrinth-Mariozo-Maze-Obby
 
 ---
 
@@ -92,7 +92,7 @@ channel, with a line of context — never DM people the link.
 **Body:**
 > Free maze obby: dodge traps and monsters, race the clock, climb the leaderboard.
 > Solo, group, or play with friends; your progress saves. Made with my nephew — would
-> love for people to try it: https://www.roblox.com/games/10547716861/
+> love for people to try it: https://www.roblox.com/games/121268951050692/Labyrinth-Mariozo-Maze-Obby
 
 ### 5. TikTok / YouTube Shorts
 Short vertical clip (or a slideshow of the promo thumbnails if no gameplay capture).

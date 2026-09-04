@@ -3,7 +3,7 @@
 A zero-budget plan to grow the player base, sequenced around the one thing that
 currently gates everything: account verification. Everything here is free.
 
-Game link: https://www.roblox.com/games/10547716861/
+Game link: https://www.roblox.com/games/121268951050692/Labyrinth-Mariozo-Maze-Obby
 (Use the "Copy link" button on the Creator Dashboard → Overview if the URL ever changes.)
 
 ---
