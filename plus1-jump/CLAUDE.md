@@ -60,10 +60,14 @@ runtime tested only in Studio (no headless runtime here).
 3. **In-game test** (Private): join/Edit-in-Studio and confirm it plays — stepping tiles
    grants +1 jump, tower streams, rebirth/codes/leaderboard work. Never runtime-tested yet.
 4. ~~Content-maturity Questionnaire~~ DONE 2026-09-05 (all 17 = No → Label **Minimal**,
-   Descriptors None, Non-Compliant Regions None). Set Audience = **Public** when ready
-   (user's call). NOTE gotcha: a green check = "answered", not "No" — the Preview page is
-   the source of truth; an accidental Yes on Alcohol/Paid-Random surfaced there and was
-   corrected before Submit.
+   Descriptors None, Non-Compliant Regions None). NOTE gotcha: a green check = "answered",
+   not "No" — the Preview page is the source of truth; an accidental Yes on Alcohol/
+   Paid-Random surfaced there and was corrected before Submit.
+5. ~~Set Audience = Public~~ DONE 2026-09-05 — experience is now **PUBLIC**.
+   URL: https://www.roblox.com/games/120040655253410/ (reach still gated: "limited to 16+
+   users and trusted friends" until 25 engaged players/60d OR 1,000 Robux — same reach-tier
+   as the maze; unrelated to the now-clean maturity/region status).
+   STILL PENDING: an actual in-game runtime test (built + unit-tested only).
 5. Fill real gamepass IDs into `Config.Passes`, set `Enabled = true`, add ProcessReceipt.
 6. Optional: lethal-hazard toggle, per-player trails (Sky Trails pass), SurfaceGui
    leaderboard board, a SpawnLocation in default.project.json (currently spawns are placed
