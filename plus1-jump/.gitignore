@@ -4,6 +4,6 @@
 *.rbxm
 *.rbxmx
 # Publish scripts hold the Open Cloud API key inline — NEVER commit
-publish_live.bat
-publish_live.sh
+publish_*.bat
+publish_*.sh
 *.secret
