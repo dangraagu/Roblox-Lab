@@ -59,8 +59,11 @@ runtime tested only in Studio (no headless runtime here).
 2. ~~Upload the code~~ DONE (versionNumber 2, via `publish_plus1.bat`).
 3. **In-game test** (Private): join/Edit-in-Studio and confirm it plays — stepping tiles
    grants +1 jump, tower streams, rebirth/codes/leaderboard work. Never runtime-tested yet.
-4. Run the content-maturity **Questionnaire** (all 17 = No for this obby — see maze memory
-   note), THEN set Audience = **Public** (user's call).
+4. ~~Content-maturity Questionnaire~~ DONE 2026-09-05 (all 17 = No → Label **Minimal**,
+   Descriptors None, Non-Compliant Regions None). Set Audience = **Public** when ready
+   (user's call). NOTE gotcha: a green check = "answered", not "No" — the Preview page is
+   the source of truth; an accidental Yes on Alcohol/Paid-Random surfaced there and was
+   corrected before Submit.
 5. Fill real gamepass IDs into `Config.Passes`, set `Enabled = true`, add ProcessReceipt.
 6. Optional: lethal-hazard toggle, per-player trails (Sky Trails pass), SurfaceGui
    leaderboard board, a SpawnLocation in default.project.json (currently spawns are placed
