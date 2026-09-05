@@ -11,12 +11,19 @@ roll** may climb its rarity tier (Shard→Quartz→Amethyst→Prism→Legendary�
 Dust → buy rarer seeds / chambers / luck+growth boosters → weekly Geode + codes + Gem
 Codex. Single shared server, per-player plots.
 
-## State — v1 pure logic + server/client built + tested; NOT deployed
+## State — v1 built + tested + DEPLOYED PUBLIC (2026-09-05); NOT runtime-tested
 - **166 luau-CLI tests pass** (Rng 56, Rarity 12, Growth 20, Economy 36, Geode 22,
   Codex 8, Codes 12). Server/client: luau-compile clean, luau-analyze clean (only Roblox
   type/global noise).
-- No Roblox experience yet. Deploy = create experience → git-ignored `publish_*.bat` with
-  Open Cloud key → questionnaire (all No) → Public.
+- **Live:** universe `10543994765`, place `106123351742435` — https://www.roblox.com/games/106123351742435
+  Audience **Public**, genre Simulation, maturity Minimal / None (no region blocks).
+  Published via `publish_crystal.bat` (Open Cloud, git-ignored), version 4.
+- **Reach tier:** still "limited to 16+ users and trusted friends" — separate gate, needs
+  25 engaged players/60d OR 1000 Robux spend. Same as +1 Jump; lifts with real traffic.
+- **NOT runtime-tested:** never run in Studio/Player (Studio access denied, Player not
+  installed). Unit tests + adversarial review only — first real play could surface
+  DataStore / ClickDetector / plot-claim bugs. Marketing gates on a play-through (see
+  `MARKETING.md`).
 
 ## Core model / important invariants
 - **Growth is stateless**: a plant = `{tier, at=os.time()}`; maturity/progress derived on
