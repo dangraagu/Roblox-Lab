@@ -18,13 +18,16 @@ Single-server, shared tower streamed ahead of the highest player. Codes + gamepa
   - Name "+1 Jump Every Step 🔼 Sky Temple Obby"; Genre Obby & Platformer / Tower Obby
     (genre locked until 2026-10-04); Audience = **Private** (make Public after code upload).
   - Future URL: https://www.roblox.com/games/120040655253410/...
-  - The place still holds the default baseplate — the +1 Jump code is NOT uploaded yet.
-- **To upload the code:** build with rojo (`rojo build -o Plus1.rbxlx` from this dir) then
-  publish that place file to place id 120040655253410 — either via Studio (open the rbxlx →
-  Publish to Roblox → this place) OR an Open Cloud publish script (git-ignored, mirror
-  `labyrint-spill/publish_live.bat`; needs an API key scoped to universe 10543598100 with
-  place-publish permission). After upload, run the content-maturity Questionnaire (all 17 =
-  No) BEFORE going Public so it isn't region-blocked (see maze memory note).
+  - **Code uploaded 2026-09-05 (versionNumber 2)** via `publish_plus1.bat` (git-ignored,
+    mirrors `labyrint-spill/publish_live.bat`; `rojo build -o Plus1.rbxl` + Open Cloud POST).
+    Re-publish anytime by double-clicking `publish_plus1.bat` (or PowerShell: `Set-Location
+    <this dir>; & '.\publish_plus1.bat'`). It has a couple of harmless "'M' is not recognized"
+    stray lines from the copied validation block — build+publish still succeed.
+  - Open Cloud key: the existing "labmario" key's scope was extended to cover BOTH universes
+    (maze + this one) with `universe-places:write`, restricted to those two experiences.
+- **Still PRIVATE** — set Audience = Public only after: (1) in-game test that it plays, and
+  (2) the content-maturity Questionnaire (all 17 = No for this obby — see maze memory note),
+  so it isn't region-blocked.
 - Pure logic: **111 luau-CLI tests pass** (Rng 56, Progression 28, TowerGen 15, Codes 12).
 - Server/client verified with luau-compile (syntax) + luau-analyze (only Roblox
   type/global noise remains).
@@ -53,10 +56,12 @@ runtime tested only in Studio (no headless runtime here).
 
 ## Next
 1. ~~Create the Roblox experience~~ DONE (universe 10543598100 / place 120040655253410).
-2. **Upload the code** to place 120040655253410 (rojo build → Studio publish or Open Cloud;
-   see State section), then run the content-maturity Questionnaire (all 17 = No for this
-   obby — see the maze memory note) BEFORE setting Audience = Public, so it isn't region-
-   blocked.
-3. Fill real gamepass IDs into `Config.Passes`, set `Enabled = true`, add ProcessReceipt.
-4. Optional: lethal-hazard toggle, per-player trails (Sky Trails pass), SurfaceGui
-   leaderboard board.
+2. ~~Upload the code~~ DONE (versionNumber 2, via `publish_plus1.bat`).
+3. **In-game test** (Private): join/Edit-in-Studio and confirm it plays — stepping tiles
+   grants +1 jump, tower streams, rebirth/codes/leaderboard work. Never runtime-tested yet.
+4. Run the content-maturity **Questionnaire** (all 17 = No for this obby — see maze memory
+   note), THEN set Audience = **Public** (user's call).
+5. Fill real gamepass IDs into `Config.Passes`, set `Enabled = true`, add ProcessReceipt.
+6. Optional: lethal-hazard toggle, per-player trails (Sky Trails pass), SurfaceGui
+   leaderboard board, a SpawnLocation in default.project.json (currently spawns are placed
+   by the server on CharacterAdded).
