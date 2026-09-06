@@ -11,3 +11,8 @@ Thumbs.db
 *.rbxlx.lock
 /bin/
 .rokit/
+
+# robloxemu generated artefacts (wrap.py output + Python cache); regenerate with wrap.py
+robloxemu/build/
+robloxemu/__pycache__/
+robloxemu/scenes/

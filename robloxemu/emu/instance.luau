@@ -453,9 +453,26 @@ function InstanceLib.new(deps)
 				return v
 			end
 		end
-		-- Unset property -> nil (never raises). Calling a nil member raises naturally and
-		-- Luau names the method in the error, which is the "surface the gap" behaviour.
-		return st.props[key]
+		local prop = st.props[key]
+		if prop ~= nil then
+			return prop
+		end
+		-- Dot access falls through to a CHILD, exactly as in Roblox: `ReplicatedStorage.Config`
+		-- is the ModuleScript named "Config". Our shared modules rely on this — several use the
+		-- dual-path idiom `(script and require(script.Parent.Rng)) or require("./Rng")` so the
+		-- same file works in Roblox and under the luau CLI, and without child lookup the Roblox
+		-- branch handed `require` a nil.
+		if type(key) == "string" then
+			for _, child in st.children do
+				if rawget(child, "__emu").props.Name == key then
+					return child
+				end
+			end
+		end
+		-- Unset property and no such child -> nil (never raises). Calling a nil member raises
+		-- naturally and Luau names the method in the error, which is the "surface the gap"
+		-- behaviour we want.
+		return nil
 	end
 
 	InstanceMT.__newindex = function(self, key, value)
@@ -1079,8 +1096,60 @@ function InstanceLib.new(deps)
 		},
 	})
 
-	-- GUI + UI classes need no behaviour at all — the hierarchy table above gives them
+	-- GUI + UI classes need almost no behaviour — the hierarchy table above gives them
 	-- :IsA("GuiObject") and the generic property bag gives them everything else.
+	--
+	-- The exception is the handful of properties Roblox COMPUTES rather than stores. Our HUDs
+	-- read them: `UIListLayout.AbsoluteContentSize` is what every ScrollingFrame divides to get
+	-- its CanvasSize, and reading nil there is a crash, not a wrong number. These are the zero
+	-- values Roblox reports for an empty layout, seeded so the code runs; nothing here performs
+	-- any actual layout, so a check that needs real geometry must compute it itself (see
+	-- Harness.guiRects).
+	if dt.Vector2 then
+		local zero2 = dt.Vector2.zero
+		defineClass("UIGridStyleLayout", { defaults = { AbsoluteContentSize = zero2 } })
+		defineClass("GuiBase2d", { defaults = { AbsoluteSize = zero2, AbsolutePosition = zero2 } })
+	end
+	-- Same reasoning for the UI modifiers whose default our code divides by or compares
+	-- against. A UIScale created and never assigned reads 1 in Roblox, and dividing by the nil
+	-- we used to return crashed the HUD before it drew anything.
+	defineClass("UIScale", { defaults = { Scale = 1 } })
+	defineClass("UIStroke", { defaults = { Thickness = 1, Transparency = 0, Enabled = true } })
+	defineClass("UIAspectRatioConstraint", { defaults = { AspectRatio = 1 } })
+
+	-- The GUI input events. Every HUD button wires `Activated:Connect(...)` at construction, so
+	-- without these a client script cannot even finish loading. They also give a headless run the
+	-- only handle it has on the UI: `button.Activated:Fire()` is how a test presses a button.
+	-- Roblox gives every GuiObject a zero Size/Position/AnchorPoint, and code reads them back
+	-- (the geometry walk in Harness.guiRects does, for one). Returning nil instead made a frame
+	-- that was never explicitly positioned look like "not a GUI object at all".
+	local zeroUDim2 = if dt.UDim2 then dt.UDim2.new(0, 0, 0, 0) else nil
+	defineClass("GuiObject", {
+		defaults = {
+			Visible = true,
+			Active = false,
+			ZIndex = 1,
+			Size = zeroUDim2,
+			Position = zeroUDim2,
+			AnchorPoint = if dt.Vector2 then dt.Vector2.zero else nil,
+		},
+		events = {
+			"InputBegan", "InputEnded", "InputChanged",
+			"MouseEnter", "MouseLeave", "MouseMoved",
+			"TouchTap", "TouchLongPress", "TouchPan",
+			"SelectionGained", "SelectionLost",
+		},
+	})
+	defineClass("GuiButton", {
+		events = {
+			"Activated",
+			"MouseButton1Click", "MouseButton1Down", "MouseButton1Up",
+			"MouseButton2Click", "MouseButton2Down", "MouseButton2Up",
+		},
+	})
+	defineClass("TextBox", {
+		events = { "Focused", "FocusLost", "ReturnPressedFromOnScreenKeyboard" },
+	})
 
 	-- ------------------------------------------------------------ constructor
 	create = function(className, parent)

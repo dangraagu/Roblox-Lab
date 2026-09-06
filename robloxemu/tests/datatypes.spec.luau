@@ -571,5 +571,37 @@ do
 	end
 end
 
+
+--============================================================ Vector2
+-- Added for the GUI layer (AnchorPoint, AbsoluteSize). Roblox reports it as "Vector2".
+do
+	local v = T.Vector2.new(3, 4)
+	eq(v.X, 3, "Vector2 keeps X")
+	eq(v.Y, 4, "Vector2 keeps Y")
+	eq(T.typeOf(v), "Vector2", "typeOf reports Vector2")
+	eq(v.Magnitude, 5, "Vector2 magnitude is the hypotenuse")
+	eq(T.Vector2.new(0, 0).X, 0, "Vector2.new defaults are numeric")
+	eq(T.Vector2.zero.X, 0, "Vector2.zero exists")
+	eq(T.Vector2.one.Y, 1, "Vector2.one exists")
+	truthy(T.Vector2.new(1, 2) == T.Vector2.new(1, 2), "equal Vector2 values compare equal")
+	truthy(T.Vector2.new(1, 2) ~= T.Vector2.new(2, 1), "different Vector2 values differ")
+	local sum = T.Vector2.new(1, 2) + T.Vector2.new(3, 4)
+	eq(sum.X, 4, "Vector2 addition adds X")
+	eq(sum.Y, 6, "Vector2 addition adds Y")
+	local diff = T.Vector2.new(5, 5) - T.Vector2.new(1, 2)
+	eq(diff.X, 4, "Vector2 subtraction subtracts X")
+	eq(diff.Y, 3, "Vector2 subtraction subtracts Y")
+	eq((T.Vector2.new(2, 3) * 2).X, 4, "Vector2 scales by a number on the right")
+	eq((2 * T.Vector2.new(2, 3)).Y, 6, "Vector2 scales by a number on the left")
+	eq((T.Vector2.new(4, 6) / 2).X, 2, "Vector2 divides by a number")
+	eq((-T.Vector2.new(1, 2)).X, -1, "Vector2 negates")
+	local u = T.Vector2.new(0, 7).Unit
+	eq(u.X, 0, "Vector2 unit keeps the zero axis")
+	eq(u.Y, 1, "Vector2 unit normalises the other axis")
+	eq(tostring(T.Vector2.new(1.5, 2)), "1.5, 2", "Vector2 tostring matches Roblox formatting")
+	-- AnchorPoint is the real reason this type exists; it must survive a property round-trip.
+	eq(T.Vector2.new(0.5, 1).X, 0.5, "Vector2 keeps fractional components")
+end
+
 print(string.format("datatypes: %d passed, %d failed", passed, failed))
 if failed > 0 then error("datatypes tests failed") end

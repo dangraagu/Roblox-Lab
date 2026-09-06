@@ -937,6 +937,27 @@ function ServicesLib.new(deps)
 		},
 	})
 
+	defineClass("GuiService", {
+		parent = "Instance",
+		events = { "MenuOpened", "MenuClosed" },
+		defaults = { TopbarInset = nil },
+		methods = {
+			-- Roblox returns TWO Vector2s: the top-left inset (the topbar) and the bottom-right one.
+			-- 36 px is the modern topbar height; a HUD that pins buttons to the top edge with
+			-- IgnoreGuiInset on has to subtract it or they land under the Roblox menu button.
+			GetGuiInset = function()
+				local v2 = dt.Vector2
+				if v2 == nil then
+					return nil, nil
+				end
+				return try((v2 :: any).new, 0, 36), try((v2 :: any).new, 0, 0)
+			end,
+			IsTenFootInterface = function()
+				return false
+			end,
+		},
+	})
+
 	defineClass("Debris", {
 		parent = "Instance",
 		methods = {
@@ -993,6 +1014,7 @@ function ServicesLib.new(deps)
 		"MarketplaceService",
 		"BadgeService",
 		"UserInputService",
+		"GuiService",
 		"Debris",
 	}
 	for _, name in SINGLETONS do

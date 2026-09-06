@@ -163,6 +163,70 @@ Vector3.zAxis = newV3(0, 0, 1)
 
 M.Vector3 = Vector3
 
+--============================================================================ Vector2
+-- Only the GUI layer uses this (AnchorPoint, AbsoluteSize, AbsolutePosition, mouse deltas),
+-- so it is deliberately smaller than Vector3: arithmetic, magnitude, unit, equality.
+
+local V2 = {}
+TYPE_OF[V2] = "Vector2"
+
+local function newV2(x, y)
+	return setmetatable({ X = x, Y = y }, V2)
+end
+
+local function isV2(v) return type(v) == "table" and getmetatable(v) == V2 end
+
+V2.__index = function(self, key)
+	if key == "Magnitude" then
+		return math.sqrt(self.X * self.X + self.Y * self.Y)
+	elseif key == "Unit" then
+		local m = math.sqrt(self.X * self.X + self.Y * self.Y)
+		if m == 0 then
+			-- Roblox yields nan components here rather than raising; match it so code that
+			-- normalises a zero vector fails the same way it would in game.
+			return newV2(0 / 0, 0 / 0)
+		end
+		return newV2(self.X / m, self.Y / m)
+	end
+	return nil
+end
+
+V2.__add = function(a, b)
+	if not (isV2(a) and isV2(b)) then error("Vector2 + expects two Vector2 values", 2) end
+	return newV2(a.X + b.X, a.Y + b.Y)
+end
+V2.__sub = function(a, b)
+	if not (isV2(a) and isV2(b)) then error("Vector2 - expects two Vector2 values", 2) end
+	return newV2(a.X - b.X, a.Y - b.Y)
+end
+V2.__unm = function(a) return newV2(-a.X, -a.Y) end
+V2.__mul = function(a, b)
+	if isV2(a) and type(b) == "number" then return newV2(a.X * b, a.Y * b) end
+	if type(a) == "number" and isV2(b) then return newV2(a * b.X, a * b.Y) end
+	if isV2(a) and isV2(b) then return newV2(a.X * b.X, a.Y * b.Y) end
+	error("Vector2 * expects a number or a Vector2", 2)
+end
+V2.__div = function(a, b)
+	if isV2(a) and type(b) == "number" then return newV2(a.X / b, a.Y / b) end
+	if isV2(a) and isV2(b) then return newV2(a.X / b.X, a.Y / b.Y) end
+	error("Vector2 / expects a number or a Vector2", 2)
+end
+V2.__eq = function(a, b) return isV2(a) and isV2(b) and a.X == b.X and a.Y == b.Y end
+V2.__tostring = function(v) return fmt(v.X) .. ", " .. fmt(v.Y) end
+
+local Vector2 = {}
+
+function Vector2.new(x, y)
+	return newV2(num(x, 0), num(y, 0))
+end
+
+Vector2.zero = newV2(0, 0)
+Vector2.one = newV2(1, 1)
+Vector2.xAxis = newV2(1, 0)
+Vector2.yAxis = newV2(0, 1)
+
+M.Vector2 = Vector2
+
 --============================================================================ CFrame
 
 local CF = {}

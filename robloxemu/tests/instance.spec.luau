@@ -334,9 +334,12 @@ do
 	frame:GetPropertyChangedSignal("Visible"):Connect(function()
 		hits += 1
 	end)
-	frame.Visible = true
-	frame.Visible = true -- unchanged
+	-- A Frame starts Visible = true (the Roblox default), so this has to begin by turning it
+	-- OFF; assigning true first would be a no-op and would not fire at all.
+	eq(frame.Visible, true, "Frame.Visible defaults to true")
 	frame.Visible = false
+	frame.Visible = false -- unchanged
+	frame.Visible = true
 	eq(hits, 2, "GetPropertyChangedSignal fires only when the value actually changes")
 end
 

@@ -1401,6 +1401,11 @@ sendLevelInfo = function(plr)
 		accepted = d and d.accepted or 0,    -- spillerens sekvensielle "accepted"-nivå
 		-- Gude-spillere (Mio) ser sitt eget skille rent/gud; andre får ikke feltet.
 		bestWithGod = (d and GodUsers.has(plr)) and d.bestWithGod or nil,
+		-- Delt-maze-modus har ingen lobby. LightingClient bruker flagget til å velge
+		-- mørke-presetet; uten det ville den falle tilbake til lys hub og fjerne mørket.
+		inLobby = false,
+		-- Sikten strammes inn med nivået; klienten speiler den i stedet for å gjette.
+		fog = getDifficulty(currentLevel).sight,
 	})
 end
 
@@ -1710,7 +1715,11 @@ end)
 -- findNearestPlayerRoot. Utgangen er alltid åpen (CONFIG.UnlockExitBy = "none").
 local LOBBY_ORIGIN = Vector3.new(0, 0, 0)
 local INSTANCE_SPACING = 6000       -- studs mellom instanser (godt utenfor sikt/range)
-local LOBBY_FOG = 90                -- huben er lys; instansene bruker samme globale tåke
+-- Huben er lys. Denne verdien er BARE startverdien serveren setter før noen klient har
+-- rukket å si noe; det er `LightingClient` som eier lyset fra da av (Lighting er global på
+-- serveren, og to spillere kan stå i hver sin instans samtidig). Hold den i par med LOBBY-
+-- presetet i LightingClient.
+local LOBBY_FOG = 520
 local INSTANCE_FOG = 45            -- fast sikt i instansene (per-spiller-tåke kommer senere)
 -- playerInstance er forhånds-deklarert i STATE-seksjonen (brukes av onCharacterAdded
 -- + SetGodMode lenger oppe).
@@ -2011,6 +2020,9 @@ local function sendInstanceInfo(plr, inst)
 		accepted = d and d.accepted or 0,
 		bestWithGod = (d and GodUsers.has(plr)) and d.bestWithGod or nil,
 		inLobby = (inst == nil),
+		-- LightingClient bruker denne til tåka inne i instansen. Lyset settes per klient
+		-- fordi Lighting er global på serveren og to spillere kan stå i hver sin instans.
+		fog = INSTANCE_FOG,
 	})
 end
 
@@ -2528,12 +2540,18 @@ end
 
 --============================  START  ============================--
 if CONFIG.UseLobby then
-	Lighting.FogEnd = INSTANCE_FOG
-	if CONFIG.Darkness then
-		Lighting.ClockTime = 0; Lighting.Brightness = 1
-		Lighting.OutdoorAmbient = Color3.fromRGB(20, 20, 28)
-		Lighting.FogColor = Color3.fromRGB(8, 8, 12); Lighting.FogStart = 0
-	end
+	-- Alle spawner i lobbyen, så lobbyen er riktig STARTtilstand. Før satte vi mørke-
+	-- presetet her og lot det stå: huben fikk labyrintens svarte tåke fra 0 til 45 studs, og
+	-- det første en ny spiller så var et grått gulv i fakkellys. En spiller beskrev spillet
+	-- som "a black part that is scaled in the shape of a square" — det var dette.
+	-- Mørket settes nå per klient (LightingClient) når spilleren går inn i en instans.
+	Lighting.FogEnd = LOBBY_FOG
+	Lighting.FogStart = 140
+	Lighting.ClockTime = 14.2
+	Lighting.Brightness = 2.4
+	Lighting.Ambient = Color3.fromRGB(96, 100, 118)
+	Lighting.OutdoorAmbient = Color3.fromRGB(128, 134, 152)
+	Lighting.FogColor = Color3.fromRGB(150, 158, 178)
 	buildLobby()
 	refreshLeaderboard()
 	print("[Labyrint] Lobby-modus lastet.")
