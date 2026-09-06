@@ -66,8 +66,14 @@ type Profile = {
 	redeemed: Codes.RedeemedSet,
 	tint: string, -- the SELECTED tint
 	ownedTints: { [string]: boolean }, -- everything the player may select (string keys)
-	canSave: boolean, -- true only if we hold the session lock
+	canSave: boolean, -- true only if we hold the session lock (RE-EVALUATED, see retryClaim)
 	lockToken: string, -- STABLE per-session ownership token (not a timestamp)
+	closing: boolean, -- R7: set before the releasing save; blocks any further lock RENEWAL
+	publishedBest: number, -- R2/R9: highest day already on the leaderboard (or loaded from the store)
+	lastPublishAt: number, -- R9: os.clock() of the last OrderedDataStore write
+	readOnlyNotified: boolean, -- R5: the "this session can't save" notice is one-shot
+	redeemBusy: boolean, -- R4: an UpdateAsync redeem is in flight for this player
+	remoteAt: { [string]: number }, -- R4: per-remote last-accepted os.clock(), for the cooldown
 }
 
 type PassState = {
@@ -176,19 +182,43 @@ local function defaultProfile(): Profile
 		ownedTints = { [Config.DefaultTint] = true },
 		canSave = false,
 		lockToken = "",
+		closing = false,
+		publishedBest = 0,
+		lastPublishAt = -math.huge, -- so the first publish is never throttled
+		readOnlyNotified = false,
+		redeemBusy = false,
+		remoteAt = {},
 	}
 end
 
--- Load the real profile via UpdateAsync and, if the previous lock is stale/absent, claim a
--- new lock. canSave is set only when we acquire the lock, so a second session never clobbers
--- the first, and a failed load never overwrites real data.
-local function loadProfile(plr: Player): Profile
-	local prof = defaultProfile()
+-- What one lock-claim attempt learned: the stored values (always) and whether we now own the
+-- lock (`got`). Kept separate from Profile so a RETRY can merge instead of overwrite.
+type ClaimResult = {
+	got: boolean,
+	bestDay: number,
+	caught: any,
+	hintTokens: number,
+	redeemed: any,
+	tint: string,
+	ownedTints: { [string]: boolean },
+}
+
+-- Read the real profile via UpdateAsync and, if the previous lock is absent/stale/ours, claim
+-- it. Used both at join and by the periodic RETRY (R1), so there is exactly ONE copy of the
+-- lock rules. Returns nil when the DataStore call itself failed (never guess at that point).
+local function claimLock(plr: Player, myToken: string): ClaimResult?
 	if not profileStore then
-		prof.canSave = false
-		return prof
+		return nil
 	end
-	local myToken = newSessionToken()
+	local res: ClaimResult = {
+		got = false,
+		bestDay = 0,
+		caught = {},
+		hintTokens = Config.Hint.StartTokens,
+		redeemed = {},
+		tint = Config.DefaultTint,
+		ownedTints = { [Config.DefaultTint] = true },
+	}
 	local key = "u_" .. plr.UserId
 	local success, err = pcall(function()
 		profileStore:UpdateAsync(key, function(old)
@@ -204,40 +234,84 @@ local function loadProfile(plr: Player): Profile
 				end
 			end
 
-			-- adopt the stored data either way (a live read never overwrites, only reads)
-			prof.bestDay = old.bestDay or 0
-			prof.caught = old.caught or {}
-			prof.hintTokens = old.hintTokens or Config.Hint.StartTokens
-			prof.redeemed = old.redeemed or {}
+			-- adopt the stored data either way (a live read never overwrites, only reads).
+			-- Re-assigned on every transform attempt, so a retry can never leave a half-read mix.
+			res.got = false
+			res.bestDay = tonumber(old.bestDay) or 0
+			res.caught = old.caught or {}
+			res.hintTokens = tonumber(old.hintTokens) or Config.Hint.StartTokens
+			res.redeemed = old.redeemed or {}
 			local storedTint = old.tint
-			prof.tint = (type(storedTint) == "string" and tintIsKnown(storedTint)) and storedTint or Config.DefaultTint
-			prof.ownedTints = sanitizeOwnedTints(old.ownedTints, prof.tint)
+			res.tint = (type(storedTint) == "string" and tintIsKnown(storedTint)) and storedTint or Config.DefaultTint
+			res.ownedTints = sanitizeOwnedTints(old.ownedTints, res.tint)
 
 			if heldByOther then
-				-- someone else holds it: load read-only, do NOT take the lock
-				prof.canSave = false
-				prof.lockToken = ""
-				return old -- unchanged
+				-- R8: someone else holds it — load READ-ONLY. Returning `old` here still counts
+				-- as an UpdateAsync WRITE (a full profile round-trip on every locked-out join,
+				-- for nothing). Returning nil aborts the write and keeps only the read.
+				return nil
 			end
 
 			-- free / stale / ours: take the lock
-			prof.canSave = true
-			prof.lockToken = myToken
-			old.bestDay = prof.bestDay
-			old.caught = prof.caught
-			old.hintTokens = prof.hintTokens
-			old.redeemed = prof.redeemed
-			old.tint = prof.tint
-			old.ownedTints = prof.ownedTints
+			res.got = true
+			old.bestDay = res.bestDay
+			old.caught = res.caught
+			old.hintTokens = res.hintTokens
+			old.redeemed = res.redeemed
+			old.tint = res.tint
+			old.ownedTints = res.ownedTints
 			old.lock = { at = nowStamp(), token = myToken }
 			return old
 		end)
 	end)
 	if not success then
-		warn("[Anomaly] load failed for", plr.Name, err)
-		prof.canSave = false -- never save over data we couldn't read
-		prof.lockToken = ""
+		warn("[Anomaly] lock claim failed for", plr.Name, err)
+		return nil
 	end
+	return res
+end
+
+-- Drop a lock we own WITHOUT needing a live profile entry. Used when a retry wins the lock for
+-- a player who has already left (the profile table entry is gone, so saveProfile can't help).
+local function releaseLockToken(userId: number, token: string)
+	if not profileStore or token == "" then
+		return
+	end
+	pcall(function()
+		profileStore:UpdateAsync("u_" .. userId, function(old)
+			if type(old) ~= "table" or type(old.lock) ~= "table" or old.lock.token ~= token then
+				return nil -- not ours (or already gone): change nothing, write nothing
+			end
+			old.lock = nil
+			return old
+		end)
+	end)
+end
+
+-- canSave is set only when we acquire the lock, so a second session never clobbers the first,
+-- and a failed load never overwrites real data. A read-only session is NOT permanent any more:
+-- the autosave loop re-attempts the claim (see retryClaim, R1).
+local function loadProfile(plr: Player): Profile
+	local prof = defaultProfile()
+	if not profileStore then
+		return prof
+	end
+	local myToken = newSessionToken()
+	local res = claimLock(plr, myToken)
+	if not res then
+		-- load failed: we know NOTHING about the stored data, so stay read-only and keep
+		-- publishedBest at 0 (publishBest is gated on canSave, so it can't publish anyway).
+		return prof
+	end
+	prof.bestDay = res.bestDay
+	prof.caught = res.caught
+	prof.hintTokens = res.hintTokens
+	prof.redeemed = res.redeemed
+	prof.tint = res.tint
+	prof.ownedTints = res.ownedTints
+	prof.publishedBest = res.bestDay -- R2: never publish BELOW what we actually loaded
+	prof.canSave = res.got
+	prof.lockToken = res.got and myToken or ""
 	return prof
 end
 
@@ -250,12 +324,25 @@ local function saveProfile(plr: Player, releaseLock: boolean): boolean
 	if not prof or not prof.canSave or not profileStore then
 		return false
 	end
+	-- R7: once the profile is CLOSED (PlayerRemoving / ghost reap started the releasing save)
+	-- only that release may still write. Cheap short-circuit; the authoritative check is inside
+	-- the transform below, because a renew can already be in flight when `closing` is set.
+	if prof.closing and not releaseLock then
+		return false
+	end
 	local key = "u_" .. plr.UserId
 	local wrote = false
 	local success = pcall(function()
 		profileStore:UpdateAsync(key, function(old)
 			old = old or {}
 			wrote = false -- reset per transform attempt (UpdateAsync may retry)
+			-- R7: the profile may have been closed while THIS UpdateAsync was in flight. A renew
+			-- landing after the releasing save re-arms the lock for a player who already left,
+			-- locking the real player out of saving on every other server for the whole TTL.
+			-- UpdateAsync re-runs the transform on a write conflict, so the last runner sees it.
+			if prof.closing and not releaseLock then
+				return nil -- abort: write nothing
+			end
 			-- only write if the lock is still ours (or gone / stale)
 			local lock = old.lock
 			if type(lock) == "table" and lock.token ~= prof.lockToken then
@@ -288,17 +375,42 @@ local function saveProfile(plr: Player, releaseLock: boolean): boolean
 	return success and wrote
 end
 
-local function publishBest(plr: Player)
+-- R9: minimum seconds between OrderedDataStore writes for one player. A fast climb used to
+-- burn one SetAsync per day; the ordered-store budget is per-key rate limited, so a good run
+-- could start dropping writes. `force` (on leave / shutdown) always flushes the final value.
+local PUBLISH_MIN_INTERVAL = 30
+
+local function publishBest(plr: Player, force: boolean?)
 	if not bestBoard then
 		return
 	end
 	local prof = profiles[plr]
-	if not prof or prof.bestDay <= 0 then
+	if not prof then
 		return
 	end
-	pcall(function()
-		bestBoard:SetAsync("u_" .. plr.UserId, prof.bestDay)
+	-- R2: the leaderboard is persistent state like any other, so it needs the SAME ownership
+	-- gate as saveProfile. Without it a session whose load failed (bestDay defaults to 0) or a
+	-- session locked out by another server could overwrite the player's real entry with a
+	-- lower number. Two guards: we must hold the lock, and we never publish below the value we
+	-- actually loaded / already published.
+	if not prof.canSave or prof.lockToken == "" then
+		return
+	end
+	if prof.bestDay <= 0 or prof.bestDay <= prof.publishedBest then
+		return
+	end
+	local now = os.clock()
+	if not force and (now - prof.lastPublishAt) < PUBLISH_MIN_INTERVAL then
+		return
+	end
+	local target = prof.bestDay
+	local okPub = pcall(function()
+		bestBoard:SetAsync("u_" .. plr.UserId, target)
 	end)
+	if okPub then
+		prof.publishedBest = math.max(prof.publishedBest, target)
+		prof.lastPublishAt = now
+	end
 end
 
 -- ------------------------------------------------------------------ Scene build
@@ -476,7 +588,21 @@ local APPLIERS: { [string]: (Model, Vector3) -> () } = {
 		end
 	end,
 	scale_bench = function(zone)
-		local p = findPart(zone, "Bench"); if p then p.Size = p.Size * 1.7 end
+		-- Scaling IN PLACE drove the bench out of the world: 6x2x2 at (6, 1.5) becomes
+		-- 10.2x3.4x3.4, so it reached x = 11.1 (WallR's inner face is 9.5) and sank to y = -0.2
+		-- (the floor's top face is 0.5). Clipping through the wall and floor reads as a BUILD
+		-- BUG, not "that bench is too big" — the player learns to distrust the hall instead of
+		-- reading it. Grow it, then re-seat it: flush on the floor, held inside the wall.
+		local p = findPart(zone, "Bench")
+		if not p then return end
+		p.Size = p.Size * 1.7
+		local pos = p.Position
+		local floor = findPart(zone, "Floor")
+		local floorTop = floor and (floor.Position.Y + floor.Size.Y / 2) or (pos.Y - 1)
+		local wall = findPart(zone, "WallR")
+		local wallInner = wall and (wall.Position.X - wall.Size.X / 2) or (pos.X + 3.5)
+		local maxX = wallInner - p.Size.X / 2 - 0.4 -- 0.4 stud of daylight so it never z-fights
+		p.CFrame = CFrame.new(math.min(pos.X, maxX), floorTop + p.Size.Y / 2, pos.Z)
 	end,
 	figure_window = function(zone, origin)
 		-- Must stay on the PLAYER side of EndWall (z = -HALL_LEN - 6, opaque, full cross-section)
@@ -537,7 +663,21 @@ end
 -- ------------------------------------------------------------------ Loop
 -- Minimum wall-clock time between a pass going live and a decision being accepted. Walking
 -- the ~80-stud hall takes many seconds, so this only ever bites scripted triggers.
+--
+-- R12 — WHAT THIS DOES NOT DO. This bounds the RATE, not the TOTAL: a patient bot can still
+-- reach Config.Progression.MaxDay, it just takes MaxDay * MIN_PASS_SECONDS to do it. And the
+-- gate cannot be tightened into an anti-cheat, because the correct answer is inherently
+-- OBSERVABLE CLIENT-SIDE: the anomaly is a real Instance replicated into the player's own
+-- zone, so a client can read it and always answer correctly without ever looking at the hall.
+-- Hiding it would mean not replicating the mutation, i.e. not having a game. So: treat the
+-- Best-Day board as a fun counter, NOT as a trustworthy competitive ranking, and do not build
+-- rewards on top of it that would pay out to a determined cheater.
 local MIN_PASS_SECONDS = 0.75
+
+-- R10: the hint's in-world ProximityPrompt sits on the StartPad (MaxActivationDistance 12).
+-- The remote must enforce the same reach or it is a strictly better hint with no cost.
+-- Slightly larger than the prompt so replication lag never eats a legitimate press.
+local HINT_RADIUS = 14
 
 local function teleportToStart(plr: Player, origin: Vector3)
 	local char = plr.Character
@@ -597,7 +737,81 @@ local function pushState(plr: Player)
 		codexTotal = Anomaly.count(Config),
 		tints = Config.Tints,
 		ownedTints = prof.ownedTints, -- which of `tints` this player may actually select
+		-- R5: a read-only session must not be silent. The HUD shows this so the player knows
+		-- the day they are grinding will not persist (and that we are retrying in background).
+		readOnly = not prof.canSave,
 	})
+end
+
+-- R5: one-shot notice when the session cannot save (and, on recovery, when it can again).
+-- Silence meant a player could grind a best day for an hour with nothing being written.
+local function notifyReadOnly(plr: Player)
+	local prof = profiles[plr]
+	if not prof or prof.canSave or prof.readOnlyNotified then
+		return
+	end
+	prof.readOnlyNotified = true
+	RevealRemote:FireClient(plr, {
+		readOnly = true,
+		message = "Progress can't be saved right now — another session may still be open. Retrying in the background.",
+	})
+end
+
+-- R1: a read-only session RE-ATTEMPTS the claim instead of being read-only forever. One
+-- transient DataStore error at join, or a rejoin while the previous lock is still warm (TTL
+-- 45s), used to disable saving for the WHOLE session — while the redeem message promised
+-- "try again in a minute", which the code could never honour.
+--
+-- Clobber safety: whoever held the lock may have written newer data, so we do NOT push our
+-- in-memory copy over it. We ADOPT the freshly read values and merge only where merging is
+-- strictly non-destructive (max for bestDay, union for the Field Guide).
+local function retryClaim(plr: Player)
+	local prof = profiles[plr]
+	if not prof or prof.canSave or prof.closing or not profileStore then
+		return
+	end
+	local myToken = newSessionToken()
+	local res = claimLock(plr, myToken) -- YIELDS
+	if not res or not res.got then
+		return -- still held elsewhere, or the store is still unhappy: try again next tick
+	end
+
+	-- We yielded. If the player left (or the entry was replaced) during the claim, we now hold
+	-- a lock for a session that no longer exists — release it immediately rather than letting
+	-- it sit for the full TTL and lock the real player out on the server they moved to.
+	if profiles[plr] ~= prof or prof.closing or plr.Parent ~= Players then
+		releaseLockToken(plr.UserId, myToken)
+		return
+	end
+
+	prof.bestDay = math.max(prof.bestDay, res.bestDay)
+	if type(res.caught) == "table" then
+		for id in res.caught do
+			prof.caught[id] = true -- union: never drop a discovery from either side
+		end
+	end
+	-- These are all authoritative-elsewhere values: the other session owned the write path, so
+	-- its numbers win over ours (adopting can only over-credit the player, never rob them).
+	prof.hintTokens = res.hintTokens
+	prof.redeemed = res.redeemed
+	local localTint = prof.tint
+	prof.ownedTints = res.ownedTints
+	prof.tint = prof.ownedTints[localTint] and localTint or res.tint
+	prof.publishedBest = math.max(prof.publishedBest, res.bestDay)
+	prof.canSave = true
+	prof.lockToken = myToken
+	prof.readOnlyNotified = false
+
+	local ls = plr:FindFirstChild("leaderstats")
+	if ls then
+		local b = ls:FindFirstChild("Best")
+		if b then (b :: IntValue).Value = prof.bestDay end
+	end
+	RevealRemote:FireClient(plr, {
+		readOnly = false,
+		message = "Saving restored — your progress is being recorded again.",
+	})
+	pushState(plr)
 end
 
 -- Rebuild the hall and roll the next pass for this player.
@@ -705,7 +919,11 @@ resolveChoice = function(plr: Player, choice: string)
 		end
 		DeathRemote:FireClient(plr, { reached = reached, wasClean = pass.clean, anomalyId = pass.anomalyId })
 		task.wait(2.5) -- brief death beat
-		if profiles[plr] then -- still here?
+		-- R6: this resumes 2.5s later, and `profiles[plr]` alone is NOT proof the player is
+		-- still here — PlayerRemoving yields inside saveProfile before it clears the tables, so
+		-- the entry can still be present for a player who has already left. Building a fresh
+		-- hall + teleporting a departed player leaks the zone rebuild and races the cleanup.
+		if profiles[plr] and plr.Parent == Players then
 			beginPass(plr)
 		end
 	end
@@ -731,10 +949,37 @@ awardMilestone = function(plr: Player, day: number)
 end
 
 -- ------------------------------------------------------------------ Remote handlers
+-- R4: RemoteEvents are client-driven, so their cost must be bounded server-side. Redeem is the
+-- dangerous one — it runs UpdateAsync on ONE key, and a burst issues N CONCURRENT UpdateAsync
+-- calls on that key: the per-key budget is exhausted, the transforms fight each other, and the
+-- retry storm can starve real saves. Hint/Tint are cheap but still push a full state packet.
+-- Cooldowns are per player and deliberately generous: a human taps these a few times a minute.
+local REMOTE_COOLDOWN: { [string]: number } = {
+	Redeem = 2.0,
+	UseHint = 0.5,
+	SetTint = 0.5,
+}
+
+local function rateLimited(prof: Profile, name: string): boolean
+	local now = os.clock()
+	local last = prof.remoteAt[name]
+	if last and (now - last) < (REMOTE_COOLDOWN[name] or 0.5) then
+		return true
+	end
+	prof.remoteAt[name] = now
+	return false
+end
+
+-- Longest code in Config.Codes is 8 chars; anything wildly longer is spam, not a redemption.
+local MAX_CODE_LEN = 64
+
 RedeemRemote.OnServerEvent:Connect(function(plr, code)
-	if typeof(code) ~= "string" then return end
+	if typeof(code) ~= "string" or #code > MAX_CODE_LEN then return end
 	local prof = profiles[plr]
 	if not prof then return end
+	-- R4: one in-flight redeem per player (the flag), plus a cooldown (the burst).
+	if prof.redeemBusy then return end
+	if rateLimited(prof, "Redeem") then return end
 	local result = Codes.redeem(code, prof.redeemed, Config)
 	if not result.ok or not result.reward then
 		RevealRemote:FireClient(plr, { redeem = result.reason or "unknown" })
@@ -757,22 +1002,34 @@ RedeemRemote.OnServerEvent:Connect(function(plr, code)
 	local applied = false
 	local alreadyOnRecord = false
 	local lockBlocked = false
+	-- R3: what the RECORD already holds, captured when the code turns out to be already used.
+	local syncRedeemed, syncTokens, syncTint, syncOwned = nil, nil, nil, nil
+	prof.redeemBusy = true
 	local ok2 = pcall(function()
 		profileStore:UpdateAsync("u_" .. plr.UserId, function(old)
 			old = old or {}
 			applied, alreadyOnRecord, lockBlocked = false, false, false -- reset per transform attempt
+			syncRedeemed, syncTokens, syncTint, syncOwned = nil, nil, nil, nil
 			-- never grant through a live foreign session's lock
 			local lock = old.lock
 			if type(lock) == "table" and lock.token ~= prof.lockToken then
 				if (nowStamp() - (tonumber(lock.at) or 0)) < Config.Save.SessionLockSeconds then
 					lockBlocked = true
-					return old
+					return nil -- nothing changed: abort the write instead of committing a no-op
 				end
 			end
 			old.redeemed = old.redeemed or {}
 			if old.redeemed[key] then
 				alreadyOnRecord = true -- genuinely used before; distinct from a failed write
-				return old
+				-- R3: the reward for this code is ALREADY granted on the record. Re-syncing only
+				-- `redeemed` left hintTokens/tint/ownedTints stale in memory, and the very next
+				-- saveProfile wrote that stale copy back — silently WIPING a reward the record
+				-- says was paid out. Capture the whole reward-bearing state instead.
+				syncRedeemed = old.redeemed
+				syncTokens = tonumber(old.hintTokens)
+				syncTint = old.tint
+				syncOwned = old.ownedTints
+				return nil -- nothing changed: abort the write
 			end
 			old.redeemed[key] = true
 			if result.reward.hintTokens then
@@ -789,6 +1046,8 @@ RedeemRemote.OnServerEvent:Connect(function(plr, code)
 		end)
 	end)
 
+	prof.redeemBusy = false
+
 	if ok2 and applied then
 		prof.redeemed[key] = true
 		if result.reward.hintTokens then prof.hintTokens += result.reward.hintTokens end
@@ -799,8 +1058,24 @@ RedeemRemote.OnServerEvent:Connect(function(plr, code)
 		RevealRemote:FireClient(plr, { redeem = "ok", reward = result.reward })
 		pushState(plr)
 	elseif ok2 and alreadyOnRecord then
+		-- R3: adopt the record's full reward state, not just `redeemed`, so the next save can't
+		-- overwrite a reward the record already paid out.
+		if type(syncRedeemed) == "table" then
+			prof.redeemed = syncRedeemed
+		end
 		prof.redeemed[key] = true -- keep memory in step with the record
+		if syncTokens then
+			prof.hintTokens = syncTokens
+		end
+		local recordTint = (type(syncTint) == "string" and tintIsKnown(syncTint)) and syncTint or prof.tint
+		prof.ownedTints = sanitizeOwnedTints(syncOwned, recordTint)
+		if prof.ownedTints[recordTint] then
+			prof.tint = recordTint
+		elseif not prof.ownedTints[prof.tint] then
+			prof.tint = Config.DefaultTint
+		end
 		RevealRemote:FireClient(plr, { redeem = "already" })
+		pushState(plr)
 	elseif ok2 and lockBlocked then
 		RevealRemote:FireClient(plr, {
 			redeem = "retry",
@@ -817,6 +1092,23 @@ RedeemRemote.OnServerEvent:Connect(function(plr, code)
 end)
 
 HintRemote.OnServerEvent:Connect(function(plr)
+	local prof = profiles[plr]
+	if not prof then return end
+	if rateLimited(prof, "UseHint") then return end
+	-- R10: the in-world prompt lives on the StartPad, so a hint has to be bought BEFORE you
+	-- walk the hall — "commit, then look" is the whole cost of the mechanic. This remote let a
+	-- client skip the prompt and buy the answer while standing on the decision pads at the far
+	-- end, which is a strictly easier (and different) game. Enforce the prompt's own reach.
+	local zone = zones[plr]
+	local pad = zone and findPart(zone, "StartPad")
+	local char = plr.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not pad or not hrp or not hrp:IsA("BasePart") then return end
+	if (hrp.Position - pad.Position).Magnitude > HINT_RADIUS then
+		-- Say WHY, so a HUD button doesn't just look broken when pressed down the hall.
+		RevealRemote:FireClient(plr, { ok = false, reason = "too_far" })
+		return
+	end
 	useHint(plr)
 end)
 
@@ -824,6 +1116,7 @@ TintRemote.OnServerEvent:Connect(function(plr, tint)
 	if typeof(tint) ~= "string" then return end
 	local prof = profiles[plr]
 	if not prof then return end
+	if rateLimited(prof, "SetTint") then return end
 	-- Only allow tints the player OWNS. Ownership lives in its own persistent set: using
 	-- `prof.tint` as both "owned" and "selected" meant picking the free white tint destroyed
 	-- a code-earned tint forever (a one-time code can't be redeemed twice).
@@ -854,6 +1147,7 @@ Players.PlayerAdded:Connect(function(plr)
 	-- zone + its index. Release what we took and bail instead.
 	if plr.Parent ~= Players then
 		if prof.canSave then
+			prof.closing = true -- R7: nothing may renew this lock, only the release below
 			profiles[plr] = prof
 			saveProfile(plr, true) -- release the lock we just claimed
 			profiles[plr] = nil
@@ -892,9 +1186,18 @@ Players.PlayerAdded:Connect(function(plr)
 	end)
 
 	beginPass(plr)
+	notifyReadOnly(plr) -- R5: say so ONCE if this session can't save
 end)
 
 Players.PlayerRemoving:Connect(function(plr)
+	local leaving = profiles[plr]
+	if leaving then
+		-- R9: always flush the final best day, throttle or not — this is the last chance.
+		publishBest(plr, true)
+		-- R7: mark CLOSED before the releasing save, so an autosave renew (in flight or about
+		-- to start) can never land afterwards and re-arm the lock for a player who has left.
+		leaving.closing = true
+	end
 	saveProfile(plr, true) -- flush + release lock
 	local zone = zones[plr]
 	if zone then
@@ -908,6 +1211,11 @@ end)
 
 game:BindToClose(function()
 	for _, plr in Players:GetPlayers() do
+		local prof = profiles[plr]
+		if prof then
+			publishBest(plr, true) -- R9: final flush; no-op unless the best day actually moved
+			prof.closing = true -- R7
+		end
 		saveProfile(plr, true)
 	end
 	task.wait(1)
@@ -929,6 +1237,11 @@ task.spawn(function()
 			end
 			if plr.Parent ~= Players then
 				-- ghost: flush + RELEASE the lock, then drop it so we stop renewing
+				local ghost = profiles[plr]
+				if ghost then
+					publishBest(plr, true) -- R9: final flush before we drop the profile
+					ghost.closing = true -- R7
+				end
 				saveProfile(plr, true)
 				local zone = zones[plr]
 				if zone then
@@ -938,8 +1251,13 @@ task.spawn(function()
 				profiles[plr] = nil
 				zones[plr] = nil
 				passState[plr] = nil
-			else
+			elseif profiles[plr].canSave then
 				saveProfile(plr, false)
+			else
+				-- R1: read-only session — try to WIN the lock instead of staying mute forever.
+				-- On success this adopts the freshly loaded values and starts saving; the
+				-- notice is reset so the player is told saving came back.
+				retryClaim(plr)
 			end
 		end
 	end

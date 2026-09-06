@@ -122,26 +122,103 @@ do
 	truthy(d >= 6, "day1 index spreads over >= 6 of the 8 pool ids (plain seeds), got " .. d)
 end
 
--- THE SHIPPED BUG (a): seeds whose LOW BITS ARE ZERO — exactly what the overflowing
--- passSeed produced. Under the old Rng.int path this yielded ONE id (scope_gone) forever.
+-- CASE (a) — SEED-SHAPE REGRESSION, INDEPENDENT OF ANY passSeed FORMULA.
+-- Seeds whose LOW BITS ARE ZERO (i * 2048). This is the exact shape the OLD overflowing
+-- passSeed produced, and under the old Rng.int path it yielded ONE id (scope_gone) forever.
+-- The server no longer generates seeds like this, but the draw must never again depend on
+-- the low bits, so this case is kept DELIBERATELY as a permanent property guard. Do not
+-- delete it just because the caller changed.
 do
 	local d = distinctIds(function(i) return i * 2048 end, 3000, 1)
 	truthy(d >= 6, "day1 index varies on low-bits-zero seeds (i*2048), got " .. d)
 end
 
--- THE SHIPPED BUG (b): the REAL passSeed formula from the server, for a realistic UserId.
+-- CASE (b) — THE OLD, OVERFLOWING passSeed, kept verbatim as a historical regression.
+-- `userId * 2654435761` exceeds 2^53 for every modern UserId, so the product was rounded and
+-- the low bits became a constant. This is NOT what the server computes any more (see case c);
+-- it is here so the low-bit-collapse property is still exercised against the exact arithmetic
+-- that shipped the bug.
 do
 	local WS = Config.WorldSeed
 	local d = distinctIds(function(i)
 		return WS + 1234567890 * 2654435761 + i * 40503
 	end, 3000, 1)
-	truthy(d >= 6, "day1 index varies across real passSeed serials (big userId), got " .. d)
+	truthy(d >= 6, "day1 index varies across LEGACY overflowing passSeed serials, got " .. d)
 
 	-- a second realistic UserId, so the guard isn't tuned to one magic number
 	local d2 = distinctIds(function(i)
 		return WS + 987654321 * 2654435761 + i * 40503
 	end, 3000, 1)
-	truthy(d2 >= 6, "day1 index varies for a second big userId, got " .. d2)
+	truthy(d2 >= 6, "day1 index varies for a second big userId (legacy formula), got " .. d2)
+end
+
+-- CASE (c) — THE CURRENT SERVER FORMULA, mirrored from src/server/Main.server.luau.
+-- passSeed reduces the UserId FIRST (mod a prime) and folds a per-session salt, so no
+-- intermediate reaches 2^53, then avalanche-mixes the result. Keep this block in step with
+-- the server: if passSeed changes there and not here, this test stops testing the real thing
+-- (which is precisely the rot this case replaces).
+local SEED_MOD = 4294967296 -- 2^32, matches Rng's state space
+local UID_MOD = 1000003 -- prime; keeps UserId small before it is multiplied
+
+local function mixSeed(x: number): number
+	x = bit32.bxor(x, bit32.rshift(x, 15))
+	x = (x * 2038073) % SEED_MOD
+	x = bit32.bxor(x, bit32.rshift(x, 13))
+	x = (x * 1832993) % SEED_MOD
+	return bit32.bxor(x, bit32.rshift(x, 16))
+end
+
+local function passSeed(userId: number, salt: number, serial: number): number
+	local uid = userId % UID_MOD -- <= 1e6
+	local sum = (Config.WorldSeed % SEED_MOD) -- < 4.3e9
+		+ (salt % SEED_MOD) -- < 4.3e9
+		+ uid * 40503 -- < 4.1e10
+		+ (serial % UID_MOD) * 2654435 -- < 2.7e12  (total stays ~3 orders under 2^53)
+	return mixSeed(sum % SEED_MOD)
+end
+
+do
+	-- the seed stays inside Rng's state space and is a whole number (no float rounding)
+	local inRange, whole = true, true
+	for i = 1, 500 do
+		local s = passSeed(1234567890, 987654321, i)
+		if s < 0 or s >= SEED_MOD then inRange = false end
+		if s ~= math.floor(s) then whole = false end
+	end
+	truthy(inRange, "current passSeed stays within [0, 2^32)")
+	truthy(whole, "current passSeed is an exact integer (no 2^53 rounding)")
+
+	-- consecutive serials must not collapse onto one another
+	do
+		local seen, distinct = {}, 0
+		for i = 1, 1000 do
+			local s = passSeed(1234567890, 987654321, i)
+			if not seen[s] then seen[s] = true; distinct += 1 end
+		end
+		truthy(distinct >= 990, "current passSeed gives ~unique seeds per serial, got " .. distinct)
+	end
+
+	-- and the day-1 draw spreads across the pool for real players
+	local d = distinctIds(function(i) return passSeed(1234567890, 987654321, i) end, 3000, 1)
+	truthy(d >= 6, "day1 index varies across CURRENT passSeed serials (big userId), got " .. d)
+
+	local d2 = distinctIds(function(i) return passSeed(987654321, 4242, i) end, 3000, 1)
+	truthy(d2 >= 6, "day1 index varies for a second big userId (current formula), got " .. d2)
+
+	-- a small/legacy UserId must behave too (the reduction must not special-case big ids)
+	local d3 = distinctIds(function(i) return passSeed(261, 7, i) end, 3000, 1)
+	truthy(d3 >= 6, "day1 index varies for a small userId (current formula), got " .. d3)
+
+	-- different sessions (different salts) must not walk the same anomaly sequence
+	do
+		local a, b, same = {}, {}, 0
+		for i = 1, 200 do
+			a[i] = Anomaly.rollPass(Rng.new(passSeed(1234567890, 11111, i)), Config, 1).anomalyId
+			b[i] = Anomaly.rollPass(Rng.new(passSeed(1234567890, 22222, i)), Config, 1).anomalyId
+			if a[i] == b[i] then same += 1 end
+		end
+		truthy(same < 160, "a different session salt gives a different sequence, matched " .. same .. "/200")
+	end
 end
 
 -- spread at a DEEPER power-of-two pool size too (day 17 -> pool 16)

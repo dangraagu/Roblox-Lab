@@ -8,12 +8,23 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local plr = Players.LocalPlayer
 local FxClient = require(ReplicatedStorage:WaitForChild("FxClient"))
+-- Shared data lives in ReplicatedStorage and is required the ROBLOX way — with an Instance.
+-- Never `require("./Config")`: a path string resolves in the luau CLI but is invalid in
+-- Roblox and makes the whole LocalScript fail to load.
+local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Remotes = ReplicatedStorage:WaitForChild("AnomalyRemotes")
 local StateRemote = Remotes:WaitForChild("State") :: RemoteEvent
 local RevealRemote = Remotes:WaitForChild("Reveal") :: RemoteEvent
 local DeathRemote = Remotes:WaitForChild("Death") :: RemoteEvent
 local RedeemRemote = Remotes:WaitForChild("Redeem") :: RemoteEvent
 local TintRemote = Remotes:WaitForChild("SetTint") :: RemoteEvent
+
+-- id -> catalog entry { id, name, kind, hint }. Lets a death name the anomaly the player
+-- walked straight past, which is the single most useful teaching beat in the game.
+local ANOMALY_BY_ID = {}
+for _, entry in Config.Anomaly.Catalog do
+	ANOMALY_BY_ID[entry.id] = entry
+end
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "AnomalyHud"
@@ -73,18 +84,32 @@ hintLbl.TextXAlignment = Enum.TextXAlignment.Right
 local toast = label(gui, "", UDim2.fromOffset(600, 40), UDim2.new(0.5, -300, 0.5, -120), 26)
 toast.Font = Enum.Font.GothamBold
 toast.TextXAlignment = Enum.TextXAlignment.Center
-local function showToast(text: string, color: Color3)
+-- second, smaller line under the toast: the "what you missed" explanation after a wrong call.
+local toastDetail = label(gui, "", UDim2.fromOffset(680, 26), UDim2.new(0.5, -340, 0.5, -80), 18)
+toastDetail.TextXAlignment = Enum.TextXAlignment.Center
+toastDetail.TextColor3 = Color3.fromRGB(210, 216, 232)
+-- `lifetime` (seconds) defaults to the original 1.8s fade; the death toast asks for longer
+-- because its detail line is the teaching beat and has to be readable (kept under the
+-- server's 2.5s death pause so it never bleeds into the next pass).
+local function showToast(text: string, color: Color3, detail: string?, lifetime: number?)
 	toast.Text = text
 	toast.TextColor3 = color
 	toast.TextTransparency = 0
+	toastDetail.Text = detail or ""
+	toastDetail.TextTransparency = 0
 	task.spawn(function()
 		local myText = text
-		for i = 1, 30 do
+		local steps = math.max(1, math.floor((lifetime or 1.8) / 0.06))
+		for i = 1, steps do
 			if toast.Text ~= myText then return end
-			toast.TextTransparency = i / 30
+			toast.TextTransparency = i / steps
+			toastDetail.TextTransparency = i / steps
 			task.wait(0.06)
 		end
-		if toast.Text == myText then toast.Text = "" end
+		if toast.Text == myText then
+			toast.Text = ""
+			toastDetail.Text = ""
+		end
 	end)
 end
 
@@ -135,29 +160,118 @@ tintLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
 tintLayout.Padding = UDim.new(0, 6)
 tintLayout.Parent = tintRow
 
-local TINT_RGB: { [string]: Color3 } = {
-	white = Color3.fromRGB(235, 235, 245),
-	amber = Color3.fromRGB(240, 180, 90),
-	gold = Color3.fromRGB(245, 205, 70),
-	cyan = Color3.fromRGB(90, 220, 235),
-	crimson = Color3.fromRGB(225, 70, 80),
-}
-local builtTints = false
-local function buildTints(tints: { string })
-	if builtTints then return end
-	builtTints = true
-	for _, name in tints do
-		local b = Instance.new("TextButton")
-		b.Size = UDim2.fromOffset(26, 26)
-		b.Text = ""
-		b.BackgroundColor3 = TINT_RGB[name] or Color3.fromRGB(200, 200, 200)
-		b.BorderSizePixel = 0
-		b.Parent = tintRow
-		Instance.new("UICorner", b).CornerRadius = UDim.new(1, 0)
-		b.Activated:Connect(function()
-			TintRemote:FireServer(name)
-		end)
+-- Colours come from Config.TintRGB (plain {R,G,B} triples so the shared module stays usable
+-- by the pure luau-CLI tests) — one source of truth for the swatch AND the carried light.
+local TINT_FALLBACK = Color3.fromRGB(200, 200, 200)
+local function tintColor(name: string): Color3
+	local rgb = Config.TintRGB and Config.TintRGB[name]
+	if type(rgb) == "table" and #rgb >= 3 then
+		return Color3.fromRGB(rgb[1], rgb[2], rgb[3])
 	end
+	return TINT_FALLBACK
+end
+
+local tintButtons: { [string]: TextButton } = {}
+-- ownership as of the LAST State push. Read at click time (never captured in the closure) so
+-- a tint unlocked mid-session — redeeming ECLIPSE — is clickable without a rebuild.
+local tintOwned: { [string]: boolean } = {}
+
+-- Creates any swatch that doesn't exist yet. Appearance is NOT decided here (see
+-- refreshTints): the old build-once guard is exactly why an unlocked tint kept looking
+-- locked, and every locked tint kept looking live.
+local function buildTints(tints: { string })
+	for _, name in tints do
+		if not tintButtons[name] then
+			local b = Instance.new("TextButton")
+			b.Name = "Tint_" .. name
+			b.Size = UDim2.fromOffset(26, 26)
+			b.Text = ""
+			b.Font = Enum.Font.GothamBold
+			b.TextSize = 13
+			b.TextColor3 = Color3.fromRGB(20, 22, 32)
+			b.AutoButtonColor = false
+			b.BackgroundColor3 = tintColor(name)
+			b.BorderSizePixel = 0
+			b.Parent = tintRow
+			Instance.new("UICorner", b).CornerRadius = UDim.new(1, 0)
+			local ring = Instance.new("UIStroke")
+			ring.Name = "SelectionRing"
+			ring.Color = ACCENT
+			ring.Thickness = 2
+			ring.Transparency = 1 -- shown only on the SELECTED tint
+			ring.Parent = b
+			b.Activated:Connect(function()
+				if not tintOwned[name] then
+					-- the server silently drops an unowned tint; without this the player just
+					-- sees nothing happen and assumes the game is broken.
+					showToast("Tint locked", WARN, "Unlock " .. name .. " with a code first.")
+					return
+				end
+				TintRemote:FireServer(name)
+			end)
+			tintButtons[name] = b
+		end
+	end
+end
+
+-- Re-style every swatch for the CURRENT ownership set + selection. Called on every State
+-- push, so the gold swatch lights up the moment ECLIPSE is redeemed.
+local function refreshTints(owned, selected)
+	-- fail OPEN if the server ever omits ownedTints: a HUD where nothing is clickable would
+	-- be worse than the bug being fixed. The live server always sends the set.
+	local haveSet = typeof(owned) == "table"
+	for name, b in tintButtons do
+		local isOwned = (not haveSet) or owned[name] == true
+		tintOwned[name] = isOwned
+		b.BackgroundColor3 = tintColor(name)
+		b.BackgroundTransparency = if isOwned then 0 else 0.6
+		b.Text = if isOwned then "" else "\u{1F512}" -- padlock on locked swatches
+		local ring = b:FindFirstChild("SelectionRing")
+		if ring and ring:IsA("UIStroke") then
+			ring.Transparency = if name == selected then 0 else 1
+		end
+	end
+end
+
+-- ---------------------------------------------------------------- carried flashlight
+-- The tint was stored, validated, persisted, replicated and pickable — but nothing ever lit
+-- anything with it, so the cosmetic (and ECLIPSE's only reward) was invisible. A small light
+-- carried by the local character: thematic for a dark observatory, deliberately not a
+-- floodlight, and client-only (it is a cosmetic for its owner).
+local LIGHT_NAME = "AnomalyTintLight"
+local currentTint = Config.DefaultTint
+
+local function ensureLight(char: Model): SpotLight?
+	local head = char:FindFirstChild("Head") or char:WaitForChild("Head", 5)
+	if not head or not head:IsA("BasePart") then return nil end
+	local existing = head:FindFirstChild(LIGHT_NAME)
+	if existing and existing:IsA("SpotLight") then return existing end
+	if existing then existing:Destroy() end
+	local s = Instance.new("SpotLight")
+	s.Name = LIGHT_NAME
+	s.Face = Enum.NormalId.Front -- the head's front == where the player is looking
+	s.Angle = 55
+	s.Range = 26
+	s.Brightness = 1.2
+	s.Shadows = false -- cheap: this is ambience, not a lighting rig
+	s.Parent = head
+	return s
+end
+
+-- yields (WaitForChild) — always call via task.spawn.
+local function applyTintLight(char: Model?)
+	if not char or not char.Parent then return end
+	local light = ensureLight(char)
+	if light then
+		light.Color = tintColor(currentTint)
+	end
+end
+
+plr.CharacterAdded:Connect(function(char)
+	task.spawn(applyTintLight, char)
+end)
+if plr.Character then
+	task.spawn(applyTintLight, plr.Character)
 end
 
 -- ---------------------------------------------------------------- remote wiring
@@ -167,7 +281,14 @@ StateRemote.OnClientEvent:Connect(function(s)
 	bestLbl.Text = "Best: Day " .. tostring(s.best)
 	codexLbl.Text = "Field Guide: " .. tostring(s.codexCount) .. "/" .. tostring(s.codexTotal)
 	hintLbl.Text = "Hints: " .. tostring(s.hintTokens) .. "  (H at start pad)"
-	if s.tints then buildTints(s.tints) end
+	if s.tints then
+		buildTints(s.tints)
+		refreshTints(s.ownedTints, s.tint)
+	end
+	if type(s.tint) == "string" and s.tint ~= currentTint then
+		currentTint = s.tint
+		task.spawn(applyTintLight, plr.Character) -- no character yet? CharacterAdded re-applies
+	end
 end)
 
 RevealRemote.OnClientEvent:Connect(function(r)
@@ -188,14 +309,38 @@ RevealRemote.OnClientEvent:Connect(function(r)
 		end
 		return
 	end
+	-- one-shot "this session cannot save" notice (server sets readOnly when it does not hold
+	-- the DataStore lock, and clears it if a later retry wins the lock back). Without this the
+	-- player grinds a best day that will never persist and is never told.
+	if r.readOnly ~= nil then
+		if r.readOnly then
+			showToast(r.message or "Progress is NOT saving this session", WARN,
+				"Another session holds your save, or the data service is down. Try rejoining.", 3.2)
+		else
+			showToast(r.message or "Saving restored", GOOD, nil, 2.2)
+		end
+		return
+	end
 	-- hint reveal
 	if r.ok == false then
-		showToast("No hints left", WARN)
-	elseif r.ok == true then
-		if r.clean then
-			showToast("HINT: the hall looks clean", GOOD)
+		if r.reason == "too_far" then
+			-- the hint is only spendable at the start pad; say so instead of looking dead
+			showToast("Too far from the start pad", WARN, "Walk back to the glowing pad to use a hint.", 2.4)
 		else
-			showToast("HINT: something is WRONG", WARN)
+			showToast("No hints left", WARN)
+		end
+	elseif r.ok == true then
+		-- the server tells us how many tokens survived the spend; show it so the player can
+		-- budget the last hint instead of guessing.
+		local left = ""
+		if type(r.remaining) == "number" then
+			local n = math.max(0, math.floor(r.remaining))
+			left = "  (" .. tostring(n) .. (if n == 1 then " hint left)" else " hints left)")
+		end
+		if r.clean then
+			showToast("HINT: the hall looks clean" .. left, GOOD)
+		else
+			showToast("HINT: something is WRONG" .. left, WARN)
 		end
 	end
 end)
@@ -206,13 +351,24 @@ DeathRemote.OnClientEvent:Connect(function(d)
 	FxClient.flash(Color3.fromRGB(180, 20, 20), 0.6, 0.7)
 	FxClient.shake(0.5, 1.6)
 	FxClient.fovPunch(12, 0.08, 0.4)
-	local msg
+	local msg, detail
 	if d.wasClean then
 		msg = "You turned back on a CLEAN hall — Night reset (reached Day " .. tostring(d.reached) .. ")"
+		detail = "Nothing was wrong that pass. ADVANCE (E) when the hall looks normal."
 	else
 		msg = "You MISSED an anomaly — Night reset (reached Day " .. tostring(d.reached) .. ")"
+		-- name what was actually wrong: the whole point of a spot-the-difference game is
+		-- learning the tell you walked past.
+		if type(d.anomalyId) == "string" then
+			local entry = ANOMALY_BY_ID[d.anomalyId]
+			if entry then
+				detail = "It was " .. tostring(entry.name) .. " — " .. tostring(entry.hint)
+			else
+				detail = "It was: " .. d.anomalyId -- id from a newer catalog than this client
+			end
+		end
 	end
-	showToast(msg, WARN)
+	showToast(msg, WARN, detail, 2.4)
 end)
 
 print("[Anomaly] HUD ready.")

@@ -79,6 +79,19 @@ Config.Codes = {
 Config.Tints = { "white", "amber", "gold", "cyan", "crimson" }
 Config.DefaultTint = "white"
 
+-- Colour of each tint id, as a plain {R, G, B} 0-255 triple. Deliberately NOT Color3 values:
+-- this module is also required by the pure luau-CLI tests, where the Roblox `Color3` global
+-- does not exist, so a Color3 literal here would break every test run. The client converts
+-- these (picker swatch + the carried flashlight light). Keep one entry per Config.Tints id.
+local TintRGB: { [string]: { number } } = {
+	white = { 235, 235, 245 },
+	amber = { 240, 180, 90 },
+	gold = { 245, 205, 70 },
+	cyan = { 90, 220, 235 },
+	crimson = { 225, 70, 80 },
+}
+Config.TintRGB = TintRGB
+
 -- Field-Guide / streak rank milestones (also Roblox Badge award points server-side).
 Config.Milestones = { 10, 25, 50, 100, 250 }
 

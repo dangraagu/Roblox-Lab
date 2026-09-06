@@ -191,9 +191,12 @@ Fx.Presets = {
 			Brightness = 1,
 			ExposureCompensation = -0.15,
 			ClockTime = 0.2,
-			FogStart = 10,
-			FogEnd = 120,
-			FogColor = Color3.fromRGB(12, 14, 22),
+			-- NO FogStart/FogEnd/FogColor here ON PURPOSE: this preset also creates an
+			-- Atmosphere below, and while an Atmosphere exists in Lighting it REPLACES the
+			-- legacy fog properties entirely — they are read by nothing. The depth/haze of
+			-- this preset is tuned with `atmosphere.Density` and `atmosphere.Haze`, not fog.
+			-- (Removing the three dead fields is visually a no-op; they were only misleading
+			-- the next person trying to tune the horror fog.)
 			EnvironmentDiffuseScale = 0.4,
 			EnvironmentSpecularScale = 0.4,
 		},
