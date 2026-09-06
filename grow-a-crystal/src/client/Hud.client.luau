@@ -51,11 +51,25 @@ end
 -- Design-space sizes the HUD was authored at; applyLayout shrinks them to fit.
 local DESIGN_LEFT_W, DESIGN_LEFT_H = 250, 470
 local DESIGN_LB_W, DESIGN_LB_H = 200, 300
+-- Desktop height of the code box plus the Redeem button; applyLayout recomputes it whenever
+-- either of those grows to stay a thumb's width.
 local DESIGN_CODE_H = 68
--- On a phone the drawers open under the toggle row plus the dust/hint/toast stack.
-local DRAWER_TOP = 104
 
 local layout = Responsive.layout(camera.ViewportSize.X, camera.ViewportSize.Y, UserInputService.TouchEnabled)
+
+-- Roblox's own guidance and both mobile platform guidelines put the smallest comfortable tap
+-- target at 44 screen px in both dimensions. A UIScale below 1 shrinks every button on exactly
+-- the device that needs them biggest, so interactive elements are sized in SCREEN space instead:
+-- divide the design size by the scale so the control lands at the same physical size whatever
+-- the scale factor, and never let it come out under the floor. controlPad is only non-zero on
+-- touch, so a small mouse-driven window and the desktop layout keep their design sizes untouched.
+local MIN_TAP = 44
+local function touchSize(designPx: number): number
+	if layout.controlPad <= 0 then return designPx end
+	-- Rounded up so the control lands a hair over the floor rather than a hair under it: 44 /
+	-- 0.8 is not exactly 55 in floating point, and 54.99... * 0.8 measures as 43.99 screen px.
+	return math.ceil(math.max(designPx, MIN_TAP) / layout.scale)
+end
 
 -- ── Top: Dust ─────────────────────────────────────────────────────────────
 local top = Instance.new("Frame")
@@ -153,6 +167,8 @@ for t = 1, MAXT do
 	seedRows[t] = { row = row, sel = sel, buy = buy }
 end
 
+-- applyLayout re-heights every one of these, so they are collected as they are made.
+local shopButtons = {}
 local function shopBtn(order, text, color, cb)
 	local b = Instance.new("TextButton")
 	b.Size = UDim2.new(1, 0, 0, 32); b.LayoutOrder = order
@@ -160,6 +176,7 @@ local function shopBtn(order, text, color, cb)
 	b.BackgroundColor3 = color; b.Text = text; b.Parent = left; corner(b, 6)
 	local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 13; cc.Parent = b
 	b.Activated:Connect(cb)
+	table.insert(shopButtons, b)
 	return b
 end
 local chamberBtn = shopBtn(20, "Buy Chamber", Color3.fromRGB(90, 110, 200), function() BuyEvent:FireServer("chamber") end)
@@ -299,19 +316,26 @@ local function setDrawer(key: string)
 	refreshDrawers()
 end
 
+-- Design width and height of one toggle on a desktop-sized window; on touch applyLayout grows
+-- both until the button is at least MIN_TAP screen px, because these three are the only route
+-- to the seeds, the shop, the codes and the leaderboard.
+local TOGGLE_W, TOGGLE_H = 88, 28
+local TOGGLE_GAP = 6
+
 local toggleBar = Instance.new("Frame")
 toggleBar.Name = "Toggles"; toggleBar.BackgroundTransparency = 1; toggleBar.BorderSizePixel = 0
-toggleBar.Position = UDim2.new(0, 12, 0, 10); toggleBar.Size = UDim2.new(0, 276, 0, 28)
+toggleBar.Position = UDim2.new(0, 12, 0, 10)
+toggleBar.Size = UDim2.new(0, 3 * TOGGLE_W + 2 * TOGGLE_GAP, 0, TOGGLE_H)
 toggleBar.Visible = false; toggleBar.ZIndex = 4; toggleBar.Parent = root
 do
 	local tl = Instance.new("UIListLayout")
-	tl.FillDirection = Enum.FillDirection.Horizontal; tl.Padding = UDim.new(0, 6)
+	tl.FillDirection = Enum.FillDirection.Horizontal; tl.Padding = UDim.new(0, TOGGLE_GAP)
 	tl.SortOrder = Enum.SortOrder.LayoutOrder; tl.Parent = toggleBar
 end
 
 local function toggleBtn(order: number, key: string, text: string)
 	local b = Instance.new("TextButton")
-	b.Size = UDim2.new(0, 88, 1, 0); b.LayoutOrder = order
+	b.Size = UDim2.new(0, TOGGLE_W, 1, 0); b.LayoutOrder = order
 	b.Font = Enum.Font.GothamBold; b.TextScaled = true
 	b.TextColor3 = Color3.fromRGB(235, 238, 248); b.BackgroundColor3 = TOGGLE_SHUT
 	b.BackgroundTransparency = 0.1; b.Text = text; b.ZIndex = 4; b.Parent = toggleBar; corner(b, 6)
@@ -332,27 +356,69 @@ local function applyLayout()
 	-- controlPad is screen px; inside the scaled root everything is design px.
 	local padDesign = layout.controlPad / layout.scale
 	local usable = Responsive.usableHeight(v.Y, layout)
+	local rootW = v.X / layout.scale
 	local leftW = Responsive.sideWidth(DESIGN_LEFT_W, v.X, layout)
 	local lbW = Responsive.sideWidth(DESIGN_LB_W, v.X, layout)
+
+	-- Everything the player taps, sized so it survives the UIScale. On desktop each of these is
+	-- the number the panel was authored with, so nothing below moves on a monitor.
+	local seedBtnH = touchSize(30)
+	local shopH = touchSize(32)
+	local codeBoxH = touchSize(28)
+	local codeBtnH = touchSize(24)
+	for t = 1, MAXT do
+		-- The row carries 2 px of margin above and below its two buttons, so it is the button
+		-- height plus 4; the buttons themselves stay at `1, -4` of the row.
+		seedRows[t].row.Size = UDim2.new(1, 0, 0, seedBtnH + 4)
+	end
+	for _, b in ipairs(shopButtons) do
+		b.Size = UDim2.new(1, 0, 0, shopH)
+	end
+	codeBox.Size = UDim2.new(1, 0, 0, codeBoxH)
+	codeBtn.Position = UDim2.new(0, 0, 0, codeBoxH + 4)
+	codeBtn.Size = UDim2.new(1, 0, 0, codeBtnH)
+	-- Box, gap, button, and the 6 px of padding at the top and the bottom. 68 on desktop.
+	local codeH = codeBoxH + 4 + codeBtnH + 12
 
 	toggleBar.Visible = layout.compact
 
 	if layout.compact then
-		-- A drawer starts below the header stack, so it gets that much less room than a panel
-		-- that may use the full height of the screen.
-		local drawerUsable = math.max(60, usable - DRAWER_TOP * layout.scale)
+		local toggleW, toggleH = touchSize(TOGGLE_W), touchSize(TOGGLE_H)
+		-- Widening the toggles must not push the row off the edge, so three of them plus their
+		-- gaps and the dust readout have to keep fitting the width. On every phone viewport this
+		-- has slack to spare; it only bites on a screen too narrow for three tap targets at all.
+		local room = rootW - 2 * 12 - 2 * TOGGLE_GAP - 120 - 8
+		if 3 * toggleW > room then toggleW = math.max(1, math.floor(room / 3)) end
+		local barW = 3 * toggleW + 2 * TOGGLE_GAP
+		toggleBar.Position = UDim2.new(0, 12, 0, 10)
+		toggleBar.Size = UDim2.new(0, barW, 0, toggleH)
+		for _, b in pairs(toggleButtons) do
+			b.Size = UDim2.new(0, toggleW, 1, 0)
+		end
+
+		-- The dust readout shares the toggle row and takes whatever width is left over, so the
+		-- taller toggles cost the drawers below only one row instead of two.
 		top.AnchorPoint = Vector2.new(1, 0)
 		top.Position = UDim2.new(1, -12, 0, 10)
-		top.Size = UDim2.new(0, 220, 0, 28)
-		hint.Position = UDim2.new(0.5, 0, 0, 46)
-		toast.Position = UDim2.new(0.5, 0, 0, 74)
+		top.Size = UDim2.new(0, math.clamp(rootW - 12 - barW - 8 - 12, 120, 300), 0, toggleH)
+
+		-- The header stack, and with it the drawers, starts below whatever the toggle row grew to.
+		local hintY = 10 + toggleH + 6
+		local toastY = hintY + 26
+		local drawerTop = toastY + 28
+		hint.Position = UDim2.new(0.5, 0, 0, hintY)
+		toast.Position = UDim2.new(0.5, 0, 0, toastY)
+
+		-- A drawer starts below the header stack, so it gets that much less room than a panel
+		-- that may use the full height of the screen.
+		local drawerUsable = math.max(60, usable - drawerTop * layout.scale)
 		left.AnchorPoint = Vector2.new(0, 0)
-		left.Position = UDim2.new(0, 12, 0, DRAWER_TOP)
+		left.Position = UDim2.new(0, 12, 0, drawerTop)
 		left.Size = UDim2.new(0, leftW, 0, Responsive.fitHeight(DESIGN_LEFT_H, drawerUsable, layout))
 		codeFrame.AnchorPoint = Vector2.new(0, 0)
-		codeFrame.Position = UDim2.new(0, 12, 0, DRAWER_TOP)
+		codeFrame.Position = UDim2.new(0, 12, 0, drawerTop)
 		lb.AnchorPoint = Vector2.new(1, 0)
-		lb.Position = UDim2.new(1, -12, 0, DRAWER_TOP)
+		lb.Position = UDim2.new(1, -12, 0, drawerTop)
 		lb.Size = UDim2.new(0, lbW, 0, Responsive.fitHeight(DESIGN_LB_H, drawerUsable, layout))
 	else
 		top.AnchorPoint = Vector2.new(0.5, 0)
@@ -371,8 +437,11 @@ local function applyLayout()
 		lb.Position = UDim2.new(1, -12, 0.5, -padDesign / 2)
 		lb.Size = UDim2.new(0, lbW, 0, Responsive.fitHeight(DESIGN_LB_H, usable, layout))
 	end
-	codeFrame.Size = UDim2.new(0, leftW, 0, DESIGN_CODE_H)
+	codeFrame.Size = UDim2.new(0, leftW, 0, codeH)
 
+	-- The rows just changed height, so the seed panel's canvas has to follow them or the shop
+	-- buttons at the bottom of the list become unreachable on the screen that needs them most.
+	refreshCanvas()
 	refreshDrawers()
 end
 

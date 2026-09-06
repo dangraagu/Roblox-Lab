@@ -22,15 +22,21 @@ local Medals = require(ReplicatedStorage:WaitForChild("Medals"))
 
 -- Delt skjermstørrelse-modul (ren data — se src/shared/Responsive.luau).
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+-- Delt trykk-mål-modul (ren data — se src/shared/TouchTarget.luau).
+local TouchTarget = require(ReplicatedStorage:WaitForChild("TouchTarget"))
 
 local TOP_N = 3
 
 -- Design-mål på panelet. Begge går gjennom takene i Responsive før de brukes.
 local PANEL_W, PANEL_H = 212, 240
--- Høyden på telefon-knappen som panelet gjemmer seg bak.
+-- Høyden på telefon-knappen som panelet gjemmer seg bak, og på tema-butikk-knappen
+-- rett over den. Begge er tegnet 48 px høye, og begge VOKSER på berøring (et 48 px
+-- trykk-mål lander på 29 px når UIScale-en krymper HUD-en ned på en telefon), så
+-- hvor kolonnen begynner må regnes ut pr oppsett i stedet for å stå fast på 66.
 local TOGGLE_H = 48
--- Kolonnen øverst til høyre begynner rett under tema-butikk-knappen (~12..60).
-local TOP_Y = 66
+local SHOP_TOGGLE_Y, COLUMN_GAP = 12, 6
+-- Startverdi til første tegning; applyLayout regner den om (som topY) med en gang.
+local START_TOP_Y = SHOP_TOGGLE_Y + TOGGLE_H + COLUMN_GAP
 
 --==========================  GUI  ===============================--
 local old = playerGui:FindFirstChild("Records")
@@ -62,12 +68,20 @@ uiScale.Parent = root
 -- Gjeldende skjerm-oppsett. Settes ordentlig av applyLayout() lenger nede.
 local rlayout = Responsive.layout(0, 0, UserInputService.TouchEnabled)
 
+-- Trykk-mål i SKJERM-rom: UIScale-en som får HUD-en til å passe på en telefon krymper
+-- samtidig hver knapp, så en 48 px knapp ble 29 px — under 44 px-gulvet. tap() vokser
+-- design-tallet med 1/skala og lar det aldri lande under gulvet. Gjør ingenting uten
+-- berøringskontroller på skjermen, så desktop står stille.
+local function tap(designPx)
+	return TouchTarget.tap(designPx, rlayout)
+end
+
 -- Telefon-knappen panelet gjemmer seg bak. Den ligger øverst i høyre kolonne —
 -- ALDRI nederst, der mobil-kontrollene bor. Skjult på nettbrett og desktop.
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "RekordKnapp"
 toggleBtn.AnchorPoint = Vector2.new(1, 0)
-toggleBtn.Position = UDim2.new(1, -12, 0, TOP_Y)
+toggleBtn.Position = UDim2.new(1, -12, 0, START_TOP_Y)
 toggleBtn.Size = UDim2.fromOffset(TOGGLE_H, TOGGLE_H)
 toggleBtn.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
 toggleBtn.BackgroundTransparency = 0.2
@@ -93,7 +107,7 @@ togglePad.Parent = toggleBtn
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.AnchorPoint = Vector2.new(1, 0)
-panel.Position = UDim2.new(1, -12, 0, TOP_Y)
+panel.Position = UDim2.new(1, -12, 0, START_TOP_Y)
 panel.Size = UDim2.new(0, PANEL_W, 0, 0)
 panel.AutomaticSize = Enum.AutomaticSize.Y
 panel.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
@@ -233,23 +247,31 @@ local function applyLayout()
 	-- helt riktig ut på desktop der skalaen er 1 og feilen er usynlig.
 	root.Size = UDim2.fromScale(1 / rlayout.scale, 1 / rlayout.scale)
 
+	-- Knappen er hele veien inn til lista på telefon, så den måles i skjerm-piksler:
+	-- 48x48 design-piksler kom ut som 29x29 på en 800x360-skjerm. Vokser den, må resten
+	-- av kolonnen flytte seg ned — både under tema-butikk-knappen over oss og under vår
+	-- egen knapp når skuffa åpner seg.
+	local toggleH = tap(TOGGLE_H)
+	toggleBtn.Size = UDim2.fromOffset(toggleH, toggleH)
+	local topY = SHOP_TOGGLE_Y + toggleH + COLUMN_GAP
+
 	-- Hvor høyt oppe i kolonnen vi får begynne.
-	local top = TOP_Y
+	local top = topY
 	local mini = playerGui:FindFirstChild("Minikart")
 	local frame = mini and mini:FindFirstChild("Kart")
 	if frame and frame.Visible and frame.Size.Y.Offset > 0 then
 		-- Vi leser Size.Y.Offset og IKKE AbsoluteSize: kartet settes i design-piksler
 		-- under sin egen UIScale, og det er design-piksler vi regner i her inne.
-		top = TOP_Y + frame.Size.Y.Offset + 8
+		top = topY + frame.Size.Y.Offset + 8
 	end
 
 	-- Hvor panelet faktisk begynner. På telefon sitter knappen ØVERST i kolonnen (rett
 	-- under butikk-knappen) og skuffen åpner seg rett under den — den legger seg da
 	-- oppå minikartet, slik en skuff skal. Da får lista hele resten av kolonnen i
 	-- stedet for den vesle stripa som blir igjen under kartet. Minikartet vet om
-	-- denne knappen og flytter seg ned for den (se COMPACT_TOP_OFFSET i
+	-- denne knappen og flytter seg ned for den (se TOGGLE_H/COLUMN_GAP i
 	-- MinimapClient), så knappen dekker aldri kartet når skuffen er lukket.
-	local panelTop = if rlayout.compact then TOP_Y + TOGGLE_H + 6 else top
+	local panelTop = if rlayout.compact then topY + toggleH + COLUMN_GAP else top
 
 	-- Bredden gjennom sidepanel-taket (venstre + høyre panel kan aldri dekke mer enn
 	-- halve skjermen), høyden gjennom fitHeight mot plassen over mobil-kontrollene.
@@ -263,7 +285,7 @@ local function applyLayout()
 	panel.Size = UDim2.new(0, w, 0, 0)
 
 	toggleBtn.Visible = rlayout.compact
-	toggleBtn.Position = UDim2.new(1, -12, 0, TOP_Y)
+	toggleBtn.Position = UDim2.new(1, -12, 0, topY)
 	panel.Visible = (not rlayout.compact) or expanded
 	panel.Position = UDim2.new(1, -12, 0, panelTop)
 end

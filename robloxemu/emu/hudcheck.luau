@@ -138,9 +138,14 @@ function HudCheck.run(cfg)
 	----------------------------------------------------------------- geometry, per viewport
 
 	for _, v in viewports do
-		h:setViewport(v.w, v.h)
+		-- Touch FIRST, then the viewport. A HUD re-lays-out when Camera.ViewportSize changes and
+		-- reads UserInputService.TouchEnabled while doing it, so setting the viewport first laid
+		-- the page out against the PREVIOUS iteration's touch flag — the mouse-driven laptop run
+		-- was measured with the tablet's touch still on. Two agents hit the resulting
+		-- disagreement between the checker and the HUD independently before it was found here.
 		h:setTouch(v.touch)
-		-- The HUD re-lays-out when Camera.ViewportSize changes; give its handlers a beat.
+		h:setViewport(v.w, v.h)
+		-- Give the HUD's handlers a beat to run.
 		h:advance(0.1)
 
 		local controlPad = 0

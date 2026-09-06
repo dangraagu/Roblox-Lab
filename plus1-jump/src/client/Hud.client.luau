@@ -4,12 +4,15 @@
 --
 -- Layout note: every panel below is authored in design pixels against a 1280x720 window and
 -- then scaled and repositioned by the shared Responsive module, so the HUD survives a phone
--- viewport. Three things follow from that and are easy to break by accident:
+-- viewport. Four things follow from that and are easy to break by accident:
 --   * a UIScale does nothing parented to a ScreenGui, so every element lives inside `root`;
 --   * `root` is grown by 1/scale so that root * scale lands exactly on the viewport;
 --   * on a phone the two side panels start collapsed behind toggle buttons along the TOP
 --     edge, and nothing is allowed into the band at the bottom of the screen where Roblox
---     draws its own movement thumbstick and jump button.
+--     draws its own movement thumbstick and jump button;
+--   * the scaling that makes the HUD fit also shrinks every button on the one device whose
+--     input is a thumb, so anything tappable is sized through `touchSize` instead of being
+--     given a design height directly. Text may shrink; tap targets may not.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -39,8 +42,17 @@ local GAP = 8
 local TOGGLE_W, TOGGLE_H = 96, 34
 local TOP_W = 360
 local LEFT_W, LEFT_H = 210, 210
-local CODE_H = 76
+local REBIRTH_H = 54
+local CODE_PAD, CODE_GAP = 8, 4
+local CODE_BOX_H, CODE_BTN_H = 30, 26
 local LB_W, LB_H = 200, 300
+
+-- Roblox's own guidance and both mobile platform guidelines put the smallest comfortable tap
+-- target at 44 SCREEN px. Design px are not screen px: the UIScale that makes the HUD fit a
+-- phone shrinks every button on exactly the device whose input is a thumb. So the interactive
+-- elements below are sized through `touchSize`, which works backwards from this floor, rather
+-- than having their heights written straight into a UDim2.
+local MIN_TAP = 44
 
 -- ── UI-hjelpere ─────────────────────────────────────────────────────────────
 local function corner(inst, r)
@@ -190,7 +202,8 @@ local multLabel = statLabel(3, "✖️ Multiplier: 1x")
 local heightLabel = statLabel(4, "📏 Jump: 7.2")
 
 local rebirthBtn = Instance.new("TextButton")
-rebirthBtn.Size = UDim2.new(1, 0, 0, 54)
+rebirthBtn.Name = "RebirthButton"
+rebirthBtn.Size = UDim2.new(1, 0, 0, REBIRTH_H)
 rebirthBtn.LayoutOrder = 5
 rebirthBtn.Font = Enum.Font.GothamBlack
 rebirthBtn.TextScaled = true
@@ -210,20 +223,22 @@ end)
 -- ── Koder ───────────────────────────────────────────────────────────────────
 -- This used to be pinned to the bottom-left corner, which on a phone is exactly where the
 -- movement thumbstick lives — the text box and the Redeem button were untappable. It is now
--- lifted clear of the touch-control band, and on a phone it rides directly under the stats
--- panel as part of the same drawer instead of being bottom-anchored at all.
+-- lifted clear of the touch-control band, and on a phone it becomes the last item inside the
+-- stats drawer (see applyLayout) rather than a bottom-anchored panel of its own.
 local codeFrame = Instance.new("Frame")
 codeFrame.Name = "Codes"
 codeFrame.AnchorPoint = Vector2.new(0, 1)
 codeFrame.Position = UDim2.new(0, MARGIN, 1, -MARGIN)
-codeFrame.Size = UDim2.new(0, LEFT_W, 0, CODE_H)
+codeFrame.Size = UDim2.new(0, LEFT_W, 0, 2 * CODE_PAD + CODE_BOX_H + CODE_GAP + CODE_BTN_H)
+codeFrame.LayoutOrder = 6 -- only consulted on a phone, where it joins the stats list
 codeFrame.BackgroundColor3 = Color3.fromRGB(20, 24, 40)
 codeFrame.BackgroundTransparency = 0.15
 codeFrame.Parent = root
-corner(codeFrame, 12); pad(codeFrame, 8)
+corner(codeFrame, 12); pad(codeFrame, CODE_PAD)
 
 local codeBox = Instance.new("TextBox")
-codeBox.Size = UDim2.new(1, 0, 0, 30)
+codeBox.Name = "CodeBox"
+codeBox.Size = UDim2.new(1, 0, 0, CODE_BOX_H)
 codeBox.Font = Enum.Font.GothamMedium
 codeBox.TextScaled = true
 codeBox.PlaceholderText = "Enter code..."
@@ -235,8 +250,9 @@ codeBox.Parent = codeFrame
 corner(codeBox, 8)
 
 local codeBtn = Instance.new("TextButton")
-codeBtn.Position = UDim2.new(0, 0, 0, 34)
-codeBtn.Size = UDim2.new(1, 0, 0, 26)
+codeBtn.Name = "RedeemButton"
+codeBtn.Position = UDim2.new(0, 0, 0, CODE_BOX_H + CODE_GAP)
+codeBtn.Size = UDim2.new(1, 0, 0, CODE_BTN_H)
 codeBtn.Font = Enum.Font.GothamBold
 codeBtn.TextScaled = true
 codeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -330,6 +346,26 @@ local layout = Responsive.layout(Responsive.REF_X, Responsive.REF_Y, UserInputSe
 local menuOpen = false
 local lbOpen = false
 
+-- Design px in, design px out — but the number that comes back is chosen so that what the
+-- player's thumb meets is at least MIN_TAP screen px once the UIScale has had its way. Dividing
+-- by the scale keeps a control at the physical size it was drawn for; the max() is the floor for
+-- controls that were drawn smaller than a thumb in the first place. `controlPad` is non-zero
+-- only on a touch client, so a small mouse-driven window and a 1920x1080 monitor both get the
+-- design numbers back unchanged and nothing on a desktop moves.
+local function touchSize(designPx: number): number
+	if layout.controlPad <= 0 then
+		return designPx
+	end
+	local wanted = math.max(designPx, MIN_TAP)
+	local n = math.ceil(wanted / layout.scale)
+	-- The ceiling can still land a hair short of `wanted` once the UIScale multiplies it back
+	-- out, because neither division is exact. One more pixel is cheaper than one more review.
+	if n * layout.scale < wanted then
+		n += 1
+	end
+	return n
+end
+
 -- On a phone both drawers are closed until the player asks for one, and only one may be open
 -- at a time so the play area is never buried under two panels at once. On anything larger the
 -- panels are simply always there and the toggles do not exist.
@@ -375,20 +411,38 @@ local function applyLayout()
 	local padDesign = layout.controlPad / layout.scale -- touch-control band, in design px
 	local usable = Responsive.usableHeight(vy, layout) -- screen px
 
+	-- Interactive sizes come first, because everything else is measured around them: the toggle
+	-- row's height decides where the drawers underneath it start, and the code panel is only as
+	-- tall as a thumb-sized text box plus a thumb-sized button.
+	local toggleW, toggleH = touchSize(TOGGLE_W), touchSize(TOGGLE_H)
+	local boxH, btnH = touchSize(CODE_BOX_H), touchSize(CODE_BTN_H)
+	local rebirthH = touchSize(REBIRTH_H)
+	local codeH = 2 * CODE_PAD + boxH + CODE_GAP + btnH
+
+	menuToggle.Size = UDim2.new(0, toggleW, 0, toggleH)
+	lbToggle.Size = UDim2.new(0, toggleW, 0, toggleH)
 	menuToggle.Visible = compact
 	lbToggle.Visible = compact
 
+	rebirthBtn.Size = UDim2.new(1, 0, 0, rebirthH)
+	codeBox.Size = UDim2.new(1, 0, 0, boxH)
+	codeBtn.Position = UDim2.new(0, 0, 0, boxH + CODE_GAP)
+	codeBtn.Size = UDim2.new(1, 0, 0, btnH)
+
 	-- The counter shrinks on a phone and is capped so the two toggles can never land on top of
-	-- it, however narrow the window gets.
+	-- it, however narrow the window gets. The floor is low because the toggles are now sized for
+	-- a thumb: on a very narrow screen the counter has to be the thing that gives way.
 	local topH = if compact then 72 else 92
 	local topW = TOP_W
 	if compact then
-		topW = clampNum(rootW - 2 * (MARGIN + TOGGLE_W + GAP), 160, TOP_W)
+		topW = clampNum(rootW - 2 * (MARGIN + toggleW + GAP), 80, TOP_W)
 	end
 	top.Size = UDim2.new(0, topW, 0, topH)
 
 	-- The vertical band a side panel may occupy: below the counter, above the touch controls.
-	local bandTop = MARGIN + topH + GAP
+	-- A thumb-sized toggle is taller than the compact counter, so the row's height is whichever
+	-- of the two reaches lower.
+	local bandTop = MARGIN + math.max(topH, if compact then toggleH else 0) + GAP
 	local bandBottom = math.max(rootH - MARGIN - padDesign, bandTop + 1)
 	local band = bandBottom - bandTop
 
@@ -396,31 +450,41 @@ local function applyLayout()
 	local lbW = Responsive.sideWidth(LB_W, vx, layout)
 
 	if compact then
-		-- Phone: stats and the code box are one stack hanging from the top edge, so the code
-		-- box ends up nowhere near the thumbstick and the whole drawer clears the control band.
-		local leftRoom = math.max(1, band - GAP - CODE_H)
-		local leftH = Responsive.fitHeight(LEFT_H, math.min(usable, leftRoom * layout.scale), layout)
+		-- Phone: stats, rebirth and the code box are ONE scrolling drawer hanging off the top
+		-- edge, so the code box ends up nowhere near the thumbstick and the whole drawer clears
+		-- the control band. Two stacked panels was the earlier shape and the arithmetic stopped
+		-- fitting once the controls were sized for a thumb — a text box and a button alone claim
+		-- 100 of the 170 screen px an 800x360 phone has between the counter and the thumbstick,
+		-- which left the stats a 26 px sliver. Inside the list they scroll instead.
+		if codeFrame.Parent ~= left then
+			codeFrame.Parent = left
+		end
+		codeFrame.AnchorPoint = Vector2.new(0, 0)
+		codeFrame.Position = UDim2.new() -- the UIListLayout in `left` places it
+		codeFrame.Size = UDim2.new(1, 0, 0, codeH)
+
+		local stackH = LEFT_H + GAP + codeH
+		local leftH = Responsive.fitHeight(stackH, math.min(usable, band * layout.scale), layout)
 		left.AnchorPoint = Vector2.new(0, 0)
 		left.Position = UDim2.new(0, MARGIN, 0, bandTop)
 		left.Size = UDim2.new(0, leftW, 0, leftH)
-
-		codeFrame.AnchorPoint = Vector2.new(0, 0)
-		codeFrame.Position = UDim2.new(0, MARGIN, 0, bandTop + leftH + GAP)
-		codeFrame.Size = UDim2.new(0, leftW, 0, CODE_H)
 
 		local lbH = Responsive.fitHeight(LB_H, math.min(usable, band * layout.scale), layout)
 		lbFrame.AnchorPoint = Vector2.new(1, 0)
 		lbFrame.Position = UDim2.new(1, -MARGIN, 0, bandTop)
 		lbFrame.Size = UDim2.new(0, lbW, 0, lbH)
 	else
-		-- Desktop and tablet keep the familiar centred side panels. The code box stays in the
-		-- bottom-left corner but is lifted by the control pad, which is zero on a mouse client
-		-- and so leaves the desktop layout exactly where it was.
+		-- Desktop and tablet keep the familiar centred side panels, with the code box a separate
+		-- frame back in the bottom-left corner. It is lifted by the control pad, which is zero on
+		-- a mouse client and so leaves the desktop layout exactly where it was.
+		if codeFrame.Parent ~= root then
+			codeFrame.Parent = root
+		end
 		codeFrame.AnchorPoint = Vector2.new(0, 1)
 		codeFrame.Position = UDim2.new(0, MARGIN, 1, -(MARGIN + padDesign))
-		codeFrame.Size = UDim2.new(0, leftW, 0, CODE_H)
+		codeFrame.Size = UDim2.new(0, leftW, 0, codeH)
 
-		local leftBand = math.max(1, band - CODE_H - GAP)
+		local leftBand = math.max(1, band - codeH - GAP)
 		local leftH = Responsive.fitHeight(LEFT_H, math.min(usable, leftBand * layout.scale), layout)
 		local leftCenter = clampNum(rootH * 0.5, bandTop + leftH * 0.5, bandTop + leftBand - leftH * 0.5)
 		left.AnchorPoint = Vector2.new(0, 0.5)

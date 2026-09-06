@@ -69,6 +69,45 @@ local ACCENT = Color3.fromRGB(120, 180, 255)
 local WARN = Color3.fromRGB(230, 90, 80)
 local GOOD = Color3.fromRGB(90, 200, 130)
 
+-- Roblox's own guidance and both mobile platform guidelines put the smallest comfortable tap
+-- target at 44 SCREEN px in both dimensions. Below that a control is drawn but not reliably
+-- hittable with a thumb.
+local TAP_MIN = 44
+
+-- Design widths of the two phone drawer toggles. Named because applyLayout has to convert them
+-- into screen space and the toggleButton factory has to seed them.
+local TOGGLE_W_STATUS = 112
+local TOGGLE_W_MENU = 96
+
+-- Interactive controls are sized in SCREEN px, not design px. A UIScale below 1 shrinks every
+-- button on exactly the device whose players need them biggest: the DAY and MENU toggles came
+-- out at 67x18 and 58x18 on a phone, and the tint swatches at 16x16 — the colour picker was
+-- smaller under a thumb than it is under a mouse pointer, which is backwards. Dividing the
+-- design size by the scale keeps a control the same physical size whatever the scale is, and
+-- the floor keeps it thumb-sized.
+--
+-- The touch test is `controlPad > 0`, which is true exactly when Roblox is drawing its own
+-- touch controls. A small mouse-driven window is therefore left alone, and so is every desktop
+-- viewport, where the scale is 1 and this returns the design size unchanged.
+-- The ceil is not cosmetic: 44 / 0.6 is 73.33, which the swatch row then floors back to 73 and
+-- lands at 43.8 screen px — a fifth of a pixel under the bar, and Roblox rounds an offset to a
+-- whole pixel anyway. Rounding up here means every derived size clears 44 with room to spare.
+local function tapSize(designPx: number): number
+	if layout.controlPad <= 0 then
+		return designPx
+	end
+	return math.ceil(math.max(designPx, TAP_MIN) / layout.scale)
+end
+
+-- Text inside a control that grew has to grow with it, or a 44 px button carries a 9 px label.
+-- Same touch-only gate, and no floor: this is readability, not hit area.
+local function tapText(designSize: number): number
+	if layout.controlPad <= 0 then
+		return designSize
+	end
+	return math.floor(designSize / layout.scale)
+end
+
 local function label(parent: Instance, text: string, size: UDim2, pos: UDim2, ts: number): TextLabel
 	local l = Instance.new("TextLabel")
 	l.BackgroundTransparency = 1
@@ -176,6 +215,7 @@ tools.Parent = root
 Instance.new("UICorner", tools).CornerRadius = UDim.new(0, 10)
 
 local codeBox = Instance.new("TextBox")
+codeBox.Name = "CodeBox" -- named so a HUD check reports "CodeBox", not a bare "TextBox"
 codeBox.Size = UDim2.fromOffset(150, 30)
 codeBox.Position = UDim2.fromOffset(16, 0)
 codeBox.BackgroundColor3 = DARK
@@ -191,6 +231,7 @@ codeBox.Parent = tools
 Instance.new("UICorner", codeBox).CornerRadius = UDim.new(0, 8)
 
 local redeemBtn = Instance.new("TextButton")
+redeemBtn.Name = "RedeemButton"
 redeemBtn.Size = UDim2.fromOffset(90, 30)
 redeemBtn.Position = UDim2.fromOffset(172, 0)
 redeemBtn.BackgroundColor3 = ACCENT
@@ -244,8 +285,25 @@ local tintOwned: { [string]: boolean } = {}
 local TINT_PAD = 6
 local tintRowWidth = 300
 
+-- How many swatches the row has to hold. Config.Tints is what the server sends and it is known
+-- before the first State push, so applyLayout can budget the row on the very first pass rather
+-- than laying the drawer out once for zero swatches and again for five.
+local function tintCount(): number
+	local n = 0
+	for _ in tintButtons do
+		n += 1
+	end
+	return math.max(n, #Config.Tints, 1)
+end
+
 -- Derive the swatch size from the row it has to fit into, so a narrow phone drawer (or a
 -- sixth tint added to Config later) shrinks the swatches instead of pushing them off the edge.
+--
+-- The 26 px clamp used to be the whole story, which meant the swatches only ever got SMALLER
+-- than their design size — 16x16 on a phone. The clamp is still the ceiling the row can afford,
+-- but on a touch screen the 44 px tap floor wins; applyLayout budgets the row wide enough for
+-- it, and `math.min(.., per)` is the belt to that pair of braces so a floor that genuinely will
+-- not fit shrinks rather than running off the screen edge.
 local function layoutTints()
 	local n = 0
 	for _ in tintButtons do
@@ -253,7 +311,7 @@ local function layoutTints()
 	end
 	if n == 0 then return end
 	local per = math.floor((tintRowWidth - TINT_PAD * (n - 1)) / n)
-	local size = math.clamp(per, 14, 26)
+	local size = math.max(14, math.min(tapSize(math.clamp(per, 14, 26)), per))
 	for _, b in tintButtons do
 		b.Size = UDim2.fromOffset(size, size)
 	end
@@ -338,8 +396,8 @@ local function toggleButton(name: string, anchorRight: boolean, width: number, t
 	return b
 end
 
-local statusToggle = toggleButton("StatusToggle", false, 112, "DAY 1")
-local menuToggle = toggleButton("MenuToggle", true, 96, "MENU")
+local statusToggle = toggleButton("StatusToggle", false, TOGGLE_W_STATUS, "DAY 1")
+local menuToggle = toggleButton("MenuToggle", true, TOGGLE_W_MENU, "MENU")
 
 -- Which drawer the player has opened. Both start closed on a phone: the default view of this
 -- game should be the hall and nothing else.
@@ -394,13 +452,23 @@ local function applyLayout()
 	-- start below it or they are simply not tappable.
 	local insetTop = GuiService:GetGuiInset().Y / layout.scale
 	local topY = if compact then insetTop + 8 else 16
-	local drawerY = topY + 38 -- clear of the 30px toggle row above
+	-- The toggle row is sized in screen px now, so on a phone it stands 44 screen px tall
+	-- instead of 18 and the drawers below it have to start correspondingly lower.
+	local toggleH = tapSize(30)
+	local statusW = tapSize(TOGGLE_W_STATUS)
+	local menuW = tapSize(TOGGLE_W_MENU)
+	local drawerY = topY + toggleH + 8
 	-- A panel hanging off the top edge only gets the room that is left below its own top
 	-- offset — otherwise a very short window drops the bottom of a drawer into the touch band.
 	local topRoom = math.max(40, usable - (if compact then drawerY else 16) * layout.scale)
 
 	statusToggle.Visible = compact
 	menuToggle.Visible = compact
+	statusToggle.Size = UDim2.fromOffset(statusW, toggleH)
+	menuToggle.Size = UDim2.fromOffset(menuW, toggleH)
+	-- A 44 px button carrying a 9 px label looks broken; the text grows with the button.
+	statusToggle.TextSize = tapText(16)
+	menuToggle.TextSize = tapText(16)
 	statusToggle.Position = UDim2.new(0, 12, 0, topY)
 	menuToggle.Position = UDim2.new(1, -12, 0, topY)
 
@@ -430,10 +498,22 @@ local function applyLayout()
 	-- Instruction line: the long form on a one-line strip as before, the short form squeezed
 	-- between the two toggles on a phone. Wrapping is only turned on where the box is tall
 	-- enough for a second line, otherwise a wrapped line would be hidden rather than trimmed.
+	-- On a phone the width is measured from the gap the toggles actually leave rather than being
+	-- a fixed 0.52 of the screen: the toggles are now three times wider in design px than they
+	-- were, and a fixed fraction would run underneath them on a narrow portrait screen. Height
+	-- matches the toggle row so the line sits centred against it.
 	help.Text = if compact then HELP_SHORT else HELP_FULL
 	help.TextWrapped = compact
-	help.Size = if compact then UDim2.new(0.52, 0, 0, 38) else UDim2.new(0.9, 0, 0, 24)
-	help.Position = if compact then UDim2.new(0.5, 0, 0, topY) else UDim2.new(0.5, 0, 0, 20)
+	if compact then
+		local rootW = v.X / layout.scale
+		local gapLeft = rootW / 2 - (12 + statusW) - 8
+		local gapRight = rootW / 2 - (12 + menuW) - 8
+		help.Size = UDim2.new(0, math.max(120, 2 * math.min(gapLeft, gapRight)), 0, toggleH)
+		help.Position = UDim2.new(0.5, 0, 0, topY)
+	else
+		help.Size = UDim2.new(0.9, 0, 0, 24)
+		help.Position = UDim2.new(0.5, 0, 0, 20)
+	end
 
 	-- Toasts sit in the upper third on a phone rather than over the middle of the hall, and get
 	-- room for a second line there because the same sentence has far fewer pixels to live in.
@@ -451,39 +531,81 @@ local function applyLayout()
 		toastDetail.Position = UDim2.new(0.5, 0, 0.5, -80)
 	end
 
-	-- code + tint tools
+	-- code + tint tools. Every control here is a tap target, so all four dimensions below come
+	-- from tapSize and land on the same physical size whatever the scale is. On a desktop
+	-- viewport tapSize is the identity and the arithmetic degenerates to the old literals:
+	-- 150x30 code box at x 16, 90x30 button at x 172, a 30 px strip 46 px off the bottom.
+	local rowH = tapSize(30)
+	local btnW = tapSize(90)
 	if compact then
-		-- A drawer under the MENU toggle. Stacked, not side by side: on a narrow phone a row
-		-- would squeeze the code box down to a few characters.
-		local w = Responsive.sideWidth(250, v.X, layout)
+		-- A drawer under the MENU toggle. At 44 screen px per control the old three stacked rows
+		-- no longer clear the touch-control band on a short landscape phone — 800x360 leaves
+		-- roughly 145 screen px between the toggle row and the thumbstick — so the drawer flows
+		-- instead: the code box, the button and the swatches share ONE row when the screen is
+		-- wide enough for it, and the swatches drop to a second row when it is not. A short
+		-- landscape phone takes the single row, a tall portrait one the two-row form; both keep
+		-- the drawer well clear of the band, and it is anchored to the right edge so the middle
+		-- of the hall stays visible.
+		local padIn, gapIn = 8, 6
+		local n = tintCount()
+		local maxW = math.max(120, v.X / layout.scale - 2 * 12)
+		local codeMin = tapSize(120)
+		-- A swatch that will not fit the widest drawer the screen allows shrinks rather than
+		-- running off the edge; on every phone viewport we ship for, the tap floor wins.
+		local roomPerSwatch = (maxW - padIn * 2 - TINT_PAD * (n - 1)) / n
+		local swatch = math.max(14, math.min(tapSize(26), roomPerSwatch))
+		local swatchRowW = swatch * n + TINT_PAD * (n - 1)
+
+		local oneRowW = codeMin + gapIn + btnW + gapIn + swatchRowW + padIn * 2
+		local twoRowW = math.max(codeMin + gapIn + btnW, swatchRowW) + padIn * 2
+		local oneRow = oneRowW <= maxW
+		local w = math.min(maxW, if oneRow then oneRowW else twoRowW)
+		local needH = padIn * 2 + rowH + (if oneRow then 0 else gapIn + swatch)
+		local codeW = math.max(codeMin, (w - padIn * 2) - gapIn - btnW - (if oneRow then gapIn + swatchRowW else 0))
+
 		tools.AnchorPoint = Vector2.new(1, 0)
-		tools.Size = UDim2.new(0, w, 0, Responsive.fitHeight(124, topRoom, layout))
+		tools.Size = UDim2.new(0, w, 0, Responsive.fitHeight(needH, topRoom, layout))
 		tools.Position = UDim2.new(1, -12, 0, drawerY)
 		tools.BackgroundTransparency = 0.15
-		codeBox.Size = UDim2.new(1, -20, 0, 32)
-		codeBox.Position = UDim2.fromOffset(10, 10)
-		redeemBtn.Size = UDim2.new(1, -20, 0, 30)
-		redeemBtn.Position = UDim2.fromOffset(10, 48)
+		codeBox.Size = UDim2.fromOffset(codeW, rowH)
+		codeBox.Position = UDim2.fromOffset(padIn, padIn)
+		codeBox.TextSize = tapText(15)
+		redeemBtn.Size = UDim2.fromOffset(btnW, rowH)
+		redeemBtn.Position = UDim2.fromOffset(padIn + codeW + gapIn, padIn)
+		redeemBtn.TextSize = tapText(15)
 		tintRow.AnchorPoint = Vector2.new(0, 0)
-		tintRow.Size = UDim2.new(1, -20, 0, 30)
-		tintRow.Position = UDim2.fromOffset(10, 86)
+		tintRow.Size = UDim2.fromOffset(swatchRowW, swatch)
+		tintRow.Position = if oneRow
+			then UDim2.fromOffset(padIn + codeW + gapIn + btnW + gapIn, padIn + (rowH - swatch) / 2)
+			else UDim2.fromOffset(padIn, padIn + rowH + gapIn)
 		tintLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-		tintRowWidth = w - 20
+		tintRowWidth = swatchRowW
 	else
 		-- A transparent full-width strip, lifted clear of the touch controls when there are any.
+		-- The lift is measured from the strip's own height so a touch tablet, where the controls
+		-- are taller, does not push the taller strip back down into the band.
+		local codeW = tapSize(150)
 		tools.AnchorPoint = Vector2.new(0, 0)
-		tools.Size = UDim2.new(1, 0, 0, 30)
-		tools.Position = UDim2.new(0, 0, 1, -(46 + padUp))
+		tools.Size = UDim2.new(1, 0, 0, rowH)
+		tools.Position = UDim2.new(0, 0, 1, -(rowH + 16 + padUp))
 		tools.BackgroundTransparency = 1
-		codeBox.Size = UDim2.fromOffset(150, 30)
+		codeBox.Size = UDim2.fromOffset(codeW, rowH)
 		codeBox.Position = UDim2.fromOffset(16, 0)
-		redeemBtn.Size = UDim2.fromOffset(90, 30)
-		redeemBtn.Position = UDim2.fromOffset(172, 0)
+		codeBox.TextSize = tapText(15)
+		redeemBtn.Size = UDim2.fromOffset(btnW, rowH)
+		redeemBtn.Position = UDim2.fromOffset(16 + codeW + 6, 0)
+		redeemBtn.TextSize = tapText(15)
+		-- 300 is the design width the strip has always had, and on a desktop viewport five 26 px
+		-- swatches need 154 of it, so this is that same 300. It only grows if the swatches would
+		-- not otherwise fit — a touch tablet, or a sixth tint appended to Config — because a row
+		-- too narrow for them makes layoutTints shrink them back under the tap target.
+		local n = tintCount()
+		local rowW = math.max(300, tapSize(26) * n + TINT_PAD * (n - 1) + 6)
 		tintRow.AnchorPoint = Vector2.new(1, 0)
-		tintRow.Size = UDim2.fromOffset(300, 30)
+		tintRow.Size = UDim2.fromOffset(rowW, rowH)
 		tintRow.Position = UDim2.new(1, -16, 0, 0)
 		tintLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
-		tintRowWidth = 300
+		tintRowWidth = rowW
 	end
 	layoutTints()
 	refreshDrawers()
@@ -491,6 +613,11 @@ end
 
 applyLayout()
 camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+-- Every tap-target size above is decided by whether Roblox is drawing its own touch controls,
+-- and that is not fixed for the life of a session: a detachable tablet keyboard flips it
+-- without the viewport changing by a single pixel. Listening to the viewport alone leaves the
+-- HUD laid out for the wrong input device until something else happens to resize it.
+UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(applyLayout)
 
 -- ---------------------------------------------------------------- carried flashlight
 -- The tint was stored, validated, persisted, replicated and pickable — but nothing ever lit

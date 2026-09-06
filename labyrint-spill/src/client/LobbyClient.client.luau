@@ -22,6 +22,7 @@ local camera = workspace.CurrentCamera
 -- Shared sizing rules so this HUD survives a phone. Note the require form: a bare string
 -- require like `require("./Responsive")` resolves in the luau CLI but is invalid in Roblox.
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+local TouchTarget = require(ReplicatedStorage:WaitForChild("TouchTarget"))
 
 --==========================  GUI  ===============================--
 local old = playerGui:FindFirstChild("LobbyPicker")
@@ -56,14 +57,20 @@ local PANEL_W, PANEL_H = 360, 380
 local layout = Responsive.layout(camera.ViewportSize.X, camera.ViewportSize.Y, UserInputService.TouchEnabled)
 
 -- A control drawn 44 px tall comes out at 44 * scale on screen, which is 26 px on a phone —
--- too small for a thumb. Where the player is on touch (controlPad is only non-zero then) we
--- grow the touch targets by 1/scale so they land at the size they were drawn for; text size
--- caps get the same treatment, otherwise the label shrinks inside a button that grew.
-local function touchSize(designPx)
-	if layout.controlPad <= 0 then
-		return designPx
-	end
-	return math.ceil(designPx / layout.scale)
+-- too small for a thumb. Both helpers below only do anything where the player is on touch
+-- (controlPad is non-zero exactly then); on a mouse-driven window they hand back the design
+-- number untouched.
+--
+--   tap()  — something the player presses. Grown by 1/scale AND floored at 44 screen px.
+--   grow() — text size caps and label rows. Grown, but no floor, or a 13 px cap would come
+--            out enormous. Text still has to shrink to fit.
+--
+-- The arithmetic lives in the shared TouchTarget module rather than in a copy per file.
+local function tap(designPx)
+	return TouchTarget.tap(designPx, layout)
+end
+local function grow(designPx)
+	return TouchTarget.grow(designPx, layout)
 end
 
 local panel = Instance.new("Frame")
@@ -175,7 +182,7 @@ local function rebuild(accepted)
 		b.TextScaled = true
 		b.Text = tostring(lvl)
 		b.Parent = scroll
-		local tsc = Instance.new("UITextSizeConstraint"); tsc.MaxTextSize = touchSize(16); tsc.Parent = b
+		local tsc = Instance.new("UITextSizeConstraint"); tsc.MaxTextSize = grow(16); tsc.Parent = b
 		corner(b, 6)
 		b.Activated:Connect(function() choose(lvl) end)
 	end
@@ -210,31 +217,31 @@ local function applyLayout()
 	-- keeps the bottom row of level buttons clear of the movement stick and the jump button.
 	panel.Position = UDim2.new(0.5, 0, 0.5, -math.floor(layout.controlPad / layout.scale / 2))
 
-	local closeW = touchSize(44)
+	local closeW = tap(44)
 	closeBtn.Size = UDim2.fromOffset(closeW, closeW)
 	title.Position = UDim2.fromOffset(closeW + 16, 8)
-	title.Size = UDim2.new(1, -2 * (closeW + 16), 0, touchSize(34))
-	ttc.MaxTextSize = touchSize(22)
+	title.Size = UDim2.new(1, -2 * (closeW + 16), 0, grow(34))
+	ttc.MaxTextSize = grow(22)
 
 	-- Stack the body from the title down, so every row keeps its gap when the parts grow.
-	local contY = 10 + touchSize(34) + 4
-	local contH = touchSize(48)
+	local contY = 10 + grow(34) + 4
+	local contH = tap(48)
 	continueBtn.Position = UDim2.fromOffset(10, contY)
 	continueBtn.Size = UDim2.new(1, -20, 0, contH)
-	ctc.MaxTextSize = touchSize(20)
+	ctc.MaxTextSize = grow(20)
 
 	local pickY = contY + contH + 8
-	local pickH = touchSize(18)
+	local pickH = grow(18)
 	pickLabel.Position = UDim2.fromOffset(10, pickY)
 	pickLabel.Size = UDim2.new(1, -20, 0, pickH)
-	ptc.MaxTextSize = touchSize(13)
+	ptc.MaxTextSize = grow(13)
 
 	local scrollY = pickY + pickH + 6
 	scroll.Position = UDim2.fromOffset(10, scrollY)
 	scroll.Size = UDim2.new(1, -20, 1, -(scrollY + 8))
 
 	-- The grid owns the size of every level button, and the buttons copy it on rebuild.
-	grid.CellSize = UDim2.fromOffset(touchSize(56), touchSize(44))
+	grid.CellSize = UDim2.fromOffset(tap(56), tap(44))
 end
 
 applyLayout()

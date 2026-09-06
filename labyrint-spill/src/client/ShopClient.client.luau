@@ -36,6 +36,7 @@ local Themes = require(ReplicatedStorage:WaitForChild("Themes"))
 -- Shared sizing rules so this HUD survives a phone. Note the require form: a bare string
 -- require like `require("./Responsive")` resolves in the luau CLI but is invalid in Roblox.
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+local TouchTarget = require(ReplicatedStorage:WaitForChild("TouchTarget"))
 
 --============================  STATE  ============================--
 -- Fasit kommer fra serveren via ShopData-eventet. Vi starter forsiktig:
@@ -203,23 +204,32 @@ root.Parent = gui
 local uiScale = Instance.new("UIScale")
 uiScale.Parent = root
 
--- The size this shop was drawn at, and how much room along the top edge the toggle owns.
+-- The size this shop was drawn at, and the toggle that owns the top-right corner.
 local PANEL_W, PANEL_H = 380, 620
-local TOP_BAR = 66
+local TOGGLE_W, TOGGLE_H = 140, 48
+-- Where the toggle sits, and the gap below it. The row under the toggle starts at
+-- TOGGLE_Y + <the toggle's height> + TOGGLE_GAP — and that height grows on touch, so the
+-- drawer below has to be worked out per layout rather than baked in as 66.
+local TOGGLE_Y, TOGGLE_GAP = 12, 6
 
 local layout = Responsive.layout(camera.ViewportSize.X, camera.ViewportSize.Y, UserInputService.TouchEnabled)
 
 -- A control drawn 44 px tall comes out at 44 * scale on screen, which is 26 px on a phone —
--- too small for a thumb, and this file is full of deliberate 44 px touch targets. Where the
--- player is on touch (controlPad is only non-zero then) we grow them by 1/scale so they land
--- at the size they were drawn for. Text size caps get the same treatment, otherwise the
--- label shrinks inside a button that grew. Widths are left alone: they are generous already,
--- and stretching them would squeeze the theme name out of the row.
-local function touchSize(designPx)
-	if layout.controlPad <= 0 then
-		return designPx
-	end
-	return math.ceil(designPx / layout.scale)
+-- too small for a thumb, and this file is full of deliberate 44 px touch targets. Both helpers
+-- below only do anything where the player is on touch (controlPad is non-zero exactly then);
+-- on a mouse-driven window they hand back the design number untouched.
+--
+--   tap()  — something the player presses. Grown by 1/scale AND floored at 44 screen px.
+--   grow() — text size caps and label rows. Grown, but no floor, or a 16 px cap would come
+--            out enormous. Text still has to shrink to fit.
+--
+-- The arithmetic lives in the shared TouchTarget module; this file used to carry its own copy
+-- with no floor, which is why the shop toggle was still 29 px tall on a phone.
+local function tap(designPx)
+	return TouchTarget.tap(designPx, layout)
+end
+local function grow(designPx)
+	return TouchTarget.grow(designPx, layout)
 end
 
 local function corner(inst, r)
@@ -234,9 +244,11 @@ local toggle = Instance.new("TextButton")
 toggle.Name = "ButikkKnapp"
 -- Stort trykk-mål (48px høyt) for telefon. Blir liggende ØVERST til høyre,
 -- godt klar av mobil-kontrollene (styrepinne nede-venstre, hopp nede-høyre).
-toggle.Size = UDim2.fromOffset(140, 48)
+-- applyLayout nederst i fila setter den endelige størrelsen; dette er bare noe å
+-- tegne før første kall.
+toggle.Size = UDim2.fromOffset(TOGGLE_W, TOGGLE_H)
 toggle.AnchorPoint = Vector2.new(1, 0)
-toggle.Position = UDim2.new(1, -12, 0, 12)
+toggle.Position = UDim2.new(1, -12, 0, TOGGLE_Y)
 toggle.BackgroundColor3 = Color3.fromRGB(52, 58, 78)
 toggle.TextColor3 = Color3.new(1, 1, 1)
 toggle.Font = Enum.Font.GothamBold
@@ -264,7 +276,7 @@ local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.Size = UDim2.fromOffset(PANEL_W, PANEL_H)
 panel.AnchorPoint = Vector2.new(1, 0)
-panel.Position = UDim2.new(1, -Responsive.MARGIN, 0, TOP_BAR)
+panel.Position = UDim2.new(1, -Responsive.MARGIN, 0, TOGGLE_Y + TOGGLE_H + TOGGLE_GAP)
 panel.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
 panel.BorderSizePixel = 0
 panel.Visible = false
@@ -454,7 +466,7 @@ local function makeButton(parent, text, size, position, color)
 	b.Parent = parent
 	corner(b, 6)
 	local tsc = Instance.new("UITextSizeConstraint")
-	tsc.MaxTextSize = touchSize(16)
+	tsc.MaxTextSize = grow(16)
 	tsc.MinTextSize = 9
 	tsc.Parent = b
 	local bp = Instance.new("UIPadding")
@@ -499,10 +511,10 @@ function refreshRows()
 			end
 		end
 
-		local BTN_H, BTN_GAP, ROW_PAD = touchSize(44), 8, 10
+		local BTN_H, BTN_GAP, ROW_PAD = tap(44), 8, 10
 		local BTN_W = 168
 		local nBuys = #buys
-		local rowH = math.max(touchSize(64), BTN_H + ROW_PAD * 2)
+		local rowH = math.max(grow(64), BTN_H + ROW_PAD * 2)
 		if nBuys > 1 then
 			-- To knapper stables loddrett -> raden må være høyere. Panelet ruller,
 			-- så det er greit at raden blir høy.
@@ -548,7 +560,7 @@ function refreshRows()
 		-- Navn på temaet (sentrert loddrett; teksten krymper for å få plass).
 		local name = Instance.new("TextLabel")
 		name.AnchorPoint = Vector2.new(0, 0.5)
-		name.Size = UDim2.new(1, -(BTN_W + 46), 0, touchSize(26))
+		name.Size = UDim2.new(1, -(BTN_W + 46), 0, grow(26))
 		name.Position = UDim2.new(0, 34, 0.5, 0)
 		name.BackgroundTransparency = 1
 		name.TextXAlignment = Enum.TextXAlignment.Left
@@ -559,7 +571,7 @@ function refreshRows()
 		name.Text = t.name
 		name.Parent = row
 		local nameTsc = Instance.new("UITextSizeConstraint")
-		nameTsc.MaxTextSize = touchSize(16)
+		nameTsc.MaxTextSize = grow(16)
 		nameTsc.MinTextSize = 10
 		nameTsc.Parent = name
 
@@ -567,7 +579,7 @@ function refreshRows()
 		if selected then
 			-- Eid + valgt: bare et fremhevet "Valgt"-merke.
 			local valgt = Instance.new("TextLabel")
-			valgt.Size = UDim2.fromOffset(BTN_W, touchSize(40))
+			valgt.Size = UDim2.fromOffset(BTN_W, grow(40))
 			valgt.AnchorPoint = Vector2.new(1, 0.5)
 			valgt.Position = UDim2.new(1, -8, 0.5, 0)
 			valgt.BackgroundColor3 = Color3.fromRGB(60, 200, 90)
@@ -578,7 +590,7 @@ function refreshRows()
 			valgt.Parent = row
 			corner(valgt, 6)
 			local valgtTsc = Instance.new("UITextSizeConstraint")
-			valgtTsc.MaxTextSize = touchSize(16)
+			valgtTsc.MaxTextSize = grow(16)
 			valgtTsc.MinTextSize = 10
 			valgtTsc.Parent = valgt
 		elseif owned then
@@ -635,30 +647,39 @@ local function applyLayout()
 	-- the HUD shrinks into the top-left corner on a phone while looking fine on desktop.
 	root.Size = UDim2.fromScale(1 / layout.scale, 1 / layout.scale)
 
+	-- The toggle is the only way into the shop on a phone, so it is sized in screen space:
+	-- 140x48 design px came out at 84x29 on an 800x360 screen, under the 44 px tap floor.
+	local toggleH = tap(TOGGLE_H)
+	toggle.Size = UDim2.fromOffset(tap(TOGGLE_W), toggleH)
+	toggle.Position = UDim2.new(1, -12, 0, TOGGLE_Y)
+	toggleTsc.MaxTextSize = grow(20)
+
 	local usable = Responsive.usableHeight(v.Y, layout)
 	-- Where the panel starts: below the toggle row when it is a drawer, but hard against the
 	-- top edge on a phone, where the modal is allowed to cover the toggles (the ✕ is the way
-	-- out) and every reclaimed pixel is another visible row.
-	local topY = if layout.compact then Responsive.MARGIN else TOP_BAR
+	-- out) and every reclaimed pixel is another visible row. The drawer follows the toggle
+	-- down when the toggle grows, rather than opening underneath it.
+	local topBar = TOGGLE_Y + toggleH + TOGGLE_GAP
+	local topY = if layout.compact then Responsive.MARGIN else topBar
 	-- Screen px left between that line and the touch-control band at the bottom; that is all
 	-- the panel is ever allowed to fill, in either mode.
 	local budget = math.max(80, usable + Responsive.MARGIN - topY * layout.scale)
 	local roomH = math.floor(budget / layout.scale)
 
 	-- Header: close button, title, balance and the status line, each grown for touch.
-	local closeW = touchSize(44)
-	local titleH, balanceH, statusH = touchSize(28), touchSize(22), touchSize(18)
+	local closeW = tap(44)
+	local titleH, balanceH, statusH = grow(28), grow(22), grow(18)
 	closeBtn.Size = UDim2.fromOffset(closeW, closeW)
-	closeBtn.TextSize = touchSize(24)
+	closeBtn.TextSize = grow(24)
 	title.Size = UDim2.new(1, -(closeW + 30), 0, titleH)
 	title.Position = UDim2.fromOffset(14, 10)
-	titleTsc.MaxTextSize = touchSize(20)
+	titleTsc.MaxTextSize = grow(20)
 	balance.Size = UDim2.new(1, -28, 0, balanceH)
 	balance.Position = UDim2.fromOffset(14, 12 + titleH)
-	balanceTsc.MaxTextSize = touchSize(16)
+	balanceTsc.MaxTextSize = grow(16)
 	status.Size = UDim2.new(1, -28, 0, statusH)
 	status.Position = UDim2.fromOffset(14, 14 + titleH + balanceH)
-	statusTsc.MaxTextSize = touchSize(15)
+	statusTsc.MaxTextSize = grow(15)
 
 	local headerH = 18 + titleH + balanceH + statusH
 	scroll.Position = UDim2.fromOffset(8, headerH)

@@ -41,6 +41,7 @@ end
 -- panel survives a phone; note the require form, since a bare string require like
 -- `require("./Responsive")` resolves in the luau CLI but is invalid in Roblox.
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+local TouchTarget = require(ReplicatedStorage:WaitForChild("TouchTarget"))
 local camera = workspace.CurrentCamera
 
 --============================  INNSTILLINGER  ====================--
@@ -126,14 +127,20 @@ uiScale.Parent = uiRoot
 local layout = Responsive.layout(camera.ViewportSize.X, camera.ViewportSize.Y, UserInputService.TouchEnabled)
 
 -- A button drawn 50 px tall comes out at 50 * scale on screen, which is 30 px on a phone —
--- too small for the child thumb this panel was designed around. Where the player is on touch
--- (controlPad is only non-zero then) we grow the touch targets by 1/scale so they land at the
--- size they were drawn for.
-local function touchSize(designPx)
-	if layout.controlPad <= 0 then
-		return designPx
-	end
-	return math.ceil(designPx / layout.scale)
+-- too small for the child thumb this panel was designed around. Both helpers below only do
+-- anything where the player is on touch (controlPad is non-zero exactly then); on a
+-- mouse-driven window they hand back the design number untouched.
+--
+--   tap()  — something the player presses. Grown by 1/scale AND floored at 44 screen px.
+--   grow() — text size caps. Grown, but no floor: a 17 px cap with a 44 px floor on it would
+--            come out as lettering taller than the button it sits in.
+--
+-- The arithmetic lives in the shared TouchTarget module rather than in a copy per file.
+local function tap(designPx)
+	return TouchTarget.tap(designPx, layout)
+end
+local function grow(designPx)
+	return TouchTarget.grow(designPx, layout)
 end
 
 -- ---- Av/på-knappen: HØYRE kant, LITT UNDER midten ----
@@ -214,19 +221,19 @@ local function applyLayout()
 	local rootH = viewY / layout.scale
 	local floorY = rootH - layout.controlPad / layout.scale - Responsive.MARGIN
 
-	local btnH = touchSize(50)
-	toggle.Size = UDim2.fromOffset(touchSize(160), btnH)
-	toggleTsc.MaxTextSize = touchSize(17)
+	local btnH = tap(50)
+	toggle.Size = UDim2.fromOffset(tap(160), btnH)
+	toggleTsc.MaxTextSize = grow(17)
 	-- Just below the middle by default, but never further down than the control band allows.
 	local toggleBottom = math.min(rootH * 0.5 + 60 + btnH / 2, floorY)
 	toggle.Position = UDim2.new(1, -14, 0, toggleBottom)
 
-	local arrow = touchSize(if layout.compact then 56 else 76)
+	local arrow = tap(if layout.compact then 56 else 76)
 	for _, b in ipairs({ upBtn, downBtn }) do
 		b.Size = UDim2.fromOffset(arrow, arrow)
 		local tsc = b:FindFirstChildOfClass("UITextSizeConstraint")
 		if tsc then
-			tsc.MaxTextSize = touchSize(40)
+			tsc.MaxTextSize = grow(40)
 		end
 	end
 

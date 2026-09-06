@@ -93,7 +93,40 @@ The harness must:
 `cframe` is position followed by the 3x3 rotation matrix in `CFrame:GetComponents()` order
 (x, y, z, R00, R01, R02, R10, R11, R12, R20, R21, R22). Colours are 0-255 integers.
 
-## First target (definition of done for round 1)
+## Status (2026-09-06)
+
+**Built and working.** `wrap.py` + `emu/harness.luau` + `emu/hudcheck.luau` boot the real server
+and client scripts of all four games headless. `check_crystal.luau`, `check_plus1.luau`,
+`check_anomaly.luau`, `check_labyrint.luau` and `check_lighting.luau` are the runners; they take a
+config table rather than command-line arguments because the luau CLI has none (every extra
+argument is another file to execute).
+
+What `hudcheck` asserts, per game, across six viewports from 414x800 to 1920x1080: every script
+loads, nothing visible hangs off the screen, nothing tappable sits under Roblox's touch controls,
+no ScrollingFrame's canvas falls short of its content, no tappable element is under 44 screen px
+on a touch viewport, and the panels cover at most half a phone. It also prints how many panels it
+could NOT measure because they were closed — a drawer parked off the edge says nothing about
+where it opens, and pretending otherwise produced false failures.
+
+**How a game script reaches the fake globals.** The CLI has no file IO and no `setfenv`, and it
+sandboxes each required module behind its own globals table. Two facts carry the design:
+`wrap.py` bundles the sources into requireable long strings, and `loadstring` binds a chunk to
+the globals of the THREAD THAT CALLS IT — so the harness installs globals via a chunk it compiles
+at call time, landing them in the same table the game chunks will read. `harness.luau` documents
+this at length; the obvious `game = svc.game` does not work.
+
+**Fidelity notes worth knowing.** Tweens take virtual time when a scheduler is injected (without
+one they still land instantly, which is what `tests/services.spec.luau` relies on) — a test that
+cannot tell a fade from a snap cannot catch a lighting transition that leaks information.
+`Harness.settleLayouts` computes each layout's real `AbsoluteContentSize` and models
+`AutomaticCanvasSize`; with those pinned at zero, a correct and a broken CanvasSize expression
+evaluated identically and the shim was blind to a bug that had shipped. `typeof` is inlined by
+the compiler, so the global override never reaches game code.
+
+**Not built yet:** the scene dump, `render.py`'s integration with it, and `run_anomaly.luau`. The
+contract for both is below and unchanged.
+
+## Next target (was round 1)
 
 `run_anomaly.luau` must:
 1. boot `anomaly-observatory/src/server/Main.server.luau` with no error,

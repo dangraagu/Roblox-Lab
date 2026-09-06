@@ -25,6 +25,8 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Delt skjermstørrelse-modul (ren data — se src/shared/Responsive.luau).
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+-- Delt trykk-mål-modul (ren data — se src/shared/TouchTarget.luau).
+local TouchTarget = require(ReplicatedStorage:WaitForChild("TouchTarget"))
 
 --==========================  GUI  ===============================--
 local old = playerGui:FindFirstChild("AssistPanel")
@@ -64,12 +66,27 @@ local rlayout = Responsive.layout(0, 0, UserInputService.TouchEnabled)
 -- Avstand fra nederste kant når det IKKE finnes berøringskontroller å ta hensyn til.
 local BOTTOM_MARGIN = 14
 local CARD_W = 340
+-- Knapperada starter her, og kortet slutter en luft under den. Knappene VOKSER på
+-- berøring (44 design-piksler ble 26 på skjermen), så kortets høyde regnes ut av
+-- applyLayout i stedet for å stå fast.
+local BTN_Y, BTN_GAP = 66, 6
+
+-- Trykk-mål i SKJERM-rom: UIScale-en som får kortet til å passe på en telefon krymper
+-- samtidig begge knappene. tap() vokser design-tallet med 1/skala og lar det aldri lande
+-- under 44 px-gulvet; grow() gjør det samme uten gulv, for tekst-takene, som må få lov
+-- til å være små. Ingen av dem gjør noe uten berøringskontroller, så desktop står stille.
+local function tap(designPx)
+	return TouchTarget.tap(designPx, rlayout)
+end
+local function grow(designPx)
+	return TouchTarget.grow(designPx, rlayout)
+end
 
 -- Nederst i midten: der blikket er når man står fast og lurer på hva man skal gjøre.
 local card = Instance.new("Frame")
 card.AnchorPoint = Vector2.new(0.5, 1)
 card.Position = UDim2.new(0.5, 0, 1, -BOTTOM_MARGIN)
-card.Size = UDim2.fromOffset(CARD_W, 116)
+card.Size = UDim2.fromOffset(CARD_W, BTN_Y + 44 + BTN_GAP)
 card.BackgroundColor3 = Color3.fromRGB(28, 31, 44)
 card.BackgroundTransparency = 0.08
 card.BorderSizePixel = 0
@@ -91,43 +108,6 @@ local function fit()
 		scale.Scale = math.clamp((vp.X / rlayout.scale - 20) / CARD_W, 0.6, 1)
 	end
 end
-
-local function applyLayout()
-	local cam = workspace.CurrentCamera
-	local v = cam and cam.ViewportSize or Vector2.new(0, 0)
-	rlayout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
-	uiScale.Scale = rlayout.scale
-
-	-- Rot-rammen må vokse med 1/skala så rot × skala lander nøyaktig på skjermkanten.
-	-- Uten dette krymper kortet inn i øvre venstre hjørne på telefon, mens det ser
-	-- helt riktig ut på desktop der skalaen er 1 og feilen er usynlig.
-	root.Size = UDim2.fromScale(1 / rlayout.scale, 1 / rlayout.scale)
-
-	-- Løft kortet opp over mobil-kontrollene. controlPad er SKJERM-piksler, mens
-	-- posisjonen her er design-piksler, så vi deler på skalaen. På desktop er
-	-- controlPad 0 og kortet står nøyaktig der det alltid har stått.
-	local lift = BOTTOM_MARGIN + math.floor(rlayout.controlPad / rlayout.scale)
-	card.Position = UDim2.new(0.5, 0, 1, -lift)
-
-	fit()
-end
-
--- workspace.CurrentCamera er nil et bilde eller to ved oppstart, og Roblox bytter
--- den ut ved enkelte respawn, så vi kobler lytteren på nytt når kameraet byttes.
-local viewportConn
-local function watchViewport()
-	if viewportConn then
-		viewportConn:Disconnect()
-		viewportConn = nil
-	end
-	local cam = workspace.CurrentCamera
-	if cam then
-		viewportConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
-	end
-	applyLayout()
-end
-watchViewport()
-workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
 
 local titleLbl = Instance.new("TextLabel")
 titleLbl.Size = UDim2.new(1, -20, 0, 24)
@@ -155,10 +135,11 @@ bodyLbl.Text = ""
 bodyLbl.Parent = card
 local btc = Instance.new("UITextSizeConstraint"); btc.MaxTextSize = 13; btc.Parent = bodyLbl
 
--- 44px høy: stor nok til å treffe med tommelen på telefon.
+-- 44px høy: stor nok til å treffe med tommelen på telefon. Den endelige størrelsen
+-- settes av applyLayout lenger nede; dette er bare noe å tegne før første kall.
 local buyBtn = Instance.new("TextButton")
 buyBtn.Size = UDim2.new(1, -60, 0, 44)
-buyBtn.Position = UDim2.fromOffset(10, 66)
+buyBtn.Position = UDim2.fromOffset(10, BTN_Y)
 buyBtn.BackgroundColor3 = Color3.fromRGB(60, 130, 190)
 buyBtn.TextColor3 = Color3.new(1, 1, 1)
 buyBtn.Font = Enum.Font.GothamBold
@@ -171,7 +152,7 @@ local abtc = Instance.new("UITextSizeConstraint"); abtc.MaxTextSize = 17; abtc.P
 local hideBtn = Instance.new("TextButton")
 hideBtn.Size = UDim2.fromOffset(40, 44)
 hideBtn.AnchorPoint = Vector2.new(1, 0)
-hideBtn.Position = UDim2.new(1, -10, 0, 66)
+hideBtn.Position = UDim2.new(1, -10, 0, BTN_Y)
 hideBtn.BackgroundColor3 = Color3.fromRGB(64, 68, 86)
 hideBtn.TextColor3 = Color3.new(1, 1, 1)
 hideBtn.Font = Enum.Font.GothamBold
@@ -180,6 +161,56 @@ hideBtn.Text = "✕"
 hideBtn.Parent = card
 corner(hideBtn, 10)
 local hbtc = Instance.new("UITextSizeConstraint"); hbtc.MaxTextSize = 18; hbtc.Parent = hideBtn
+
+local function applyLayout()
+	local cam = workspace.CurrentCamera
+	local v = cam and cam.ViewportSize or Vector2.new(0, 0)
+	rlayout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	uiScale.Scale = rlayout.scale
+
+	-- Rot-rammen må vokse med 1/skala så rot × skala lander nøyaktig på skjermkanten.
+	-- Uten dette krymper kortet inn i øvre venstre hjørne på telefon, mens det ser
+	-- helt riktig ut på desktop der skalaen er 1 og feilen er usynlig.
+	root.Size = UDim2.fromScale(1 / rlayout.scale, 1 / rlayout.scale)
+
+	-- Løft kortet opp over mobil-kontrollene. controlPad er SKJERM-piksler, mens
+	-- posisjonen her er design-piksler, så vi deler på skalaen. På desktop er
+	-- controlPad 0 og kortet står nøyaktig der det alltid har stått.
+	local lift = BOTTOM_MARGIN + math.floor(rlayout.controlPad / rlayout.scale)
+	card.Position = UDim2.new(0.5, 0, 1, -lift)
+
+	-- The two buttons are the whole point of the card, so they are sized in screen space:
+	-- 44 design px came out at 26 px on an 800x360 screen, well under the 44 px tap floor.
+	-- The card grows with them, so a taller button never hangs out of its own card.
+	local btnH = tap(44)
+	local hideW = tap(40)
+	buyBtn.Size = UDim2.new(1, -(hideW + 20), 0, btnH)
+	buyBtn.Position = UDim2.fromOffset(10, BTN_Y)
+	abtc.MaxTextSize = grow(17)
+	hideBtn.Size = UDim2.fromOffset(hideW, btnH)
+	hideBtn.Position = UDim2.new(1, -10, 0, BTN_Y)
+	hbtc.MaxTextSize = grow(18)
+	card.Size = UDim2.fromOffset(CARD_W, BTN_Y + btnH + BTN_GAP)
+
+	fit()
+end
+
+-- workspace.CurrentCamera er nil et bilde eller to ved oppstart, og Roblox bytter
+-- den ut ved enkelte respawn, så vi kobler lytteren på nytt når kameraet byttes.
+local viewportConn
+local function watchViewport()
+	if viewportConn then
+		viewportConn:Disconnect()
+		viewportConn = nil
+	end
+	local cam = workspace.CurrentCamera
+	if cam then
+		viewportConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+	end
+	applyLayout()
+end
+watchViewport()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
 
 --=======================  TILSTAND  =============================--
 local buyAssistFn                 -- RemoteFunction (fylles ut nedenfor)

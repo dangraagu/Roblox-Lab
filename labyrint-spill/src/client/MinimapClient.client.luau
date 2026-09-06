@@ -32,6 +32,8 @@ local player = Players.LocalPlayer
 
 -- Delt skjermstørrelse-modul (ren data — se src/shared/Responsive.luau).
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+-- Delt trykk-mål-modul (ren data — se src/shared/TouchTarget.luau).
+local TouchTarget = require(ReplicatedStorage:WaitForChild("TouchTarget"))
 
 --============================  INNSTILLINGER  ====================--
 -- Tak på antall veggprikker (sikkerhets-vakt mot å sprute ut tusenvis av Frames).
@@ -93,12 +95,16 @@ root.Parent = gui
 local uiScale = Instance.new("UIScale")
 uiScale.Parent = root
 
--- Kartet starter rett under tema-butikk-knappen (som ligger på y ~12..60).
-local TOP_Y = 66
--- På telefon legger LeaderboardClient sin lille rekord-knapp (48 px + 6 px luft)
--- øverst i den SAMME høyre kolonnen, så kartet flyttes ned under den. Endres tallet
--- der, må det endres her også — kolonnen deles av de to.
-local COMPACT_TOP_OFFSET = 54
+-- Kartet starter rett under tema-butikk-knappen, og på telefon ett hakk til: da legger
+-- LeaderboardClient sin lille rekord-knapp seg øverst i den SAMME høyre kolonnen.
+-- Begge knappene er tegnet 48 px høye, og begge VOKSER på berøring (et 48 px trykk-mål
+-- lander på 29 px når UIScale-en krymper HUD-en ned på en telefon), så vi regner ut hvor
+-- kolonnen begynner pr oppsett i stedet for å bake inn 66 og 54. Endres knapphøyden i
+-- ShopClient eller LeaderboardClient, må den endres her også — kolonnen deles av de tre.
+local TOGGLE_H = 48
+local SHOP_TOGGLE_Y, COLUMN_GAP = 12, 6
+-- Startverdi til første tegning; applyLayout regner den om (som topY) med en gang.
+local START_TOP_Y = SHOP_TOGGLE_Y + TOGGLE_H + COLUMN_GAP
 
 -- Gjeldende skjerm-oppsett. Settes ordentlig av applyLayout() lenger nede.
 local layout = Responsive.layout(0, 0, UserInputService.TouchEnabled)
@@ -107,7 +113,7 @@ local layout = Responsive.layout(0, 0, UserInputService.TouchEnabled)
 local mapFrame = Instance.new("Frame")
 mapFrame.Name = "Kart"
 mapFrame.AnchorPoint = Vector2.new(1, 0)
-mapFrame.Position = UDim2.new(1, -12, 0, TOP_Y)
+mapFrame.Position = UDim2.new(1, -12, 0, START_TOP_Y)
 mapFrame.Size = UDim2.fromOffset(150, 150) -- settes av applyLayout under
 mapFrame.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
 mapFrame.BackgroundTransparency = 0.25 -- halv-gjennomsiktig
@@ -180,7 +186,10 @@ local function applyLayout()
 	local want = math.clamp(math.floor(designMin * 0.22), 96, 150)
 
 	-- Toppen av kolonnen. På telefon står rekord-knappen over oss, så vi flytter ned.
-	local top = if layout.compact then TOP_Y + COMPACT_TOP_OFFSET else TOP_Y
+	-- Begge knappene vokser i skjerm-rom på berøring, så begge trinnene måles med tap().
+	local toggleH = TouchTarget.tap(TOGGLE_H, layout)
+	local topY = SHOP_TOGGLE_Y + toggleH + COLUMN_GAP
+	local top = if layout.compact then topY + toggleH + COLUMN_GAP else topY
 
 	-- Så gjennom takene: bredden kan aldri ta mer enn en fjerdedel av skjermen, og
 	-- høyden må få plass mellom butikk-knappen og mobil-kontrollene nederst. Kartet
