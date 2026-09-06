@@ -460,9 +460,13 @@ function OrderedDataStore:GetSortedAsync(ascending, pageSize, minValue, maxValue
 end
 
 -- ---------------------------------------------------------------- factory
+-- `deps.scheduler` is optional. Supply it and tweens take virtual time instead of landing
+-- instantly, which is what lets a test tell a fade from a snap; omit it and the old
+-- apply-immediately behaviour is kept, which is what the services tests rely on.
 function ServicesLib.new(deps)
 	deps = deps or {}
 	local dt = deps.datatypes or {}
+	local sched = deps.scheduler
 	local inst = deps.instance or (require("./instance") :: any).new(deps)
 
 	local Instance = inst.Instance
@@ -741,20 +745,45 @@ function ServicesLib.new(deps)
 		parent = "Instance",
 		events = { "Completed" },
 		methods = {
-			-- Headless: apply the goal IMMEDIATELY and report Completed. Game logic that waits
-			-- on .Completed keeps moving, and the scene dump sees the END state, which is the
-			-- state a screenshot would show anyway.
+			-- Two behaviours, chosen by whether a scheduler was injected.
+			--
+			-- Without one: apply the goal IMMEDIATELY and report Completed, so game logic that
+			-- waits on .Completed keeps moving and a scene dump sees the END state.
+			--
+			-- With one: hold the old values and apply the goal after TweenInfo.Time virtual
+			-- seconds. It is not an interpolation — the value jumps at the end rather than
+			-- easing — but it does model the thing that matters: THERE IS A WINDOW during which
+			-- the property is not yet at its goal. Without that window a test cannot tell a
+			-- fade from a snap, and in the maze game that difference is the one between a
+			-- player seeing 45 studs on entry and seeing the whole corridor.
 			Play = function(self)
 				local target = rawget(self, "__target")
 				local props = rawget(self, "__props")
-				if target ~= nil and type(props) == "table" then
-					for k, v in props do
-						target[k] = v
+				local function applyGoal()
+					if target ~= nil and type(props) == "table" then
+						for k, v in props do
+							target[k] = v
+						end
 					end
+					stateOf(self).props.PlaybackState = completedState
+					fireIfExists(self, "Completed", completedState)
 				end
+
 				rawset(self, "__played", (rawget(self, "__played") or 0) + 1)
-				stateOf(self).props.PlaybackState = completedState
-				fireIfExists(self, "Completed", completedState)
+
+				local seconds = 0
+				local info = rawget(self, "__info")
+				if type(info) == "table" and type(info.Time) == "number" then
+					seconds = info.Time
+				end
+
+				if sched == nil or seconds <= 0 then
+					applyGoal()
+					return
+				end
+
+				stateOf(self).props.PlaybackState = "Playing"
+				sched:delay(seconds, applyGoal)
 			end,
 			Cancel = function(self)
 				stateOf(self).props.PlaybackState = cancelledState

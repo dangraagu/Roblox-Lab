@@ -361,8 +361,16 @@ pad.Parent = scroll
 
 -- The canvas follows the rows. Rows get taller in compact mode, so this has to be measured
 -- rather than assumed; the +8 covers the padding above and below the list.
+--
+-- AbsoluteContentSize is post-UIScale SCREEN px; CanvasSize offsets are pre-scale DESIGN px.
+-- Feeding one into the other without dividing the scale back out makes the canvas short by
+-- exactly the scale factor, and only on the screens where scale < 1 — so it looks perfect on a
+-- 1080p monitor while a phone player simply cannot scroll to the last rows. That cost seven of
+-- the seventeen themes and the `minimap` perk their only purchase button.
 local function syncCanvas()
-	scroll.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 8)
+	local scale = uiScale.Scale
+	if scale <= 0 then scale = 1 end
+	scroll.CanvasSize = UDim2.new(0, 0, 0, math.ceil(listLayout.AbsoluteContentSize.Y / scale) + 8)
 end
 listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncCanvas)
 

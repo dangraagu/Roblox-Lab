@@ -64,7 +64,7 @@ function Harness.new(opts: Options)
 
 	local sched = Scheduler.new()
 	local inst = InstanceLib.new({ datatypes = Datatypes })
-	local svc = ServicesLib.new({ datatypes = Datatypes, instance = inst })
+	local svc = ServicesLib.new({ datatypes = Datatypes, instance = inst, scheduler = sched })
 
 	local self = setmetatable({
 		name = opts.name or "game",
@@ -355,6 +355,106 @@ function Harness.hadErrors(self): boolean
 	return self.scheduler:hadErrors()
 end
 
+
+--=========================================================== layout settling (screen px)
+-- Nothing in this shim lays anything out, so `UIListLayout.AbsoluteContentSize` sits at zero
+-- forever. That is not a harmless simplification: our HUDs compute a ScrollingFrame's
+-- CanvasSize FROM that property, so with it pinned at zero the correct expression and a
+-- broken one evaluate identically and a review had to find the bug by hand. Three files had
+-- shipped a canvas that was short by exactly the UIScale factor, which hides completely on a
+-- 1080p monitor and costs a phone player the bottom half of the shop.
+--
+-- So: resolve the geometry, then fill in what each layout's content actually measures. Writing
+-- the property fires the game's own GetPropertyChangedSignal handler, which is what makes the
+-- canvas maths run for real.
+--
+-- Values are SCREEN px, like Roblox's. The UIGridLayout arithmetic is an approximation — cells
+-- per row from the parent's width, rows from the count — which is enough to catch a canvas that
+-- is short by a scale factor, and not enough to trust for pixel work.
+function Harness.settleLayouts(self, root, viewportW: number, viewportH: number)
+	local rects = self:guiRects(root, viewportW, viewportH)
+	local byObj = {}
+	for _, r in rects do
+		if r.obj ~= nil then
+			byObj[r.obj] = r
+		end
+	end
+
+	for _, r in rects do
+		local parent = r.obj
+		if parent == nil then continue end
+		for _, child in parent:GetChildren() do
+			local cls = child.ClassName
+			if cls ~= "UIListLayout" and cls ~= "UIGridLayout" then continue end
+
+			local kids = {}
+			for _, k in parent:GetChildren() do
+				local kr = byObj[k]
+				if kr ~= nil then table.insert(kids, kr) end
+			end
+			if #kids == 0 then
+				child.AbsoluteContentSize = Datatypes.Vector2.new(0, 0)
+				continue
+			end
+
+			-- Roblox sizes the canvas itself when AutomaticCanvasSize covers an axis; the shim
+			-- does not, so without this a ScrollingFrame that correctly uses it looks to a
+			-- checker exactly like one with a canvas of zero. Applied after the content size is
+			-- known, further down.
+			local function autoCanvas(contentScreen: number)
+				if parent.ClassName ~= "ScrollingFrame" then return end
+				local mode = parent.AutomaticCanvasSize
+				local name = if mode == nil then "None" else tostring(mode.Name or mode)
+				if name ~= "Y" and name ~= "XY" then return end
+				local scale = if r.scale > 0 then r.scale else 1
+				parent.CanvasSize = Datatypes.UDim2.new(0, 0, 0, math.ceil(contentScreen / scale))
+			end
+
+			if cls == "UIListLayout" then
+				local gap = 0
+				local pad = child.Padding
+				if pad ~= nil then
+					local ok, off = pcall(function() return pad.Offset end)
+					if ok and type(off) == "number" then gap = off * r.scale end
+				end
+				local total, widest = 0, 0
+				for _, kr in kids do
+					total += kr.sh
+					if kr.sw > widest then widest = kr.sw end
+				end
+				total += gap * math.max(#kids - 1, 0)
+				child.AbsoluteContentSize = Datatypes.Vector2.new(widest, total)
+				autoCanvas(total)
+			else
+				local cellW = 100 * r.scale
+				local cellH = 100 * r.scale
+				local cell = child.CellSize
+				if cell ~= nil then
+					local ok, w = pcall(function() return cell.X.Offset end)
+					local ok2, hgt = pcall(function() return cell.Y.Offset end)
+					if ok and type(w) == "number" and w > 0 then cellW = w * r.scale end
+					if ok2 and type(hgt) == "number" and hgt > 0 then cellH = hgt * r.scale end
+				end
+				local padX, padY = 0, 0
+				local cp = child.CellPadding
+				if cp ~= nil then
+					local ok, w = pcall(function() return cp.X.Offset end)
+					local ok2, hgt = pcall(function() return cp.Y.Offset end)
+					if ok and type(w) == "number" then padX = w * r.scale end
+					if ok2 and type(hgt) == "number" then padY = hgt * r.scale end
+				end
+				local perRow = math.max(1, math.floor((r.sw + padX) / math.max(cellW + padX, 1)))
+				local rows = math.ceil(#kids / perRow)
+				child.AbsoluteContentSize = Datatypes.Vector2.new(
+					math.min(#kids, perRow) * (cellW + padX) - padX,
+					rows * (cellH + padY) - padY
+				)
+				autoCanvas(rows * (cellH + padY) - padY)
+			end
+		end
+	end
+end
+
 --=================================================================================== reporting
 
 -- Walk a GuiObject tree and report every frame's resolved screen rectangle, so a test can
@@ -418,6 +518,7 @@ function Harness.guiRects(self, root, viewportW: number, viewportH: number): { a
 			w = w,
 			h = h,
 			scale = s,
+			obj = obj,
 			sx = x * s,
 			sy = y * s,
 			sw = w * s,

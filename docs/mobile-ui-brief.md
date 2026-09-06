@@ -103,8 +103,10 @@ Binaries live at
 L="C:/Users/BAHS_A~1/AppData/Local/Temp/claude/C--Users-bahs-admin/ecae86a3-0220-4a1c-84bc-1986788bfefa/scratchpad/luau"
 # 1. syntax of every file you edited
 "$L/luau-compile.exe" --binary <file> > /dev/null
-# 2. static analysis; only Roblox-global noise is acceptable
-"$L/luau-analyze.exe" <file> | grep -v -E 'Unknown global|Unknown type|Unknown require|unsupported path|Unknown symbol'
+# 2. static analysis; only Roblox-global noise is acceptable.
+#    NOTE the 2>&1: luau-analyze writes diagnostics to stderr, so without it the grep filters
+#    nothing and every run looks like it printed raw noise.
+"$L/luau-analyze.exe" <file> 2>&1 | grep -v -E 'Unknown global|Unknown type|Unknown require|unsupported path|Unknown symbol'
 # 3. the game's existing tests must still pass
 for t in tests/*.spec.luau; do "$L/luau.exe" "$t"; done
 ```
@@ -112,3 +114,42 @@ for t in tests/*.spec.luau; do "$L/luau.exe" "$t"; done
 Report: files changed, what each phone-mode behaviour now is, and the exact verification
 output. If something cannot be verified from the CLI, say so plainly rather than implying it
 was tested.
+
+---
+
+## Addendum: tap targets (round 2)
+
+The first round moved the HUDs out of the touch controls' way and made them fit. A review then
+measured the controls themselves and found the fit had made them unhittable: a `UIScale` below 1
+shrinks every button on exactly the device that needs them biggest. Measured after scaling, on an
+800x360 phone:
+
+| game | control | screen px |
+|---|---|---|
+| grow-a-crystal | the drawer toggles — the only route to seeds, shop, codes, leaderboard | 53 x 17 |
+| plus1-jump | `MenuToggle` / `TopToggle` | 58 x 20 |
+| anomaly | `StatusToggle` / `MenuToggle` | 67 x 18 |
+| anomaly | tint swatches | 16 x 16 |
+| labyrint | `RekordKnapp` | 29 x 29 |
+
+Roblox's own guidance and both mobile platform guidelines put the minimum comfortable tap target
+at **44 screen px in both dimensions**. 63 controls across the four games are under it.
+
+The fix is not to stop scaling — text still has to shrink to fit. It is to size *interactive*
+elements in screen space: divide the design size by `layout.scale` so the control lands at the
+same physical size whatever the scale factor, and give every tappable element a floor. The maze
+game already has the shape of this in a local `touchSize(designPx)` helper; it applies the
+division only when `layout.controlPad > 0`, so a touch tablet gets big targets and a small
+mouse-driven window does not. Its own toggles are still under 44 px, so the helper needs a floor
+as well as a multiplier.
+
+Widening a control must not push it off screen or into the control band — the existing checks
+still apply, and a taller toggle row may mean the drawers below it start lower.
+
+### The gate
+
+```bash
+luau check_crystal.luau     # from robloxemu/, after: py -3 wrap.py --game ../<game> --out build/<game>.luau
+```
+`hudcheck` now fails on any interactive element under 44 screen px on a touch viewport, alongside
+the off-screen, touch-control-band and canvas-reachability checks. Zero failures is the bar.

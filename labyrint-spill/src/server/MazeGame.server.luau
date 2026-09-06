@@ -142,6 +142,12 @@ local MazeGen = require(ReplicatedStorage:WaitForChild("MazeGen"))
 local Hazard = require(ReplicatedStorage:WaitForChild("Hazard"))
 local Assist = require(ReplicatedStorage:WaitForChild("Assist"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
+local LightingPresets = require(ReplicatedStorage:WaitForChild("LightingPresets"))
+
+-- Presetene lagrer farger som {r, g, b} 0-255 så de kan enhetstestes uten Roblox-API.
+local function rgb(c: { number }): Color3
+	return Color3.fromRGB(c[1], c[2], c[3])
+end
 
 -- Felle-vaktposten: uansett hva som står i CONFIG.Traps, sørg for at det trygge
 -- vinduet er langt nok til å faktisk gå over ei felle. Slik kan ingen fremtidig
@@ -1406,6 +1412,9 @@ sendLevelInfo = function(plr)
 		inLobby = false,
 		-- Sikten strammes inn med nivået; klienten speiler den i stedet for å gjette.
 		fog = getDifficulty(currentLevel).sight,
+		-- Uten flagget svarter klienten ut verden mens serveren dropper å dele ut fakler:
+		-- en helsvart labyrint uten lys. Darkness=false skal gi et OPPLYST spill.
+		darkness = CONFIG.Darkness,
 	})
 end
 
@@ -1715,11 +1724,10 @@ end)
 -- findNearestPlayerRoot. Utgangen er alltid åpen (CONFIG.UnlockExitBy = "none").
 local LOBBY_ORIGIN = Vector3.new(0, 0, 0)
 local INSTANCE_SPACING = 6000       -- studs mellom instanser (godt utenfor sikt/range)
--- Huben er lys. Denne verdien er BARE startverdien serveren setter før noen klient har
--- rukket å si noe; det er `LightingClient` som eier lyset fra da av (Lighting er global på
--- serveren, og to spillere kan stå i hver sin instans samtidig). Hold den i par med LOBBY-
--- presetet i LightingClient.
-local LOBBY_FOG = 520
+-- Huben er lys. Startverdiene serveren setter kommer fra ReplicatedStorage.LightingPresets,
+-- delt med LightingClient som eier lyset per spiller fra første payload (Lighting er global på
+-- serveren, og to spillere kan stå i hver sin instans samtidig). Ingen håndkopierte tall her:
+-- de to kopiene drev fra hverandre innen et døgn sist.
 local INSTANCE_FOG = 45            -- fast sikt i instansene (per-spiller-tåke kommer senere)
 -- playerInstance er forhånds-deklarert i STATE-seksjonen (brukes av onCharacterAdded
 -- + SetGodMode lenger oppe).
@@ -2023,6 +2031,7 @@ local function sendInstanceInfo(plr, inst)
 		-- LightingClient bruker denne til tåka inne i instansen. Lyset settes per klient
 		-- fordi Lighting er global på serveren og to spillere kan stå i hver sin instans.
 		fog = INSTANCE_FOG,
+		darkness = CONFIG.Darkness,
 	})
 end
 
@@ -2545,13 +2554,14 @@ if CONFIG.UseLobby then
 	-- det første en ny spiller så var et grått gulv i fakkellys. En spiller beskrev spillet
 	-- som "a black part that is scaled in the shape of a square" — det var dette.
 	-- Mørket settes nå per klient (LightingClient) når spilleren går inn i en instans.
-	Lighting.FogEnd = LOBBY_FOG
-	Lighting.FogStart = 140
-	Lighting.ClockTime = 14.2
-	Lighting.Brightness = 2.4
-	Lighting.Ambient = Color3.fromRGB(96, 100, 118)
-	Lighting.OutdoorAmbient = Color3.fromRGB(128, 134, 152)
-	Lighting.FogColor = Color3.fromRGB(150, 158, 178)
+	local lobbyLight = if CONFIG.Darkness then LightingPresets.LOBBY else LightingPresets.LIT
+	Lighting.ClockTime = lobbyLight.ClockTime
+	Lighting.Brightness = lobbyLight.Brightness
+	Lighting.Ambient = rgb(lobbyLight.Ambient)
+	Lighting.OutdoorAmbient = rgb(lobbyLight.OutdoorAmbient)
+	Lighting.FogColor = rgb(lobbyLight.FogColor)
+	Lighting.FogStart = lobbyLight.FogStart
+	Lighting.FogEnd = lobbyLight.FogEnd
 	buildLobby()
 	refreshLeaderboard()
 	print("[Labyrint] Lobby-modus lastet.")

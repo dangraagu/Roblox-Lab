@@ -150,6 +150,15 @@ grid.CellPadding = UDim2.fromOffset(6, 6)
 grid.SortOrder = Enum.SortOrder.LayoutOrder
 grid.Parent = scroll
 
+-- AbsoluteContentSize is post-UIScale SCREEN px; CanvasSize offsets are pre-scale DESIGN px.
+-- Without dividing the scale back out the canvas is short by exactly that factor, and only
+-- where scale < 1 — a 1080p monitor looks fine while a phone loses the bottom rows of levels.
+local function syncCanvas()
+	local scale = uiScale.Scale
+	if scale <= 0 then scale = 1 end
+	scroll.CanvasSize = UDim2.new(0, 0, 0, math.ceil(grid.AbsoluteContentSize.Y / scale) + 8)
+end
+
 local function rebuild(accepted)
 	continueBtn.Text = "▶ Continue  →  Level " .. (accepted + 1)
 	for _, ch in ipairs(scroll:GetChildren()) do
@@ -170,11 +179,9 @@ local function rebuild(accepted)
 		corner(b, 6)
 		b.Activated:Connect(function() choose(lvl) end)
 	end
-	scroll.CanvasSize = UDim2.new(0, 0, 0, grid.AbsoluteContentSize.Y + 8)
+	syncCanvas()
 end
-grid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-	scroll.CanvasSize = UDim2.new(0, 0, 0, grid.AbsoluteContentSize.Y + 8)
-end)
+grid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncCanvas)
 
 continueBtn.Activated:Connect(function()
 	-- Continue = accepted+1; serveren klamper uansett.

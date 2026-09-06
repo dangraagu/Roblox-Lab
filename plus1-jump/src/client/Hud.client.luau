@@ -23,7 +23,15 @@ local RedeemFunc = remotes:WaitForChild("Redeem")
 local LeaderboardEvent = remotes:WaitForChild("Leaderboard")
 
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+-- CurrentCamera can still be nil for the first frames of a join. Indexing it inside
+-- applyLayout would throw before the state connections below are made, leaving the player with
+-- a fully drawn HUD that silently never updates again: jump power stuck at 0, an empty
+-- leaderboard, a rebirth button that never changes. Wait for it instead.
 local camera = workspace.CurrentCamera
+while camera == nil do
+	task.wait()
+	camera = workspace.CurrentCamera
+end
 
 -- Design-space sizes. These are the numbers the HUD was drawn with; Responsive shrinks them.
 local MARGIN = Responsive.MARGIN
@@ -429,10 +437,10 @@ local function applyLayout()
 	refreshDrawers()
 end
 
-applyLayout()
-camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
-
 -- ── State-oppdatering ───────────────────────────────────────────────────────
+-- Connected BEFORE the first layout pass on purpose. Layout is cosmetic; these are the only
+-- thing that keeps the numbers on screen true. If applyLayout ever throws, the player should
+-- lose the polish, not the game.
 StateEvent.OnClientEvent:Connect(function(s)
 	jumpLabel.Text = "🔼 " .. tostring(s.jumpPower)
 	tierLabel.Text = "🏛️ Tier: " .. tostring(s.tier)
@@ -449,3 +457,6 @@ StateEvent.OnClientEvent:Connect(function(s)
 end)
 
 LeaderboardEvent.OnClientEvent:Connect(renderLeaderboard)
+
+applyLayout()
+camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
