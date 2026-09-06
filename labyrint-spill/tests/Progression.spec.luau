@@ -46,5 +46,40 @@ eq(rp.acceptedGained, false, "replay -> no gain")
 eq(rp.newAccepted, 50, "replay -> accepted unchanged")
 eq(rp.recordEligible, true, "replay -> record still eligible (better time)")
 
+--============  RUTE-GUIDEN ("Hjelp meg", se Assist)  =============--
+-- Kjernen: guiden viser veien, den HOPPER IKKE over noe. Derfor mister kjøringen
+-- retten til tid/rekord, men accepted teller — spilleren gikk faktisk ut selv.
+
+eq(Progression.recordEligible(false, false), true, "clean run -> record eligible")
+eq(Progression.recordEligible(true, false), false, "god -> no record")
+eq(Progression.recordEligible(false, true), false, "guide -> no record")
+eq(Progression.recordEligible(true, true), false, "god + guide -> no record")
+eq(Progression.recordEligible(nil, nil), true, "nil-safe -> eligible")
+
+-- guide på nøyaktig accepted+1: accepted teller, rekorden gjør ikke
+local a = Progression.resolveClear({ level = 7, accepted = 6, bestWithGod = 6,
+	hadGod = false, usedAssist = true })
+eq(a.acceptedGained, true, "guide -> accepted STILL gained (you walked it)")
+eq(a.newAccepted, 7, "guide -> accepted 7")
+eq(a.recordEligible, false, "guide -> record NOT eligible (board cannot be bought)")
+eq(a.leaderboardEligible, true, "guide -> still on the progression board")
+
+-- guiden kan ikke brukes til å hoppe: carry er fortsatt carry
+local ac = Progression.resolveClear({ level = 200, accepted = 6, bestWithGod = 6,
+	hadGod = false, usedAssist = true })
+eq(ac.acceptedGained, false, "guide + carry -> still no gain")
+eq(ac.newAccepted, 6, "guide cannot inflate accepted")
+
+-- guiden vasker ikke bort gudemodus
+local ag = Progression.resolveClear({ level = 7, accepted = 6, bestWithGod = 6,
+	hadGod = true, usedAssist = true })
+eq(ag.acceptedGained, false, "god still zeroes accepted even with a guide")
+eq(ag.recordEligible, false, "god + guide -> no record")
+
+-- uten flagget oppfører alt seg nøyaktig som før (bakover-kompatibelt)
+local an = Progression.resolveClear({ level = 7, accepted = 6, bestWithGod = 6, hadGod = false })
+eq(an.acceptedGained, true, "no usedAssist field -> unchanged behaviour")
+eq(an.recordEligible, true, "no usedAssist field -> record eligible")
+
 print(string.format("Progression: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Progression tests failed")

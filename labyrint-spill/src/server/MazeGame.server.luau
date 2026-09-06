@@ -76,6 +76,47 @@ local CONFIG = {
 		-- Mørket kryper litt innover: sikt 60 -> 35 mot level 500
 		StartSight = 60, SightTightenPerLevel = 0.05, MinSight = 35,
 	},
+
+	------------------------------------------------------------------
+	-- FELLER: PULSENDE LAVA
+	-- Labyrinten er et PERFEKT tre — det finnes nøyaktig ÉN rute fra start til
+	-- utgang. Feller plasseres på en hvilken som helst passasjecelle, også på
+	-- den eneste ruta, og en felle fyller hele korridoren (CellSize - 2 studs
+	-- bred) med en 10 studs høy dødelig trigger: umulig å gå rundt, umulig å
+	-- hoppe over. Det gjorde nivåer bokstavelig talt uløselige (en ekte spiller
+	-- ga opp på "lava-dammen" rundt level 5-6 — første nivå med felle er 6).
+	-- Nå PULSERER fella: TRYGG -> FORVARSEL (gul) -> DØDELIG -> TRYGG. Den er
+	-- fortsatt livsfarlig, men det finnes alltid et vindu å gå gjennom i.
+	-- Pulse = false gir eksakt gammel oppførsel (alltid dødelig) = rollback.
+	------------------------------------------------------------------
+	Traps = {
+		Pulse = true,
+		OffTime = 3.0,        -- sekunder ufarlig (forvarselet under er en del av denne)
+		WarnTime = 0.8,       -- de siste sekundene av det trygge vinduet blinker gult
+		OnTime = 2.2,         -- sekunder dødelig
+		MinSafeSeconds = 1.5, -- gulv: for korte trygge vinduer klampes opp ved oppstart
+	},
+
+	------------------------------------------------------------------
+	-- "HJELP MEG"-GUIDEN
+	-- Hvert nivå er vanskeligere enn forrige, så før eller siden treffer alle en
+	-- vegg. Har du feilet samme nivå OfferAfterFails ganger, tilbyr spillet en
+	-- lysende rute til utgangen for MYNTER — for ÉN kjøring.
+	-- Den hopper IKKE over noe: du må fortsatt gå ut selv, og en guide-kjøring
+	-- gir ingen tidsrekord (se Progression.recordEligible). Enabled = false slår
+	-- hele mekanikken av. Kun lobby-modus (CONFIG.UseLobby).
+	------------------------------------------------------------------
+	Assist = {
+		Enabled = true,
+		OfferAfterFails = 3,   -- ekte, server-talte mislykkede forsøk på SAMME nivå
+		MinRunSeconds = 8,     -- gikk du FRIVILLIG ut igjen raskere enn dette, teller
+		                       -- det ikke som et forsøk (ellers kunne man låst opp
+		                       -- tilbudet ved å gå inn og ut av døra). Død teller alltid.
+		BasePrice = 40,        -- pris = BasePrice + PricePerLevel * nivå, tak MaxPrice
+		PricePerLevel = 6,
+		MaxPrice = 250,
+		MaxTrailParts = 400,   -- tak på antall guide-merker (ytelse på store baner)
+	},
 }
 --=================================================================--
 
@@ -98,7 +139,22 @@ local GodUsers = require(ReplicatedStorage:WaitForChild("GodUsers"))
 local Contributors = require(ReplicatedStorage:WaitForChild("Contributors"))
 local Progression = require(ReplicatedStorage:WaitForChild("Progression"))
 local MazeGen = require(ReplicatedStorage:WaitForChild("MazeGen"))
+local Hazard = require(ReplicatedStorage:WaitForChild("Hazard"))
+local Assist = require(ReplicatedStorage:WaitForChild("Assist"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
+
+-- Felle-vaktposten: uansett hva som står i CONFIG.Traps, sørg for at det trygge
+-- vinduet er langt nok til å faktisk gå over ei felle. Slik kan ingen fremtidig
+-- CONFIG-redigering gjenskape den umulige banen (felle som sperrer den eneste
+-- ruta for godt). Blir noe rettet, sier vi tydelig fra i Output.
+local TRAP_CFG = (function()
+	local minSafe = Hazard.crossSeconds(CONFIG.CellSize, CONFIG.PlayerWalkSpeed)
+	local cfg, fixes = Hazard.sanitize(CONFIG.Traps, minSafe)
+	for _, f in ipairs(fixes) do
+		warn("[Labyrint] CONFIG.Traps rettet for å holde nivåene løsbare: " .. f)
+	end
+	return cfg
+end)()
 
 -- Visuell polish (kun kode, KONSERVATIV): Maze-presetet setter BEVISST ingen Lighting-
 -- felter — kun post-fx (Atmosphere/Bloom/ColorCorrection/DepthOfField) LAGT OPPÅ. Det
@@ -231,6 +287,8 @@ local invulnUntil = {}        -- [player] = os.clock()-tid uskadelig til (kort v
 local godActive = {}          -- [player] = true hvis gudemodus er på (kun GodUsers)
 local levelHadGod = false     -- true hvis NOEN brukte gud på gjeldende nivå (nullstilles pr bygging)
 local playerInstance = {}     -- LOBBY-MODUS: [player] = instansen de er inne i (nil = lobbyen)
+local stuckState = {}         -- [player] = { level, fails } — server-talte mislykkede forsøk
+                              -- (grunnlaget for "Hjelp meg"-guiden; klienten kan ikke røre den)
 local handleLobbySpawn        -- forhånds-deklarert; fylles ut i lobby-seksjonen
 local teardownPlayerInstance  -- forhånds-deklarert; fjerner spiller fra instans + rydder
 
@@ -368,6 +426,91 @@ local function killTouch(hit)
 		hum.Health = 0
 		if playFx then playFx(plr, "death") end
 	end
+end
+
+--========================  FELLER (PULS)  ========================--
+-- Se CONFIG.Traps for HVORFOR. Kort: labyrinten har bare ÉN rute, en felle
+-- sperrer hele korridoren, og før pulsen kunne det gjøre nivået uløselig.
+-- Alle feller i SAMME labyrint pulserer i takt — da er det lett å lese timingen,
+-- og ett trygt vindu holder til å løpe forbi flere feller på rad.
+
+-- Hvordan fella SER ut i hver fase. "warn" er ufarlig; den er forvarselet.
+local TRAP_LOOK = {
+	safe   = { Color = Color3.fromRGB(74, 46, 38),   Material = Enum.Material.Slate, Transparency = 0.4 },
+	warn   = { Color = Color3.fromRGB(255, 205, 60), Material = Enum.Material.Neon,  Transparency = 0.25 },
+	deadly = { Color = Color3.fromRGB(230, 90, 30),  Material = Enum.Material.Neon,  Transparency = 0 },
+}
+
+-- Felle-kontekst: samler alle fellene i én labyrint så de deler klokke og fase.
+-- deadly = true fra start hvis pulsen er av (da er oppførselen som før).
+local function newTrapCtx()
+	return { traps = {}, deadly = (TRAP_CFG.Pulse == false), t0 = os.clock(), phase = nil }
+end
+
+-- Bygg én felle i `folder` på verdens-punktet `w` og registrer den i `ctx`.
+-- Samme deler og samme mål som før; det eneste nye er at treffet er fase-styrt.
+local function spawnTrap(ctx, folder, w)
+	local S = CONFIG.CellSize
+	local pad = makePart({
+		Name = "Trap", Size = Vector3.new(S - 2, 0.6, S - 2),
+		Position = Vector3.new(w.X, 0.3, w.Z),
+		Color = TRAP_LOOK.deadly.Color, Material = TRAP_LOOK.deadly.Material,
+		CanCollide = false,
+	})
+	pad.Parent = folder                 -- MÅ parentes ellers vises den ikke / fyrer ikke Touched
+	-- Usynlig, høyere trigger så man ikke sklir/hopper "over" den tynne fella i fart.
+	local trig = makePart({
+		Name = "TrapTrigger", Size = Vector3.new(S - 2, 10, S - 2),
+		Position = Vector3.new(w.X, 5, w.Z), Transparency = 1, CanCollide = false,
+	})
+	trig.Parent = folder
+	-- Dreper BARE i dødelig fase. Touched fyrer hele tiden; fasen bestemmer.
+	local function hurt(hit)
+		if ctx.deadly then killTouch(hit) end
+	end
+	pad.Touched:Connect(hurt)
+	trig.Touched:Connect(hurt)
+	table.insert(ctx.traps, { pad = pad, trig = trig })
+end
+
+-- Sett fase på alle fellene i konteksten (farge/materiale + dødelig-flagget).
+local function applyTrapPhase(ctx, phase)
+	local look = TRAP_LOOK[phase] or TRAP_LOOK.deadly
+	local nowDeadly = (phase == "deadly")
+	local justLit = nowDeadly and not ctx.deadly
+	ctx.deadly = nowDeadly
+	ctx.phase = phase
+	for _, t in ipairs(ctx.traps) do
+		if t.pad.Parent then
+			t.pad.Color = look.Color
+			t.pad.Material = look.Material
+			t.pad.Transparency = look.Transparency
+		end
+		-- Sto noen OPPÅ fella i det den tente? Touched fyrer ikke på nytt for den
+		-- som allerede står der, så vi må sjekke selv — ellers ville "stå stille
+		-- på lavaen" vært helt trygt.
+		if justLit and t.trig.Parent then
+			local ok, parts = pcall(function() return t.trig:GetTouchingParts() end)
+			if ok and parts then
+				for _, p in ipairs(parts) do killTouch(p) end
+			end
+		end
+	end
+end
+
+-- Kjør pulsen til `alive()` blir false (nivået bygges om / instansen rives).
+-- Fasen regnes av ren logikk (Hazard), så den er testet uten Roblox.
+local function runTrapPulse(ctx, alive)
+	if TRAP_CFG.Pulse == false then return end        -- rollback: alltid dødelig
+	if #ctx.traps == 0 then return end
+	applyTrapPhase(ctx, Hazard.phaseAt(0, TRAP_CFG))  -- riktig utseende med en gang
+	task.spawn(function()
+		while alive() do
+			local phase = Hazard.phaseAt(os.clock() - ctx.t0, TRAP_CFG)
+			if phase ~= ctx.phase then applyTrapPhase(ctx, phase) end
+			task.wait(0.1)
+		end
+	end)
 end
 
 --==========================  LEADERSTATS  ========================--
@@ -903,30 +1046,12 @@ local function buildLevel()
 		end)
 	end
 
-	-- Feller
+	-- Feller (pulserende — se CONFIG.Traps + "FELLER (PULS)")
+	local trapCtx = newTrapCtx()
 	for _, c in ipairs(take(diff.traps)) do
-		local w = cellCenterWorld(c[1], c[2], gCols, gRows)
-		local trap = makePart({
-			Name = "Trap",
-			Size = Vector3.new(S - 2, 0.6, S - 2),
-			Position = Vector3.new(w.X, 0.3, w.Z),
-			Color = Color3.fromRGB(230, 90, 30),
-			Material = Enum.Material.Neon,
-			CanCollide = false,
-		})
-		trap.Parent = folder
-		trap.Touched:Connect(killTouch)
-		-- Usynlig, høyere trigger så man ikke sklir/hopper "over" den tynne fella i fart.
-		local trapTrigger = makePart({
-			Name = "TrapTrigger",
-			Size = Vector3.new(S - 2, 10, S - 2),
-			Position = Vector3.new(w.X, 5, w.Z),
-			Transparency = 1,
-			CanCollide = false,
-		})
-		trapTrigger.Parent = folder
-		trapTrigger.Touched:Connect(killTouch)
+		spawnTrap(trapCtx, folder, cellCenterWorld(c[1], c[2], gCols, gRows))
 	end
+	runTrapPulse(trapCtx, function() return gen == currentGen end)
 
 	-- Knapper (åpner hemmelige vegger)
 	local doorKeys = {}
@@ -1033,7 +1158,8 @@ onEscape = function(plr)
 			local elapsed = os.clock() - st
 			-- "clean" = INGEN brukte gud på dette nivået. Gud-runder oppdaterer ingen
 			-- tider/rekorder (kun bestWithGod, se accepted-blokka lenger nede).
-			local clean = not levelHadGod
+			-- (Gammel enkelt-maze-modus har ingen instanser, altså ingen guide.)
+			local clean = Progression.recordEligible(levelHadGod, false)
 			if clean and elapsed < d.best then d.best = elapsed end
 
 			-- Per-nivå: personlig rekord, medalje, global rekord, oppsummering.
@@ -1570,6 +1696,7 @@ Players.PlayerRemoving:Connect(function(plr)
 	shieldUsed[plr] = nil
 	invulnUntil[plr] = nil
 	godActive[plr] = nil
+	stuckState[plr] = nil
 end)
 
 game:BindToClose(function()
@@ -1662,6 +1789,8 @@ local function buildInstance(inst)
 	inst.spinners = {}
 	inst.passages = {}
 	inst.hadGod = false
+	inst.assist = false   -- "Hjelp meg"-guiden gjelder ÉN kjøring: nullstilles pr nivå
+	inst.trail = nil
 
 	local diff = MazeGen.getDifficulty(inst.level, CONFIG.Curve)
 	local cols, rows = diff.size, diff.size
@@ -1795,18 +1924,13 @@ local function buildInstance(inst)
 			if playFx then playFx(plr, "gem") end
 		end)
 	end
-	-- Feller
+	-- Feller (pulserende — se CONFIG.Traps + "FELLER (PULS)")
+	local trapCtx = newTrapCtx()
 	for _, c in ipairs(take(diff.traps)) do
-		local w = MazeGen.cellCenterWorld(c[1], c[2], gCols, gRows, S, origin)
-		local trap = makePart({ Name = "Trap", Size = Vector3.new(S - 2, 0.6, S - 2), Position = Vector3.new(w.X, 0.3, w.Z),
-			Color = Color3.fromRGB(230, 90, 30), Material = Enum.Material.Neon, CanCollide = false })
-		trap.Parent = folder                 -- MÅ parentes ellers vises den ikke / fyrer ikke Touched
-		trap.Touched:Connect(killTouch)
-		local trig = makePart({ Name = "TrapTrigger", Size = Vector3.new(S - 2, 10, S - 2),
-			Position = Vector3.new(w.X, 5, w.Z), Transparency = 1, CanCollide = false })
-		trig.Parent = folder
-		trig.Touched:Connect(killTouch)
+		spawnTrap(trapCtx, folder, MazeGen.cellCenterWorld(c[1], c[2], gCols, gRows, S, origin))
 	end
+	local trapGen = inst.gen
+	runTrapPulse(trapCtx, function() return inst.gen == trapGen and folder.Parent ~= nil end)
 	-- Skjulte knapper (senker en SecretWall)
 	for _, c in ipairs(take(math.min(diff.buttons, 4))) do
 		local key = next(doorParts)
@@ -1840,6 +1964,26 @@ local function buildInstance(inst)
 	local steps = Medals.solveRoute(grid, gCols, gRows, startFine, exitFine, {})
 	inst.par = Medals.parTime(steps, CONFIG.CellSize, CONFIG.PlayerWalkSpeed)
 	inst.thresholds = Medals.thresholds(inst.par)
+
+	-- Ruta til "Hjelp meg"-guiden regnes NÅ (mens vi har grid-en) og lagres som
+	-- ferdige verdens-punkter. Selve merkene tegnes først hvis noen kjøper guiden.
+	-- Medals.dist sendes INN til Assist — delte moduler krever aldri hverandre.
+	inst.routeWorld = nil
+	if CONFIG.Assist.Enabled then
+		local ok, route = pcall(function()
+			return Assist.route(Medals.dist, grid, gCols, gRows, startFine, exitFine)
+		end)
+		-- Tynn ut FØR vi lager punkter, så en lang rute blir jevnt fordelte merker
+		-- hele veien til utgangen i stedet for å stoppe halvveis.
+		local thinned = ok and Assist.thin(route, CONFIG.Assist.MaxTrailParts) or nil
+		if thinned then
+			local pts = {}
+			for _, fine in ipairs(thinned) do
+				pts[#pts + 1] = MazeGen.gridToWorld(fine[1], fine[2], gCols, gRows, S, origin)
+			end
+			inst.routeWorld = pts
+		end
+	end
 
 	-- Spinn på mynter/edelstener
 	local myGen = inst.gen
@@ -1898,11 +2042,123 @@ local function removeInstanceFromLists(inst)
 	for i = #friendsInstances, 1, -1 do if friendsInstances[i] == inst then table.remove(friendsInstances, i) end end
 end
 
+--===================  "HJELP MEG"-GUIDEN  ========================--
+-- Se CONFIG.Assist for HVORFOR. Kort: har du feilet samme nivå nok ganger, kan
+-- du kjøpe en lysende rute til utgangen for mynter — for ÉN kjøring.
+--
+-- SERVER-AUTORITATIVT, og umulig å utnytte til gratis fremgang:
+--   * Klienten sender BARE et ønske (ingen argumenter: ingen pris, intet nivå).
+--     Pris og nivå leses av serveren fra CONFIG og spillerens egen instans.
+--   * `stuckState` telles KUN i teardownPlayerInstance (ekte død / ekte retur til
+--     lobbyen) og bor bare på serveren. Klienten kan ikke sette seg selv "fast".
+--   * Guiden gis bare på NØYAKTIG det nivået forsøkene gjelder (Assist.shouldOffer),
+--     så den kan ikke spares opp på et lett nivå og brukes på et vanskelig.
+--   * Ingen hopp: du må fortsatt gå ut selv. accepted krever fremdeles nøyaktig
+--     accepted+1 og ingen gud (Progression) — guiden rører ikke det tallet.
+--   * En guide-kjøring gir INGEN tid/rekord (Progression.recordEligible), så
+--     rekordtavla kan ikke kjøpes for mynter.
+--   * Én guide pr kjøring (inst.assist), og flagget settes i samme steg som
+--     myntene trekkes (ingen yield imellom), så spam-klikk kan ikke belaste to
+--     ganger eller tegne ruta på nytt.
+local assistFolder = Instance.new("Folder")
+assistFolder.Name = "AssistRemotes"
+assistFolder.Parent = ReplicatedStorage
+
+local assistStateEvent = Instance.new("RemoteEvent")
+assistStateEvent.Name = "AssistState"
+assistStateEvent.Parent = assistFolder
+
+local buyAssistFn = Instance.new("RemoteFunction")
+buyAssistFn.Name = "BuyAssist"
+buyAssistFn.Parent = assistFolder
+
+-- Fortell klienten hva den skal vise: ingenting, "du står fast — kjøp guide",
+-- eller "guide aktiv". Sendes ved hvert spawn, hvert nivåbytte og hvert kjøp.
+local function sendAssistState(plr)
+	local d = playerData[plr]
+	if not d then return end
+	local inst = playerInstance[plr]
+	local stuck = stuckState[plr]
+	local level = (inst and inst.level) or (stuck and stuck.level) or 0
+	assistStateEvent:FireClient(plr, {
+		enabled = CONFIG.Assist.Enabled,
+		inMaze = inst ~= nil,
+		level = level,
+		fails = (stuck and stuck.level == level) and stuck.fails or 0,
+		need = CONFIG.Assist.OfferAfterFails,
+		offered = Assist.shouldOffer(stuck, level, CONFIG.Assist),
+		active = (inst ~= nil) and (inst.assist == true),
+		price = Assist.price(level, CONFIG.Assist),
+		coins = d.coins,
+	})
+end
+
+-- Tegn guiden: lysende prikker langs ruta som allerede ble regnet i buildInstance.
+-- I mørket ser du bare de nærmeste — den viser veien uten å avsløre hele banen.
+local function buildAssistTrail(inst)
+	if not inst.routeWorld or inst.trail then return 0 end
+	local folder = Instance.new("Folder")
+	folder.Name = "Guide"
+	folder.Parent = inst.folder
+	inst.trail = folder
+	local n = 0
+	for _, pos in ipairs(inst.routeWorld) do
+		local dot = makePart({
+			Name = "GuideDot", Shape = Enum.PartType.Ball,
+			Size = Vector3.new(1.1, 1.1, 1.1),
+			Position = pos + Vector3.new(0, 1.3, 0),
+			Color = Color3.fromRGB(90, 235, 255), Material = Enum.Material.Neon,
+			Transparency = 0.15, CanCollide = false, CanTouch = false,
+			CanQuery = false, CastShadow = false,
+		})
+		dot.Parent = folder
+		n += 1
+	end
+	return n
+end
+
+buyAssistFn.OnServerInvoke = function(plr)
+	local d = playerData[plr]
+	if not d then return { ok = false, reason = "noplayer", price = 0, coins = 0 } end
+	local inst = playerInstance[plr]
+	if not inst then                       -- guiden kjøpes INNE i labyrinten
+		sendAssistState(plr)
+		return { ok = false, reason = "notinmaze", price = 0, coins = d.coins }
+	end
+	if not inst.routeWorld then            -- ingen rute å tegne => ingen betaling
+		sendAssistState(plr)
+		return { ok = false, reason = "noroute", price = 0, coins = d.coins }
+	end
+	local ok, reason, price = Assist.buy(d, stuckState[plr], inst.level, inst.assist == true, CONFIG.Assist)
+	if ok then
+		inst.assist = true                 -- samme steg som trekket: ingen dobbeltkjøp
+		buildAssistTrail(inst)
+		refreshStats(plr)
+		scheduleSave(plr)
+		sendPerkData(plr)                  -- alle mynt-tellere skal vise samme tall
+		sendShopData(plr)
+		-- Hele instansen mister rekord-retten, så alle skal se at guiden er på.
+		for _, p in ipairs(participantList(inst)) do sendAssistState(p) end
+	else
+		sendAssistState(plr)
+	end
+	return { ok = ok, reason = reason, price = price, coins = d.coins }
+end
+
 -- Fjern spilleren fra sin instans (forlot/døde). Tom instans -> riv + prune.
 -- Forhånds-deklarert i STATE så PlayerRemoving (definert over) kan kalle den.
-teardownPlayerInstance = function(plr)
+-- `voluntary` = spilleren gikk selv ut via retur-døra (ikke død). Da kreves det
+-- at de faktisk var inne en stund før det teller som et forsøk.
+teardownPlayerInstance = function(plr, voluntary)
 	local inst = playerInstance[plr]
 	if not inst then return end
+	-- Ett mislykket forsøk til på dette nivået (døde eller ga opp). Dette er det
+	-- ENESTE stedet tellingen øker, og den skjer på serveren — grunnlaget for at
+	-- "Hjelp meg"-guiden tilbys.
+	local runSeconds = startClock[plr] and (os.clock() - startClock[plr]) or 0
+	if Assist.countsAsFail(runSeconds, voluntary, CONFIG.Assist) then
+		stuckState[plr] = Assist.noteFail(stuckState[plr], inst.level)
+	end
 	playerInstance[plr] = nil
 	if inst.participants then inst.participants[plr] = nil end
 	if not inst.participants or not next(inst.participants) then
@@ -1915,10 +2171,11 @@ end
 -- Frivillig retur til lobbyen (retur-døra inne i labyrinten). Ut av instansen +
 -- teleporter til lobbyen + vis lobby-HUD.
 returnToLobby = function(plr)
-	teardownPlayerInstance(plr)
+	teardownPlayerInstance(plr, true)   -- frivillig: kort inn-og-ut teller ikke
 	local char = plr.Character
 	if char then pcall(function() char:PivotTo(CFrame.new(LOBBY_ORIGIN + Vector3.new(0, 5, 0))) end) end
 	sendInstanceInfo(plr, nil)
+	sendAssistState(plr)   -- i lobbyen: vis "du står fast"-hintet hvis det gjelder
 end
 
 local endInstance, advanceInstance
@@ -1933,6 +2190,7 @@ local function placeInInstance(plr, inst)
 	startClock[plr] = os.clock()
 	shieldUsed[plr] = false
 	sendInstanceInfo(plr, inst)
+	sendAssistState(plr)   -- inne i labyrinten: her dukker kjøp-knappen opp
 end
 
 -- Lag en ny instans (bygd) med `plr` som første deltaker.
@@ -1991,6 +2249,7 @@ endInstance = function(inst)
 		local char = p.Character
 		if char then pcall(function() char:PivotTo(CFrame.new(LOBBY_ORIGIN + Vector3.new(0, 5, 0))) end) end
 		sendInstanceInfo(p, nil)
+		sendAssistState(p)
 	end
 	inst.participants = {}
 	inst.gen = (inst.gen or 0) + 1
@@ -2010,6 +2269,7 @@ advanceInstance = function(inst)
 		startClock[p] = os.clock()
 		shieldUsed[p] = false
 		sendInstanceInfo(p, inst)
+		sendAssistState(p)   -- nytt nivå = ny (u)tilbudt guide
 	end
 end
 
@@ -2025,12 +2285,16 @@ finishRun = function(solverPlr, inst)
 	-- rett før mål). Fanger ALLE gud-veier — ellers kunne Mio "rent" løse nivået.
 	local hadGod = inst.hadGod
 	for p in pairs(inst.participants) do if godActive[p] then hadGod = true end end
+	-- Ble "Hjelp meg"-guiden kjøpt på dette nivået, teller kjøringen for
+	-- fremgang (du gikk faktisk ut) men gir INGEN tid/rekord — rekordtavla skal
+	-- ikke kunne kjøpes for mynter. Én regel, samme sted som gud: Progression.
+	local usedAssist = inst.assist and true or false
 	local sd = playerData[solverPlr]
 	local elapsed
 	if sd then
 		local st = startClock[solverPlr]
 		elapsed = st and (os.clock() - st) or nil
-		local clean = not hadGod
+		local clean = Progression.recordEligible(hadGod, usedAssist)
 		local medal, isNewPB, isNewRecord, recs
 		if elapsed then
 			if clean and elapsed < sd.best then sd.best = elapsed end
@@ -2071,9 +2335,10 @@ finishRun = function(solverPlr, inst)
 		if pd then
 			local res = Progression.resolveClear({
 				level = level, accepted = pd.accepted, bestWithGod = pd.bestWithGod,
-				hadGod = hadGod, mode = inst.mode,
+				hadGod = hadGod, usedAssist = usedAssist, mode = inst.mode,
 			})
 			pd.accepted = res.newAccepted; pd.bestWithGod = res.newBestWithGod
+			stuckState[p] = Assist.noteClear(stuckState[p], level)  -- klarte det: null forsøk
 			refreshStats(p)
 			if res.acceptedGained and pd.canSave ~= false and not GodUsers.has(p) then
 				submitTopScore(p.UserId, pd.accepted); anyGain = true
@@ -2258,6 +2523,7 @@ end
 handleLobbySpawn = function(plr)
 	teardownPlayerInstance(plr)   -- døde i en instans -> ut av den (riv hvis tom)
 	sendInstanceInfo(plr, nil)
+	sendAssistState(plr)          -- døde du for mange ganger, sier lobbyen fra her
 end
 
 --============================  START  ============================--

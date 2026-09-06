@@ -126,6 +126,52 @@ TrackMania-inspirert nivå-HUD + oppsummering.
 - **Polish**: monstre = server-network-owner (jevnere); feller har høy usynlig trigger.
 - **Mobil**: shop/HUD/kort skalert for telefon (44px-knapper, TextScaled, MaxSize).
 
+## Pulsende feller + "Hjelp meg"-guiden — BYGGET (etter spiller-tilbakemelding)
+En ekte spiller (u/popovitsj på r/RobloxDevelopers) testet spillet og meldte to
+ting. Begge er nå adressert.
+
+### 1. "Kom meg ikke forbi lava-dammen" — det var en EKTE blokkering
+Diagnose (ikke en gjetning): labyrinten er et **perfekt tre** (recursive
+backtracker), så det finnes nøyaktig ÉN rute fra start til utgang. Feller ble
+trukket fra `pool` = alle passasjeceller unntatt start- og utgangs-cella — altså
+**uten å ekskludere ruta**. En felle fyller korridoren (`CellSize - 2` = 7 av 9
+studs) og har en 10 studs høy `TrapTrigger`, så den kan verken gås rundt (1 stud
+klaring pr side) eller hoppes over (hopp når ~6,4 studs). Treff = `Health = 0`.
+Eneste motmiddel var skjold-perken til 600 mynter — på level 6 har en ny spiller
+~15-25 mynter. Simulering (20 000 baner pr nivå, samme plasserings-rekkefølge som
+koden): level 6 = **52,7 %** sjanse for felle på den eneste ruta, **23,6 %** helt
+uløselig selv om alle hemmelige dører sto åpne; level 100: 92,7 % / 84,6 %;
+level 300+: ~98 % / ~95 %. Level 6 er nøyaktig første nivå med felle — det
+stemmer med "level 5 eller 6".
+
+**Fiks:** fellene PULSERER nå — TRYGG → FORVARSEL (gul) → DØDELIG → TRYGG. De er
+like dødelige, men det finnes alltid et vindu å gå gjennom i. Alle feller i samme
+labyrint går i takt (lett å lese). Står du oppå fella når den tenner, dør du
+(`GetTouchingParts` ved tenning) — man kan ikke bare stå stille på lavaen.
+- Ren logikk: `src/shared/Hazard.luau` (fase-regning + `sanitize`), 36/36 tester.
+- `Hazard.sanitize` kjøres ved oppstart mot `CONFIG.Traps`: er det trygge vinduet
+  for kort til å gå over ei felle, klampes det opp og det varsles i Output. Slik
+  kan ingen fremtidig CONFIG-redigering gjenskape den umulige tilstanden.
+- `CONFIG.Traps.Pulse = false` gir eksakt gammel oppførsel (rollback).
+
+### 2. Vanskelighets-veggen — "Hjelp meg"-guiden
+Serveren teller mislykkede forsøk pr spiller pr nivå (`stuckState`). Etter
+`CONFIG.Assist.OfferAfterFails` (3) ekte forsøk dukker det opp et kort: kjøp en
+**lysende rute til utgangen for mynter**, for ÉN kjøring.
+- Ren logikk: `src/shared/Assist.luau` (pris, gating, rute-uthenting, tynning),
+  70/70 tester. `Medals.dist` sendes INN som argument — delte moduler krever
+  aldri hverandre via sti (`require("./X")` er ugyldig i Roblox).
+- Klient: `src/client/AssistClient.client.luau` (kort nederst; kjøp-knapp inne i
+  labyrinten, hint i lobbyen). Klienten sender et ønske UTEN argumenter.
+- **Kan ikke utnyttes:** prisen regnes på serveren; forsøk telles kun ved ekte
+  død/retur (og en frivillig retur under `MinRunSeconds` teller ikke, så man kan
+  ikke gå inn og ut av døra for å låse opp); guiden gjelder bare nøyaktig det
+  nivået forsøkene gjelder; én guide pr kjøring; ingen hopp — `accepted` krever
+  fortsatt nøyaktig `accepted+1` uten gud. En guide-kjøring gir **ingen tidsrekord
+  og ingen personlig bestetid** (`Progression.recordEligible`), så rekordtavla kan
+  ikke kjøpes for mynter.
+- `CONFIG.Assist.Enabled = false` slår hele mekanikken av. Kun lobby-modus.
+
 ## v2 — resten (ikke bygget ennå)
 Bevisst parkert for å få v1 til å funke først. Lagringen er allerede på plass,
 så saldoen finnes når butikkene bygges.
@@ -154,8 +200,12 @@ Roblox har ingen headless-runtime her — testing skjer i Studio.
 1. `rojo serve` (se README) og koble til fra Rojo-pluginen i Studio, ELLER
    `rojo build -o Labyrint.rbxlx` og åpne den fila.
 2. Trykk **Play**. Se `Output`-vinduet for `[Labyrint] Lastet...`.
-Ingen automatiske Luau-tester ennå. Hvis vi legger til, bruk Lune eller
-luau-CLI for ren logikk (maze-gen, kurve), ikke Roblox-avhengige biter.
+
+Ren logikk testes med luau-CLI (ikke Roblox-avhengige biter):
+`luau tests/<Navn>.spec.luau` for hver fil i `tests/` — alle skal si
+`N passed, 0 failed`. Dekker nå Progression, Contributors, Hazard og Assist.
+MERK: `luau-analyze` melder pre-eksisterende TypeErrors i `MazeGen.luau` og
+`Medals.luau` (utypede tabeller) og en ubrukt `LOBBY_FOG` — de er ikke nye.
 
 ## Kjente grovheter å polere
 - Monster-riggen er én del med Humanoid; kan skli/rykke. Vurder ordentlig
