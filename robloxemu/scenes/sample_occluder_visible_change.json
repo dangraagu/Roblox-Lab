@@ -1,0 +1,30 @@
+{
+  "name": "sample_occluder_visible_change",
+  "_comment": "The same box, but moved in FRONT of the wall (between wall and camera). diff_images() against sample_occluder_clean must be large -- this is what a correctly authored anomaly looks like.",
+  "camera": { "pos": [0, 3, 12], "look": [0, 3, 0], "fov": 70 },
+  "lighting": {
+    "ambient": [50, 52, 60], "brightness": 1.0,
+    "fogEnd": 300, "fogColor": [10, 10, 16]
+  },
+  "parts": [
+    { "name": "Floor", "class": "Part",
+      "size": [30, 1, 60],
+      "cframe": [0, -1, -15, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      "color": [38, 40, 52], "material": "SmoothPlastic",
+      "transparency": 0.0, "reflectance": 0.0 },
+    { "name": "Wall", "class": "Part",
+      "size": [12, 8, 1],
+      "cframe": [0, 3, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      "color": [90, 95, 110], "material": "SmoothPlastic",
+      "transparency": 0.0, "reflectance": 0.0 },
+    { "name": "HiddenBox", "class": "Part",
+      "size": [2, 2, 2],
+      "cframe": [0, 3, 7, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      "color": [230, 60, 60], "material": "Plastic",
+      "transparency": 0.0, "reflectance": 0.0 }
+  ],
+  "lights": [
+    { "class": "PointLight", "pos": [0, 7, 8], "color": [255, 245, 230],
+      "brightness": 1.6, "range": 26, "enabled": true }
+  ]
+}

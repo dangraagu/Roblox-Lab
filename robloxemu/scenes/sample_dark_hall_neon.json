@@ -1,0 +1,40 @@
+{
+  "name": "sample_dark_hall_neon",
+  "_comment": "sample_dark_hall_clean plus one small Neon anomaly on the right-hand wall. Neon is emissive in Roblox, so it must survive the near-zero ambient and register on diff_images().",
+  "camera": { "pos": [0, 4, 16], "look": [0, 4, -10], "fov": 70 },
+  "lighting": {
+    "ambient": [3, 3, 5], "brightness": 0.05,
+    "fogEnd": 90, "fogColor": [4, 4, 8], "atmosphereDensity": 0.42
+  },
+  "parts": [
+    { "name": "Floor", "class": "Part",
+      "size": [16, 1, 60],
+      "cframe": [0, 0, -10, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      "color": [40, 42, 52], "material": "Concrete",
+      "transparency": 0.0, "reflectance": 0.0 },
+    { "name": "WallLeft", "class": "Part",
+      "size": [1, 10, 60],
+      "cframe": [-8, 5, -10, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      "color": [45, 45, 55], "material": "Concrete",
+      "transparency": 0.0, "reflectance": 0.0 },
+    { "name": "WallRight", "class": "Part",
+      "size": [1, 10, 60],
+      "cframe": [8, 5, -10, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      "color": [45, 45, 55], "material": "Concrete",
+      "transparency": 0.0, "reflectance": 0.0 },
+    { "name": "Ceiling", "class": "Part",
+      "size": [16, 1, 60],
+      "cframe": [0, 10, -10, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      "color": [28, 28, 36], "material": "Concrete",
+      "transparency": 0.0, "reflectance": 0.0 },
+    { "name": "NeonAnomaly", "class": "Part",
+      "size": [1.5, 1.5, 0.25],
+      "cframe": [3, 5, -6, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      "color": [120, 255, 140], "material": "Neon",
+      "transparency": 0.0, "reflectance": 0.0 }
+  ],
+  "lights": [
+    { "class": "PointLight", "pos": [0, 8, 4], "color": [180, 190, 220],
+      "brightness": 1.2, "range": 20, "enabled": true }
+  ]
+}

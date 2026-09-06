@@ -1,0 +1,3 @@
+# rendered output + scratch scenes
+*.png
+scenes/out_*.json
