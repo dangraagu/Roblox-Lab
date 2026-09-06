@@ -14,6 +14,7 @@ local SelectEvent = remotes:WaitForChild("Select")
 local GeodeEvent = remotes:WaitForChild("Geode")
 local RedeemFunc = remotes:WaitForChild("Redeem")
 local LeaderboardEvent = remotes:WaitForChild("Leaderboard")
+local ToastEvent = remotes:WaitForChild("Toast")
 
 local TIERS = Config.Tiers
 local MAXT = Config.MaxTier
@@ -47,9 +48,25 @@ hint.AnchorPoint = Vector2.new(0.5, 0); hint.Position = UDim2.new(0.5, 0, 0, 70)
 hint.Size = UDim2.new(0, 460, 0, 22); hint.BackgroundTransparency = 1
 hint.Font = Enum.Font.GothamMedium; hint.TextScaled = true
 hint.TextColor3 = Color3.fromRGB(210, 214, 230)
-hint.Text = "Select a seed, click an empty socket to plant · click a glowing crystal to harvest"
+hint.Text = "👆 Click a glowing socket to PLANT (you start with 3 free seeds!) · click a grown crystal to HARVEST 💎"
 hint.Parent = gui
 do local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 14; cc.Parent = hint end
+
+-- transient toast (server messages, e.g. "not enough dust")
+local toast = Instance.new("TextLabel")
+toast.AnchorPoint = Vector2.new(0.5, 0); toast.Position = UDim2.new(0.5, 0, 0, 98)
+toast.Size = UDim2.new(0, 460, 0, 24); toast.BackgroundTransparency = 1
+toast.Font = Enum.Font.GothamBold; toast.TextScaled = true
+toast.TextColor3 = Color3.fromRGB(255, 210, 120); toast.Text = ""
+toast.Parent = gui
+do local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 15; cc.Parent = toast end
+ToastEvent.OnClientEvent:Connect(function(msg)
+	if typeof(msg) ~= "string" then return end
+	toast.Text = msg
+	task.delay(3, function()
+		if toast.Text == msg then toast.Text = "" end
+	end)
+end)
 
 -- ── Left: Seeds + shop ──────────────────────────────────────────────────────
 local left = Instance.new("Frame")

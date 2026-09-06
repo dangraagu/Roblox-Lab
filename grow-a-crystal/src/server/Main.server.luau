@@ -18,6 +18,11 @@ local Economy = require(ReplicatedStorage:WaitForChild("Economy"))
 local Geode = require(ReplicatedStorage:WaitForChild("Geode"))
 local Codex = require(ReplicatedStorage:WaitForChild("Codex"))
 local Codes = require(ReplicatedStorage:WaitForChild("Codes"))
+local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
+
+-- Visual polish (code-only, additive): warm glowing cavern lighting + post-fx + ambient dust.
+Fx.applyLighting(Fx.Presets.Cozy)
+Fx.dustVolume(workspace, Vector3.new(600, 160, 600), CFrame.new(0, 70, 0), Color3.fromRGB(150, 200, 220), 40)
 
 -- ── Remotes ─────────────────────────────────────────────────────────────────
 local remotes = Instance.new("Folder")
@@ -30,6 +35,7 @@ local SelectEvent = mk("RemoteEvent", "Select")      -- klient -> server: valgt 
 local GeodeEvent = mk("RemoteEvent", "Geode")        -- klient -> server: knus geode
 local RedeemFunc = mk("RemoteFunction", "Redeem")    -- klient -> server: løs inn kode
 local LeaderboardEvent = mk("RemoteEvent", "Leaderboard")
+local ToastEvent = mk("RemoteEvent", "Toast")        -- server -> klient: kort melding (f.eks. "kjøp en seed")
 
 -- ── Data ─────────────────────────────────────────────────────────────────────
 local store = Config.Save.Enabled and DataStoreService:GetDataStore(Config.Save.Store) or nil
@@ -41,7 +47,7 @@ local selected = {} -- [player] = seedTier currently selected in the shop UI
 local function defaultProfile()
 	return {
 		dust = Config.Economy.StartDust,
-		seeds = {},                       -- [tier]=count
+		seeds = { [1] = 3 },              -- [tier]=count · start with 3 free Shard seeds so a new player can plant IMMEDIATELY (feedback: "i cant even place a seed")
 		chambers = Config.Economy.StartChambers,
 		luckLevel = 0, growthLevel = 0,
 		plants = {},                      -- [socketId]={tier=,at=}
@@ -179,6 +185,8 @@ local function makeSocket(plr, socketId)
 	part.Position = socketWorldPos(plotIndex, socketId)
 	part.Material = Enum.Material.Slate
 	part.Color = Color3.fromRGB(70, 74, 92)
+	-- a faint rim glow so empty sockets read as "plantable" (onboarding affordance)
+	Fx.attachGlow(part, Color3.fromRGB(90, 150, 200), 0.6, 8)
 	part.Name = "Socket_" .. plr.UserId .. "_" .. socketId
 	part:SetAttribute("SocketId", socketId)
 	part:SetAttribute("Owner", plr.UserId)
@@ -218,8 +226,14 @@ local function refreshSocketVisual(plr, socketId)
 	c.Position = part.Position + Vector3.new(0, c.Size.Y / 2, 0)
 	c.Material = Enum.Material.Neon
 	local rgb = Config.TierColor[plant.tier]
-	c.Color = Color3.fromRGB(rgb[1], rgb[2], rgb[3])
+	local col = Color3.fromRGB(rgb[1], rgb[2], rgb[3])
+	c.Color = col
 	c.Parent = part
+	-- visual polish: crystals glow + sparkle, brighter as they mature and by tier
+	Fx.attachGlow(c, col, 1 + 2 * prog, 10 + 6 * plant.tier)
+	if prog >= 1 then
+		Fx.sparkle(c, col) -- mature crystals glint (ready to harvest)
+	end
 end
 
 local function buildChambers(plr)
@@ -274,7 +288,15 @@ tryPlant = function(plr, socketId)
 	if socketId < 1 or socketId > total then return end
 	if p.plants[socketId] then return end -- occupied
 	local tier = selected[plr] or 1
-	if (p.seeds[tier] or 0) <= 0 then return end -- no seed of that tier
+	-- Auto-buy on click: if you don't own a seed of the selected tier, try to buy one with
+	-- your dust right here so a single click just plants (no hidden buy->select->plant dance).
+	-- This + the free starter seeds fixes the "i cant even place a seed" feedback.
+	if (p.seeds[tier] or 0) <= 0 then
+		if not Economy.buySeed(p, tier, Config.Economy) then
+			ToastEvent:FireClient(plr, "Not enough Gem Dust for that seed — harvest a crystal first!")
+			return
+		end
+	end
 	p.seeds[tier] -= 1
 	p.plants[socketId] = { tier = tier, at = os.time() }
 	refreshSocketVisual(plr, socketId)
