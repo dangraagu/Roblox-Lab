@@ -43,6 +43,24 @@ Copy `Fx.luau` + `FxClient.luau` from any sibling game, then **on the very first
 All of the above is **code-only — no art assets required.** What genuinely needs assets (and so must
 come from the user or the marketplace): custom meshes/textures, skyboxes, audio, custom fonts.
 
+### 2b. The HUD is built for a phone first
+
+Most Roblox players are on a phone. A HUD authored in fixed pixels against a desktop window is
+unusable there, and that is not a small blemish: a player told us Grow a Crystal's UI "covers the
+entire screen and it's impossible to move or do anything". Copy `Responsive.luau` from any sibling
+game (identical in all four) and follow `docs/mobile-ui-brief.md`. The rules:
+
+1. **A root Frame owns a `UIScale`.** A `UIScale` parented to a `ScreenGui` does nothing. Size the
+   root `UDim2.fromScale(1/scale, 1/scale)` so it still spans the screen after scaling — forget this
+   and the HUD shrinks into the top-left corner *only on phones*, where you are not looking.
+2. **Side panels go through `Responsive.sideWidth` / `fitHeight`**, and collapse behind top-edge
+   toggles when `layout.compact`. A list that can outgrow its box is a `ScrollingFrame`.
+3. **Nothing tappable in the bottom-left or bottom-right.** Roblox's own thumbstick and jump button
+   own those; a button drawn there can never be pressed.
+4. **Re-lay-out on `Camera:GetPropertyChangedSignal("ViewportSize")`** — rotation and window resize.
+5. **Prove it**: `robloxemu` boots the real server and HUD headless and measures every panel across
+   six viewports. See §5.
+
 ## 3. Correctness traps — check these every time
 
 These are real defects that shipped or nearly shipped in this repo. Treat them as a standing gate.

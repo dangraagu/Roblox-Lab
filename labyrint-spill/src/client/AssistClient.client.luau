@@ -9,13 +9,22 @@
 	Klienten bestemmer INGENTING: den viser bare det serveren sier, og sender et
 	ønske uten argumenter (ingen pris, intet nivå). All validering skjer på
 	serveren (se "HJELP MEG"-GUIDEN i MazeGame.server.luau). All tekst er engelsk.
+
+	Kortet har knapper og står nederst, så på berøringsskjerm løftes det opp over
+	båndet der Roblox tegner sine egne kontroller (styrepinne nede-venstre, hopp
+	nede-høyre). Ellers ville kjøp-knappen ligget under tommelen og aldri kunne
+	trykkes.
 ==================================================================]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+
+-- Delt skjermstørrelse-modul (ren data — se src/shared/Responsive.luau).
+local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 
 --==========================  GUI  ===============================--
 local old = playerGui:FindFirstChild("AssistPanel")
@@ -33,24 +42,92 @@ local function corner(inst, r)
 	local u = Instance.new("UICorner"); u.CornerRadius = UDim.new(0, r or 8); u.Parent = inst
 end
 
+--====================  ROT-RAMME MED UISCALE  ====================--
+-- En UIScale gjør INGENTING når den henger rett på en ScreenGui, så vi trenger en
+-- gjennomsiktig rot-ramme som eier skaleringen, og kortet henger under den.
+-- Active = false: spilleren holder finger på skjermen nesten hele tiden i en
+-- hinderløype, og en gjennomsiktig ramme som sluker trykk ville låst bevegelsen.
+local root = Instance.new("Frame")
+root.Name = "Root"
+root.BackgroundTransparency = 1
+root.BorderSizePixel = 0
+root.Active = false
+root.Size = UDim2.fromScale(1, 1)
+root.Parent = gui
+
+local uiScale = Instance.new("UIScale")
+uiScale.Parent = root
+
+-- Gjeldende skjerm-oppsett. Settes ordentlig av applyLayout() rett under.
+local rlayout = Responsive.layout(0, 0, UserInputService.TouchEnabled)
+
+-- Avstand fra nederste kant når det IKKE finnes berøringskontroller å ta hensyn til.
+local BOTTOM_MARGIN = 14
+local CARD_W = 340
+
 -- Nederst i midten: der blikket er når man står fast og lurer på hva man skal gjøre.
 local card = Instance.new("Frame")
 card.AnchorPoint = Vector2.new(0.5, 1)
-card.Position = UDim2.new(0.5, 0, 1, -14)
-card.Size = UDim2.fromOffset(340, 116)
+card.Position = UDim2.new(0.5, 0, 1, -BOTTOM_MARGIN)
+card.Size = UDim2.fromOffset(CARD_W, 116)
 card.BackgroundColor3 = Color3.fromRGB(28, 31, 44)
 card.BackgroundTransparency = 0.08
 card.BorderSizePixel = 0
-card.Parent = gui
+card.Active = false -- selve kortflata skal ikke sluke trykk; knappene under gjør sitt
+card.Parent = root
 corner(card, 12)
 
--- Skaler ned på små skjermer (telefon) i stedet for å flyte utenfor.
+-- Ekstra nedskalering av selve kortet, oppå rot-skaleringen: kortet er 340 faste
+-- piksler bredt, og på en veldig smal design-flate må det krympe litt til.
 local scale = Instance.new("UIScale"); scale.Parent = card
+
 local function fit()
+	-- Alt under rot-rammen måles i DESIGN-piksler: rot-rammen er 1/scale så stor som
+	-- skjermen, og UIScale krymper den ned igjen. Derfor deler vi skjermbredden på
+	-- skalaen før vi sammenligner med kortets faste bredde — ellers krymper kortet
+	-- én gang for mye på telefon.
 	local vp = gui.AbsoluteSize
-	if vp.X > 0 then scale.Scale = math.clamp((vp.X - 20) / 340, 0.6, 1) end
+	if vp.X > 0 then
+		scale.Scale = math.clamp((vp.X / rlayout.scale - 20) / CARD_W, 0.6, 1)
+	end
 end
-gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)
+
+local function applyLayout()
+	local cam = workspace.CurrentCamera
+	local v = cam and cam.ViewportSize or Vector2.new(0, 0)
+	rlayout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	uiScale.Scale = rlayout.scale
+
+	-- Rot-rammen må vokse med 1/skala så rot × skala lander nøyaktig på skjermkanten.
+	-- Uten dette krymper kortet inn i øvre venstre hjørne på telefon, mens det ser
+	-- helt riktig ut på desktop der skalaen er 1 og feilen er usynlig.
+	root.Size = UDim2.fromScale(1 / rlayout.scale, 1 / rlayout.scale)
+
+	-- Løft kortet opp over mobil-kontrollene. controlPad er SKJERM-piksler, mens
+	-- posisjonen her er design-piksler, så vi deler på skalaen. På desktop er
+	-- controlPad 0 og kortet står nøyaktig der det alltid har stått.
+	local lift = BOTTOM_MARGIN + math.floor(rlayout.controlPad / rlayout.scale)
+	card.Position = UDim2.new(0.5, 0, 1, -lift)
+
+	fit()
+end
+
+-- workspace.CurrentCamera er nil et bilde eller to ved oppstart, og Roblox bytter
+-- den ut ved enkelte respawn, så vi kobler lytteren på nytt når kameraet byttes.
+local viewportConn
+local function watchViewport()
+	if viewportConn then
+		viewportConn:Disconnect()
+		viewportConn = nil
+	end
+	local cam = workspace.CurrentCamera
+	if cam then
+		viewportConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+	end
+	applyLayout()
+end
+watchViewport()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
 
 local titleLbl = Instance.new("TextLabel")
 titleLbl.Size = UDim2.new(1, -20, 0, 24)

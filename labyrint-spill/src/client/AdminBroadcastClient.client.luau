@@ -16,9 +16,13 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:GetService("TextChatService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+
+-- Delt skjermstørrelse-modul (ren data — se src/shared/Responsive.luau).
+local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 
 --==========================  GUI  ===============================--
 local old = playerGui:FindFirstChild("AdminBroadcast")
@@ -31,12 +35,30 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 20            -- over alt annet: en kringkasting skal ses
 gui.Parent = playerGui
 
--- Gjennomsiktig banner øverst-i-midten (rett under "Level"-feltet). Bare tekst
--- med svart kant, ingen boks — "gjennomsiktig felt øverst på skjermen".
+--====================  ROT-RAMME MED UISCALE  ====================--
+-- En UIScale gjør INGENTING når den henger rett på en ScreenGui, så vi trenger en
+-- gjennomsiktig rot-ramme som eier skaleringen, og banneret henger under den.
+-- Active = false: spilleren holder finger på skjermen nesten hele tiden i en
+-- hinderløype, og en gjennomsiktig ramme som sluker trykk ville låst bevegelsen.
+-- (Selve banneret er en TextLabel, og de tar aldri imot input.)
+local root = Instance.new("Frame")
+root.Name = "Root"
+root.BackgroundTransparency = 1
+root.BorderSizePixel = 0
+root.Active = false
+root.Size = UDim2.fromScale(1, 1)
+root.Parent = gui
+
+local uiScale = Instance.new("UIScale")
+uiScale.Parent = root
+
+-- Gjennomsiktig banner øverst-i-midten, rett UNDER "Level"-feltet i HUD-et (som
+-- går fra y=6 til y=84). Bare tekst med svart kant, ingen boks — "gjennomsiktig
+-- felt øverst på skjermen".
 local banner = Instance.new("TextLabel")
 banner.Name = "Banner"
 banner.AnchorPoint = Vector2.new(0.5, 0)
-banner.Position = UDim2.new(0.5, 0, 0, 72)
+banner.Position = UDim2.new(0.5, 0, 0, 88)
 banner.Size = UDim2.new(0.8, 0, 0, 44)
 banner.BackgroundTransparency = 1        -- gjennomsiktig
 banner.Font = Enum.Font.GothamBold
@@ -46,7 +68,7 @@ banner.TextXAlignment = Enum.TextXAlignment.Center
 banner.TextWrapped = true
 banner.Text = ""
 banner.Visible = false
-banner.Parent = gui
+banner.Parent = root
 
 local sizeC = Instance.new("UISizeConstraint")
 sizeC.MaxSize = Vector2.new(720, 44)
@@ -62,6 +84,39 @@ local bstroke = Instance.new("UIStroke")
 bstroke.Color = Color3.fromRGB(0, 0, 0)
 bstroke.Thickness = 2
 bstroke.Parent = banner
+
+--====================  SKJERM-TILPASNING  =======================--
+-- Banneret er allerede skala-basert med et tak (UISizeConstraint), så det eneste
+-- som må skje her er rot-skaleringen: da krymper teksten i takt med resten av
+-- HUD-et i stedet for å ta over en telefonskjerm.
+local function applyLayout()
+	local cam = workspace.CurrentCamera
+	local v = cam and cam.ViewportSize or Vector2.new(0, 0)
+	local layout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	uiScale.Scale = layout.scale
+
+	-- Rot-rammen må vokse med 1/skala så rot × skala lander nøyaktig på skjermkanten.
+	-- Uten dette krymper banneret inn i øvre venstre hjørne på telefon, mens det ser
+	-- helt riktig ut på desktop der skalaen er 1 og feilen er usynlig.
+	root.Size = UDim2.fromScale(1 / layout.scale, 1 / layout.scale)
+end
+
+-- workspace.CurrentCamera er nil et bilde eller to ved oppstart, og Roblox bytter
+-- den ut ved enkelte respawn, så vi kobler lytteren på nytt når kameraet byttes.
+local viewportConn
+local function watchViewport()
+	if viewportConn then
+		viewportConn:Disconnect()
+		viewportConn = nil
+	end
+	local cam = workspace.CurrentCamera
+	if cam then
+		viewportConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+	end
+	applyLayout()
+end
+watchViewport()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
 
 --==========================  VISNING  ===========================--
 local showToken = 0

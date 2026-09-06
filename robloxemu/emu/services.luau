@@ -969,6 +969,15 @@ function ServicesLib.new(deps)
 
 	defineClass("SoundService", { parent = "Instance" })
 	defineClass("TextChatService", { parent = "Instance" })
+	-- The maze game registers a "/bc" admin command server-side and connects to it on the
+	-- client. Without the event declared, `cmd.Triggered:Connect(...)` reads nil and the whole
+	-- broadcast client dies partway through loading.
+	defineClass("TextChatCommand", {
+		parent = "Instance",
+		events = { "Triggered" },
+		defaults = { PrimaryAlias = "", SecondaryAlias = "", Enabled = true, AutocompleteVisible = true },
+	})
+	defineClass("TextChannel", { parent = "Instance", events = { "MessageReceived" } })
 	defineClass("ReplicatedStorage", { parent = "Instance" })
 	defineClass("ServerScriptService", { parent = "Instance" })
 	defineClass("ServerStorage", { parent = "Instance" })

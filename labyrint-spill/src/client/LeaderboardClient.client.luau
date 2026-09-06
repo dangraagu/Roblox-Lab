@@ -6,16 +6,31 @@
 	  • 🏆 Fastest — de 3 raskeste tidene på GJELDENDE nivå (fra HudRemotes/LevelInfo).
 	  • ⛰️ Top Climbers — de 3 spillerne med HØYEST nivå (fra HudRemotes/Leaderboard).
 	Serveren er fasit; klienten bare tegner. All tekst er engelsk, alt nil-sjekket.
+
+	På telefon er dette et ekte sidepanel, og da starter det SKJULT bak en liten
+	knapp øverst i høyre kolonne — et alltid-synlig listepanel ville spist en for
+	stor del av skjermen.
 ==================================================================]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local Medals = require(ReplicatedStorage:WaitForChild("Medals"))
 
+-- Delt skjermstørrelse-modul (ren data — se src/shared/Responsive.luau).
+local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+
 local TOP_N = 3
+
+-- Design-mål på panelet. Begge går gjennom takene i Responsive før de brukes.
+local PANEL_W, PANEL_H = 212, 240
+-- Høyden på telefon-knappen som panelet gjemmer seg bak.
+local TOGGLE_H = 48
+-- Kolonnen øverst til høyre begynner rett under tema-butikk-knappen (~12..60).
+local TOP_Y = 66
 
 --==========================  GUI  ===============================--
 local old = playerGui:FindFirstChild("Records")
@@ -28,23 +43,70 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 9
 gui.Parent = playerGui
 
+--====================  ROT-RAMME MED UISCALE  ====================--
+-- En UIScale gjør INGENTING når den henger rett på en ScreenGui, så vi trenger en
+-- gjennomsiktig rot-ramme som eier skaleringen, og panelet henger under den.
+-- Active = false: spilleren holder finger på skjermen nesten hele tiden i en
+-- hinderløype, og en gjennomsiktig ramme som sluker trykk ville låst bevegelsen.
+local root = Instance.new("Frame")
+root.Name = "Root"
+root.BackgroundTransparency = 1
+root.BorderSizePixel = 0
+root.Active = false
+root.Size = UDim2.fromScale(1, 1)
+root.Parent = gui
+
+local uiScale = Instance.new("UIScale")
+uiScale.Parent = root
+
+-- Gjeldende skjerm-oppsett. Settes ordentlig av applyLayout() lenger nede.
+local rlayout = Responsive.layout(0, 0, UserInputService.TouchEnabled)
+
+-- Telefon-knappen panelet gjemmer seg bak. Den ligger øverst i høyre kolonne —
+-- ALDRI nederst, der mobil-kontrollene bor. Skjult på nettbrett og desktop.
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "RekordKnapp"
+toggleBtn.AnchorPoint = Vector2.new(1, 0)
+toggleBtn.Position = UDim2.new(1, -12, 0, TOP_Y)
+toggleBtn.Size = UDim2.fromOffset(TOGGLE_H, TOGGLE_H)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
+toggleBtn.BackgroundTransparency = 0.2
+toggleBtn.BorderSizePixel = 0
+toggleBtn.AutoButtonColor = true
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextScaled = true
+toggleBtn.TextColor3 = Color3.fromRGB(255, 210, 90)
+toggleBtn.Text = "🏆"
+toggleBtn.Visible = false
+toggleBtn.Parent = root
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 10)
+toggleCorner.Parent = toggleBtn
+local togglePad = Instance.new("UIPadding")
+togglePad.PaddingTop = UDim.new(0, 8)
+togglePad.PaddingBottom = UDim.new(0, 8)
+togglePad.Parent = toggleBtn
+
 -- Øverst-til-høyre. Ligger rett under "🎨 Shop"-knappen (~12..60) NÅR minikartet
 -- ikke vises; eier spilleren minikartet (som står øverst i samme kolonne), legger
--- panelet seg UNDER kartet (se reposition() nederst). Høyre kant følger Shop/kart (-12).
+-- panelet seg UNDER kartet (se applyLayout() nederst). Høyre kant følger Shop/kart (-12).
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.AnchorPoint = Vector2.new(1, 0)
-panel.Position = UDim2.new(1, -12, 0, 66)
-panel.Size = UDim2.new(0, 212, 0, 0)
+panel.Position = UDim2.new(1, -12, 0, TOP_Y)
+panel.Size = UDim2.new(0, PANEL_W, 0, 0)
 panel.AutomaticSize = Enum.AutomaticSize.Y
 panel.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
 panel.BackgroundTransparency = 0.2
 panel.BorderSizePixel = 0
 panel.Active = false
-panel.Parent = gui
+-- Høyde-taket under kan bite i et svært lavt vindu. Da vil vi heller klippe den
+-- nederste linja enn å la lista male seg utover selve labyrinten.
+panel.ClipsDescendants = true
+panel.Parent = root
 
 local sizeC = Instance.new("UISizeConstraint")
-sizeC.MaxSize = Vector2.new(212, 240)
+sizeC.MaxSize = Vector2.new(PANEL_W, PANEL_H)
 sizeC.MinSize = Vector2.new(150, 0)
 sizeC.Parent = panel
 
@@ -65,11 +127,13 @@ pad.PaddingLeft = UDim.new(0, 10)
 pad.PaddingRight = UDim.new(0, 10)
 pad.Parent = panel
 
-local layout = Instance.new("UIListLayout")
-layout.FillDirection = Enum.FillDirection.Vertical
-layout.SortOrder = Enum.SortOrder.LayoutOrder
-layout.Padding = UDim.new(0, 1)
-layout.Parent = panel
+-- Heter listLayout og ikke layout, så den ikke forveksles med skjerm-oppsettet
+-- (rlayout) fra Responsive lenger opp.
+local listLayout = Instance.new("UIListLayout")
+listLayout.FillDirection = Enum.FillDirection.Vertical
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 1)
+listLayout.Parent = panel
 
 -- Liten fabrikk for en tekst-linje i panelet.
 local function mkLine(order, size, color, font, xalign)
@@ -152,27 +216,87 @@ local function onLeaderboard(list)
 	end)
 end
 
---==================  PLASSERING RUNDT MINIKARTET  ===============--
--- Minikartet (perk) står øverst-til-høyre på y=66. Eies det + vises det, legger
--- vi rekord-panelet RETT UNDER kartet; ellers rett under Shop-knappen (y=66).
-local TOP_Y = 66
-local function reposition()
+--============  SKJERM-TILPASNING + PLASSERING RUNDT KARTET  =====--
+-- Minikartet (perk) står øverst-til-høyre på y=66. Eies det + vises det, legger vi
+-- rekord-panelet RETT UNDER kartet; ellers rett under Shop-knappen (y=66). På
+-- telefon ligger telefon-knappen øverst i kolonnen og panelet under DEN igjen.
+local expanded = false
+
+local function applyLayout()
+	local cam = workspace.CurrentCamera
+	local v = cam and cam.ViewportSize or Vector2.new(0, 0)
+	rlayout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	uiScale.Scale = rlayout.scale
+
+	-- Rot-rammen må vokse med 1/skala så rot × skala lander nøyaktig på skjermkanten.
+	-- Uten dette krymper panelet inn i øvre venstre hjørne på telefon, mens det ser
+	-- helt riktig ut på desktop der skalaen er 1 og feilen er usynlig.
+	root.Size = UDim2.fromScale(1 / rlayout.scale, 1 / rlayout.scale)
+
+	-- Hvor høyt oppe i kolonnen vi får begynne.
+	local top = TOP_Y
 	local mini = playerGui:FindFirstChild("Minikart")
 	local frame = mini and mini:FindFirstChild("Kart")
-	if frame and frame.Visible and frame.AbsoluteSize.Y > 0 then
-		panel.Position = UDim2.new(1, -12, 0, TOP_Y + frame.AbsoluteSize.Y + 8)
-	else
-		panel.Position = UDim2.new(1, -12, 0, TOP_Y)
+	if frame and frame.Visible and frame.Size.Y.Offset > 0 then
+		-- Vi leser Size.Y.Offset og IKKE AbsoluteSize: kartet settes i design-piksler
+		-- under sin egen UIScale, og det er design-piksler vi regner i her inne.
+		top = TOP_Y + frame.Size.Y.Offset + 8
 	end
+
+	-- Hvor panelet faktisk begynner. På telefon sitter knappen ØVERST i kolonnen (rett
+	-- under butikk-knappen) og skuffen åpner seg rett under den — den legger seg da
+	-- oppå minikartet, slik en skuff skal. Da får lista hele resten av kolonnen i
+	-- stedet for den vesle stripa som blir igjen under kartet. Minikartet vet om
+	-- denne knappen og flytter seg ned for den (se COMPACT_TOP_OFFSET i
+	-- MinimapClient), så knappen dekker aldri kartet når skuffen er lukket.
+	local panelTop = if rlayout.compact then TOP_Y + TOGGLE_H + 6 else top
+
+	-- Bredden gjennom sidepanel-taket (venstre + høyre panel kan aldri dekke mer enn
+	-- halve skjermen), høyden gjennom fitHeight mot plassen over mobil-kontrollene.
+	-- Merk at budsjettet regnes fra panelTop — ikke fra toppen av kolonnen — ellers
+	-- stikker den åpne skuffa ned i kontroll-båndet på en lav telefonskjerm.
+	local w = Responsive.sideWidth(PANEL_W, v.X, rlayout)
+	local usable = Responsive.usableHeight(v.Y, rlayout) - panelTop * rlayout.scale
+	local h = Responsive.fitHeight(PANEL_H, usable, rlayout)
+	sizeC.MaxSize = Vector2.new(w, math.max(40, h))
+	sizeC.MinSize = Vector2.new(math.min(150, w), 0)
+	panel.Size = UDim2.new(0, w, 0, 0)
+
+	toggleBtn.Visible = rlayout.compact
+	toggleBtn.Position = UDim2.new(1, -12, 0, TOP_Y)
+	panel.Visible = (not rlayout.compact) or expanded
+	panel.Position = UDim2.new(1, -12, 0, panelTop)
 end
+
+toggleBtn.Activated:Connect(function()
+	expanded = not expanded
+	toggleBtn.Text = expanded and "✕" or "🏆"
+	applyLayout()
+end)
+
+-- workspace.CurrentCamera er nil et bilde eller to ved oppstart, og Roblox bytter
+-- den ut ved enkelte respawn, så vi kobler lytteren på nytt når kameraet byttes.
+local viewportConn
+local function watchViewport()
+	if viewportConn then
+		viewportConn:Disconnect()
+		viewportConn = nil
+	end
+	local cam = workspace.CurrentCamera
+	if cam then
+		viewportConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+	end
+	applyLayout()
+end
+watchViewport()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
 
 task.spawn(function()
 	local function hookFrame(frame)
-		frame:GetPropertyChangedSignal("Visible"):Connect(reposition)
-		frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(reposition)
-		reposition()
+		frame:GetPropertyChangedSignal("Visible"):Connect(applyLayout)
+		frame:GetPropertyChangedSignal("Size"):Connect(applyLayout)
+		applyLayout()
 	end
-	reposition()
 	local mini = playerGui:FindFirstChild("Minikart")
 	if mini then
 		local f = mini:FindFirstChild("Kart")

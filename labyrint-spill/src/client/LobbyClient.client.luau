@@ -6,13 +6,22 @@
 	LobbyRemotes/OpenPicker). Spilleren velger "Continue" (neste nivå) eller et
 	spesifikt nivå 1..accepted+1, og vi sender valget tilbake (StartRun). Group-
 	døra trenger ingen velger (matches direkte). All tekst er engelsk.
+
+	The picker is a centred modal. It is sized from Responsive, so on a phone it
+	shrinks to fit and sits above Roblox's touch controls instead of under them.
 ==================================================================]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local camera = workspace.CurrentCamera
+
+-- Shared sizing rules so this HUD survives a phone. Note the require form: a bare string
+-- require like `require("./Responsive")` resolves in the luau CLI but is invalid in Roblox.
+local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 
 --==========================  GUI  ===============================--
 local old = playerGui:FindFirstChild("LobbyPicker")
@@ -30,22 +39,44 @@ local function corner(inst, r)
 	local u = Instance.new("UICorner"); u.CornerRadius = UDim.new(0, r or 8); u.Parent = inst
 end
 
+-- A UIScale does nothing parented to a ScreenGui, so the picker hangs off this root Frame
+-- and the root is what the scale acts on.
+local root = Instance.new("Frame")
+root.Name = "Root"
+root.BackgroundTransparency = 1
+root.BorderSizePixel = 0
+root.Size = UDim2.fromScale(1, 1)
+root.Parent = gui
+local uiScale = Instance.new("UIScale")
+uiScale.Parent = root
+
+-- The size the picker was drawn at.
+local PANEL_W, PANEL_H = 360, 380
+
+local layout = Responsive.layout(camera.ViewportSize.X, camera.ViewportSize.Y, UserInputService.TouchEnabled)
+
+-- A control drawn 44 px tall comes out at 44 * scale on screen, which is 26 px on a phone —
+-- too small for a thumb. Where the player is on touch (controlPad is only non-zero then) we
+-- grow the touch targets by 1/scale so they land at the size they were drawn for; text size
+-- caps get the same treatment, otherwise the label shrinks inside a button that grew.
+local function touchSize(designPx)
+	if layout.controlPad <= 0 then
+		return designPx
+	end
+	return math.ceil(designPx / layout.scale)
+end
+
 local panel = Instance.new("Frame")
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
-panel.Size = UDim2.fromOffset(360, 380)
+panel.Size = UDim2.fromOffset(PANEL_W, PANEL_H)
 panel.BackgroundColor3 = Color3.fromRGB(28, 31, 44)
 panel.BorderSizePixel = 0
-panel.Parent = gui
+-- A plain Frame does not consume input, so a drag across the picker would fall through and
+-- swing the camera behind it. This is a modal; it should absorb what lands on it.
+panel.Active = true
+panel.Parent = root
 corner(panel, 14)
-local pscale = Instance.new("UIScale"); pscale.Parent = panel
-local function fit()
-	local vp = gui.AbsoluteSize
-	if vp.X > 0 and vp.Y > 0 then
-		pscale.Scale = math.clamp(math.min((vp.X - 24) / 360, (vp.Y - 24) / 380), 0.5, 1)
-	end
-end
-gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)
 
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -20, 0, 34)
@@ -59,7 +90,7 @@ title.Parent = panel
 local ttc = Instance.new("UITextSizeConstraint"); ttc.MaxTextSize = 22; ttc.Parent = title
 
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.fromOffset(30, 30)
+closeBtn.Size = UDim2.fromOffset(44, 44)
 closeBtn.AnchorPoint = Vector2.new(1, 0)
 closeBtn.Position = UDim2.new(1, -8, 0, 8)
 closeBtn.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
@@ -127,7 +158,7 @@ local function rebuild(accepted)
 	-- nivåer 1..accepted+1 (accepted+1 = neste; <= accepted = replay)
 	for lvl = 1, accepted + 1 do
 		local b = Instance.new("TextButton")
-		b.Size = UDim2.fromOffset(56, 40)
+		b.Size = grid.CellSize
 		b.LayoutOrder = lvl
 		b.BackgroundColor3 = (lvl == accepted + 1) and Color3.fromRGB(70, 110, 170) or Color3.fromRGB(52, 56, 74)
 		b.TextColor3 = Color3.new(1, 1, 1)
@@ -135,7 +166,7 @@ local function rebuild(accepted)
 		b.TextScaled = true
 		b.Text = tostring(lvl)
 		b.Parent = scroll
-		local tsc = Instance.new("UITextSizeConstraint"); tsc.MaxTextSize = 16; tsc.Parent = b
+		local tsc = Instance.new("UITextSizeConstraint"); tsc.MaxTextSize = touchSize(16); tsc.Parent = b
 		corner(b, 6)
 		b.Activated:Connect(function() choose(lvl) end)
 	end
@@ -151,6 +182,57 @@ continueBtn.Activated:Connect(function()
 	choose(acc + 1)
 end)
 
+--==========================  RESPONSIVT OPPSETT  =================--
+-- Re-lays the picker for the current viewport: never wider than the screen, never taller
+-- than the room left above Roblox's touch controls, and every level button kept at a size
+-- a thumb can actually hit.
+local function applyLayout()
+	local v = camera.ViewportSize
+	layout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	uiScale.Scale = layout.scale
+	-- Grow the root by 1/scale so root * scale lands exactly on the viewport. Skip this and
+	-- the picker shrinks into the top-left corner on a phone while looking fine on desktop.
+	root.Size = UDim2.fromScale(1 / layout.scale, 1 / layout.scale)
+
+	local viewX = if v.X > 0 then v.X else Responsive.REF_X
+	local rootW = viewX / layout.scale
+	local panelW = math.max(200, math.min(PANEL_W, math.floor(rootW) - 2 * Responsive.MARGIN))
+	local panelH = Responsive.fitHeight(PANEL_H, Responsive.usableHeight(v.Y, layout), layout)
+	panel.Size = UDim2.fromOffset(panelW, panelH)
+	-- Centre it in the room that is actually free: lifting it by half the touch-control band
+	-- keeps the bottom row of level buttons clear of the movement stick and the jump button.
+	panel.Position = UDim2.new(0.5, 0, 0.5, -math.floor(layout.controlPad / layout.scale / 2))
+
+	local closeW = touchSize(44)
+	closeBtn.Size = UDim2.fromOffset(closeW, closeW)
+	title.Position = UDim2.fromOffset(closeW + 16, 8)
+	title.Size = UDim2.new(1, -2 * (closeW + 16), 0, touchSize(34))
+	ttc.MaxTextSize = touchSize(22)
+
+	-- Stack the body from the title down, so every row keeps its gap when the parts grow.
+	local contY = 10 + touchSize(34) + 4
+	local contH = touchSize(48)
+	continueBtn.Position = UDim2.fromOffset(10, contY)
+	continueBtn.Size = UDim2.new(1, -20, 0, contH)
+	ctc.MaxTextSize = touchSize(20)
+
+	local pickY = contY + contH + 8
+	local pickH = touchSize(18)
+	pickLabel.Position = UDim2.fromOffset(10, pickY)
+	pickLabel.Size = UDim2.new(1, -20, 0, pickH)
+	ptc.MaxTextSize = touchSize(13)
+
+	local scrollY = pickY + pickH + 6
+	scroll.Position = UDim2.fromOffset(10, scrollY)
+	scroll.Size = UDim2.new(1, -20, 1, -(scrollY + 8))
+
+	-- The grid owns the size of every level button, and the buttons copy it on rebuild.
+	grid.CellSize = UDim2.fromOffset(touchSize(56), touchSize(44))
+end
+
+applyLayout()
+camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+
 --==================  KOBLE TIL SERVEREN  ========================--
 task.spawn(function()
 	local lobby = ReplicatedStorage:WaitForChild("LobbyRemotes", 30)
@@ -165,7 +247,7 @@ task.spawn(function()
 			title.Text = (currentMode == "friends") and "Host: Play with Friends" or "Solo Climb"
 			gui:SetAttribute("accepted", accepted)
 			pcall(rebuild, accepted)
-			fit()
+			applyLayout()
 			gui.Enabled = true
 		end)
 	end

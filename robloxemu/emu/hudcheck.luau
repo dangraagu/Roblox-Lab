@@ -149,10 +149,12 @@ function HudCheck.run(cfg)
 					end
 				end
 
-				-- 3. how much of the screen the panels cover between them
-				if r.class == "Frame" or r.class == "ScrollingFrame" then
+				-- 3. how much of the screen the panels cover between them. Only the panels
+				-- themselves (depth 2, the children of the scaling root) count: adding their
+				-- rows and labels on top would count the same pixels several times over.
+				if (r.class == "Frame" or r.class == "ScrollingFrame") and r.depth == 2 then
 					local area = r.sw * r.sh
-					-- Skip a full-screen container: the scaling root is not furniture.
+					-- Skip a full-screen container: a second scaling root is not furniture.
 					if area > 0 and area < v.w * v.h * 0.98 then
 						shownArea += area
 						if worst == nil or area > worst.area then

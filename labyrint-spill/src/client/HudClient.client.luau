@@ -22,12 +22,17 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 
 -- Delt medalje-/tid-modul (ren data + fmtTime). Denne MÅ finnes; serveren
 -- kloner src/shared inn i ReplicatedStorage før spillerne kobler seg på.
 local Medals = require(ReplicatedStorage:WaitForChild("Medals"))
+
+-- Delt skjermstørrelse-modul: bestemmer hvor stort HUD-et får lov å være på
+-- telefon/nettbrett/desktop. Ren data — se src/shared/Responsive.luau.
+local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 
 --==========================  HJELPERE  ===========================--
 -- {r,g,b} 0-255  ->  Color3. Tåler tull (mangler/feil form) og faller pent
@@ -122,6 +127,28 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 12             -- over tema-butikken (10)
 gui.Parent = playerGui
 
+--====================  ROT-RAMME MED UISCALE  ====================--
+-- En UIScale gjør INGENTING når den henger rett på en ScreenGui, så vi trenger en
+-- gjennomsiktig rot-ramme som eier skaleringen. Alt HUD-innhold henger under den
+-- i stedet for rett på gui-en, slik at hele HUD-et krymper i takt på små skjermer.
+--
+-- Active = false er viktig i et hinderløype-spill: spilleren holder finger på
+-- skjermen nesten hele tiden, og en gjennomsiktig ramme som "spiser" trykk ville
+-- gjort det umulig å bevege seg. En Frame sluker bare input når Active er true.
+local root = Instance.new("Frame")
+root.Name = "Root"
+root.BackgroundTransparency = 1
+root.BorderSizePixel = 0
+root.Active = false
+root.Size = UDim2.fromScale(1, 1)
+root.Parent = gui
+
+local uiScale = Instance.new("UIScale")
+uiScale.Parent = root
+
+-- Gjeldende skjerm-oppsett. Settes ordentlig av applyLayout() nederst i fila.
+local layout = Responsive.layout(0, 0, UserInputService.TouchEnabled)
+
 --==================  JOBB 1: FAST HUD (topp-midten)  =============--
 -- Gjennomsiktig "Level"-felt: bare flytende tekst med svart kant (lesbar over
 -- selve spillet). Rekorden vises nå øverst-til-HØYRE (eget panel), ikke her.
@@ -132,7 +159,8 @@ hudPanel.Position = UDim2.new(0.5, 0, 0, 6)
 hudPanel.Size = UDim2.new(0.82, 0, 0, 78)
 hudPanel.BackgroundTransparency = 1        -- gjennomsiktig felt (ingen boks)
 hudPanel.BorderSizePixel = 0
-hudPanel.Parent = gui
+hudPanel.Active = false                    -- må aldri sluke trykk over spillefeltet
+hudPanel.Parent = root
 local hudSize = Instance.new("UISizeConstraint")
 hudSize.MaxSize = Vector2.new(320, 78)
 hudSize.MinSize = Vector2.new(240, 78)
@@ -233,23 +261,27 @@ card.BackgroundColor3 = Color3.fromRGB(30, 33, 46)
 card.BorderSizePixel = 0
 card.Visible = false
 card.ZIndex = 5
-card.Parent = gui
+card.Active = false                        -- kortet er ren visning; ikke sluk trykk
+card.Parent = root
 corner(card, 16)
 stroke(card, Color3.fromRGB(80, 88, 115), 1.5, 0)
 depthGradient(card, Color3.fromRGB(44, 48, 66), Color3.fromRGB(24, 26, 38))
 
--- Skaler HELE kortet ned på små/smale skjermer (telefon) så det aldri stikker
--- utenfor kanten. Kortet er offset-basert (fast bredde + dynamisk høyde), så én
--- UIScale på kortet er reneste løsning: alt innholdet krymper likt, og midt-
--- stillingen (AnchorPoint 0.5,0.5) holder. På desktop blir skalaen 1 → utseendet
--- er uendret. (Vi legger IKKE UIScale på hele ScreenGui-en, for da ville HUD-
--- panelet — som allerede er skala-basert — blitt dobbelt-skalert.)
+-- Ekstra nedskalering av SELVE kortet, oppå rot-skaleringen. Rot-rammen tar seg av
+-- den generelle telefon-krympingen, men kortet vokser i høyden ut fra hvor mange
+-- linjer som vises, og et høyt kort kan fortsatt bli for stort for et lavt vindu.
+-- Denne UIScale-en fanger nettopp det tilfellet, og lar midtstillingen
+-- (AnchorPoint 0.5,0.5) stå i fred.
 local cardScale = Instance.new("UIScale")
 cardScale.Parent = card
 
 local SCREEN_MARGIN = 24
 local function fitCard()
-	local vp = gui.AbsoluteSize -- = skjermstørrelsen for en ScreenGui
+	-- Alt under rot-rammen måles i DESIGN-piksler, ikke skjerm-piksler: rot-rammen er
+	-- 1/scale så stor som skjermen, og UIScale krymper den ned igjen. Derfor deler vi
+	-- skjermstørrelsen på skalaen før vi sammenligner med kortets egne mål. Gjør man
+	-- ikke det, skrumper kortet én gang for mye på telefon.
+	local vp = gui.AbsoluteSize / layout.scale
 	if vp.X <= 0 or vp.Y <= 0 then
 		return
 	end
@@ -261,9 +293,6 @@ local function fitCard()
 	local sh = (vp.Y - SCREEN_MARGIN) / h
 	cardScale.Scale = math.clamp(math.min(sw, sh), 0.5, 1)
 end
-
-gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitCard)
-fitCard()
 
 -- Stor medalje-"badge": en farget sirkel med en stjerne i.
 local badge = Instance.new("Frame")
@@ -496,7 +525,8 @@ rewardCard.BackgroundColor3 = Color3.fromRGB(30, 26, 16)
 rewardCard.BorderSizePixel = 0
 rewardCard.Visible = false
 rewardCard.ZIndex = 30
-rewardCard.Parent = gui
+rewardCard.Active = false                  -- ren visning; skal ikke sluke trykk
+rewardCard.Parent = root
 corner(rewardCard, 18)
 stroke(rewardCard, Color3.fromRGB(255, 210, 90), 3, 0)
 depthGradient(rewardCard, Color3.fromRGB(58, 48, 22), Color3.fromRGB(24, 20, 12))
@@ -556,6 +586,44 @@ local function showReward(p)
 		end
 	end)
 end
+
+--====================  SKJERM-TILPASNING  =======================--
+-- Én funksjon som kjøres ved oppstart og hver gang vinduet endrer størrelse
+-- (rotering av telefon, endring av vindu, delt skjerm).
+local function applyLayout()
+	local cam = workspace.CurrentCamera
+	local v = cam and cam.ViewportSize or Vector2.new(0, 0)
+	layout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	uiScale.Scale = layout.scale
+
+	-- Rot-rammen må vokse med 1/skala, slik at rot × skala lander nøyaktig på
+	-- skjermkanten. Uten dette krymper hele HUD-et inn i øvre venstre hjørne på
+	-- telefon — mens det ser helt riktig ut på desktop, der skalaen er 1 og feilen
+	-- dermed er usynlig.
+	root.Size = UDim2.fromScale(1 / layout.scale, 1 / layout.scale)
+
+	-- Toppfeltet er allerede skala-basert med et tak (UISizeConstraint), så det
+	-- trenger ingen egen justering. Kortene måles derimot i faste piksler.
+	fitCard()
+end
+
+-- workspace.CurrentCamera er nil et bilde eller to ved oppstart, og Roblox bytter
+-- den ut ved enkelte respawn. Derfor kobler vi lytteren på nytt hver gang kameraet
+-- byttes, i stedet for å ta vare på det aller første.
+local viewportConn
+local function watchViewport()
+	if viewportConn then
+		viewportConn:Disconnect()
+		viewportConn = nil
+	end
+	local cam = workspace.CurrentCamera
+	if cam then
+		viewportConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+	end
+	applyLayout()
+end
+watchViewport()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
 
 --==================  KOBLE TIL SERVERENS REMOTES  ===============--
 -- Serveren lager mappa "HudRemotes" med "LevelInfo" og "LevelComplete". Vi

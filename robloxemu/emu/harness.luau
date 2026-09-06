@@ -377,7 +377,7 @@ function Harness.guiRects(self, root, viewportW: number, viewportH: number): { a
 		return s
 	end
 
-	local function resolve(obj, parentW: number, parentH: number, parentX: number, parentY: number, parentShown: boolean)
+	local function resolve(obj, parentW: number, parentH: number, parentX: number, parentY: number, parentShown: boolean, depth: number)
 		local size = obj.Size
 		local pos = obj.Position
 		if size == nil or pos == nil then
@@ -409,6 +409,10 @@ function Harness.guiRects(self, root, viewportW: number, viewportH: number): { a
 			class = obj.ClassName,
 			visible = obj.Visible ~= false,
 			shown = shown,
+			-- 1 = a direct child of the ScreenGui (usually the scaling root), 2 = the panels
+			-- themselves. Callers that measure "how much screen do the panels cover" must count
+			-- one depth only, or a panel's own rows get added on top of the panel again.
+			depth = depth,
 			x = x,
 			y = y,
 			w = w,
@@ -422,14 +426,14 @@ function Harness.guiRects(self, root, viewportW: number, viewportH: number): { a
 
 		for _, child in obj:GetChildren() do
 			if child.Size ~= nil and child.Position ~= nil then
-				resolve(child, w, h, x, y, shown)
+				resolve(child, w, h, x, y, shown, depth + 1)
 			end
 		end
 	end
 
 	for _, child in root:GetChildren() do
 		if child.Size ~= nil and child.Position ~= nil then
-			resolve(child, viewportW, viewportH, 0, 0, true)
+			resolve(child, viewportW, viewportH, 0, 0, true, 1)
 		end
 	end
 

@@ -18,14 +18,20 @@
 
 	Mobil-vennlig: kartet ligger ØVERST TIL HØYRE, UNDER tema-butikk-knappen (så
 	det ikke dekker den), og aldri i de nederste hjørnene der mobil-kontrollene er
-	(styrepinne nede-venstre, hopp nede-høyre). Størrelsen skaleres ned på telefon.
+	(styrepinne nede-venstre, hopp nede-høyre). Størrelsen regnes ut fra vinduet via
+	den delte Responsive-modulen, ikke som en fast firkant, slik at kartet aldri kan
+	sluke en telefonskjerm.
 ==================================================================]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
+
+-- Delt skjermstørrelse-modul (ren data — se src/shared/Responsive.luau).
+local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 
 --============================  INNSTILLINGER  ====================--
 -- Tak på antall veggprikker (sikkerhets-vakt mot å sprute ut tusenvis av Frames).
@@ -70,17 +76,45 @@ gui.DisplayOrder = 6 -- under tema-butikken (10), så butikk-panelet legger seg 
 gui.Enabled = true
 gui.Parent = playerGui
 
+--====================  ROT-RAMME MED UISCALE  ====================--
+-- En UIScale gjør INGENTING når den henger rett på en ScreenGui, så vi trenger en
+-- gjennomsiktig rot-ramme som eier skaleringen, og alt kart-innhold henger under
+-- den. Active = false: i et hinderløype-spill holder spilleren finger på skjermen
+-- nesten hele tiden, og en gjennomsiktig ramme som sluker trykk ville gjort det
+-- umulig å bevege seg. En Frame sluker bare input når Active er true.
+local root = Instance.new("Frame")
+root.Name = "Root"
+root.BackgroundTransparency = 1
+root.BorderSizePixel = 0
+root.Active = false
+root.Size = UDim2.fromScale(1, 1)
+root.Parent = gui
+
+local uiScale = Instance.new("UIScale")
+uiScale.Parent = root
+
+-- Kartet starter rett under tema-butikk-knappen (som ligger på y ~12..60).
+local TOP_Y = 66
+-- På telefon legger LeaderboardClient sin lille rekord-knapp (48 px + 6 px luft)
+-- øverst i den SAMME høyre kolonnen, så kartet flyttes ned under den. Endres tallet
+-- der, må det endres her også — kolonnen deles av de to.
+local COMPACT_TOP_OFFSET = 54
+
+-- Gjeldende skjerm-oppsett. Settes ordentlig av applyLayout() lenger nede.
+local layout = Responsive.layout(0, 0, UserInputService.TouchEnabled)
+
 -- Selve kart-ruta: en liten firkant øverst til høyre, UNDER butikk-knappen.
 local mapFrame = Instance.new("Frame")
 mapFrame.Name = "Kart"
 mapFrame.AnchorPoint = Vector2.new(1, 0)
-mapFrame.Position = UDim2.new(1, -12, 0, 66) -- under tema-butikk-knappen (som er ~12..60)
-mapFrame.Size = UDim2.fromOffset(150, 150) -- settes av applyMapSize under
+mapFrame.Position = UDim2.new(1, -12, 0, TOP_Y)
+mapFrame.Size = UDim2.fromOffset(150, 150) -- settes av applyLayout under
 mapFrame.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
 mapFrame.BackgroundTransparency = 0.25 -- halv-gjennomsiktig
 mapFrame.BorderSizePixel = 0
+mapFrame.Active = false -- kartet er ren visning; må aldri sluke trykk
 mapFrame.Visible = false -- skjult til du eier perket OG labyrinten finnes
-mapFrame.Parent = gui
+mapFrame.Parent = root
 
 local mapCorner = Instance.new("UICorner")
 mapCorner.CornerRadius = UDim.new(0, 8)
@@ -122,26 +156,63 @@ canvas.ClipsDescendants = true
 canvas.Parent = mapFrame
 
 --=====================  STØRRELSE (mobil-skalering)  =============--
--- Firkant basert på den minste skjermkanten: ~22% av den, men aldri under 96px
--- (fortsatt lesbart på telefon) eller over 150px (ikke enormt på desktop).
-local function applyMapSize()
+-- Kartet er den delen av HUD-et som lettest kan sluke en telefonskjerm, så
+-- størrelsen regnes ut fra vinduet — ikke som en fast firkant — og sendes gjennom
+-- begge takene i Responsive før den brukes.
+local function applyLayout()
 	local cam = workspace.CurrentCamera
-	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
-	local base = math.min(vp.X, vp.Y)
-	if base <= 0 then base = 720 end
-	local s = math.clamp(math.floor(base * 0.22), 96, 150)
-	mapFrame.Size = UDim2.fromOffset(s, s)
+	local v = cam and cam.ViewportSize or Vector2.new(0, 0)
+	layout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	uiScale.Scale = layout.scale
+
+	-- Rot-rammen må vokse med 1/skala så rot × skala lander nøyaktig på skjermkanten.
+	-- Uten dette krymper hele kartet inn i øvre venstre hjørne på telefon, mens det
+	-- ser helt riktig ut på desktop der skalaen er 1 og feilen er usynlig.
+	root.Size = UDim2.fromScale(1 / layout.scale, 1 / layout.scale)
+
+	-- Ønsket størrelse i DESIGN-piksler: ~22 % av den korteste kanten på design-flata
+	-- (skjermen delt på skalaen). Aldri under 96 (fortsatt lesbart) eller over 150
+	-- (ikke enormt på desktop) — samme tall som før, bare målt i riktig rom.
+	local designMin = math.min(v.X, v.Y) / layout.scale
+	if designMin <= 0 then
+		designMin = Responsive.REF_Y -- vinduet er ikke kjent ennå; neste kall retter det
+	end
+	local want = math.clamp(math.floor(designMin * 0.22), 96, 150)
+
+	-- Toppen av kolonnen. På telefon står rekord-knappen over oss, så vi flytter ned.
+	local top = if layout.compact then TOP_Y + COMPACT_TOP_OFFSET else TOP_Y
+
+	-- Så gjennom takene: bredden kan aldri ta mer enn en fjerdedel av skjermen, og
+	-- høyden må få plass mellom butikk-knappen og mobil-kontrollene nederst. Kartet
+	-- er kvadratisk, så vi bruker det minste av de to.
+	local wCap = Responsive.sideWidth(want, v.X, layout)
+	-- usableHeight svarer i SKJERM-piksler, mens top er design-piksler — derfor
+	-- ganges top opp med skalaen før vi trekker den fra.
+	local usable = Responsive.usableHeight(v.Y, layout) - top * layout.scale
+	local hCap = Responsive.fitHeight(want, usable, layout)
+
+	local side = math.max(56, math.min(wCap, hCap))
+	mapFrame.Position = UDim2.new(1, -12, 0, top)
+	mapFrame.Size = UDim2.fromOffset(side, side)
 end
 
-local function watchCamera()
+-- workspace.CurrentCamera er nil et bilde eller to ved oppstart, og Roblox bytter
+-- den ut ved enkelte respawn. Vi kobler lytteren på nytt når kameraet byttes — og
+-- kobler den gamle FRA først, så vi ikke samler opp forbindelser over tid.
+local viewportConn
+local function watchViewport()
+	if viewportConn then
+		viewportConn:Disconnect()
+		viewportConn = nil
+	end
 	local cam = workspace.CurrentCamera
 	if cam then
-		cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyMapSize)
+		viewportConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
 	end
-	applyMapSize()
+	applyLayout()
 end
-watchCamera()
-workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
+watchViewport()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
 
 --============================  KARTLEGGING  ======================--
 -- Verden (x,z) -> 0..1 kart-koordinat. nil hvis kartet ikke er klart. Deler på

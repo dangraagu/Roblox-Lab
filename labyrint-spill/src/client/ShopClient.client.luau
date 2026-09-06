@@ -17,15 +17,25 @@
 	           andre ser den), så alle kan ha hvert sitt utseende samtidig.
 
 	Ingen bilder/assets brukes — alt tegnes av Frames og TextButtons.
+
+	Phone layout: the shop is a long list, so on a phone it opens as a near-full-screen
+	modal under the toggle row instead of a side drawer that would fight the touch
+	controls. Everything is sized from Responsive, and the list scrolls.
 ==================================================================]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
 
 -- Delt tema-liste (ren data, samme som serveren bruker).
 local Themes = require(ReplicatedStorage:WaitForChild("Themes"))
+
+-- Shared sizing rules so this HUD survives a phone. Note the require form: a bare string
+-- require like `require("./Responsive")` resolves in the luau CLI but is invalid in Roblox.
+local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 
 --============================  STATE  ============================--
 -- Fasit kommer fra serveren via ShopData-eventet. Vi starter forsiktig:
@@ -182,6 +192,36 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 10
 gui.Parent = playerGui
 
+-- A UIScale does nothing parented to a ScreenGui, so every element below hangs off this
+-- root Frame instead, and the root is what the scale acts on.
+local root = Instance.new("Frame")
+root.Name = "Root"
+root.BackgroundTransparency = 1
+root.BorderSizePixel = 0
+root.Size = UDim2.fromScale(1, 1)
+root.Parent = gui
+local uiScale = Instance.new("UIScale")
+uiScale.Parent = root
+
+-- The size this shop was drawn at, and how much room along the top edge the toggle owns.
+local PANEL_W, PANEL_H = 380, 620
+local TOP_BAR = 66
+
+local layout = Responsive.layout(camera.ViewportSize.X, camera.ViewportSize.Y, UserInputService.TouchEnabled)
+
+-- A control drawn 44 px tall comes out at 44 * scale on screen, which is 26 px on a phone —
+-- too small for a thumb, and this file is full of deliberate 44 px touch targets. Where the
+-- player is on touch (controlPad is only non-zero then) we grow them by 1/scale so they land
+-- at the size they were drawn for. Text size caps get the same treatment, otherwise the
+-- label shrinks inside a button that grew. Widths are left alone: they are generous already,
+-- and stretching them would squeeze the theme name out of the row.
+local function touchSize(designPx)
+	if layout.controlPad <= 0 then
+		return designPx
+	end
+	return math.ceil(designPx / layout.scale)
+end
+
 local function corner(inst, r)
 	local uc = Instance.new("UICorner")
 	uc.CornerRadius = UDim.new(0, r or 6)
@@ -203,7 +243,7 @@ toggle.Font = Enum.Font.GothamBold
 toggle.TextScaled = true
 toggle.Text = "🎨 Shop"
 toggle.AutoButtonColor = true
-toggle.Parent = gui
+toggle.Parent = root
 corner(toggle, 8)
 -- Tekst-tilpasning: fyll knappen pent, men ikke bli enorm på desktop.
 local toggleTsc = Instance.new("UITextSizeConstraint")
@@ -217,26 +257,22 @@ togglePad.PaddingTop = UDim.new(0, 6)
 togglePad.PaddingBottom = UDim.new(0, 6)
 togglePad.Parent = toggle
 
--- Selve panelet (skjult til man trykker).
+-- Selve panelet (skjult til man trykker). Størrelse og plassering settes av
+-- applyLayout nederst i fila — på desktop en skuff i høyre kant, på telefon en
+-- nesten fullskjerms modal. Verdiene her er bare noe å tegne før første kall.
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
--- Skala-basert størrelse (andel av skjermen) med tak nedenfor. På en liten
--- telefon blir panelet ≤80% av skjermhøyden, så de 17 radene MÅ rulles; på
--- desktop kapper UISizeConstraint det så det ikke blir enormt.
-panel.Size = UDim2.new(0.94, 0, 0.8, 0)
+panel.Size = UDim2.fromOffset(PANEL_W, PANEL_H)
 panel.AnchorPoint = Vector2.new(1, 0)
-panel.Position = UDim2.new(1, -12, 0, 66)
+panel.Position = UDim2.new(1, -Responsive.MARGIN, 0, TOP_BAR)
 panel.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
 panel.BorderSizePixel = 0
 panel.Visible = false
-panel.Parent = gui
+-- A plain Frame does not consume input, so a tap on the panel background would fall through
+-- to whatever sits behind it — on a phone that is the toggle button the modal covers.
+panel.Active = true
+panel.Parent = root
 corner(panel, 10)
--- Tak/gulv på panel-størrelsen: aldri større enn dette på desktop, aldri så
--- lite at innholdet klemmes på en bitteliten skjerm.
-local panelSize = Instance.new("UISizeConstraint")
-panelSize.MaxSize = Vector2.new(380, 620)
-panelSize.MinSize = Vector2.new(300, 300)
-panelSize.Parent = panel
 
 local panelStroke = Instance.new("UIStroke")
 panelStroke.Color = Color3.fromRGB(70, 78, 100)
@@ -311,18 +347,24 @@ scroll.BorderSizePixel = 0
 scroll.ScrollBarThickness = 10  -- litt bredere så det er lett å ta tak i med finger
 scroll.ScrollBarImageColor3 = Color3.fromRGB(120, 128, 150)
 scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 scroll.Parent = panel
 
-local layout = Instance.new("UIListLayout")
-layout.Padding = UDim.new(0, 6)
-layout.SortOrder = Enum.SortOrder.LayoutOrder
-layout.Parent = scroll
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0, 6)
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Parent = scroll
 
 local pad = Instance.new("UIPadding")
 pad.PaddingTop = UDim.new(0, 2)
 pad.PaddingBottom = UDim.new(0, 6)
 pad.Parent = scroll
+
+-- The canvas follows the rows. Rows get taller in compact mode, so this has to be measured
+-- rather than assumed; the +8 covers the padding above and below the list.
+local function syncCanvas()
+	scroll.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 8)
+end
+listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncCanvas)
 
 --==========================  UI-OPPFRISK  ========================--
 function refreshHeader()
@@ -404,7 +446,7 @@ local function makeButton(parent, text, size, position, color)
 	b.Parent = parent
 	corner(b, 6)
 	local tsc = Instance.new("UITextSizeConstraint")
-	tsc.MaxTextSize = 16
+	tsc.MaxTextSize = touchSize(16)
 	tsc.MinTextSize = 9
 	tsc.Parent = b
 	local bp = Instance.new("UIPadding")
@@ -449,9 +491,10 @@ function refreshRows()
 			end
 		end
 
-		local BTN_H, BTN_GAP, ROW_PAD = 44, 8, 10
+		local BTN_H, BTN_GAP, ROW_PAD = touchSize(44), 8, 10
+		local BTN_W = 168
 		local nBuys = #buys
-		local rowH = 64
+		local rowH = math.max(touchSize(64), BTN_H + ROW_PAD * 2)
 		if nBuys > 1 then
 			-- To knapper stables loddrett -> raden må være høyere. Panelet ruller,
 			-- så det er greit at raden blir høy.
@@ -497,7 +540,7 @@ function refreshRows()
 		-- Navn på temaet (sentrert loddrett; teksten krymper for å få plass).
 		local name = Instance.new("TextLabel")
 		name.AnchorPoint = Vector2.new(0, 0.5)
-		name.Size = UDim2.new(1, -214, 0, 26)
+		name.Size = UDim2.new(1, -(BTN_W + 46), 0, touchSize(26))
 		name.Position = UDim2.new(0, 34, 0.5, 0)
 		name.BackgroundTransparency = 1
 		name.TextXAlignment = Enum.TextXAlignment.Left
@@ -508,7 +551,7 @@ function refreshRows()
 		name.Text = t.name
 		name.Parent = row
 		local nameTsc = Instance.new("UITextSizeConstraint")
-		nameTsc.MaxTextSize = 16
+		nameTsc.MaxTextSize = touchSize(16)
 		nameTsc.MinTextSize = 10
 		nameTsc.Parent = name
 
@@ -516,7 +559,7 @@ function refreshRows()
 		if selected then
 			-- Eid + valgt: bare et fremhevet "Valgt"-merke.
 			local valgt = Instance.new("TextLabel")
-			valgt.Size = UDim2.fromOffset(168, 40)
+			valgt.Size = UDim2.fromOffset(BTN_W, touchSize(40))
 			valgt.AnchorPoint = Vector2.new(1, 0.5)
 			valgt.Position = UDim2.new(1, -8, 0.5, 0)
 			valgt.BackgroundColor3 = Color3.fromRGB(60, 200, 90)
@@ -527,7 +570,7 @@ function refreshRows()
 			valgt.Parent = row
 			corner(valgt, 6)
 			local valgtTsc = Instance.new("UITextSizeConstraint")
-			valgtTsc.MaxTextSize = 16
+			valgtTsc.MaxTextSize = touchSize(16)
 			valgtTsc.MinTextSize = 10
 			valgtTsc.Parent = valgt
 		elseif owned then
@@ -535,8 +578,8 @@ function refreshRows()
 			local velg = makeButton(
 				row,
 				"Select",
-				UDim2.fromOffset(168, BTN_H),
-				UDim2.new(1, -176, 0.5, -BTN_H / 2),
+				UDim2.fromOffset(BTN_W, BTN_H),
+				UDim2.new(1, -(BTN_W + 8), 0.5, -BTN_H / 2),
 				Color3.fromRGB(60, 140, 210)
 			)
 			velg.Activated:Connect(function()
@@ -552,8 +595,8 @@ function refreshRows()
 				local b = makeButton(
 					row,
 					opt.text,
-					UDim2.fromOffset(168, BTN_H),
-					UDim2.new(1, -176, 0, y),
+					UDim2.fromOffset(BTN_W, BTN_H),
+					UDim2.new(1, -(BTN_W + 8), 0, y),
 					opt.color
 				)
 				b.Activated:Connect(function()
@@ -564,20 +607,116 @@ function refreshRows()
 	end
 end
 
---============================  ÅPNE/LUKKE  =======================--
-toggle.Activated:Connect(function()
-	panel.Visible = not panel.Visible
+--==========================  RESPONSIVT OPPSETT  =================--
+-- Re-lays the whole shop for the current viewport. On a desktop or tablet the panel is a
+-- drawer down the right edge, below its toggle; on a phone it is a near-full-screen modal
+-- that takes the top edge as well and stops above Roblox's touch controls, so the movement
+-- stick and the jump button stay reachable even while the shop is open.
+
+-- The phone modal covers the toggle, so hide it while the shop is open: an opaque panel on
+-- top of a live button is a tap waiting to land somewhere the player did not intend.
+local function syncToggle()
+	toggle.Visible = not (panel.Visible and layout.compact)
+end
+
+local function applyLayout()
+	local v = camera.ViewportSize
+	layout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	uiScale.Scale = layout.scale
+	-- Grow the root by 1/scale so root * scale lands exactly on the viewport. Skip this and
+	-- the HUD shrinks into the top-left corner on a phone while looking fine on desktop.
+	root.Size = UDim2.fromScale(1 / layout.scale, 1 / layout.scale)
+
+	local usable = Responsive.usableHeight(v.Y, layout)
+	-- Where the panel starts: below the toggle row when it is a drawer, but hard against the
+	-- top edge on a phone, where the modal is allowed to cover the toggles (the ✕ is the way
+	-- out) and every reclaimed pixel is another visible row.
+	local topY = if layout.compact then Responsive.MARGIN else TOP_BAR
+	-- Screen px left between that line and the touch-control band at the bottom; that is all
+	-- the panel is ever allowed to fill, in either mode.
+	local budget = math.max(80, usable + Responsive.MARGIN - topY * layout.scale)
+	local roomH = math.floor(budget / layout.scale)
+
+	-- Header: close button, title, balance and the status line, each grown for touch.
+	local closeW = touchSize(44)
+	local titleH, balanceH, statusH = touchSize(28), touchSize(22), touchSize(18)
+	closeBtn.Size = UDim2.fromOffset(closeW, closeW)
+	closeBtn.TextSize = touchSize(24)
+	title.Size = UDim2.new(1, -(closeW + 30), 0, titleH)
+	title.Position = UDim2.fromOffset(14, 10)
+	titleTsc.MaxTextSize = touchSize(20)
+	balance.Size = UDim2.new(1, -28, 0, balanceH)
+	balance.Position = UDim2.fromOffset(14, 12 + titleH)
+	balanceTsc.MaxTextSize = touchSize(16)
+	status.Size = UDim2.new(1, -28, 0, statusH)
+	status.Position = UDim2.fromOffset(14, 14 + titleH + balanceH)
+	statusTsc.MaxTextSize = touchSize(15)
+
+	local headerH = 18 + titleH + balanceH + statusH
+	scroll.Position = UDim2.fromOffset(8, headerH)
+	scroll.Size = UDim2.new(1, -16, 1, -(headerH + 6))
+
+	if layout.compact then
+		-- Phone: 17 rows never fit in a drawer, and a drawer wide enough to read them would
+		-- cover the controls anyway. Full width, centred, and the ✕ is the way out.
+		local panelH = Responsive.fitHeight(math.max(headerH + 120, roomH), usable, layout)
+		panel.AnchorPoint = Vector2.new(0.5, 0)
+		panel.Position = UDim2.new(0.5, 0, 0, topY)
+		panel.Size = UDim2.new(0.94, 0, 0, panelH)
+	else
+		local panelW = Responsive.sideWidth(PANEL_W, v.X, layout)
+		local panelH = Responsive.fitHeight(math.min(PANEL_H, roomH), usable, layout)
+		panel.AnchorPoint = Vector2.new(1, 0)
+		panel.Position = UDim2.new(1, -Responsive.MARGIN, 0, topY)
+		panel.Size = UDim2.fromOffset(panelW, panelH)
+	end
+
+	syncToggle()
+
+	-- Row heights and label sizes depend on compact, so an open list has to be redrawn.
 	if panel.Visible then
-		refreshHeader()
 		refreshRows()
 	end
+end
+
+--============================  ÅPNE/LUKKE  =======================--
+-- The upgrades shop is the same kind of full-screen modal on a phone, and two of them at
+-- once would simply stack. A shared attribute on PlayerGui lets whichever opened last ask
+-- the other one to close; on bigger screens they sit on opposite edges and both may stay open.
+local MODAL_ATTR = "MobileModalOpen"
+local MODAL_ID = "shop"
+
+local function setPanelOpen(open)
+	panel.Visible = open
+	syncToggle()
+	if open then
+		if layout.compact then
+			playerGui:SetAttribute(MODAL_ATTR, MODAL_ID)
+		end
+		refreshHeader()
+		refreshRows()
+	elseif playerGui:GetAttribute(MODAL_ATTR) == MODAL_ID then
+		playerGui:SetAttribute(MODAL_ATTR, nil)
+	end
+end
+
+toggle.Activated:Connect(function()
+	setPanelOpen(not panel.Visible)
 end)
 
 closeBtn.Activated:Connect(function()
-	panel.Visible = false
+	setPanelOpen(false)
+end)
+
+playerGui:GetAttributeChangedSignal(MODAL_ATTR):Connect(function()
+	if panel.Visible and playerGui:GetAttribute(MODAL_ATTR) ~= MODAL_ID then
+		setPanelOpen(false)
+	end
 end)
 
 -- Fyll lista med en gang, så den er klar før første ShopData rekker frem.
+applyLayout()
+camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
 refreshHeader()
 refreshRows()
 
