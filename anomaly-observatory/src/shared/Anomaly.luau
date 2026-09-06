@@ -5,7 +5,11 @@
 --
 -- Contract: exactly ONE anomaly per non-clean pass. Clean passes carry no anomalyId.
 
-local Rng = require("./Rng")
+-- NOTE: this module deliberately does NOT `require` Rng. A bare string require like
+-- `require("./Rng")` resolves in the luau CLI but is INVALID in Roblox (require takes an
+-- Instance), which would make the whole server script fail to load. The rng is passed in and
+-- used through its metatable methods (`rng:next()`, `rng:below(n)`), so no import is needed.
+export type RngLike = { next: (any) -> number, below: (any, number) -> number }
 
 export type Pass = { clean: boolean, anomalyId: string? }
 
@@ -61,12 +65,12 @@ end
 -- pool is 8 — a power of two — so the modulo path collapsed the choice onto the seed's
 -- lowest 3 bits. Every real passSeed loses its low bits to float rounding (userId *
 -- 2654435761 overflows 2^53), so every player drew the SAME anomaly on every pass forever.
-function Anomaly.rollPass(self: Rng.Rng, cfg: any, day: number): Pass
-	if Rng.next(self) >= Anomaly.chance(cfg, day) then
+function Anomaly.rollPass(self: any, cfg: any, day: number): Pass
+	if self:next() >= Anomaly.chance(cfg, day) then
 		return { clean = true }
 	end
 	local pool = Anomaly.poolSize(cfg, day)
-	local idx = Rng.below(self, pool)
+	local idx = self:below(pool)
 	return { clean = false, anomalyId = cfg.Anomaly.Catalog[idx].id }
 end
 

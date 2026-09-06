@@ -366,7 +366,10 @@ local function buildClean(zone: Model, origin: Vector3)
 	newPart({ Name = "Window", Size = Vector3.new(8, 8, 0.3), CFrame = at(0, 9, -HALL_LEN - 5.4), Color = Color3.fromRGB(180, 200, 230), Transparency = 0.4, Material = Enum.Material.Glass, Parent = zone })
 	newPart({ Name = "Bench", Size = Vector3.new(6, 2, 2), CFrame = at(6, 1.5, -60), Color = Color3.fromRGB(90, 70, 55), Material = Enum.Material.Wood, Parent = zone })
 	newPart({ Name = "Mirror", Size = Vector3.new(0.3, 6, 4), CFrame = at(9.5, 6, -64), Color = Color3.fromRGB(200, 220, 240), Reflectance = 0.6, Material = Enum.Material.Glass, Parent = zone })
-	newPart({ Name = "ExitSign", Size = Vector3.new(4, 1.5, 0.3), CFrame = at(0, 13, -HALL_LEN - 5.9), Color = Color3.fromRGB(40, 200, 90), Material = Enum.Material.Neon, Parent = zone })
+	-- z must stay IN FRONT of the EndWall (centre z = -(HALL_LEN+6), 1 thick -> front face at
+	-- -(HALL_LEN+5.5)). At -5.9 the sign was buried inside the wall and invisible, which made
+	-- the `sign_swap` anomaly unspottable (a guaranteed unfair Day reset).
+	newPart({ Name = "ExitSign", Size = Vector3.new(4, 1.5, 0.3), CFrame = at(0, 13, -HALL_LEN - 5.0), Color = Color3.fromRGB(40, 200, 90), Material = Enum.Material.Neon, Parent = zone })
 	newPart({ Name = "DoorMain", Size = Vector3.new(5, 12, 0.5), CFrame = at(0, 6, -HALL_LEN - 5.6), Color = Color3.fromRGB(70, 55, 45), Material = Enum.Material.Wood, Parent = zone })
 	-- four chairs (count_off / chair_moved touch these)
 	for i = 1, 4 do
@@ -842,6 +845,22 @@ end
 
 Players.PlayerAdded:Connect(function(plr)
 	local prof = loadProfile(plr)
+
+	-- GHOST-SESSION GUARD. loadProfile YIELDS inside UpdateAsync. If the player left during
+	-- that yield, PlayerRemoving already ran against empty tables and cleaned up nothing —
+	-- so without this check we would install a profile for a player who is gone, and the
+	-- autosave loop would renew their session lock every 20s (TTL 45s) for the life of the
+	-- server. That locks the real player out of saving on EVERY other server, and leaks the
+	-- zone + its index. Release what we took and bail instead.
+	if plr.Parent ~= Players then
+		if prof.canSave then
+			profiles[plr] = prof
+			saveProfile(plr, true) -- release the lock we just claimed
+			profiles[plr] = nil
+		end
+		return
+	end
+
 	profiles[plr] = prof
 
 	-- leaderstats
@@ -894,12 +913,34 @@ game:BindToClose(function()
 	task.wait(1)
 end)
 
--- autosave loop (renews the soft lock)
+-- Autosave loop (renews the soft lock). Second half of the ghost-session guard: REAP any
+-- entry whose Player is no longer in the game instead of renewing its lock forever. Iterate a
+-- snapshot, because saveProfile yields and the table is mutated by PlayerRemoving meanwhile.
 task.spawn(function()
 	while true do
 		task.wait(Config.Save.AutosaveSeconds)
+		local snapshot = {}
 		for plr in profiles do
-			saveProfile(plr, false)
+			table.insert(snapshot, plr)
+		end
+		for _, plr in snapshot do
+			if not profiles[plr] then
+				continue -- left while we were saving someone else
+			end
+			if plr.Parent ~= Players then
+				-- ghost: flush + RELEASE the lock, then drop it so we stop renewing
+				saveProfile(plr, true)
+				local zone = zones[plr]
+				if zone then
+					releaseZoneIndex(tonumber(zone:GetAttribute("Index")) or 0)
+					zone:Destroy()
+				end
+				profiles[plr] = nil
+				zones[plr] = nil
+				passState[plr] = nil
+			else
+				saveProfile(plr, false)
+			end
 		end
 	end
 end)

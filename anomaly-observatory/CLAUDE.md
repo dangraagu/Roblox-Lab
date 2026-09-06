@@ -11,11 +11,23 @@ spottable mutation. Player walks to the end → **ADVANCE** (E) if normal / **TU
 if wrong. Correct → Day+1 (hall loops). Wrong → night resets to Day 1. **No chase AI.**
 Hint (H at start pad) spends a token to reveal clean/anomaly.
 
-## State — v1 pure logic + server/client built + tested; adversarial review done; NOT deployed
-- **73 luau-CLI tests pass** (Rng 10, Anomaly 20, Progression 22, Codex 11, Codes 10).
+## State — built + tested + adversarial-reviewed + DEPLOYED PUBLIC (2026-09-06)
+- **Live:** universe `10544008743`, place `123669267191209` —
+  https://www.roblox.com/games/123669267191209
+  Made by repurposing the unused Private placeholder "Labyrinth Mariozo 1" (0 visits, updated
+  22.7.2026 — verified empty before reuse), since Roblox web "Create Experience" only offers Studio.
+- Audience **Public**, genre **Survival / Escape** (genre locked until Oct 4 2026),
+  maturity **Mild — descriptor `Fear (Repeated/Mild)`**, **no region blocks**.
+  Published via git-ignored `publish_anomaly.bat` (Open Cloud), version 3.
+  The `labmario` Open Cloud key now covers all 4 universes (re-add ALL when editing it).
+- **119 luau-CLI tests pass** (Rng 32, Anomaly 29, Progression 22, Codex 26, Codes 10).
   luau-compile clean, luau-analyze clean (only Roblox type/global noise).
-- No Roblox experience yet. Deploy = create experience → git-ignored `publish_*.bat` with
-  Open Cloud key → questionnaire → Public (mirror the sibling games).
+- Adversarial review found **23 confirmed defects — all fixed** (2 critical: passSeed float
+  overflow that pinned every modern player to ONE day-1 anomaly, and the session-lock stamp
+  desync that silently dropped saves). A second review, of the fix code itself, was still
+  running at deploy time → fix forward if it reports anything.
+- **Visuals from the start:** Fx `Horror` preset + hall dust + camera shake/red flash on a wrong call.
+- Still NOT runtime-tested in Studio/Player (no engine here) — first real play may surface UX gaps.
 
 ## Core model / important invariants
 - **Fresh-rebuild each pass**: server does `zone:ClearAllChildren()` + `buildClean()` before

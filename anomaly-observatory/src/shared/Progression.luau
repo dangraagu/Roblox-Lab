@@ -6,7 +6,10 @@
 -- Correct       -> Day + 1 (capped at MaxDay).
 -- Wrong         -> the run ends; Day resets to StartDay.
 
-local Anomaly = require("./Anomaly")
+-- NOTE: no `require("./Anomaly")`. A bare string require resolves in the luau CLI but is
+-- INVALID in Roblox (require takes an Instance) and would break the whole server script.
+-- The Pass shape is tiny, so it is declared structurally here instead of imported.
+export type Pass = { clean: boolean, anomalyId: string? }
 
 export type State = { day: number }
 export type Resolution = { correct: boolean, day: number, reset: boolean }
@@ -22,7 +25,7 @@ function Progression.newRun(cfg: any): State
 end
 
 -- Is this the right call for this pass?
-function Progression.isCorrect(choice: string, pass: Anomaly.Pass): boolean
+function Progression.isCorrect(choice: string, pass: Pass): boolean
 	if choice == Progression.ADVANCE then
 		return pass.clean == true
 	elseif choice == Progression.TURN_BACK then
@@ -33,7 +36,7 @@ end
 
 -- Apply a choice to the state. Returns a NEW state plus what happened. Never mutates the
 -- passed-in state (server decides what to persist).
-function Progression.resolve(state: State, choice: string, pass: Anomaly.Pass, cfg: any): (State, Resolution)
+function Progression.resolve(state: State, choice: string, pass: Pass, cfg: any): (State, Resolution)
 	local correct = Progression.isCorrect(choice, pass)
 	if correct then
 		local day = math.min(state.day + 1, cfg.Progression.MaxDay)
@@ -51,7 +54,7 @@ end
 
 -- Was an anomaly successfully CAUGHT (correct + it was an anomaly)? If so its id should
 -- be added to the Field Guide. Returns the id or nil.
-function Progression.caughtAnomalyId(choice: string, pass: Anomaly.Pass): string?
+function Progression.caughtAnomalyId(choice: string, pass: Pass): string?
 	if pass.clean == false and choice == Progression.TURN_BACK and pass.anomalyId then
 		return pass.anomalyId
 	end
