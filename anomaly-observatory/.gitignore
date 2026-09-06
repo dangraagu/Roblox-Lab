@@ -1,0 +1,9 @@
+# Build artifacts
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+# Publish scripts hold the Open Cloud API key inline — NEVER commit
+publish_*.bat
+publish_*.sh
+*.secret
