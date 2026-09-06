@@ -69,7 +69,11 @@ end
 -- `touch` is optional. Pass UserInputService.TouchEnabled when you know it; when omitted we
 -- assume anything phone/tablet-sized is touch, which is the safe guess (reserving space the
 -- controls don't use costs a little room; not reserving it makes buttons untappable).
-function Responsive.layout(vx: number, vy: number, touch: boolean?): Layout
+-- `physicalY` is the TRUE viewport height, used only for `controlPad`. Callers that shorten `vy`
+-- by the topbar inset must pass it: the inset comes off the TOP, while Roblox draws its movement
+-- thumbstick and jump button at the bottom of the PHYSICAL screen, so shortening `vy` alone
+-- silently shrinks the reserved band without the band moving. Omit it and nothing changes.
+function Responsive.layout(vx: number, vy: number, touch: boolean?, physicalY: number?): Layout
 	-- ViewportSize is (0,0) for a frame or two at startup. Treat unknown as the worst case
 	-- rather than dividing by it.
 	local x = if type(vx) == "number" and vx > 0 then vx else 0
@@ -87,11 +91,16 @@ function Responsive.layout(vx: number, vy: number, touch: boolean?): Layout
 		isTouch = touch
 	end
 
+	local padHeight = y
+	if type(physicalY) == "number" and physicalY > 0 then
+		padHeight = physicalY
+	end
+
 	local controlPad = 0
-	if isTouch and y > 0 then
+	if isTouch and padHeight > 0 then
 		-- Proportional so it never eats an absurd share of a short screen, capped so it never
 		-- grows past what the controls actually occupy on a tall one.
-		controlPad = math.min(Responsive.MAX_CONTROL_PAD, math.floor(y * 0.35))
+		controlPad = math.min(Responsive.MAX_CONTROL_PAD, math.floor(padHeight * 0.35))
 	end
 
 	return {

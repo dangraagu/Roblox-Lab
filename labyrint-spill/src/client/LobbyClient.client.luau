@@ -11,13 +11,13 @@
 	shrinks to fit and sits above Roblox's touch controls instead of under them.
 ==================================================================]]
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-local camera = workspace.CurrentCamera
 
 -- Shared sizing rules so this HUD survives a phone. Note the require form: a bare string
 -- require like `require("./Responsive")` resolves in the luau CLI but is invalid in Roblox.
@@ -35,6 +35,27 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 14
 gui.Enabled = false
 gui.Parent = playerGui
+
+--==================  EFFEKTIV HØYDE (topplinja)  ================--
+-- IgnoreGuiInset står på false (standard), så Roblox korter ned det tegnbare området med
+-- topplinje-innslaget (~36 px) — mens budsjettene under regnes fra camera.ViewportSize.Y,
+-- altså HELE skjermen. Et panel som fyller den høyden stikker nøyaktig innslaget for langt
+-- ned, ned i båndet der mobil-kontrollene bor. Derfor mates den EFFEKTIVE høyden inn i
+-- Responsive.layout og i alt som regnes ut av den. GetGuiInset gir TO Vector2-er; den
+-- første er innslaget øverst til venstre. pcall fordi et oppsett som ikke gir oss innslaget
+-- skal ende med hele høyden — som før — og ikke velte tegningen.
+local function effectiveY(vy: number): number
+	if gui.IgnoreGuiInset then
+		return vy
+	end
+	local ok, inset = pcall(function()
+		return GuiService:GetGuiInset()
+	end)
+	if ok and inset ~= nil and type(inset.Y) == "number" and vy - inset.Y > 0 then
+		return vy - inset.Y
+	end
+	return vy
+end
 
 local function corner(inst, r)
 	local u = Instance.new("UICorner"); u.CornerRadius = UDim.new(0, r or 8); u.Parent = inst
@@ -54,7 +75,10 @@ uiScale.Parent = root
 -- The size the picker was drawn at.
 local PANEL_W, PANEL_H = 360, 380
 
-local layout = Responsive.layout(camera.ViewportSize.X, camera.ViewportSize.Y, UserInputService.TouchEnabled)
+-- Gjeldende skjerm-oppsett. Settes ordentlig av applyLayout() lenger nede; kameraet leses
+-- ikke her, fordi workspace.CurrentCamera er nil et bilde eller to ved oppstart og byttes
+-- ut ved enkelte respawn (se watchViewport nederst).
+local layout = Responsive.layout(0, 0, UserInputService.TouchEnabled)
 
 -- A control drawn 44 px tall comes out at 44 * scale on screen, which is 26 px on a phone —
 -- too small for a thumb. Both helpers below only do anything where the player is on touch
@@ -201,8 +225,11 @@ end)
 -- than the room left above Roblox's touch controls, and every level button kept at a size
 -- a thumb can actually hit.
 local function applyLayout()
-	local v = camera.ViewportSize
-	layout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	local cam = workspace.CurrentCamera
+	local v = cam and cam.ViewportSize or Vector2.new(0, 0)
+	-- Den tegnbare høyden, ikke hele vinduet: se effectiveY over.
+	local effY = effectiveY(v.Y)
+	layout = Responsive.layout(v.X, effY, UserInputService.TouchEnabled, v.Y)
 	uiScale.Scale = layout.scale
 	-- Grow the root by 1/scale so root * scale lands exactly on the viewport. Skip this and
 	-- the picker shrinks into the top-left corner on a phone while looking fine on desktop.
@@ -211,7 +238,7 @@ local function applyLayout()
 	local viewX = if v.X > 0 then v.X else Responsive.REF_X
 	local rootW = viewX / layout.scale
 	local panelW = math.max(200, math.min(PANEL_W, math.floor(rootW) - 2 * Responsive.MARGIN))
-	local panelH = Responsive.fitHeight(PANEL_H, Responsive.usableHeight(v.Y, layout), layout)
+	local panelH = Responsive.fitHeight(PANEL_H, Responsive.usableHeight(effY, layout), layout)
 	panel.Size = UDim2.fromOffset(panelW, panelH)
 	-- Centre it in the room that is actually free: lifting it by half the touch-control band
 	-- keeps the bottom row of level buttons clear of the movement stick and the jump button.
@@ -244,8 +271,24 @@ local function applyLayout()
 	grid.CellSize = UDim2.fromOffset(tap(56), tap(44))
 end
 
-applyLayout()
-camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+-- workspace.CurrentCamera er nil et bilde eller to ved oppstart, og Roblox bytter den ut ved
+-- enkelte respawn. Vi kobler lytteren på nytt når kameraet byttes — og kobler den gamle FRA
+-- først, så vi ikke samler opp forbindelser over tid. Dette er den samme rebindingen som
+-- HUD-, kart-, rekord-, guide- og kringkastings-skriptene bruker; før hadde denne halvdelen
+-- av spillet et kamera fanget ved lasting, og de to halvdelene sto for hver sin oppfatning
+-- av nøyaktig det samme plattform-faktumet.
+local viewportConn
+local function watchViewport()
+	if viewportConn then
+		viewportConn:Disconnect()
+		viewportConn = nil
+	end
+	local cam = workspace.CurrentCamera
+	if cam then
+		viewportConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+	end
+	applyLayout()
+end
 
 --==================  KOBLE TIL SERVEREN  ========================--
 task.spawn(function()
@@ -266,3 +309,24 @@ task.spawn(function()
 		end)
 	end
 end)
+
+--==============  FØRSTE OPPSETT + LYTTERE (ALLER SIST)  =========--
+-- Rekkefølgen er med vilje: remotene kobles opp FØRST, så første oppsett, og lytteren på
+-- inndata-enheten aller sist. Et LocalScript som reiser stopper på stedet, så det samme
+-- kallet plassert over OnClientEvent-handlerne ville — den dagen det reiste — etterlatt
+-- spilleren med et frosset HUD og ingen måte å merke det på.
+watchViewport()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
+
+-- Hver trykk-mål-størrelse henger på layout.controlPad, som kommer fra
+-- UserInputService.TouchEnabled. Endrer berøringen seg UTEN at pikselstørrelsen gjør det
+-- (et nettbrett som kobler fra tastaturet, en telefon som får mus), fyrer ViewportSize
+-- aldri, og hver kontroll beholder størrelsen fra forrige inndata-enhet — nøyaktig slik
+-- rekord-knappen ble stående på 29x29. Layout er kosmetikk; tilstands-røret er det ikke,
+-- så selve Connect ligger i pcall.
+local touchOk, touchErr = pcall(function()
+	UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(applyLayout)
+end)
+if not touchOk then
+	warn("[Lobby] ingen TouchEnabled-lytter; oppsettet følger bare vinduet: " .. tostring(touchErr))
+end

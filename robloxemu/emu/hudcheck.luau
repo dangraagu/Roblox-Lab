@@ -13,7 +13,17 @@
 --         bundle = require("./build/grow-a-crystal"),
 --         server = "server/Main.server",
 --         clients = { "client/Hud.client" },
+--         warmup = function(harness, player) --[[ optional, see below ]] end,
 --     })
+--
+-- `warmup` is optional and exists because a HUD control that is BUILT BY A REMOTE HANDLER does
+-- not exist yet when the client script finishes loading. This harness never fires a remote on
+-- its own, so such a control is silently absent for the whole run and every rule below scores
+-- it as a pass — which is how the anomaly tint swatches, the headline example of the tap-target
+-- change, shipped at 16x16 with a green gate. A runner that has controls in that shape supplies
+-- a function; it is handed the harness and the joined player after the client scripts load and
+-- before the first viewport is measured, and is expected to push whatever state those controls
+-- are built from. Runners without such controls omit it and nothing changes for them.
 --
 -- One game per process: the harness installs globals into the calling thread and refuses a
 -- second install.
@@ -24,13 +34,30 @@ local HudCheck = {}
 
 -- Viewports worth caring about. The phone ones are why this file exists; the desktop ones are
 -- the regression guard, because the fix must not move anything on a monitor.
+-- The list is ORDERED, and two adjacent entries deliberately share a pixel size while flipping
+-- the touch flag. That pair is not decoration: a HUD that only re-lays-out on
+-- Camera.ViewportSize never re-runs when the size does not change, so it carries the previous
+-- entry's sizing into a viewport where the tap-target rules differ. Every viewport used to have a
+-- distinct size, which meant ViewportSize always re-fired and masked a missing TouchEnabled
+-- listener in three of four games. Mouse comes FIRST in the pair, so the stale state under test
+-- is the small mouse sizing being measured against the touch rules — the direction that fails.
+-- Do not reorder or dedupe these.
 HudCheck.VIEWPORTS = {
 	{ name = "phone landscape", w = 800, h = 360, touch = true },
 	{ name = "small phone", w = 640, h = 300, touch = true },
 	{ name = "phone portrait", w = 414, h = 800, touch = true },
+	-- a mouse window below the 900px compact threshold: takes the compact branch with no touch
+	-- growth, which nothing else in this list exercises
+	{ name = "small mouse window", w = 800, h = 600, touch = false },
 	{ name = "tablet", w = 1024, h = 768, touch = true },
 	{ name = "laptop", w = 1366, h = 768, touch = false },
+	-- the flag-flip pair: same 1366x768, mouse then touch (a Windows touch laptop is a real
+	-- device, and this is the pair that catches a missing TouchEnabled listener)
+	{ name = "laptop, touch", w = 1366, h = 768, touch = true },
 	{ name = "desktop", w = 1920, h = 1080, touch = false },
+	-- and the same flip at phone size, where the consequences are worst
+	{ name = "phone landscape, mouse", w = 800, h = 360, touch = false },
+	{ name = "phone landscape, touch again", w = 800, h = 360, touch = true },
 }
 
 -- Roblox's own touch controls. The movement thumbstick owns the bottom-left, the jump button
@@ -66,6 +93,9 @@ function HudCheck.run(cfg)
 	local viewports = cfg.viewports or HudCheck.VIEWPORTS
 
 	local failures = {}
+	-- Things the gate deliberately does NOT claim to have checked. Printed at the end, because a
+	-- silent skip reads as a pass and that is how two defects reached a live game.
+	local unverified = {}
 	local function fail(where: string, msg: string)
 		table.insert(failures, "[" .. where .. "] " .. msg)
 	end
@@ -75,6 +105,14 @@ function HudCheck.run(cfg)
 	-- phone player the bottom of the list while a 1080p monitor looks perfect. Position plays no
 	-- part, so this is checked on hidden panels too.
 	local function checkCanvas(r, viewportName: string)
+		-- A frame using AutomaticCanvasSize has its CanvasSize written by the shim, not by the
+		-- game. Comparing that back against the same content figure grades the shim against
+		-- itself and passes no matter what the game does, so it is reported as unverified
+		-- rather than counted as a pass.
+		if r.obj:GetAttribute("__emuAutoCanvas") then
+			table.insert(unverified, string.format("%s (AutomaticCanvasSize, %s)", r.name, viewportName))
+			return
+		end
 		local content = 0
 		for _, child in r.obj:GetChildren() do
 			if child.ClassName == "UIListLayout" or child.ClassName == "UIGridLayout" then
@@ -133,6 +171,19 @@ function HudCheck.run(cfg)
 	local playerGui = player:FindFirstChild("PlayerGui")
 	if playerGui == nil or #playerGui:GetChildren() == 0 then
 		error("the client scripts produced no PlayerGui content", 0)
+	end
+
+	-- Optional per-game warmup: build the controls that only a remote push creates, before
+	-- anything is measured. A failure here is fatal rather than a recorded failure, because a
+	-- warmup that did not run means the rest of the run is measuring less than it reports.
+	if cfg.warmup ~= nil then
+		assert(type(cfg.warmup) == "function", "config.warmup must be a function(harness, player)")
+		local okWarm, warmErr = pcall(cfg.warmup, h, player)
+		if not okWarm then
+			error("config.warmup failed, so the HUD was never fully populated: " .. tostring(warmErr), 0)
+		end
+		h:advance(0.1)
+		print(string.format("   warmup %-28s ran", "config.warmup"))
 	end
 
 	----------------------------------------------------------------- geometry, per viewport
@@ -266,6 +317,18 @@ function HudCheck.run(cfg)
 	end
 
 	print("")
+	if #unverified > 0 then
+		local seen, uniq = {}, {}
+		for _, u in unverified do
+			local key = string.match(u, "^[^(]+") or u
+			if not seen[key] then
+				seen[key] = true
+				table.insert(uniq, key)
+			end
+		end
+		print("NOT VERIFIED by this gate (" .. tostring(#uniq) .. "): " .. table.concat(uniq, ", "))
+		print("")
+	end
 	if #failures == 0 then
 		print("PASS — " .. cfg.game .. " fits every viewport checked.")
 		return true

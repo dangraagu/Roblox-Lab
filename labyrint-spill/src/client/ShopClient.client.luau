@@ -23,12 +23,12 @@
 	controls. Everything is sized from Responsive, and the list scrolls.
 ==================================================================]]
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
-local camera = workspace.CurrentCamera
 
 -- Delt tema-liste (ren data, samme som serveren bruker).
 local Themes = require(ReplicatedStorage:WaitForChild("Themes"))
@@ -193,6 +193,27 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 10
 gui.Parent = playerGui
 
+--==================  EFFEKTIV HØYDE (topplinja)  ================--
+-- IgnoreGuiInset står på false (standard), så Roblox korter ned det tegnbare området med
+-- topplinje-innslaget (~36 px) — mens budsjettene under regnes fra camera.ViewportSize.Y,
+-- altså HELE skjermen. Et panel som fyller den høyden stikker nøyaktig innslaget for langt
+-- ned, ned i båndet der mobil-kontrollene bor. Derfor mates den EFFEKTIVE høyden inn i
+-- Responsive.layout og i alt som regnes ut av den. GetGuiInset gir TO Vector2-er; den
+-- første er innslaget øverst til venstre. pcall fordi et oppsett som ikke gir oss innslaget
+-- skal ende med hele høyden — som før — og ikke velte tegningen.
+local function effectiveY(vy: number): number
+	if gui.IgnoreGuiInset then
+		return vy
+	end
+	local ok, inset = pcall(function()
+		return GuiService:GetGuiInset()
+	end)
+	if ok and inset ~= nil and type(inset.Y) == "number" and vy - inset.Y > 0 then
+		return vy - inset.Y
+	end
+	return vy
+end
+
 -- A UIScale does nothing parented to a ScreenGui, so every element below hangs off this
 -- root Frame instead, and the root is what the scale acts on.
 local root = Instance.new("Frame")
@@ -212,7 +233,10 @@ local TOGGLE_W, TOGGLE_H = 140, 48
 -- drawer below has to be worked out per layout rather than baked in as 66.
 local TOGGLE_Y, TOGGLE_GAP = 12, 6
 
-local layout = Responsive.layout(camera.ViewportSize.X, camera.ViewportSize.Y, UserInputService.TouchEnabled)
+-- Gjeldende skjerm-oppsett. Settes ordentlig av applyLayout() lenger nede; kameraet leses
+-- ikke her, fordi workspace.CurrentCamera er nil et bilde eller to ved oppstart og byttes
+-- ut ved enkelte respawn (se watchViewport nederst).
+local layout = Responsive.layout(0, 0, UserInputService.TouchEnabled)
 
 -- A control drawn 44 px tall comes out at 44 * scale on screen, which is 26 px on a phone —
 -- too small for a thumb, and this file is full of deliberate 44 px touch targets. Both helpers
@@ -640,21 +664,28 @@ local function syncToggle()
 end
 
 local function applyLayout()
-	local v = camera.ViewportSize
-	layout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	local cam = workspace.CurrentCamera
+	local v = cam and cam.ViewportSize or Vector2.new(0, 0)
+	-- Den tegnbare høyden, ikke hele vinduet: se effectiveY over.
+	local effY = effectiveY(v.Y)
+	layout = Responsive.layout(v.X, effY, UserInputService.TouchEnabled, v.Y)
 	uiScale.Scale = layout.scale
 	-- Grow the root by 1/scale so root * scale lands exactly on the viewport. Skip this and
 	-- the HUD shrinks into the top-left corner on a phone while looking fine on desktop.
 	root.Size = UDim2.fromScale(1 / layout.scale, 1 / layout.scale)
 
-	-- The toggle is the only way into the shop on a phone, so it is sized in screen space:
-	-- 140x48 design px came out at 84x29 on an 800x360 screen, under the 44 px tap floor.
+	-- The toggle is the only way into the shop on a phone, so its HEIGHT is sized in screen
+	-- space: 48 design px came out at 29 on an 800x360 screen, under the 44 px tap floor.
+	-- The WIDTH is left at the design number on purpose. 140 design px is already 84 screen
+	-- px, comfortably over the floor, and growing it as well pushed the toggle from clear of
+	-- the level HUD to a 36.6 px overlap on a 414x800 phone (7.2 -> 63.6 at 360x800). Apply
+	-- the tap floor to the dimension that needs it, not to one that never did.
 	local toggleH = tap(TOGGLE_H)
-	toggle.Size = UDim2.fromOffset(tap(TOGGLE_W), toggleH)
+	toggle.Size = UDim2.fromOffset(TOGGLE_W, toggleH)
 	toggle.Position = UDim2.new(1, -12, 0, TOGGLE_Y)
 	toggleTsc.MaxTextSize = grow(20)
 
-	local usable = Responsive.usableHeight(v.Y, layout)
+	local usable = Responsive.usableHeight(effY, layout)
 	-- Where the panel starts: below the toggle row when it is a drawer, but hard against the
 	-- top edge on a phone, where the modal is allowed to cover the toggles (the ✕ is the way
 	-- out) and every reclaimed pixel is another visible row. The drawer follows the toggle
@@ -743,11 +774,24 @@ playerGui:GetAttributeChangedSignal(MODAL_ATTR):Connect(function()
 	end
 end)
 
--- Fyll lista med en gang, så den er klar før første ShopData rekker frem.
-applyLayout()
-camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
-refreshHeader()
-refreshRows()
+-- workspace.CurrentCamera er nil et bilde eller to ved oppstart, og Roblox bytter den ut ved
+-- enkelte respawn. Vi kobler lytteren på nytt når kameraet byttes — og kobler den gamle FRA
+-- først, så vi ikke samler opp forbindelser over tid. Dette er den samme rebindingen som
+-- HUD-, kart-, rekord-, guide- og kringkastings-skriptene bruker; før hadde denne halvdelen
+-- av spillet et kamera fanget ved lasting, og de to halvdelene sto for hver sin oppfatning
+-- av nøyaktig det samme plattform-faktumet.
+local viewportConn
+local function watchViewport()
+	if viewportConn then
+		viewportConn:Disconnect()
+		viewportConn = nil
+	end
+	local cam = workspace.CurrentCamera
+	if cam then
+		viewportConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+	end
+	applyLayout()
+end
 
 --==================  SPEIL LEADERSTATS (valgfritt)  ==============--
 -- ShopData er fasit, men leaderstats (Coins/Gems) oppdateres også når man
@@ -792,3 +836,27 @@ task.spawn(function()
 		end)
 	end
 end)
+
+--==============  FØRSTE OPPSETT + LYTTERE (ALLER SIST)  =========--
+-- Rekkefølgen er med vilje: remotene kobles opp FØRST, så første oppsett (som også fyller
+-- lista, slik at den er klar før første ShopData rekker frem), og lytteren på inndata-enheten
+-- aller sist. Et LocalScript som reiser stopper på stedet, så det samme kallet plassert over
+-- OnClientEvent-handlerne ville — den dagen det reiste — etterlatt spilleren med et frosset
+-- HUD og ingen måte å merke det på.
+watchViewport()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
+refreshHeader()
+refreshRows()
+
+-- Hver trykk-mål-størrelse henger på layout.controlPad, som kommer fra
+-- UserInputService.TouchEnabled. Endrer berøringen seg UTEN at pikselstørrelsen gjør det
+-- (et nettbrett som kobler fra tastaturet, en telefon som får mus), fyrer ViewportSize
+-- aldri, og hver kontroll beholder størrelsen fra forrige inndata-enhet — nøyaktig slik
+-- butikk-knappen ble stående på 84x29. Layout er kosmetikk; tilstands-røret er det ikke,
+-- så selve Connect ligger i pcall.
+local touchOk, touchErr = pcall(function()
+	UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(applyLayout)
+end)
+if not touchOk then
+	warn("[Butikk] ingen TouchEnabled-lytter; oppsettet følger bare vinduet: " .. tostring(touchErr))
+end

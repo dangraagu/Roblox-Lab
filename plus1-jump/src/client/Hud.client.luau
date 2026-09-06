@@ -4,7 +4,7 @@
 --
 -- Layout note: every panel below is authored in design pixels against a 1280x720 window and
 -- then scaled and repositioned by the shared Responsive module, so the HUD survives a phone
--- viewport. Four things follow from that and are easy to break by accident:
+-- viewport. Five things follow from that and are easy to break by accident:
 --   * a UIScale does nothing parented to a ScreenGui, so every element lives inside `root`;
 --   * `root` is grown by 1/scale so that root * scale lands exactly on the viewport;
 --   * on a phone the two side panels start collapsed behind toggle buttons along the TOP
@@ -12,11 +12,14 @@
 --     draws its own movement thumbstick and jump button;
 --   * the scaling that makes the HUD fit also shrinks every button on the one device whose
 --     input is a thumb, so anything tappable is sized through `touchSize` instead of being
---     given a design height directly. Text may shrink; tap targets may not.
+--     given a design height directly. Text may shrink; tap targets may not;
+--   * the drawable area is SHORTER than the viewport by the topbar inset, so every vertical
+--     budget is measured against `drawableHeight`, never against `camera.ViewportSize.Y`.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 
 local player = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Plus1Remotes")
@@ -46,6 +49,15 @@ local REBIRTH_H = 54
 local CODE_PAD, CODE_GAP = 8, 4
 local CODE_BOX_H, CODE_BTN_H = 30, 26
 local LB_W, LB_H = 200, 300
+
+-- The stats drawer's own furniture: a row's height, the padding inside the panel and the gap the
+-- UIListLayout leaves between rows. These used to be written straight into the frames below and
+-- nowhere else, which is how the drawer came to be sized from the frozen LEFT_H instead of from
+-- what it actually holds. applyLayout adds them back up, so they have to be the same numbers the
+-- frames are built with.
+local STAT_H = 26
+local LEFT_PAD = 10
+local LIST_GAP = 6
 
 -- Roblox's own guidance and both mobile platform guidelines put the smallest comfortable tap
 -- target at 44 SCREEN px. Design px are not screen px: the UIScale that makes the HUD fit a
@@ -174,17 +186,21 @@ left.ScrollingDirection = Enum.ScrollingDirection.Y
 left.CanvasSize = UDim2.new()
 left.AutomaticCanvasSize = Enum.AutomaticSize.Y
 left.Parent = root
-corner(left, 12); pad(left, 10)
+corner(left, 12); pad(left, LEFT_PAD)
 
 local list = Instance.new("UIListLayout")
-list.Padding = UDim.new(0, 6)
+list.Padding = UDim.new(0, LIST_GAP)
 list.SortOrder = Enum.SortOrder.LayoutOrder
 list.Parent = left
+
+-- Counted rather than written down as a 4, so that adding a fifth stat cannot leave the height
+-- arithmetic in applyLayout quietly measuring a drawer that no longer exists.
+local statRows = 0
 
 local function statLabel(order, text)
 	local l = Instance.new("TextLabel")
 	l.BackgroundTransparency = 1
-	l.Size = UDim2.new(1, 0, 0, 26)
+	l.Size = UDim2.new(1, 0, 0, STAT_H)
 	l.Font = Enum.Font.GothamMedium
 	l.TextColor3 = Color3.fromRGB(230, 234, 245)
 	l.TextXAlignment = Enum.TextXAlignment.Left
@@ -193,6 +209,7 @@ local function statLabel(order, text)
 	l.Text = text
 	l.Parent = left
 	local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 18; cc.Parent = l
+	statRows += 1
 	return l
 end
 
@@ -360,10 +377,30 @@ local function touchSize(designPx: number): number
 	local n = math.ceil(wanted / layout.scale)
 	-- The ceiling can still land a hair short of `wanted` once the UIScale multiplies it back
 	-- out, because neither division is exact. One more pixel is cheaper than one more review.
-	if n * layout.scale < wanted then
+	-- The test is `<=`, not `<`: at scale 1.0 and at scale 0.8 the product lands on exactly
+	-- 44.000, which clears a 44 px minimum with no margin at all and only while the arithmetic
+	-- stays exact. A control that has to be measured to the third decimal to pass is one the
+	-- next rounding change fails, so the boundary counts as short.
+	if n * layout.scale <= wanted then
 		n += 1
 	end
 	return n
+end
+
+-- How tall the stats drawer's contents actually are, in design px: the UIPadding above and
+-- below, every row, and the UIListLayout gap between them. The interactive rows are passed in at
+-- whatever size `touchSize` just gave them, which is the whole point — REBIRTH_H grows from 54 to
+-- 90 on a phone, so a drawer sized from the frozen LEFT_H is a window onto content that has since
+-- outgrown it, and the overflow came off the bottom of the Redeem button. LEFT_H stays the floor,
+-- so a desktop, whose rows come to 202, keeps the 210 px panel it was drawn with.
+local function stackHeight(rebirthH: number, codeH: number?): number
+	local rows = statRows * STAT_H + rebirthH
+	local count = statRows + 1
+	if codeH ~= nil then
+		rows += codeH
+		count += 1
+	end
+	return math.max(LEFT_H, 2 * LEFT_PAD + rows + LIST_GAP * math.max(count - 1, 0))
 end
 
 -- On a phone both drawers are closed until the player asks for one, and only one may be open
@@ -391,13 +428,38 @@ lbToggle.Activated:Connect(function()
 	refreshDrawers()
 end)
 
+-- The height the HUD may actually draw into. ScreenGui.IgnoreGuiInset is left at its default
+-- false, so Roblox reserves the topbar strip along the top of the screen and hands the ScreenGui
+-- an area shorter than the viewport by exactly that much — while every vertical budget below was
+-- computed from camera.ViewportSize.Y, the full one. A panel sized to fill that overflows the real bottom
+-- edge by the inset, into exactly the band of touch controls this file exists to keep clear.
+-- Elements anchored to the bottom resolve against the ScreenGui itself and were never wrong,
+-- which is why the mistake is invisible on a desktop and invisible to a checker that measures
+-- against the viewport.
+local function drawableHeight(vy: number): number
+	if gui.IgnoreGuiInset then
+		return vy
+	end
+	-- GetGuiInset returns TWO Vector2s, the top-left inset and the bottom-right one; the topbar
+	-- is the first. Guarded because this runs on every layout pass: a HUD that lays out slightly
+	-- too tall is a better failure than a HUD that stops laying out at all.
+	local ok, topLeft = pcall(function()
+		return GuiService:GetGuiInset()
+	end)
+	local inset = if ok and topLeft ~= nil then topLeft.Y else 0
+	return math.max(1, vy - inset)
+end
+
 local function applyLayout()
 	local v = camera.ViewportSize
 	-- ViewportSize is (0,0) for a frame or two at startup; fall back to the design window
 	-- rather than laying the HUD out against nothing.
 	local vx = if v.X > 0 then v.X else Responsive.REF_X
 	local vy = if v.Y > 0 then v.Y else Responsive.REF_Y
-	layout = Responsive.layout(vx, vy, UserInputService.TouchEnabled)
+	-- Everything vertical from here on is measured against the drawable height, not the
+	-- viewport. The width is unaffected: the inset is a strip along the top only.
+	local vyDraw = drawableHeight(vy)
+	layout = Responsive.layout(vx, vyDraw, UserInputService.TouchEnabled, vy)
 
 	uiScale.Scale = layout.scale
 	-- Grow the root by 1/scale so root * scale lands exactly on the viewport. Without this the
@@ -407,9 +469,9 @@ local function applyLayout()
 
 	local compact = layout.compact
 	local rootW = vx / layout.scale
-	local rootH = vy / layout.scale
+	local rootH = vyDraw / layout.scale
 	local padDesign = layout.controlPad / layout.scale -- touch-control band, in design px
-	local usable = Responsive.usableHeight(vy, layout) -- screen px
+	local usable = Responsive.usableHeight(vyDraw, layout) -- screen px
 
 	-- Interactive sizes come first, because everything else is measured around them: the toggle
 	-- row's height decides where the drawers underneath it start, and the code panel is only as
@@ -463,7 +525,12 @@ local function applyLayout()
 		codeFrame.Position = UDim2.new() -- the UIListLayout in `left` places it
 		codeFrame.Size = UDim2.new(1, 0, 0, codeH)
 
-		local stackH = LEFT_H + GAP + codeH
+		-- The drawer's window comes from the rows it holds, code panel included. At 414x800 that
+		-- is 413 design px against the 386 the frozen constant claimed, and the difference was
+		-- the bottom of the Redeem button sitting below the drawer with the band underneath it
+		-- standing empty. On a short phone the band still wins and the list scrolls, which is
+		-- what AutomaticCanvasSize is there for.
+		local stackH = stackHeight(rebirthH, codeH)
 		local leftH = Responsive.fitHeight(stackH, math.min(usable, band * layout.scale), layout)
 		left.AnchorPoint = Vector2.new(0, 0)
 		left.Position = UDim2.new(0, MARGIN, 0, bandTop)
@@ -484,8 +551,12 @@ local function applyLayout()
 		codeFrame.Position = UDim2.new(0, MARGIN, 1, -(MARGIN + padDesign))
 		codeFrame.Size = UDim2.new(0, leftW, 0, codeH)
 
+		-- Same content-derived height here, without the code panel, which lives in its own frame
+		-- on this branch. A touch tablet grows the rebirth button and the drawer with it; the
+		-- frozen constant clipped the last 6 design px of that button at 1024x768.
 		local leftBand = math.max(1, band - codeH - GAP)
-		local leftH = Responsive.fitHeight(LEFT_H, math.min(usable, leftBand * layout.scale), layout)
+		local leftH =
+			Responsive.fitHeight(stackHeight(rebirthH), math.min(usable, leftBand * layout.scale), layout)
 		local leftCenter = clampNum(rootH * 0.5, bandTop + leftH * 0.5, bandTop + leftBand - leftH * 0.5)
 		left.AnchorPoint = Vector2.new(0, 0.5)
 		left.Position = UDim2.new(0, MARGIN, 0, leftCenter)
@@ -524,3 +595,14 @@ LeaderboardEvent.OnClientEvent:Connect(renderLeaderboard)
 
 applyLayout()
 camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+
+-- Touch can change without the window changing size: a Windows laptop with a touchscreen, a
+-- tablet put into and taken out of a dock, a device that gains a keyboard. Every tap-target size
+-- above comes from layout.controlPad, which comes from TouchEnabled, so a HUD that only listens
+-- to the viewport carries the sizing of the input it no longer has — the toggles stay at their
+-- 58x20 mouse size on a screen now being poked with a thumb. Connected last and wrapped, for the
+-- same reason the state remotes above are connected first: the layout is polish, the numbers on
+-- screen are not, and a signal this one cannot get should cost the re-fit and nothing else.
+pcall(function()
+	UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(applyLayout)
+end)

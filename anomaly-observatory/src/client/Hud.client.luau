@@ -613,11 +613,8 @@ end
 
 applyLayout()
 camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
--- Every tap-target size above is decided by whether Roblox is drawing its own touch controls,
--- and that is not fixed for the life of a session: a detachable tablet keyboard flips it
--- without the viewport changing by a single pixel. Listening to the viewport alone leaves the
--- HUD laid out for the wrong input device until something else happens to resize it.
-UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(applyLayout)
+-- The TouchEnabled listener that belongs beside this one is wired at the very bottom of the
+-- file instead, after every remote handler. See the note down there for why.
 
 -- ---------------------------------------------------------------- carried flashlight
 -- The tint was stored, validated, persisted, replicated and pickable — but nothing ever lit
@@ -758,5 +755,26 @@ DeathRemote.OnClientEvent:Connect(function(d)
 	end
 	showToast(msg, WARN, detail, 2.4)
 end)
+
+-- ---------------------------------------------------------------- input-device listener
+-- Every tap-target size above is decided by whether Roblox is drawing its own touch controls,
+-- and that is not fixed for the life of a session: a detachable tablet keyboard flips it
+-- without the viewport changing by a single pixel. Listening to the viewport alone leaves the
+-- HUD laid out for the wrong input device until something else happens to resize it.
+--
+-- Two things about this line are deliberate and neither is style. It is wired LAST, below every
+-- remote handler, and the connect itself is inside a pcall. A LocalScript that raises stops
+-- dead at the offending line, so this same call written near applyLayout would have sat above
+-- the State, Reveal and Death handlers: one throw there and the player keeps a HUD frozen on
+-- "DAY 1 / Best: Day 0 / Field Guide: 0/0" for the rest of the session, with codes and hints
+-- silently dead. Down here, and caught, the worst it can cost is a stale layout until the next
+-- viewport change. Layout is cosmetic; the state pipeline is not, and nothing cosmetic gets to
+-- take the pipeline down with it.
+local touchOk, touchErr = pcall(function()
+	UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(applyLayout)
+end)
+if not touchOk then
+	warn("[Anomaly] no TouchEnabled listener; layout will follow the viewport only: " .. tostring(touchErr))
+end
 
 print("[Anomaly] HUD ready.")

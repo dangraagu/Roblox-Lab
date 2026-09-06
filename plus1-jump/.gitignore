@@ -7,3 +7,6 @@
 publish_*.bat
 publish_*.sh
 *.secret
+
+# Open Cloud publish response body (written by publish_*.bat)
+publish_response.json

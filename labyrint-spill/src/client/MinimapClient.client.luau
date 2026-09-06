@@ -23,6 +23,7 @@
 	sluke en telefonskjerm.
 ==================================================================]]
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -77,6 +78,27 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 6 -- under tema-butikken (10), så butikk-panelet legger seg over
 gui.Enabled = true
 gui.Parent = playerGui
+
+--==================  EFFEKTIV HØYDE (topplinja)  ================--
+-- IgnoreGuiInset står på false (standard), så Roblox korter ned det tegnbare området med
+-- topplinje-innslaget (~36 px) — mens budsjettene under regnes fra camera.ViewportSize.Y,
+-- altså HELE skjermen. Et panel som fyller den høyden stikker nøyaktig innslaget for langt
+-- ned, ned i båndet der mobil-kontrollene bor. Derfor mates den EFFEKTIVE høyden inn i
+-- Responsive.layout og i alt som regnes ut av den. GetGuiInset gir TO Vector2-er; den
+-- første er innslaget øverst til venstre. pcall fordi et oppsett som ikke gir oss innslaget
+-- skal ende med hele høyden — som før — og ikke velte tegningen.
+local function effectiveY(vy: number): number
+	if gui.IgnoreGuiInset then
+		return vy
+	end
+	local ok, inset = pcall(function()
+		return GuiService:GetGuiInset()
+	end)
+	if ok and inset ~= nil and type(inset.Y) == "number" and vy - inset.Y > 0 then
+		return vy - inset.Y
+	end
+	return vy
+end
 
 --====================  ROT-RAMME MED UISCALE  ====================--
 -- En UIScale gjør INGENTING når den henger rett på en ScreenGui, så vi trenger en
@@ -168,7 +190,9 @@ canvas.Parent = mapFrame
 local function applyLayout()
 	local cam = workspace.CurrentCamera
 	local v = cam and cam.ViewportSize or Vector2.new(0, 0)
-	layout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	-- Den tegnbare høyden, ikke hele vinduet: se effectiveY over.
+	local effY = effectiveY(v.Y)
+	layout = Responsive.layout(v.X, effY, UserInputService.TouchEnabled, v.Y)
 	uiScale.Scale = layout.scale
 
 	-- Rot-rammen må vokse med 1/skala så rot × skala lander nøyaktig på skjermkanten.
@@ -179,7 +203,7 @@ local function applyLayout()
 	-- Ønsket størrelse i DESIGN-piksler: ~22 % av den korteste kanten på design-flata
 	-- (skjermen delt på skalaen). Aldri under 96 (fortsatt lesbart) eller over 150
 	-- (ikke enormt på desktop) — samme tall som før, bare målt i riktig rom.
-	local designMin = math.min(v.X, v.Y) / layout.scale
+	local designMin = math.min(v.X, effY) / layout.scale
 	if designMin <= 0 then
 		designMin = Responsive.REF_Y -- vinduet er ikke kjent ennå; neste kall retter det
 	end
@@ -197,7 +221,7 @@ local function applyLayout()
 	local wCap = Responsive.sideWidth(want, v.X, layout)
 	-- usableHeight svarer i SKJERM-piksler, mens top er design-piksler — derfor
 	-- ganges top opp med skalaen før vi trekker den fra.
-	local usable = Responsive.usableHeight(v.Y, layout) - top * layout.scale
+	local usable = Responsive.usableHeight(effY, layout) - top * layout.scale
 	local hCap = Responsive.fitHeight(want, usable, layout)
 
 	local side = math.max(56, math.min(wCap, hCap))
@@ -220,8 +244,6 @@ local function watchViewport()
 	end
 	applyLayout()
 end
-watchViewport()
-workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
 
 --============================  KARTLEGGING  ======================--
 -- Verden (x,z) -> 0..1 kart-koordinat. nil hvis kartet ikke er klart. Deler på
@@ -455,3 +477,24 @@ task.spawn(function()
 		updateVisibility()
 	end)
 end)
+
+--==============  FØRSTE OPPSETT + LYTTERE (ALLER SIST)  =========--
+-- Rekkefølgen er med vilje: remotene kobles opp FØRST, så første oppsett, og lytteren på
+-- inndata-enheten aller sist. Et LocalScript som reiser stopper på stedet, så det samme
+-- kallet plassert over OnClientEvent-handlerne ville — den dagen det reiste — etterlatt
+-- spilleren med et frosset HUD og ingen måte å merke det på.
+watchViewport()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
+
+-- Hver trykk-mål-størrelse henger på layout.controlPad, som kommer fra
+-- UserInputService.TouchEnabled. Endrer berøringen seg UTEN at pikselstørrelsen gjør det
+-- (et nettbrett som kobler fra tastaturet, en telefon som får mus), fyrer ViewportSize
+-- aldri, og hver kontroll beholder størrelsen fra forrige inndata-enhet — nøyaktig slik
+-- rekord-knappen ble stående på 29x29. Layout er kosmetikk; tilstands-røret er det ikke,
+-- så selve Connect ligger i pcall.
+local touchOk, touchErr = pcall(function()
+	UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(applyLayout)
+end)
+if not touchOk then
+	warn("[Minikart] ingen TouchEnabled-lytter; oppsettet følger bare vinduet: " .. tostring(touchErr))
+end

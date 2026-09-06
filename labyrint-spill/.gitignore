@@ -10,9 +10,17 @@
 
 # Secrets — ALDRI commit API-nokler
 roblox_api_key.txt
-publish_live.bat
+# Glob, ikke eksakt filnavn. De tre andre spillene bruker publish_*.bat; her sto bare
+# publish_live.bat, så et nytt skript med konvensjonelt navn (publish_labyrint.bat) ville blitt
+# committet med Open Cloud-nøkkelen inline, slik de andre publish-skriptene har den.
+publish_*.bat
+publish_*.sh
+*.secret
 
 # Editor
 .vscode/
 .idea/
 .DS_Store
+
+# Open Cloud publish response body (written by publish_*.bat)
+publish_response.json

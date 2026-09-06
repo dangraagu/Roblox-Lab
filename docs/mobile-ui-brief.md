@@ -96,11 +96,13 @@ camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
 
 ## Verification (all of it, before you report back)
 
-Binaries live at
-`C:/Users/BAHS_A~1/AppData/Local/Temp/claude/C--Users-bahs-admin/ecae86a3-0220-4a1c-84bc-1986788bfefa/scratchpad/luau/`
+The luau CLI is not on PATH and no manifest pins it, so point `L` at wherever your copy lives.
+Note this is a real gap, not a nicety: every count quoted in this repo's commit messages was
+produced by a binary that nothing in the repo identifies, so those numbers cannot be reproduced or
+refuted from a clean checkout. Pinning it (a `rokit.toml`) is tracked as a deferred item.
 
 ```bash
-L="C:/Users/BAHS_A~1/AppData/Local/Temp/claude/C--Users-bahs-admin/ecae86a3-0220-4a1c-84bc-1986788bfefa/scratchpad/luau"
+L="${LUAU_DIR:?set this to the directory holding luau.exe, luau-compile.exe and luau-analyze.exe}"
 # 1. syntax of every file you edited
 "$L/luau-compile.exe" --binary <file> > /dev/null
 # 2. static analysis; only Roblox-global noise is acceptable.

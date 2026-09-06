@@ -37,12 +37,14 @@ if not GodUsers.has(LocalPlayer) then
 	return
 end
 
--- Everything below this line only ever runs for a god user. Shared sizing rules so the
--- panel survives a phone; note the require form, since a bare string require like
--- `require("./Responsive")` resolves in the luau CLI but is invalid in Roblox.
+-- Everything below this line only ever runs for a god user — including the GuiService lookup,
+-- so a normal player still walks straight out of the gate above without touching a thing.
+-- Shared sizing rules so the panel survives a phone; note the require form, since a bare
+-- string require like `require("./Responsive")` resolves in the luau CLI but is invalid in
+-- Roblox.
+local GuiService = game:GetService("GuiService")
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 local TouchTarget = require(ReplicatedStorage:WaitForChild("TouchTarget"))
-local camera = workspace.CurrentCamera
 
 --============================  INNSTILLINGER  ====================--
 local FLY_SPEED = 55           -- studs/sek — rask, men grei for en fly-juks
@@ -112,6 +114,27 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 15           -- over de andre panelene
 gui.Parent = playerGui
 
+--==================  EFFEKTIV HØYDE (topplinja)  ================--
+-- IgnoreGuiInset står på false (standard), så Roblox korter ned det tegnbare området med
+-- topplinje-innslaget (~36 px) — mens budsjettene under regnes fra camera.ViewportSize.Y,
+-- altså HELE skjermen. En stabel som bygges opp fra bunnen av den høyden havner nøyaktig
+-- innslaget for langt ned, ned i båndet der mobil-kontrollene bor. Derfor mates den
+-- EFFEKTIVE høyden inn i Responsive.layout og i alt som regnes ut av den. GetGuiInset gir
+-- TO Vector2-er; den første er innslaget øverst til venstre. pcall fordi et oppsett som
+-- ikke gir oss innslaget skal ende med hele høyden — som før — og ikke velte tegningen.
+local function effectiveY(vy: number): number
+	if gui.IgnoreGuiInset then
+		return vy
+	end
+	local ok, inset = pcall(function()
+		return GuiService:GetGuiInset()
+	end)
+	if ok and inset ~= nil and type(inset.Y) == "number" and vy - inset.Y > 0 then
+		return vy - inset.Y
+	end
+	return vy
+end
+
 -- A UIScale does nothing parented to a ScreenGui, so the buttons hang off this root Frame
 -- and the root is what the scale acts on. Called uiRoot, because `root` in this file is
 -- already the character's HumanoidRootPart.
@@ -124,7 +147,10 @@ uiRoot.Parent = gui
 local uiScale = Instance.new("UIScale")
 uiScale.Parent = uiRoot
 
-local layout = Responsive.layout(camera.ViewportSize.X, camera.ViewportSize.Y, UserInputService.TouchEnabled)
+-- Gjeldende skjerm-oppsett. Settes ordentlig av applyLayout() lenger nede; kameraet leses
+-- ikke her, fordi workspace.CurrentCamera er nil et bilde eller to ved oppstart og byttes
+-- ut ved enkelte respawn (se watchViewport nederst).
+local layout = Responsive.layout(0, 0, UserInputService.TouchEnabled)
 
 -- A button drawn 50 px tall comes out at 50 * scale on screen, which is 30 px on a phone —
 -- too small for the child thumb this panel was designed around. Both helpers below only do
@@ -210,14 +236,17 @@ local downBtn = makeArrow("FlyNed", "▼")
 -- rather than from the middle of the screen: on a short phone screen the whole thing slides
 -- up instead of ending underneath a control the player can never tap through.
 local function applyLayout()
-	local v = camera.ViewportSize
-	layout = Responsive.layout(v.X, v.Y, UserInputService.TouchEnabled)
+	local cam = workspace.CurrentCamera
+	local v = cam and cam.ViewportSize or Vector2.new(0, 0)
+	-- Den tegnbare høyden, ikke hele vinduet: se effectiveY over.
+	local effY = effectiveY(v.Y)
+	layout = Responsive.layout(v.X, effY, UserInputService.TouchEnabled, v.Y)
 	uiScale.Scale = layout.scale
 	-- Grow the root by 1/scale so root * scale lands exactly on the viewport. Skip this and
 	-- the buttons shrink into the top-left corner on a phone while looking fine on desktop.
 	uiRoot.Size = UDim2.fromScale(1 / layout.scale, 1 / layout.scale)
 
-	local viewY = if v.Y > 0 then v.Y else Responsive.REF_Y
+	local viewY = if effY > 0 then effY else Responsive.REF_Y
 	local rootH = viewY / layout.scale
 	local floorY = rootH - layout.controlPad / layout.scale - Responsive.MARGIN
 
@@ -251,8 +280,24 @@ local function applyLayout()
 	end
 end
 
-applyLayout()
-camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+-- workspace.CurrentCamera er nil et bilde eller to ved oppstart, og Roblox bytter den ut ved
+-- enkelte respawn — og gudemodus respawner deg hvert nivå. Vi kobler lytteren på nytt når
+-- kameraet byttes, og kobler den gamle FRA først, så vi ikke samler opp forbindelser. Dette
+-- er den samme rebindingen som HUD-, kart-, rekord-, guide- og kringkastings-skriptene
+-- bruker; før hadde denne halvdelen av spillet et kamera fanget ved lasting, og de to
+-- halvdelene sto for hver sin oppfatning av nøyaktig det samme plattform-faktumet.
+local viewportConn
+local function watchViewport()
+	if viewportConn then
+		viewportConn:Disconnect()
+		viewportConn = nil
+	end
+	local cam = workspace.CurrentCamera
+	if cam then
+		viewportConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+	end
+	applyLayout()
+end
 
 --==========================  NOCLIP + FLY  =======================--
 -- Sett CanCollide tilbake til normalt. I en standard Roblox-figur skal
@@ -450,3 +495,24 @@ task.spawn(function()
 		fireGod(true)   -- var alt på før remoten kom → synk serveren nå
 	end
 end)
+
+--==============  FØRSTE OPPSETT + LYTTERE (ALLER SIST)  =========--
+-- Rekkefølgen er med vilje: remoten kobles opp FØRST, så første oppsett, og lytteren på
+-- inndata-enheten aller sist. Et LocalScript som reiser stopper på stedet, så det samme
+-- kallet plassert over remote-oppkoblingen ville — den dagen det reiste — etterlatt
+-- spilleren med et frosset panel og ingen måte å merke det på.
+watchViewport()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
+
+-- Hver trykk-mål-størrelse henger på layout.controlPad, som kommer fra
+-- UserInputService.TouchEnabled. Endrer berøringen seg UTEN at pikselstørrelsen gjør det
+-- (et nettbrett som kobler fra tastaturet, en telefon som får mus), fyrer ViewportSize
+-- aldri, og hver kontroll beholder størrelsen fra forrige inndata-enhet — nøyaktig slik
+-- rekord-knappen i rekord-panelet ble stående på 29x29. Layout er kosmetikk; tilstands-røret
+-- er det ikke, så selve Connect ligger i pcall.
+local touchOk, touchErr = pcall(function()
+	UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(applyLayout)
+end)
+if not touchOk then
+	warn("[Gudemodus] ingen TouchEnabled-lytter; oppsettet følger bare vinduet: " .. tostring(touchErr))
+end

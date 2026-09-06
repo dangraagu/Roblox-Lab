@@ -24,13 +24,31 @@ local PHONE_TALL = R.layout(414, 800, true)
 local TABLET = R.layout(1024, 768, true)
 local LAPTOP = R.layout(1366, 768, false)
 local DESKTOP = R.layout(1920, 1080, false)
+-- Et LITE mus-vindu. Dette er ikke enda en skjerm for syns skyld: både 1366x768 og
+-- 1920x1080 klampes til skala nøyaktig 1.0, og der ER det å dele på skalaen identiteten.
+-- Regresjonsvakta under kunne derfor ikke se forskjell på «grow rører ingenting uten
+-- mobil-kontroller» og «grow deler alltid på skalaen» — mutasjonstesten fjernet
+-- controlPad-vakta i grow() og alle 46 påstandene sto like grønne. 1000x600 gir skala
+-- 0,78 og controlPad 0, og der blir grow(48) til 62 i det øyeblikket vakta forsvinner.
+local SMALL_MOUSE = R.layout(1000, 600, false)
 
 local TOUCH = { PHONE, SMALL_PHONE, PHONE_TALL, TABLET }
-local MOUSE = { LAPTOP, DESKTOP }
+local MOUSE = { LAPTOP, DESKTOP, SMALL_MOUSE }
+
+-- Forutsetningen SMALL_MOUSE hviler på, låst: mister den skalaen sin under en framtidig
+-- endring i Responsive, blir vakta blind igjen — og da skal DENNE linja si fra, ikke en
+-- stille grønn kjøring.
+if SMALL_MOUSE.scale < 1 then passed += 1 else
+	failed += 1
+	print("FAIL: SMALL_MOUSE må ha skala UNDER 1, ellers er delingen identitet -> fikk", tostring(SMALL_MOUSE.scale))
+end
+eq(SMALL_MOUSE.controlPad, 0, "SMALL_MOUSE er et mus-vindu: ingen mobil-kontroller å ta hensyn til")
 
 -- ── desktop rører seg ikke ──────────────────────────────────────────────────
 -- Uten mobil-kontroller på skjermen skal begge funksjonene gi tilbake nøyaktig
--- design-tallet. Dette er hele regresjonsvakta: 1920x1080 har scale 1 og controlPad 0.
+-- design-tallet. Dette er hele regresjonsvakta: den gjelder både der skalaen er 1
+-- (1920x1080) og der den ikke er det (1000x600), og bare den siste kan fange at
+-- controlPad-vakta forsvinner.
 for _, l in MOUSE do
 	eq(T.grow(48, l), 48, "grow rører ikke et vindu uten mobil-kontroller")
 	eq(T.tap(48, l), 48, "tap rører ikke et vindu uten mobil-kontroller")
@@ -39,10 +57,16 @@ for _, l in MOUSE do
 end
 
 -- ── gulvet: 44 skjerm-piksler på berøring ───────────────────────────────────
+-- Tallet 44 står her som et LITERAL med vilje, ikke som T.MIN_TAP. Leser vi konstanten
+-- ut av modulen vi tester, sier påstanden bare at modulen er enig med seg selv: en
+-- mutasjon av MIN_TAP fra 44 til 24 flyttet både kravet og svaret, og alle 46 påstandene
+-- besto. 44 er kravet fra Roblox' egen veiledning og fra begge mobil-plattformene — det
+-- er en ytre fasit, og da må det stå skrevet her, ikke hentes fra det som testes.
+local MIN_TAP_SCREEN_PX = 44
 for _, l in TOUCH do
-	atLeast(T.tap(48, l) * l.scale, T.MIN_TAP, "en 48px-knapp lander over 44 skjerm-piksler")
-	atLeast(T.tap(40, l) * l.scale, T.MIN_TAP, "en 40px-knapp løftes opp til gulvet")
-	atLeast(T.tap(29, l) * l.scale, T.MIN_TAP, "selv en bitteliten knapp løftes opp til gulvet")
+	atLeast(T.tap(48, l) * l.scale, MIN_TAP_SCREEN_PX, "en 48px-knapp lander over 44 skjerm-piksler")
+	atLeast(T.tap(40, l) * l.scale, MIN_TAP_SCREEN_PX, "en 40px-knapp løftes opp til gulvet")
+	atLeast(T.tap(29, l) * l.scale, MIN_TAP_SCREEN_PX, "selv en bitteliten knapp løftes opp til gulvet")
 	atLeast(T.tap(160, l) * l.scale, 160, "en bred knapp beholder sin fysiske bredde")
 end
 
@@ -54,7 +78,9 @@ atLeast(T.tap(48, PHONE) * PHONE.scale, 44, "RekordKnapp er ikke lenger 29x29")
 for _, l in TOUCH do
 	atLeast(T.grow(17, l) * l.scale, 17, "grow beholder tekst-takets fysiske størrelse")
 	local capped = T.grow(17, l) * l.scale
-	if capped < T.MIN_TAP then passed += 1 else
+	-- Igjen literalet 44, ikke T.MIN_TAP: påstanden er at grow IKKE har plattformenes
+	-- gulv, og den må måles mot plattformenes tall, ikke mot modulens eget.
+	if capped < MIN_TAP_SCREEN_PX then passed += 1 else
 		failed += 1; print("FAIL: grow skal IKKE ha noe 44px-gulv (fikk", tostring(capped), ")")
 	end
 end

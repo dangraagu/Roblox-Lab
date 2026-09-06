@@ -59,6 +59,34 @@ truthy(R.layout(PHONE[1], PHONE[2]).controlPad > 0, "telefon reserverer plass ne
 eq(R.layout(DESKTOP[1], DESKTOP[2]).controlPad, 0, "desktop reserverer ingenting")
 truthy(R.layout(PHONE[1], PHONE[2]).controlPad < PHONE[2] / 2, "reservasjonen spiser ikke halve skjermen")
 
+-- Den fysiske hoyden eier baandet, ikke den tegnbare.
+-- Roblox tar topplinje-inset fra TOPPEN, mens tommelstikka og hoppknappen sitter paa bunnen av
+-- den FYSISKE skjermen. Da mobil-fiksen begynte aa mate den forkortede hoyden inn her, krympet
+-- reservasjonen fra 125 til 113 px paa 800x360 uten at baandet ble mindre: 12 px margin tapt i
+-- feil retning. Fjerde argument er den fysiske hoyden; utelates den, oppfoerer alt seg som foer.
+do
+    local physical = 360
+    local drawable = physical - 36 -- topplinje-inset
+
+    local full = R.layout(800, physical, true)
+    local naive = R.layout(800, drawable, true)
+    local fixed = R.layout(800, drawable, true, physical)
+
+    truthy(naive.controlPad < full.controlPad, "uten fysisk hoyde ville reservasjonen krympet")
+    eq(fixed.controlPad, full.controlPad, "controlPad kommer fra den fysiske hoyden")
+
+    -- ... men budsjettet skal fortsatt regnes fra det panelet faktisk har aa gaa paa
+    eq(fixed.viewportY, drawable, "viewportY er fortsatt den tegnbare hoyden")
+    truthy(R.usableHeight(drawable, fixed) < R.usableHeight(physical, full), "budsjettet krymper med inset-en")
+
+    -- utelatt fjerde argument = uendret oppfoersel, saa ingen kallsted maa endres for aa virke
+    eq(R.layout(800, physical, true, nil).controlPad, full.controlPad, "utelatt fysisk hoyde faller tilbake paa vy")
+    eq(R.layout(800, physical, true, 0).controlPad, full.controlPad, "0 som fysisk hoyde faller tilbake paa vy")
+
+    -- desktop har ingen kontroller aa reservere for, uansett hvilken hoyde som sendes inn
+    eq(R.layout(1920, 1080 - 36, false, 1080).controlPad, 0, "desktop reserverer fortsatt ingenting")
+end
+
 -- ── usableHeight: det et sidepanel FAKTISK har å gå på ───────────────────────
 for _, v in { PHONE, PHONE_TALL, SMALL_PHONE, TABLET, LAPTOP, DESKTOP } do
 	local l = R.layout(v[1], v[2])
