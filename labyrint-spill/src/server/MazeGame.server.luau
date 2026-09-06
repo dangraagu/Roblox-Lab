@@ -98,6 +98,12 @@ local GodUsers = require(ReplicatedStorage:WaitForChild("GodUsers"))
 local Contributors = require(ReplicatedStorage:WaitForChild("Contributors"))
 local Progression = require(ReplicatedStorage:WaitForChild("Progression"))
 local MazeGen = require(ReplicatedStorage:WaitForChild("MazeGen"))
+local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
+
+-- Visuell polish (kun kode, KONSERVATIV): Maze-presetet setter BEVISST ingen Lighting-
+-- felter — kun post-fx (Atmosphere/Bloom/ColorCorrection/DepthOfField) LAGT OPPÅ. Det
+-- rører altså ikke spillets egen per-nivå-tåke (FogEnd) eller fakkel-logikk.
+Fx.applyLighting(Fx.Presets.Maze)
 
 -- Start-gave: de spesielle spillerne (samme liste som gudemodus, se GodUsers)
 -- får startkapital FØRSTE gang de blir med. Gis én gang og lagres.

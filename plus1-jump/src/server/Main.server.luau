@@ -14,6 +14,20 @@ local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Progression = require(ReplicatedStorage:WaitForChild("Progression"))
 local TowerGen = require(ReplicatedStorage:WaitForChild("TowerGen"))
 local Codes = require(ReplicatedStorage:WaitForChild("Codes"))
+local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
+
+-- Visuell polish (kun kode, additiv): lys, luftig sky-tempel-rigg + post-fx (bloom/sunrays).
+Fx.applyLighting(Fx.Presets.Temple)
+
+-- Hoppspor: gir hver spillerkarakter en Trail så hoppene leser som «fancy» i klipp/thumbnails.
+Players.PlayerAdded:Connect(function(plr)
+	plr.CharacterAdded:Connect(function(char)
+		local root = char:WaitForChild("HumanoidRootPart", 5)
+		if root then
+			Fx.trail(root, Color3.fromRGB(160, 210, 255), 0.45)
+		end
+	end)
+end)
 
 local genCfg = { Tower = Config.Tower, Jump = Config.Jump, WorldSeed = Config.WorldSeed }
 
