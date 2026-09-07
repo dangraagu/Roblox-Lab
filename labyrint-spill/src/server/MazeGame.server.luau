@@ -1829,29 +1829,48 @@ local function buildInstance(inst)
 			if cy + 1 < rows and grid[gy + 1][gx] then table.insert(doorCandidates, { gx, gy + 1 }) end
 		end
 	end
-	local doorSet = {}
+	-- Hemmelige dorer velges IKKE her lenger. En dor uten knapp er en vegg spilleren SER at er
+	-- annerledes, leter etter bryteren til, og aldri kan apne. En spiller rapporterte nettopp
+	-- det: "There were 2 doors but only for one of them there was a switch." Antallene kom fra
+	-- to urelaterte uttrykk -- dorer fra min(diff.buttons, #doorCandidates), knapper fra
+	-- take(min(diff.buttons, 4)) -- og diff.buttons er 3 + floor(level / 170), sa fra niva 340
+	-- garanterte taket alene en foreldrelos dor i HVER labyrint.
+	--
+	-- Na bygges alle vegger like, og en vegg gjores om til hemmelig dor forst NAR den har fatt
+	-- sin knapp (se knappe-blokka lenger ned). Da kan antallene ikke sprike, uansett hvor mange
+	-- celler `take` faktisk klarer a gi.
+	-- Dorene VELGES her, pa nøyaktig samme punkt og med noyaktig like mange rng-trekk som for.
+	-- Det er ikke pynt: `pool` (der mynter, edelstener, feller og monstre plukkes fra) Fisher-
+	-- Yates-stokkes med SAMME rng noen linjer lenger ned. Flytter man disse trekkene, starter
+	-- stokkingen fra en annen tilstand og alt innhold i HVERT nivaa trekkes pa nytt. Nivaaene er
+	-- delte og deterministiske, sa det ville stille om baner spillere har lart seg.
+	-- Valget er bare en PLAN her; en vegg blir forst en dor nar den faktisk har fatt en knapp.
+	local plannedDoors = {}
 	for _ = 1, math.min(diff.buttons, #doorCandidates) do
 		local c = table.remove(doorCandidates, rng:NextInteger(1, #doorCandidates))
-		doorSet[c[1] .. "," .. c[2]] = true
+		table.insert(plannedDoors, c[1] .. "," .. c[2])
 	end
-	local doorParts = {}
+	local wallByKey = {}
 	for y = 0, gRows - 1 do
 		for x = 0, gCols - 1 do
 			if grid[y][x] then
 				local wp = MazeGen.gridToWorld(x, y, gCols, gRows, S, origin)
-				local isDoor = doorSet[x .. "," .. y]
 				local wall = makePart({
-					Name = isDoor and "SecretWall" or "Wall",
+					Name = "Wall",
 					Size = Vector3.new(S, CONFIG.WallHeight, S),
 					Position = Vector3.new(wp.X, CONFIG.WallHeight / 2, wp.Z),
-					Color = isDoor and Color3.fromRGB(70, 66, 78) or Color3.fromRGB(90, 94, 105),
+					Color = Color3.fromRGB(90, 94, 105),
 					Material = Enum.Material.Slate,
 				})
 				wall.Parent = folder
-				if isDoor then doorParts[x .. "," .. y] = wall end
+				wallByKey[x .. "," .. y] = wall
 			end
 		end
 	end
+	-- En planlagt dor sitter alltid pa en vegg mellom to apne celler, altsa en snarvei og aldri
+	-- selve ruta: labyrinten er perfekt, sa eneste vei til utgangen gar utenom. Derfor er en
+	-- foreldrelos dor grusom, ikke uvinnbar -- og derfor overlevde den sa lenge. Ingenting
+	-- feiler; spilleren kaster bare bort runden pa a lete etter en bryter som ikke finnes.
 
 	-- Passasjeceller (plassering + monster-vandring) + plukk-pool
 	local passageCells = {}
@@ -1948,25 +1967,84 @@ local function buildInstance(inst)
 	end
 	local trapGen = inst.gen
 	runTrapPulse(trapCtx, function() return inst.gen == trapGen and folder.Parent ~= nil end)
-	-- Skjulte knapper (senker en SecretWall)
-	for _, c in ipairs(take(math.min(diff.buttons, 4))) do
-		local key = next(doorParts)
+	-- Skjulte knapper. Hver knapp far SIN dor her, og veggen blir forst en SecretWall nar paret
+	-- finnes -- det er dette som gjor at antallene ikke kan sprike.
+	--
+	-- Paret deler farge. For delte alle knapper samme cyan, og alle dorer samme morke lilla, sa
+	-- koblingen var usynlig: du trykket en knapp, en vegg forsvant et sted du ikke kunne se, og
+	-- fant du en hemmelig vegg visste du ikke hvilken av knappene som horte til. Na er doren
+	-- tonet mot knappens farge (svakt -- den skal fortsatt oppdages, ikke lyse), mens knappen
+	-- har fargen i fullt.
+	-- Fargene er valgt for a IKKE ligne noe annet som lyser i en helsvart labyrint. Ambient er
+	-- {0,0,0} og tavla er 45 studs, sa fargetonen er nesten alt spilleren har a ga pa. Fallgruver
+	-- som ble malt bort igjen: rav lignet bade Coin (250,205,50) og feltas GULE FORVARSEL
+	-- (255,205,60) -- en gul glod som betyr "dor" ved siden av en som betyr "dette gulvet dreper
+	-- deg om et oyeblikk"; lilla lignet Gem (170,90,240); gronn lignet Exit (60,200,90); rose
+	-- lignet LobbyDoor (210,80,80).
+	local PAIR_COLORS = {
+		{ 60, 200, 220 },  -- cyan (den opprinnelige knappefargen)
+		{ 245, 245, 255 }, -- hvit
+		{ 70, 110, 255 },  -- dypbla
+		{ 255, 90, 200 },  -- knallrosa
+	}
+	-- Parfargen ligger pa en egen del, "SecretMark", ikke pa veggen. Grunnen: alt som maler om
+	-- deler etter NAVN vil ellers vaske koblingen bort. Tema-butikka gjor nettopp det --
+	-- ShopClient.PART_FIELD mapper "SecretWall" til temaets ene `secret`-farge -- og "SecretMark"
+	-- star ikke i den tabellen, sa den blir staende uansett tema.
+	-- MERK: i dag treffer tema-omfargingen ikke live-labyrinten i det hele tatt. ShopClient og
+	-- MinimapClient leter etter workspace.MazeGame, mens buildInstance navngir mappa
+	-- "Maze_<id>" -- se linje 1804 mot 853. Det er en EGEN, storre feil (temaer og minikart-perk
+	-- er betalt for og gjor ingenting), ikke noe denne endringen innforte eller loser. Markoren
+	-- er riktig plassert uansett hvilken av dem som fikses forst.
+	-- Veggen selv beholder den klassiske hemmelig-fargen, sa temaene virker akkurat som for.
+	-- Baandet stikker bare 0.125 studs ut fra en 9x9-vegg, og en dor star alltid mellom to apne
+	-- celler, sa to av sidene er begravd i naboveggene: den leses fra de to passasje-sidene.
+	for i, c in ipairs(take(math.min(diff.buttons, 4))) do
+		local key = table.remove(plannedDoors, 1)
 		if not key then break end
-		local doorPart = doorParts[key]; doorParts[key] = nil
+		local doorPart = wallByKey[key]
+		if not doorPart then break end
+		local rgb = PAIR_COLORS[((i - 1) % #PAIR_COLORS) + 1]
+		doorPart.Name = "SecretWall"
+		doorPart.Color = Color3.fromRGB(70, 66, 78)
+
+		local mark = makePart({
+			Name = "SecretMark",
+			Size = Vector3.new(S + 0.25, 1.1, S + 0.25),
+			Position = doorPart.Position - Vector3.new(0, CONFIG.WallHeight / 2 - 1.2, 0),
+			Color = Color3.fromRGB(rgb[1], rgb[2], rgb[3]),
+			Material = Enum.Material.Neon,
+			CanCollide = false,
+			CanQuery = false,
+			CanTouch = false,
+			CastShadow = false,
+		})
+		mark.Parent = folder
+
 		local w = MazeGen.cellCenterWorld(c[1], c[2], gCols, gRows, S, origin)
 		local btn = makePart({ Name = "SecretButton", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 3, 3),
-			Color = Color3.fromRGB(60, 200, 220), Material = Enum.Material.Neon, CanCollide = false,
+			Color = Color3.fromRGB(rgb[1], rgb[2], rgb[3]), Material = Enum.Material.Neon, CanCollide = false,
 			CFrame = CFrame.new(w + Vector3.new(0, 1.5, 0)) * CFrame.Angles(0, 0, math.rad(90)) })
 		btn.Parent = folder
 		local used = false
 		btn.Touched:Connect(function(hit)
 			if used then return end
 			local plr = Players:GetPlayerFromCharacter(hit.Parent); if not plr then return end
-			used = true; btn.Color = Color3.fromRGB(30, 90, 100)
+			used = true
+			-- Brukt knapp beholder fargen sin, bare dempet, sa spilleren fortsatt kan se hvilket
+			-- par den horte til etterpa.
+			btn.Color = Color3.fromRGB(
+				math.floor(rgb[1] * 0.35), math.floor(rgb[2] * 0.35), math.floor(rgb[3] * 0.35))
 			if doorPart and doorPart.Parent then
 				doorPart.CanCollide = false
+				local drop = Vector3.new(0, CONFIG.WallHeight + 2, 0)
 				TweenService:Create(doorPart, TweenInfo.new(0.7, Enum.EasingStyle.Quad),
-					{ Position = doorPart.Position - Vector3.new(0, CONFIG.WallHeight + 2, 0) }):Play()
+					{ Position = doorPart.Position - drop }):Play()
+				-- Markoren ma synke med veggen sin, ellers henter den igjen i lufta.
+				if mark and mark.Parent then
+					TweenService:Create(mark, TweenInfo.new(0.7, Enum.EasingStyle.Quad),
+						{ Position = mark.Position - drop }):Play()
+				end
 			end
 		end)
 	end

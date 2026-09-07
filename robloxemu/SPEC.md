@@ -97,7 +97,7 @@ The harness must:
 
 **Built and working.** `wrap.py` + `emu/harness.luau` + `emu/hudcheck.luau` boot the real server
 and client scripts of all four games headless. `check_crystal.luau`, `check_plus1.luau`,
-`check_anomaly.luau`, `check_labyrint.luau` and `check_lighting.luau` are the runners; they take a
+`check_anomaly.luau`, `check_labyrint.luau`, `check_lighting.luau` and `check_secretdoors.luau` are the runners; they take a
 config table rather than command-line arguments because the luau CLI has none (every extra
 argument is another file to execute).
 
@@ -122,6 +122,15 @@ cannot tell a fade from a snap cannot catch a lighting transition that leaks inf
 `AutomaticCanvasSize`; with those pinned at zero, a correct and a broken CanvasSize expression
 evaluated identically and the shim was blind to a bug that had shipped. `typeof` is inlined by
 the compiler, so the global override never reaches game code.
+
+`check_secretdoors.luau` is the narrowest of them and the template for this kind of check: it
+seeds a DataStore profile so `startSolo`'s clamp lets it reach any level, builds ten levels, and
+asserts that the number of secret doors equals the number of buttons equals the number of pair
+marks, that the absolute count is what the difficulty curve says it should be, that the instance
+built without a warning, and that pressing a button actually drops exactly one wall. The last
+three exist because the first version passed with the feature deleted, passed with
+`buildInstance` raising (createInstance pcalls it and downgrades the failure to a warn), and
+passed with the door wired to open nothing.
 
 **Not built yet:** the scene dump, `render.py`'s integration with it, and `run_anomaly.luau`. The
 contract for both is below and unchanged.
