@@ -22,6 +22,36 @@ also carries the game roster, so it can tell which game a new thread is about, a
 Threads retire themselves too: three days with no new comment moves a thread to `dormant`, and a
 post that 404s or comes back removed moves to `closed`. Neither is fetched again.
 
+## Reddit will not serve `.json` to a datacenter
+
+The first run of this routine died on it. `https://www.reddit.com/user/<name>/submitted.json`
+answers **403** with an anti-bot challenge page from Anthropic's cloud egress, on `www` and on
+`old`, through `curl` and through WebFetch alike. The run stopped rather than varying its
+User-Agent to get around it, which is the correct call and the standing rule here: if Reddit
+blocks a path, report it and change nothing.
+
+The `.rss` feeds are served. So the routine reads those instead:
+
+| What | Feed |
+|---|---|
+| The account's own posts | `https://www.reddit.com/user/<name>/submitted.rss` |
+| One thread's comments | `https://www.reddit.com/r/<sub>/comments/<id>.rss` |
+
+They are Atom. A post entry carries `<id>` as `t3_<postid>`, `<title>`, `<link href>`,
+`<updated>` and a `<category term>` naming the subreddit. A comment entry carries
+`<author><name>`, `<content>` as escaped HTML, `<updated>` and its permalink.
+
+Two things they cost us. The feeds are **rate limited hard** - a second request fired
+immediately after the first comes back 429, so the routine sleeps at least 8 seconds between
+fetches and retries a 429 once after 30. And a comment feed is **flat**: it carries no reply
+tree, so "has the owner already answered this one" has to be inferred from whether an entry by
+the account responds to it, and a draft says so when that is unclear rather than guessing.
+
+Measured from a residential connection, `.json` is 403 there too, with the User-Agent format
+Reddit's own documentation asks for. This is not about where the request comes from; the
+unauthenticated JSON API is simply closed. The authenticated OAuth API would be the other way
+in, and it needs a registered app and a secret, which is why the feeds are worth the awkwardness.
+
 ## Files
 
 | Path | What it is |
