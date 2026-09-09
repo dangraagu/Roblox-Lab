@@ -67,3 +67,38 @@ It renders nothing, runs no `UIListLayout` positioning, and cannot measure a pan
 at boot. It prints what it did not check rather than implying full coverage. The luau CLI it runs
 on is not pinned by any manifest in this repo, so its counts cannot be reproduced from a clean
 checkout — a `rokit.toml` is the fix and has not been written.
+
+## Changing the store text (name, description)
+
+Not through Open Cloud. `PATCH /cloud/v2/universes/{id}?updateMask=description` answers **200**
+and stores nothing. Measured on 2026-09-09 across eight lengths from 200 to 1600 characters:
+every one returned 200, and a fresh GET after each returned the unchanged original. The GET on
+the same endpoint works and is the reliable way to read what is actually live, which is what
+`tools/store_text.py` uses.
+
+The endpoint that works is the one the Creator Dashboard itself calls:
+
+```
+PATCH https://develop.roblox.com/v2/universes/{universeId}/configuration
+{"description": "..."}
+```
+
+It needs the logged-in session cookie and an `x-csrf-token`, so it runs from the browser, not
+from a script with an API key. Get the token by sending the same PATCH with an empty body and
+reading `x-csrf-token` off the 403 response.
+
+Three things it will refuse:
+
+- **Over 1000 characters.** That is the dashboard field's limit. The reviewed drafts ran 1522
+  to 2005 and had to be cut.
+- **Moderation.** A rejection is `400 {"code":7,"message":"New universe name or description has
+  been rejected."}` and it names nothing. Bisect line by line against the endpoint - a rejected
+  write changes nothing, so it is safe to probe.
+- **Coloured square emoji.** Both 🟦 and 🟩 were rejected on their own, twice each, in a line
+  that passed the moment the square was removed. 🔥 👹 🏁 🛒 🎨 🎁 💎 🏆 🔦 ⚠ ⬇ ♻ 🏛 🔓 all
+  passed. This is worth knowing before spending an hour on the wording, which is what happened.
+
+**A 200 is not proof.** `store_text.py` reads the description back after every write and reports
+APPLIED only when what Roblox serves is identical to what was sent. It reports NOT APPLIED
+otherwise, which is how the silent Open Cloud no-op was caught at all - the first run of it
+claimed success on the strength of the status code.
