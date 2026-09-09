@@ -14,7 +14,20 @@ local Config = {}
 -- The catalog is ORDER-SENSITIVE: the first `StartPool` entries are the most obvious
 -- anomalies available on Day 1; deeper days unlock more (and subtler) entries. Each id
 -- is a STRING (avoids the DataStore integer-key -> string JSON round-trip trap that bit
--- the sibling games). `kind` tells the server which visual mutation to apply.
+-- the sibling games).
+--
+-- `kind` is a LABEL FOR HUMANS AND NOTHING ELSE. It used to say "kind tells the server which
+-- visual mutation to apply", which is false and cost real time: the server dispatches on `id`
+-- through the APPLIERS table, and greps for a kind therefore find only this file and look like
+-- a missing feature. Adding an entry here does NOT make it happen - it needs an APPLIERS entry
+-- under the same id, and the server refuses to start without one.
+--
+-- `hint` is the text the player is shown after a miss, so it is a promise about what they were
+-- supposed to see. Five of them used to describe something other than what the applier did -
+-- a strobe that never strobed, a clock with no face, a sign flip that was geometrically a
+-- no-op, a reflection that was never rendered, and a moon behind a dome that does not exist.
+-- In a spot-the-difference game that is not a wording problem: it teaches the player a tell
+-- that is not there. Keep hint and applier honest with each other.
 Config.Anomaly = {
 	-- Present-probability curve: P(an anomaly is injected this pass).
 	BaseChance = 0.5, -- Day 1
@@ -35,7 +48,10 @@ Config.Anomaly = {
 		{ id = "clock_stop", name = "Stopped Clock", kind = "SWAP", hint = "the wall clock reads the wrong time" },
 		-- subtler (unlock with depth)
 		{ id = "twin_scope", name = "The Twin", kind = "DUPLICATE", hint = "a duplicated telescope" },
-		{ id = "reflection_off", name = "Wrong Reflection", kind = "MIRROR", hint = "your reflection is a beat behind" },
+		-- Was "Wrong Reflection / your reflection is a beat behind". Roblox never rendered an
+		-- avatar reflection in a Reflectance surface, so a delayed one was unbuildable; what the
+		-- applier actually does is kill the reflectance and darken the glass. Named for that.
+		{ id = "reflection_off", name = "Dead Glass", kind = "MIRROR", hint = "the mirror has stopped reflecting" },
 		{ id = "flicker_hall", name = "The Flicker", kind = "FLICKER", hint = "a light strobing that shouldn't" },
 		{ id = "scale_bench", name = "Too Big", kind = "SCALE", hint = "a bench scaled larger than normal" },
 		{ id = "figure_window", name = "The Onlooker", kind = "FIGURE", hint = "a face in the observation window" },

@@ -203,6 +203,18 @@ local function makeSocket(plr, socketId)
 			tryPlant(plr, socketId)
 		end
 	end)
+	-- INTO THE WORLD. This line was missing, and its absence is why nobody could plant anything:
+	-- the Part was built, sized, positioned, named, given its attributes and handed a
+	-- ClickDetector, and then left unparented. It existed only in `socketParts` below - not in
+	-- the workspace, never replicated, and the ClickDetector could not fire from inside an
+	-- orphan. refreshSocketVisual parented the crystal to the same orphan, so growth was
+	-- invisible too. Nothing raised: an unparented Instance is silent, and the function returned
+	-- a perfectly good Part the whole time.
+	--
+	-- Parent LAST, with the ClickDetector already inside, so the socket never exists in the
+	-- world for a frame without the thing that makes it clickable.
+	part.Parent = plotsFolder
+
 	socketParts[plr] = socketParts[plr] or {}
 	socketParts[plr][socketId] = part
 	return part
