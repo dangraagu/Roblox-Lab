@@ -1,0 +1,50 @@
+[
+  {
+    "name": "maze_iso",
+    "file": "labyrint-spill/marketing/shots/promo/maze_iso.png",
+    "camera": [
+      5920.0,
+      69.5,
+      -98.5
+    ],
+    "look_at": [
+      6005.0,
+      3.5,
+      5.0
+    ],
+    "fog_lifted": true,
+    "note": "PROMOTIONAL: the fog was temporarily removed. No player sees the world lit like this."
+  },
+  {
+    "name": "maze_top",
+    "file": "labyrint-spill/marketing/shots/promo/maze_top.png",
+    "camera": [
+      6000.0,
+      139.5,
+      -10.0
+    ],
+    "look_at": [
+      6000.0,
+      -1.0,
+      0.0
+    ],
+    "fog_lifted": true,
+    "note": "PROMOTIONAL: the fog was temporarily removed. No player sees the world lit like this."
+  },
+  {
+    "name": "corridor",
+    "file": "labyrint-spill/marketing/shots/gameplay/corridor.png",
+    "camera": [
+      5951.5,
+      3.0,
+      -52.5
+    ],
+    "look_at": [
+      6000.0,
+      3.0,
+      0.0
+    ],
+    "fog_lifted": false,
+    "note": "As the game actually looks."
+  }
+]
