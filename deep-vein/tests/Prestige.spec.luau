@@ -34,9 +34,14 @@ end
 
 --============================================================================ the curves
 
-eq(Prestige.requirement(Config, 0), 30000, "the first rebirth costs 30000")
-eq(Prestige.requirement(Config, 1), math.floor(30000 * 3.2), "the second costs 3.2x that")
-eq(Prestige.requirement(Config, 2), math.floor(30000 * 3.2 ^ 2), "…and so on")
+-- The price is BaseRequirement, grown by RequirementGrowth per rebirth and then re-quoted in ore
+-- by the same multiplier that inflates every sale (see Prestige.requirement). Written out here
+-- by hand: recomputing the formula from the module would grade it against itself.
+eq(Prestige.requirement(Config, 0), 3500, "the first rebirth costs 3500")
+eq(Prestige.requirement(Config, 1), math.floor(3500 * 1.8 * 1.21), "the second is 1.21x that, times the new 1.8x multiplier")
+eq(Prestige.requirement(Config, 2), math.floor(3500 * 2.6 * 1.21 ^ 2), "…and so on")
+eq(Prestige.requirement(Config, 1), 7623, "…which is 7623 in cash")
+eq(Prestige.requirement(Config, 2), 13323, "…and 13323")
 for r = 0, 10 do
 	truthy(Prestige.requirement(Config, r + 1) > Prestige.requirement(Config, r),
 		"rebirth " .. (r + 1) .. " costs more than rebirth " .. r)
@@ -53,7 +58,7 @@ end
 do
 	local p = newProfile()
 	near(Prestige.progress(p, Config), 0, "no cash is no progress")
-	p.cash = 15000
+	p.cash = 1750
 	near(Prestige.progress(p, Config), 0.5, "half the requirement is half the bar")
 	p.cash = 99999999
 	near(Prestige.progress(p, Config), 1, "the bar is clamped at full")
@@ -68,9 +73,9 @@ do
 	local ok, reason = Prestige.canRebirth(p, Config)
 	eq(ok, false, "you cannot rebirth broke"); eq(reason, "poor", "…and it says why")
 
-	p.cash = 29999
+	p.cash = 3499
 	eq(Prestige.canRebirth(p, Config), false, "one short is still short")
-	p.cash = 30000
+	p.cash = 3500
 	local ok2, r2 = Prestige.canRebirth(p, Config)
 	eq(ok2, true, "exactly the requirement is enough"); eq(r2, "ok", "ok reason")
 
@@ -166,6 +171,59 @@ do
 	real.Prestige.RequirementGrowth = 2.0
 	truthy(Prestige.requirement(real, 3) ~= Prestige.requirement(Config, 3),
 		"the same comparison DOES notice a real change to the growth curve")
+end
+
+--=========================================================== the ladder has to be CLIMBABLE
+
+-- THE REQUIREMENT IS CHARGED AGAINST A FINITE SHAFT, so somebody has to check the two against
+-- each other. A player's only income is selling ore out of their own cave, and that cave holds a
+-- fixed, countable amount of it: once mined cells stop growing back there is no second helping.
+-- If the requirement for rebirth `r` is larger than everything the rebirth-`r` cave contains,
+-- that rebirth is not "hard", it is impossible, and every rebirth past it is unreachable too —
+-- which means the depth wall never moves, the deepest ores never appear, and the entire second
+-- half of the game is dead. Nothing in Config relates the two numbers, so this is the assertion
+-- that does.
+--
+-- The bar is 2x: a player should be able to buy the next rebirth having mined about half of
+-- their shaft, not all of it and the walls as well.
+do
+	local Mine = require("../src/shared/Mine")
+	local Ore = require("../src/shared/Ore")
+	local W = Config.Mine.GridW
+
+	-- Everything the rebirth-`r` shaft would pay out if a player mined every last cell of it.
+	local function shaftIncome(r: number): number
+		local w = Mine.world(Config, r)
+		local raw = 0
+		for y = 1, w.maxLayer do
+			for x = 2, W - 1 do
+				for z = 2, W - 1 do
+					local c = Mine.cell(Config, Ore, w, x, y, z)
+					if c.kind == "rock" then raw += Ore.value(Config, c.ore) * Ore.yieldOf(Config, c.ore) end
+				end
+			end
+		end
+		return math.floor(raw * Prestige.multiplier(Config, r))
+	end
+
+	local worst, worstAt = math.huge, -1
+	for r = 0, pc.MaxRebirths - 1 do
+		local income = shaftIncome(r)
+		local need = Prestige.requirement(Config, r)
+		local ratio = income / need
+		if ratio < worst then worst, worstAt = ratio, r end
+		truthy(ratio >= 2, "rebirth " .. r .. " is payable out of the shaft it is charged against"
+			.. " (shaft holds $" .. income .. ", rebirth costs $" .. need
+			.. ", " .. string.format("%.2f", ratio) .. "x)")
+	end
+	print(string.format("  tightest rebirth: %.2fx the whole shaft's ore, at rebirth %d", worst, worstAt))
+
+	-- CONTROL: the same comparison must be able to FAIL, or the loop above is decoration.
+	local tight = table.clone(Config)
+	tight.Prestige = table.clone(Config.Prestige)
+	tight.Prestige.BaseRequirement = Config.Prestige.BaseRequirement * 1000
+	truthy(shaftIncome(0) / Prestige.requirement(tight, 0) < 2,
+		"CONTROL: a requirement 1000x too large is caught by this comparison")
 end
 
 print(string.format("Prestige: %d passed, %d failed", passed, failed))

@@ -37,12 +37,15 @@ near(Ore.weight(Config, 2, 4), 0.070, "iron starts at its BaseWeight on its MinL
 near(Ore.weight(Config, 2, 14), 0.083, "iron gets richer with depth")
 near(Ore.weight(Config, 2, 400), 0.150, "iron is clamped to MaxWeight")
 
-eq(Ore.weight(Config, 3, 9), 0, "gold cannot appear on layer 9")
-near(Ore.weight(Config, 3, 10), 0.030, "gold starts on layer 10")
-eq(Ore.weight(Config, 4, 17), 0, "diamond cannot appear on layer 17")
-eq(Ore.weight(Config, 5, 25), 0, "obsidian cannot appear on layer 25")
-near(Ore.weight(Config, 5, 26), 0.004, "obsidian starts on layer 26")
-near(Ore.weight(Config, 5, 40), 0.0166, "obsidian gets richer with depth")
+eq(Ore.weight(Config, 3, 8), 0, "gold cannot appear on layer 8")
+near(Ore.weight(Config, 3, 9), 0.030, "gold starts on layer 9")
+eq(Ore.weight(Config, 4, 13), 0, "diamond cannot appear on layer 13")
+near(Ore.weight(Config, 4, 14), 0.020, "diamond starts on layer 14")
+-- Obsidian is the tier that shipped stranded below the rebirth-0 depth wall. It now starts at
+-- layer 19, five layers above the wall, which is what the reachability gate further down asserts.
+eq(Ore.weight(Config, 5, 18), 0, "obsidian cannot appear on layer 18")
+near(Ore.weight(Config, 5, 19), 0.008, "obsidian starts on layer 19")
+near(Ore.weight(Config, 5, 40), 0.008 + 0.0012 * 21, "obsidian gets richer with depth")
 
 eq(Ore.weight(Config, 0, 50), 0, "tier 0 is stone, not an ore, and has no weight")
 eq(Ore.weight(Config, 99, 50), 0, "an unknown tier weighs nothing rather than raising")
@@ -56,13 +59,14 @@ eq(Ore.tierAt(Config, 1, 0.150), 0, "just outside copper's band is plain stone")
 eq(Ore.tierAt(Config, 1, 0.9), 0, "most of layer 1 is plain stone")
 
 -- Layer 30, every tier live. Bands, rarest first:
---   obsidian [0, 0.0076)  diamond [0.0076, 0.0352)  gold [0.0352, 0.1012)
---   iron     [0.1012, 0.2050)  copper [0.2050, 0.2912)  stone [0.2912, 1)
+--   obsidian [0, 0.0212)  diamond [0.0212, 0.0668)  gold [0.0668, 0.1346)
+--   iron     [0.1346, 0.2384)  copper [0.2384, 0.3246)  stone [0.3246, 1)
 eq(Ore.tierAt(Config, 30, 0.001), 5, "the rarest band on layer 30 is obsidian")
-eq(Ore.tierAt(Config, 30, 0.02), 4, "diamond band on layer 30")
-eq(Ore.tierAt(Config, 30, 0.05), 3, "gold band on layer 30")
-eq(Ore.tierAt(Config, 30, 0.15), 2, "iron band on layer 30")
-eq(Ore.tierAt(Config, 30, 0.25), 1, "copper band on layer 30")
+eq(Ore.tierAt(Config, 30, 0.021), 5, "just inside obsidian's band")
+eq(Ore.tierAt(Config, 30, 0.04), 4, "diamond band on layer 30")
+eq(Ore.tierAt(Config, 30, 0.10), 3, "gold band on layer 30")
+eq(Ore.tierAt(Config, 30, 0.20), 2, "iron band on layer 30")
+eq(Ore.tierAt(Config, 30, 0.28), 1, "copper band on layer 30")
 eq(Ore.tierAt(Config, 30, 0.5), 0, "and the rest of layer 30 is stone")
 
 -- The gate has to hold for EVERY roll, not just the ones spelled out above: an ore that leaks
@@ -137,6 +141,31 @@ end
 for t = 1, MAXO do
 	truthy(Ore.value(Config, t) > Ore.value(Config, t - 1), "tier " .. t .. " is worth more than tier " .. (t - 1))
 	truthy(Ore.hardness(Config, t) > Ore.hardness(Config, t - 1), "tier " .. t .. " is harder than tier " .. (t - 1))
+end
+
+--============================================================ every tier has to be REACHABLE
+
+-- MinLayer is written in absolute layers and the depth wall is a separate constant, and nothing
+-- in the config relates the two. Obsidian shipped with MinLayer 26 against a rebirth-0 wall of
+-- 24: Ore.weight returned 0 for it at every layer a player could ever stand on, so an entire
+-- advertised tier could not spawn until after the first rebirth — and the first rebirth is the
+-- thing the deepest ore is supposed to pay for. This is the assertion that ties the two numbers
+-- together, so moving either one can never quietly strand a tier again.
+do
+	local wall = Config.Mine.BaseMaxLayer
+	for t = 1, MAXO do
+		local best, bestAt = 0, -1
+		for layer = 1, wall do
+			local w = Ore.weight(Config, t, layer)
+			if w > best then best, bestAt = w, layer end
+		end
+		truthy(best > 0, Ore.name(Config, t) .. " can spawn somewhere above the rebirth-0 depth wall"
+			.. " (MinLayer " .. tostring(oc.MinLayer[t]) .. " vs wall " .. wall
+			.. ", best weight " .. string.format("%.4f", best) .. " at layer " .. bestAt .. ")")
+		truthy(oc.MinLayer[t] <= wall, Ore.name(Config, t)
+			.. " starts at or above the rebirth-0 depth wall (MinLayer " .. tostring(oc.MinLayer[t])
+			.. ", wall " .. wall .. ")")
+	end
 end
 
 print(string.format("Ore: %d passed, %d failed", passed, failed))

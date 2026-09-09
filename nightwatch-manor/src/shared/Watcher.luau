@@ -142,8 +142,18 @@ function Watcher.dread(elapsed: number, total: number): number
 	return clamp(elapsed / total, 0, 1)
 end
 
--- Studs per second. Never returns zero or less: an upgrade stack that froze the watcher solid
--- would delete the only threat in the game, so the slow is capped and then floored.
+-- Studs per second, BOUNDED AT BOTH ENDS AGAINST THINGS THAT WOULD END THE GAME.
+--
+-- Floor: an upgrade stack that froze the watcher solid would delete the only threat there is.
+--
+-- Ceiling: `MaxSpeedFraction * cfg.Player.WalkSpeed`. This one is the important one, and it is
+-- deliberately expressed against the PLAYER rather than as another absolute number. The speed of
+-- a pursuer only means anything relative to what it is pursuing: at 15.95 studs/s against a
+-- player fixed at 16 the Nightwatcher was already faster from 0.8 seconds into night one, so
+-- being seen was being caught on every night, forever, with no counterplay — and the whole suite
+-- stayed green through it, because nothing in it knew what the player's speed was. A bare
+-- constant here can be retuned back into that state at any value; a fraction of the player's own
+-- speed cannot. The ceiling is applied LAST so it always wins.
 function Watcher.speed(cfg: any, dread: number, watcherSlow: number, hunting: boolean): number
 	local W = cfg.Watcher
 	local s = (W.BaseSpeed + W.SpeedPerDread * clamp(dread, 0, 1)) * (1 - clamp(watcherSlow, 0, 1))
@@ -153,6 +163,10 @@ function Watcher.speed(cfg: any, dread: number, watcherSlow: number, hunting: bo
 	local floor = W.BaseSpeed * 0.15
 	if s < floor then
 		s = floor
+	end
+	local ceiling = cfg.Player.WalkSpeed * W.MaxSpeedFraction
+	if s > ceiling then
+		s = ceiling
 	end
 	return s
 end

@@ -51,6 +51,8 @@ local RUN_SEED = 4 -- inscriptions lie on floors 4, 6 and 8
 local LIAR_FLOORS = { [4] = true, [6] = true, [8] = true }
 
 local READER, NAIVE, LATE = 5150, 6161, 7171
+local HAZARD_COOLDOWN = 1 -- Config.Limits.HazardCooldown
+local Config_SaveMinInterval = 6 -- Config.Limits.SaveMinInterval
 
 --============================================================================ seeded profiles
 
@@ -489,13 +491,457 @@ do
 	h:advance(1)
 end
 
---============================================================================ done
+--============================================================================ REVIEW FINDING 1
+-- A tower has to stay inside its own lane.
+--
+-- Each section's exit X became the next floor's fork origin, so ten floors of left/right steps
+-- accumulated with nothing bounding them. Measured in this world: two players on run seed 39, one
+-- playing safe and one taking every trap, ended with `Lane_0 SummitPad <-> Lane_1 Plat_8_4`
+-- intersecting — 47 studs of overlap between two strangers' towers. Chaining the generator over
+-- 500 floors reached 2942 studs of drift against a 220-stud lane.
+--
+-- Measured here from the LOBBY PAD's X rather than from a lane-index formula, so the assertion
+-- survives any change to how lanes are laid out.
+
+local DRIFT_A, DRIFT_B = 3901, 3902
+local LANE_SPACING = 220 -- Config.World.LaneSpacing
+
+local function seedProfileAt(uid, runSeed)
+	store:SetAsync("u_" .. uid, {
+		data = {
+			runSeed = runSeed, level = 1, stage = "fork", picks = {}, slots = {},
+			skips = 0, rebirths = 0, bestScore = 0, bestTitle = "", redeemed = {}, passes = {},
+		},
+	})
+end
+
+local function bounds(node)
+	local minx, maxx, miny = math.huge, -math.huge, math.huge
+	local function walk(x)
+		for _, c in x:GetChildren() do
+			if c:IsA("BasePart") then
+				local p, s = c.Position, c.Size
+				minx = math.min(minx, p.X - s.X / 2)
+				maxx = math.max(maxx, p.X + s.X / 2)
+				miny = math.min(miny, p.Y)
+			end
+			walk(c)
+		end
+	end
+	walk(node)
+	return minx, maxx, miny
+end
+
+do
+	seedProfileAt(DRIFT_A, 39)
+	seedProfileAt(DRIFT_B, 39)
+	local safe = h:join("DriftSafe", DRIFT_A)
+	h:advance(1)
+	h.Players:simulateSpawn(safe, h.workspace)
+	local greedy = h:join("DriftTrap", DRIFT_B)
+	h:advance(1)
+	h.Players:simulateSpawn(greedy, h.workspace)
+	h:advance(1)
+
+	local safeLane, greedyLane = laneOf(safe), laneOf(greedy)
+	truthy(safeLane ~= nil and greedyLane ~= nil, "both drift players got a lane")
+
+	-- Same seed, opposite strategies: the two ways a run's X can walk.
+	for level = 1, FLOORS do
+		local f1 = readFork(safeLane, level)
+		if f1 then choose(safe, safeLane, level, 3 - f1.trap); climb(safe, safeLane, level) end
+		local f2 = readFork(greedyLane, level)
+		if f2 then choose(greedy, greedyLane, level, f2.trap); climb(greedy, greedyLane, level) end
+	end
+	truthy(safeLane:FindFirstChild("Summit") ~= nil, "the safe drift player summited")
+	truthy(greedyLane:FindFirstChild("Summit") ~= nil, "the trap-taking drift player summited")
+
+	-- Every part of every lane in the world, against its own lane's centre line.
+	local worst, worstLane = 0, ""
+	for _, lane in towers:GetChildren() do
+		local lobby = lane:FindFirstChild("LobbyPad")
+		if lobby then
+			local centre = lobby.Position.X
+			local lo, hi = bounds(lane)
+			local off = math.max(math.abs(lo - centre), math.abs(hi - centre))
+			if off > worst then worst, worstLane = off, tostring(lane.Name) end
+		end
+	end
+	truthy(worst <= LANE_SPACING / 2, string.format(
+		"no tower reaches outside its own %d-stud lane slot (worst %.1f studs, %s)",
+		LANE_SPACING, worst, worstLane))
+
+	-- And the consequence, stated directly: no two towers share any X at all.
+	local spans = {}
+	for _, lane in towers:GetChildren() do
+		local lo, hi = bounds(lane)
+		if lo < math.huge then spans[#spans + 1] = { lo = lo, hi = hi, name = tostring(lane.Name) } end
+	end
+	local overlaps = {}
+	for i = 1, #spans do
+		for j = i + 1, #spans do
+			local a, b = spans[i], spans[j]
+			if a.lo < b.hi and b.lo < a.hi then
+				overlaps[#overlaps + 1] = a.name .. "/" .. b.name
+			end
+		end
+	end
+	eq(#overlaps, 0, "no two towers overlap in X (" .. table.concat(overlaps, " ") .. ")")
+end
+
+--============================================================================ REVIEW FINDING 3
+-- The checkpoint a hazard hands you must not be inside that hazard.
+
+do
+	local CHAR_HALF = 2 -- Config.World.CharacterHalfWidth; a Roblox character is 4 studs wide
+	local lane = laneOf(h.Players:GetPlayerByUserId(DRIFT_B))
+	local plr = h.Players:GetPlayerByUserId(DRIFT_B)
+	local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+	local notice = h.ReplicatedStorage:FindFirstChild("ForkRemotes"):FindFirstChild("Notice")
+
+	local measured, pinned, worstGap = 0, 0, math.huge
+	for level = 2, FLOORS do
+		local sec = sectionOf(lane, level)
+		if sec and hrp then
+			for _, hz in sec:GetChildren() do
+				local platIndex = hz:GetAttribute("Platform")
+				local plat = platIndex and sec:FindFirstChild("Plat_" .. level .. "_" .. platIndex)
+				if plat then
+					-- Land on the platform the hazard stands on: that is the checkpoint it will
+					-- hand back. Then touch the hazard, exactly as a player does.
+					plat.Touched:Fire(hrp)
+					h:advance(0.1)
+					hz.Touched:Fire(hrp)
+					h:advance(0.1)
+					measured += 1
+					local gx = math.abs(hrp.Position.X - hz.Position.X) - (hz.Size.X / 2 + CHAR_HALF)
+					local gz = math.abs(hrp.Position.Z - hz.Position.Z) - (hz.Size.Z / 2 + CHAR_HALF)
+					local gap = math.max(gx, gz)
+					if gap < worstGap then worstGap = gap end
+					if gap < 0 then pinned += 1 end
+					h:advance(HAZARD_COOLDOWN)
+				end
+			end
+		end
+	end
+	truthy(measured > 0, "there were hazards to walk into (the check is not vacuous)")
+	eq(pinned, 0, string.format(
+		"touching a hazard never returns the player INTO it (%d of %d, worst clearance %.2f studs)",
+		pinned, measured, worstGap))
+
+	-- Touched fires many times per contact. Without a cooldown every one of them is another
+	-- teleport mid-teleport and another Notice down the wire.
+	if hrp then
+		local sec = sectionOf(lane, 3) or sectionOf(lane, 2)
+		local hz = nil
+		for _, c in sec:GetChildren() do
+			if c:GetAttribute("Hazard") ~= nil and hz == nil then hz = c end
+		end
+		if hz then
+			h:advance(HAZARD_COOLDOWN)
+			local before = #notice:sentTo(plr)
+			for _ = 1, 40 do
+				hz.Touched:Fire(hrp)
+			end
+			h:advance(0.1)
+			local sent = #notice:sentTo(plr) - before
+			truthy(sent <= 2, string.format(
+				"forty Touched fires in one contact cost the client %d notices, not forty", sent))
+		end
+	end
+end
+
+--============================================================================ REVIEW FINDING 5
+-- Answering a fork with no character must not spend the floor and strand the run.
+
+do
+	local GHOST = 3903
+	seedProfileAt(GHOST, 4)
+	local ghost = h:join("Ghost", GHOST)
+	h:advance(1)
+	-- Deliberately NOT spawned: exactly the state between a Reset and the next CharacterAdded.
+	local lane = laneOf(ghost)
+	truthy(lane ~= nil, "a character-less player still gets a lane")
+	truthy(ghost.Character == nil, "...and really has no character (the check is not vacuous)")
+
+	local fork = readFork(lane, 1)
+	choose(ghost, lane, 1, 3 - fork.trap)
+	local sec = sectionOf(lane, 1)
+	truthy(sec ~= nil, "the fork was answered")
+
+	h.Players:simulateSpawn(ghost, h.workspace)
+	h:advance(1)
+	local hrp = ghost.Character:FindFirstChild("HumanoidRootPart")
+	local first = sec and sec:FindFirstChild("Plat_1_1")
+	local pad = padOf(lane, 1)
+	if hrp and first and pad then
+		local dPlat = math.sqrt((hrp.Position.X - first.Position.X) ^ 2 + (hrp.Position.Z - first.Position.Z) ^ 2)
+		local dPad = math.sqrt((hrp.Position.X - pad.Position.X) ^ 2 + (hrp.Position.Z - pad.Position.Z) ^ 2)
+		truthy(dPlat < 1, string.format(
+			"a player who spawns AFTER answering a fork stands on their new section (%.1f studs from platform 1)", dPlat))
+		truthy(dPad > dPlat, string.format(
+			"...and not stranded on the spent fork pad (%.1f studs away from it)", dPad))
+	else
+		failed += 1
+		print("FAIL: the ghost run built nothing to stand on")
+	end
+	h:leave(ghost)
+	h:advance(1)
+end
+
+--============================================================================ REVIEW FINDING 4
+-- Rebirth is a button. It must not be a DataStore drain.
+
+do
+	local plr = h.Players:GetPlayerByUserId(DRIFT_A)
+	local rebirth = h.ReplicatedStorage:FindFirstChild("ForkRemotes"):FindFirstChild("Rebirth")
+	local ls = plr:FindFirstChild("leaderstats")
+	local rb = ls and ls:FindFirstChild("Rebirths")
+
+	local notice = h.ReplicatedStorage:FindFirstChild("ForkRemotes"):FindFirstChild("Notice")
+	local callsBefore = store.__calls
+	local noticesBefore = #notice:sentTo(plr)
+	local rbBefore = rb and rb.Value or 0
+	for _ = 1, 200 do
+		rebirth:simulateFireServer(plr)
+	end
+	h:advance(0.1)
+	local refusals = #notice:sentTo(plr) - noticesBefore
+	local calls = store.__calls - callsBefore
+	local granted = (rb and rb.Value or 0) - rbBefore
+
+	truthy(granted <= 2, string.format(
+		"200 Rebirth fires in one frame granted %d rebirths, not 200", granted))
+	truthy(calls <= 4, string.format(
+		"...and cost %d DataStore calls, not 200 (the whole server's minute budget)", calls))
+	-- And the REFUSAL must not become the amplifier. Answering every fire with a Notice would
+	-- send 199 remotes back at exactly the rate they arrived.
+	truthy(refusals <= 4, string.format(
+		"...and answered them with %d messages, not one refusal per fire", refusals))
+
+	local myLanes = 0
+	for _, f in towers:GetChildren() do
+		if f:GetAttribute("Owner") == plr.UserId then myLanes += 1 end
+	end
+	eq(myLanes, 1, "...and left the player exactly one tower")
+
+	-- The button still works when it is not being held down.
+	h:advance(10)
+	rebirth:simulateFireServer(plr)
+	h:advance(0.1)
+	eq((rb and rb.Value or 0), rbBefore + granted + 1,
+		"CONTROL: a rebirth after the cooldown is still granted (the throttle is not a wall)")
+end
+
+--============================================================================ REVIEW FINDING 4, second half
+-- The Rebirth cooldown above caps ONE remote. The budget it protects is spent by every write
+-- path, so the throttle that matters is on the write itself: a DataStore write comes out of a
+-- per-SERVER allowance of 60 + 10 per player per minute, and one player's ordinary ten-floor run
+-- used to spend twenty of them — one per door answered, one per floor cleared. Fill a server with
+-- climbers and the autosaves and the 45-second session-lock refreshes start losing the race, which
+-- silently flips other players to read-only.
+
+do
+	local SAVER = 3904
+	seedProfileAt(SAVER, 4)
+	local plr = h:join("Saver", SAVER)
+	h:advance(1)
+	h.Players:simulateSpawn(plr, h.workspace)
+	h:advance(1)
+	local lane = laneOf(plr)
+
+	local before = store.__calls
+	for level = 1, FLOORS do
+		local f = readFork(lane, level)
+		if f then
+			choose(plr, lane, level, 3 - f.trap)
+			climb(plr, lane, level)
+		end
+	end
+	local calls = store.__calls - before
+	truthy(lane:FindFirstChild("Summit") ~= nil, "the saver summited (the measurement is not vacuous)")
+	truthy(calls <= 8, string.format(
+		"a whole ten-floor run cost %d DataStore writes, not one per door plus one per floor", calls))
+
+	-- The ordered leaderboard is a SECOND store and a second budget, and bestScore only moves once
+	-- per summit — so re-publishing it on every save was another write per save buying nothing.
+	local lb = h.services.DataStoreService:GetOrderedDataStore("ForkTower_LB_v1")
+	local summited = 0
+	for _, other in h.Players:GetPlayers() do
+		local ols = other:FindFirstChild("leaderstats")
+		local best = ols and ols:FindFirstChild("Best")
+		if best and best.Value > 0 then summited += 1 end
+	end
+	local lbBefore = lb.__calls
+	h:advance(21) -- one autosave round for everybody in the server
+	local lbCalls = lb.__calls - lbBefore
+	truthy(summited >= 3, string.format(
+		"%d players in this server have a banked score (the measurement is not vacuous)", summited))
+	truthy(lbCalls < summited, string.format(
+		"one autosave round cost %d leaderboard calls, fewer than the %d players holding a score",
+		lbCalls, summited))
+
+	-- And coalescing must not EAT the run. Leaving forces the write through; rejoining reads it
+	-- back. Without this, the assertion above could be satisfied by a server that simply stopped
+	-- saving, which is a far worse bug than the one it was fixing.
+	h:leave(plr)
+	h:advance(1)
+	local back = h:join("SaverAgain", SAVER)
+	h:advance(1)
+	local ls = back:FindFirstChild("leaderstats")
+	local floorVal = ls and ls:FindFirstChild("Floor")
+	eq(floorVal and floorVal.Value, FLOORS,
+		"...and the coalesced run came back whole after leaving and rejoining")
+	h:leave(back)
+	h:advance(1)
+end
+
+--============================================================================ normal play warned nothing
 
 print("")
 for _, w in h.warnings do
 	print("server warned: " .. w)
 end
 eq(#h.warnings, 0, "the server built every tower without a single warning")
+
+--============================================================================ REVIEW FINDING 2
+-- More players than lanes must not mean two players in one tower.
+--
+-- claimLane returned 0 when every lane was taken, without signalling failure, so the 25th player
+-- got a tower at player 1's exact coordinates. Measured before the fix: 27 joins produced
+-- `Lane_0 x4` — four complete towers at identical coordinates, zero server errors, nothing warned.
+-- teardownLane then freed that index when the overflow player left, even though the original
+-- owner was still standing in it, so the collision spread.
+
+do
+	local crowd = {}
+	for i = 1, 30 do
+		crowd[i] = h:join("Crowd" .. i, 41000 + i)
+		h:advance(0.2)
+	end
+	h:advance(1)
+
+	local seen, dupes = {}, {}
+	for _, f in towers:GetChildren() do
+		local n = tostring(f.Name)
+		if seen[n] then dupes[#dupes + 1] = n end
+		seen[n] = true
+	end
+	eq(#dupes, 0, "no two towers share a lane index (" .. table.concat(dupes, ",") .. ")")
+
+	local spots, stacked = {}, {}
+	for _, f in towers:GetChildren() do
+		local lobby = f:FindFirstChild("LobbyPad")
+		if lobby then
+			local at = string.format("%.1f", lobby.Position.X)
+			if spots[at] then stacked[#stacked + 1] = at end
+			spots[at] = true
+		end
+	end
+	eq(#stacked, 0, "no two towers stand at the same world position (" .. table.concat(stacked, ",") .. ")")
+
+	-- One owner per lane, and one lane per owner.
+	local owners, twoLanes = {}, 0
+	for _, f in towers:GetChildren() do
+		local o = f:GetAttribute("Owner")
+		if o ~= nil then
+			if owners[o] then twoLanes += 1 end
+			owners[o] = true
+		end
+	end
+	eq(twoLanes, 0, "nobody owns two towers")
+
+	-- The freed-index cascade: an overflow player leaving must not hand their index to somebody
+	-- who is standing in it.
+	local victimLane = nil
+	for _, f in towers:GetChildren() do
+		if victimLane == nil and f:FindFirstChild("LobbyPad") then victimLane = f end
+	end
+	local victimName = victimLane and tostring(victimLane.Name)
+	h:leave(crowd[30])
+	h:advance(1)
+	h:leave(crowd[29])
+	h:advance(1)
+	local newcomer = h:join("Newcomer", 41999)
+	h:advance(1)
+	local stillThere = 0
+	for _, f in towers:GetChildren() do
+		if tostring(f.Name) == victimName then stillThere += 1 end
+	end
+	eq(stillThere, 1, "the lane an occupied player is standing in was not handed to anybody else")
+	truthy(newcomer ~= nil, "...and the newcomer still joined")
+
+	local seen2, dupes2 = {}, {}
+	for _, f in towers:GetChildren() do
+		local n = tostring(f.Name)
+		if seen2[n] then dupes2[#dupes2 + 1] = n end
+		seen2[n] = true
+	end
+	eq(#dupes2, 0, "...and still no two towers share an index after the churn")
+
+	-- Anyone the server could not seat has to be TOLD, not dropped into the void.
+	local notice = h.ReplicatedStorage:FindFirstChild("ForkRemotes"):FindFirstChild("Notice")
+	local seated, unseated, told = 0, 0, 0
+	for _, plr in h.Players:GetPlayers() do
+		if laneOf(plr) ~= nil then
+			seated += 1
+		else
+			unseated += 1
+			local wasTold = false
+			for _, msg in notice:sentTo(plr) do
+				local a = msg.args and msg.args[1]
+				if type(a) == "table" and a.kind == "full" then wasTold = true end
+			end
+			if wasTold then told += 1 end
+		end
+	end
+	print(string.format("  crowd: %d players seated, %d unseated", seated, unseated))
+	eq(told, unseated, "every player the server had no lane for was told so")
+	truthy(seated > 0, "...and the ones it did have room for are playing")
+
+	-- A player without a lane must still be told, at a moment their HUD is listening, and must
+	-- still land on something solid.
+	local orphan = nil
+	for _, plr in h.Players:GetPlayers() do
+		if orphan == nil and laneOf(plr) == nil then orphan = plr end
+	end
+	if orphan then
+		local said = #notice:sentTo(orphan)
+		h.Players:simulateSpawn(orphan, h.workspace)
+		h:advance(1)
+		truthy(#notice:sentTo(orphan) > said,
+			"an unseated player is told AGAIN once their character exists, because the first "
+				.. "message went out before their HUD could have connected")
+	end
+
+	-- HOUSE RULE, learned in this repo hours ago: a world whose only spawn points are disabled
+	-- makes Roblox drop the character wherever it likes — the roof of a sealed shell, or in this
+	-- game the empty air at the world origin. Every LANE spawn here is Enabled = false on purpose
+	-- (the server places you on your checkpoint itself), so exactly one real one has to exist
+	-- outside them, standing on something.
+	local enabled = {}
+	local function scan(x)
+		for _, c in x:GetChildren() do
+			if c.ClassName == "SpawnLocation" and c.Enabled == true then enabled[#enabled + 1] = c end
+			scan(c)
+		end
+	end
+	scan(h.workspace)
+	truthy(#enabled >= 1, string.format("the place has a real, ENABLED SpawnLocation (found %d)", #enabled))
+	local wait = h.workspace:FindFirstChild("Waiting")
+	local pad = wait and wait:FindFirstChild("WaitingPad")
+	truthy(pad ~= nil, "...and a waiting pad outside every lane to put it on")
+	if pad and enabled[1] then
+		local sp = enabled[1]
+		local onPad = math.abs(sp.Position.X - pad.Position.X) <= pad.Size.X / 2
+			and math.abs(sp.Position.Z - pad.Position.Z) <= pad.Size.Z / 2
+			and sp.Position.Y > pad.Position.Y
+		truthy(onPad, "...and the spawn really stands on that pad rather than beside it")
+	end
+end
+
+--============================================================================ done
+
 for _, e in h:errors() do
 	print("scheduler error: " .. e)
 	failed += 1

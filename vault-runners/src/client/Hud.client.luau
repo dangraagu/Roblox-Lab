@@ -106,14 +106,22 @@ end
 
 --============================================================================ the pieces
 
+-- The design sizes of the two top-edge panels, named ONCE. They were literals here and again
+-- (implicitly) in applyLayout, which is how the wallet and the timer came to overlap by 109
+-- design px on a portrait phone with nothing in the repo able to notice: the layout pass had no
+-- idea how wide either of them was.
+local MARGIN = 14
+local WALLET_W, WALLET_H = 300, 62
+local TIMER_W, TIMER_H = 280, 92
+
 -- Wallet: top-left, never tappable, never in the way.
-local wallet = panel("Wallet", UDim2.fromOffset(300, 62), UDim2.fromOffset(14, 14))
+local wallet = panel("Wallet", UDim2.fromOffset(WALLET_W, WALLET_H), UDim2.fromOffset(MARGIN, MARGIN))
 local walletGems = text(wallet, "Gems", UDim2.new(1, -20, 0, 26), UDim2.fromOffset(12, 6), "💎 0", 20, ACCENT)
 local walletSub = text(wallet, "Sub", UDim2.new(1, -20, 0, 20), UDim2.fromOffset(12, 32),
 	"🏆 0 banked   🐾 x1.00", 14, Color3.fromRGB(190, 188, 205))
 
 -- The collapse clock: dead centre at the top, the only thing that matters mid-run.
-local timer = panel("Timer", UDim2.fromOffset(280, 92), UDim2.new(0.5, 0, 0, 14), Vector2.new(0.5, 0))
+local timer = panel("Timer", UDim2.fromOffset(TIMER_W, TIMER_H), UDim2.new(0.5, 0, 0, MARGIN), Vector2.new(0.5, 0))
 local timerBig = text(timer, "Seconds", UDim2.new(1, -20, 0, 44), UDim2.fromOffset(10, 4),
 	"70.0", 40, ACCENT, Enum.TextXAlignment.Center)
 local timerSub = text(timer, "Detail", UDim2.new(1, -20, 0, 20), UDim2.fromOffset(10, 48),
@@ -257,9 +265,36 @@ local function applyLayout()
 	vaultPanel.Visible = not inRun and ((not layout.compact) or vaultOpen)
 	petPanel.Visible = not inRun and ((not layout.compact) or petOpen)
 
-	toast.Position = UDim2.new(0.5, 0, 0, layout.compact and 96 or 118)
-	toast.Size = UDim2.new(0, math.min(520, math.floor(v.X / layout.scale) - 28), 0, 30)
-	wallet.Size = UDim2.fromOffset(math.min(300, math.floor(v.X / layout.scale) - 28), 62)
+	-- THE TOP EDGE, LAID OUT INSTEAD OF ASSUMED.
+	--
+	-- The wallet is left-aligned and the collapse timer is centred, and on a narrow screen those
+	-- two claims collide: under the UIScale the root is (viewport / scale) design px wide, so at
+	-- 414x800 the design width is 690, the wallet spans 14..314 and the timer 205..485. 109 px of
+	-- the gem count and the pet multiplier sat underneath the clock — and the timer is built
+	-- second, so it drew on top — during the only part of the game where either number matters.
+	--
+	-- Mid-run the timer is the thing the player is actually reading, so it keeps the top-centre
+	-- slot and the WALLET moves. The condition is measured, not guessed at from `compact`: a
+	-- window is narrow when these two specific panels do not both fit across it.
+	local designW = math.floor(v.X / layout.scale)
+	local walletW = math.min(WALLET_W, designW - 2 * MARGIN)
+	local timerW = math.min(TIMER_W, designW - 2 * MARGIN)
+	timer.Size = UDim2.fromOffset(timerW, TIMER_H)
+	wallet.Size = UDim2.fromOffset(walletW, WALLET_H)
+
+	local timerLeft = designW / 2 - timerW / 2
+	-- `timer.Visible`, not `inRun`: it is the visible panel that can cover something, and the two
+	-- are set together by the Run handler. Basing it on inRun would move the wallet for a state
+	-- push that arrives before the run's start event.
+	local stacked = timer.Visible and (MARGIN + walletW + 8 > timerLeft)
+	local walletY = stacked and (MARGIN + TIMER_H + 8) or MARGIN
+	wallet.Position = UDim2.fromOffset(MARGIN, walletY)
+
+	-- ...and the toast clears whatever ended up lowest, rather than a number that happened to be
+	-- under the old layout.
+	local topUsed = math.max(walletY + WALLET_H, timer.Visible and (MARGIN + TIMER_H) or 0)
+	toast.Position = UDim2.new(0.5, 0, 0, math.max(layout.compact and 96 or 118, topUsed + 8))
+	toast.Size = UDim2.new(0, math.min(520, designW - 2 * MARGIN), 0, 30)
 	syncCanvas()
 end
 

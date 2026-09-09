@@ -55,12 +55,39 @@ end
 
 --=========================================================================== size / count curves
 
-eq(Manor.roomCount(Config, 1, 0), M.BaseRooms, "night 1 with no hub == BaseRooms")
-truthy(Manor.roomCount(Config, 10, 0) > Manor.roomCount(Config, 1, 0), "the manor grows with the night")
-truthy(Manor.roomCount(Config, 1, 10) > Manor.roomCount(Config, 1, 0), "the manor grows with hub level")
-eq(Manor.roomCount(Config, 100000, 100000), M.MaxRooms, "room count clamps at MaxRooms")
-truthy(Manor.roomCount(Config, 0, 0) >= 2, "there is always room for an entrance and an exit")
-truthy(Manor.roomCount(Config, -5, -5) >= 2, "negative inputs cannot shrink it below 2")
+eq(Manor.roomCount(Config, 1), M.BaseRooms, "night 1 == BaseRooms")
+truthy(Manor.roomCount(Config, 10) > Manor.roomCount(Config, 1), "the manor grows with the night")
+eq(Manor.roomCount(Config, 100000), M.MaxRooms, "room count clamps at MaxRooms")
+truthy(Manor.roomCount(Config, 0) >= 2, "there is always room for an entrance and an exit")
+truthy(Manor.roomCount(Config, -5) >= 2, "negative inputs cannot shrink it below 2")
+
+-- THE headline claim, asserted as a property rather than as prose: night N is the same manor for
+-- everybody. It was FALSE. `roomCount` folded in the player's hub level, so every upgrade anybody
+-- bought quietly grew their manor, moved the exit and re-rolled the relics — and since the exit is
+-- always the DEEPEST room, every purchase in a tycoon game silently lengthened the walk out.
+-- Nothing but the seed may reach the layout, so a stray extra argument has to change nothing.
+do
+	local function signature(plan)
+		local out = {}
+		for _, r in plan.rooms do
+			table.insert(out, string.format("%d:%s@%d,%d", r.id, r.kind, r.gx, r.gz))
+		end
+		table.insert(out, "exit=" .. tostring(plan.exitId))
+		for _, s in plan.relics do
+			table.insert(out, string.format("r%d/%d:%s", s.roomId, s.slot, s.tier))
+		end
+		for _, id in plan.patrol do
+			table.insert(out, "p" .. tostring(id))
+		end
+		return table.concat(out, "|")
+	end
+	for _, night in { 1, 7, 14 } do
+		local fresh = Manor.plan(Rng.new(Manor.seedFor(Config, night)), Config, night)
+		local veteran = Manor.plan(Rng.new(Manor.seedFor(Config, night)), Config, night, 12)
+		eq(signature(veteran), signature(fresh),
+			"night " .. night .. " is the SAME manor for a hub-level-12 player as for a brand new one")
+	end
+end
 
 eq(Manor.relicCount(Config, 1), Config.Relics.Base, "night 1 relic count == Base")
 truthy(Manor.relicCount(Config, 12) > Manor.relicCount(Config, 1), "more relics on later nights")
@@ -74,12 +101,15 @@ truthy(Manor.patrolCount(Config, 100000, 3) <= 3, "the patrol can never be longe
 --=================================================================================== the plan
 
 local function planFor(night, hub)
-	return Manor.plan(Rng.new(Manor.seedFor(Config, night)), Config, night, hub or 0)
+	return Manor.plan(Rng.new(Manor.seedFor(Config, night)), Config, night)
 end
 
 local plan = planFor(1)
 
-eq(#plan.rooms, Manor.roomCount(Config, 1, 0), "the plan holds exactly roomCount rooms")
+-- roomCount is the TARGET the manor is grown to; the dead-end repair pass may then add up to
+-- MaxRepairRooms more while closing one-door rooms, and nothing else may.
+truthy(#plan.rooms >= Manor.roomCount(Config, 1), "the plan holds at least roomCount rooms")
+truthy(#plan.rooms <= Manor.roomCount(Config, 1) + M.MaxRepairRooms, "...and never more than the repair budget on top")
 eq(plan.night, 1, "the plan remembers its night")
 
 -- Determinism: same seed, same manor. This is the entire claim behind "night 7 is night 7
@@ -317,7 +347,7 @@ do
 	local before = Manor.kindById(Config, "cellar").name
 	Manor.kindById(Config, "cellar").name = "Wine Cellar"
 	local p = planFor(4)
-	local ok = #p.rooms == Manor.roomCount(Config, 4, 0) and p.exitId ~= p.entranceId
+	local ok = #p.rooms >= Manor.roomCount(Config, 4) and p.exitId ~= p.entranceId
 		and #p.relics == Manor.relicCount(Config, 4)
 	Manor.kindById(Config, "cellar").name = before
 	truthy(ok, "CONTROL: renaming a room kind changes nothing structural")

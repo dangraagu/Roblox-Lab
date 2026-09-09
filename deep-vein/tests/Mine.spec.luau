@@ -245,6 +245,38 @@ do
 	truthy(biggest <= M.RevealBudget, "no void is larger than one reveal may flood through")
 end
 
+do
+	-- CENSUS OF THE SHAFT A NEW PLAYER ACTUALLY GETS. Ore.spec proves the weight table lets each
+	-- tier spawn above the depth wall; this proves the cave built from it CONTAINS some. A tier
+	-- can be legal and still absent — the rebirth-0 shaft is only 24 layers of a 9x9 grid, so a
+	-- tier that only becomes likely below the wall is a tier a pre-rebirth player will hunt for,
+	-- fail to find, and conclude is broken. Obsidian shipped at exactly zero cells.
+	local counts = { [0] = 0, 0, 0, 0, 0, 0 }
+	local rock = 0
+	for y = 1, w0.maxLayer do
+		for x = 2, W - 1 do
+			for z = 2, W - 1 do
+				local c = Mine.cell(Config, Ore, w0, x, y, z)
+				if c.kind == "rock" then
+					rock += 1
+					counts[c.ore] += 1
+				end
+			end
+		end
+	end
+	local line = ""
+	for t = 0, Config.MaxOre do line ..= " " .. Ore.name(Config, t) .. "=" .. counts[t] end
+	print(string.format("  rebirth-0 shaft: %d rock cells;%s", rock, line))
+	for t = 1, Config.MaxOre do
+		truthy(counts[t] >= 3, Ore.name(Config, t) .. " actually occurs in the rebirth-0 shaft ("
+			.. counts[t] .. " cells in " .. rock .. " rock)")
+	end
+	-- CONTROL: the census can tell tiers apart, so "every tier >= 3" cannot pass by counting
+	-- everything as one tier.
+	truthy(counts[1] > counts[5], "CONTROL: the census still ranks common above rare")
+	truthy(counts[0] > 0, "CONTROL: plain stone is still the bulk of the shaft")
+end
+
 --============================================================================ 5. cells and yields
 
 do
@@ -390,6 +422,68 @@ do
 	local reAir = 0
 	for _, c in r.air do if opened[c.key] then reAir += 1 end end
 	eq(reAir, 0, "reveal never re-reports a cell the caller already has open")
+end
+
+do
+	-- MINED BLOCKS MUST NOT GROW BACK, and this is the assertion that says so.
+	--
+	-- The generator is STATELESS on purpose: kindAt calls a mined cell "rock" forever, because a
+	-- cell's contents must not depend on when it was first looked at. That makes `opened` the
+	-- ONLY record that a block has been dug out — and the solids half of reveal has to consult it
+	-- exactly like the air half already does (see the reAir assertion above). Without that, the
+	-- moment a player breaks any of the 26 neighbours of a cell they already mined, the mined cell
+	-- is collected as a visible solid again; the server has no Part for it any more, so it builds
+	-- a fresh one at full hit points with a fresh ore payload. That is an unbounded currency
+	-- printer on the first block of the game, and a ceiling that reseals over a player digging
+	-- down.
+	local opened = {}
+	opened[Mine.key(5, 0, 5)] = true
+	local mouth = Mine.reveal(Config, Ore, w0, opened, 5, 0, 5)
+	for _, c in mouth.air do opened[c.key] = true end
+
+	eq(Mine.kindAt(Config, w0, 5, 1, 5), "rock", "the block under the spawn is rock to begin with")
+	eq(Mine.kindAt(Config, w0, 4, 1, 5), "rock", "…and so is its neighbour")
+
+	opened[Mine.key(5, 1, 5)] = true -- mine it
+	local afterFirst = Mine.reveal(Config, Ore, w0, opened, 5, 1, 5)
+	for _, c in afterFirst.air do opened[c.key] = true end
+
+	opened[Mine.key(4, 1, 5)] = true -- now mine the neighbour
+	local r = Mine.reveal(Config, Ore, w0, opened, 4, 1, 5)
+
+	local resurrected = {}
+	for _, c in r.solids do
+		if opened[c.key] then resurrected[#resurrected + 1] = c.key end
+	end
+	eq(#resurrected, 0, "reveal never reports an already-mined cell as a solid face again (got "
+		.. table.concat(resurrected, ",") .. ")")
+
+	-- CONTROL: the assertion above must not be satisfiable by returning nothing at all.
+	local solids = keysOf(r.solids)
+	truthy(#r.solids > 0, "CONTROL: the faces that were never mined are still reported")
+	truthy(solids[Mine.key(3, 1, 5)] ~= nil, "CONTROL: the untouched neighbour behind the break is exposed")
+	truthy(solids[Mine.key(4, 2, 5)] ~= nil, "CONTROL: …and the one beneath it")
+end
+
+do
+	-- The same rule stated as the thing a player actually does: dig straight down. Six layers in
+	-- they must be standing at the bottom of a six-cell shaft, not in a one-cell pocket with five
+	-- full-strength blocks stacked back over their head.
+	local opened = { [Mine.key(5, 0, 5)] = true }
+	local mouth = Mine.reveal(Config, Ore, w0, opened, 5, 0, 5)
+	for _, c in mouth.air do opened[c.key] = true end
+
+	local resealed = {}
+	for y = 1, 6 do
+		opened[Mine.key(5, y, 5)] = true
+		local r = Mine.reveal(Config, Ore, w0, opened, 5, y, 5)
+		for _, c in r.air do opened[c.key] = true end
+		for _, c in r.solids do
+			if opened[c.key] then resealed[#resealed + 1] = c.key end
+		end
+	end
+	eq(#resealed, 0, "digging six layers straight down reseals nothing overhead (got "
+		.. table.concat(resealed, ",") .. ")")
 end
 
 do

@@ -25,6 +25,18 @@ have would depend on the choices it exists to protect.
 > `maxJumpRun` is *derived* from Roblox's gravity, not guessed. `src/server/Main.server.luau`
 > re-runs `Section.check` at boot and warns loudly if a config change breaks it.
 
+**1b. Your tower is yours alone.** A lane is 220 studs wide and the tower inside it is bounded to
+a 60-stud corridor around its own centre line, so no part of your tower can reach into a
+neighbour's — and the pool of lanes is sized to the place's `Players.MaxPlayers`, so there is never
+a player the server has to seat on top of somebody else. Every checkpoint the tower hands you is a
+point on a platform's *clear band*, never its centre, because the centre is where the hazard is.
+
+> `tests/Section.spec.luau` chains 500 floors the way the server chains them and asserts nothing
+> leaves the corridor; `Section.check` re-derives both bounds and rejects a section that breaks
+> either. `check_forktower.luau` plays two full towers on the same seed, one safe and one taking
+> every trap, and asserts no two towers overlap in X at all — then joins thirty players into a
+> twenty-four lane server and asserts nobody ends up in somebody else's.
+
 **2. No run is a coin flip all the way down.** Every fork is readable to certainty. Both doors
 carry exactly two signs; exactly one door carries the sign the inscription names; and the
 inscription says outright whether that marks the trap or — from floor 4, when the warden starts
@@ -35,6 +47,12 @@ time. That gap *is* the game.
 > hits 50%; a climber who knows the signs but ignores the liar line is wrong on exactly the
 > inverted floors. Plus everything that could become a *second* tell: door position, sign
 > arrangement, single signs, trait power, and what the previous one and three floors predict.
+>
+> The reader is measured **off the doors' own sign lists**, not off `floor.markedDoor`. That field
+> is derived from `trapDoor` inside `Fork.plan`, so a check written against it compares a field
+> with the field it came from and is true by construction — a mutation that put the named sign on
+> *both* doors, turning every fork into a real coin flip, left this suite green at 47/0. Witness E
+> is that mutation, kept.
 
 ---
 
@@ -42,8 +60,8 @@ time. That gap *is* the game.
 
 ```
 cd D:/Claude/Roblox/fork-tower
-luau tests/Fork.spec.luau          # 47 passed, 0 failed
-luau tests/Section.spec.luau       # 32 passed, 0 failed
+luau tests/Fork.spec.luau          # 53 passed, 0 failed
+luau tests/Section.spec.luau       # 47 passed, 0 failed
 luau tests/Build.spec.luau         # 31 passed, 0 failed
 luau tests/Codes.spec.luau         # 19 passed, 0 failed
 luau tests/Rng.spec.luau           # 32 passed, 0 failed
@@ -70,7 +88,7 @@ A game that has never been booted headless is not finished.
 ```
 cd D:/Claude/Roblox/robloxemu
 py -3 wrap.py --game ../fork-tower --out build/fork-tower.luau
-luau check_forktower.luau          # 50 passed, 0 failed
+luau check_forktower.luau          # 82 passed, 0 failed
 ```
 
 `check_forktower.luau` runs the real server script against the emulator and then *plays the game*:

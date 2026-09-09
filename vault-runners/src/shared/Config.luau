@@ -27,8 +27,13 @@ Config.Seed = {
 Config.Save = {
 	Enabled = true,
 	Store = "VaultRunners_v1",
-	AutosaveSeconds = 45,
-	LockSeconds = 120,          -- soft session lock TTL, renewed by autosave
+	-- Remote-driven saves are COALESCED onto this tick instead of writing per tap. Roblox
+	-- throttles writes to one key to roughly one every six seconds and queues about thirty
+	-- before it errors, and flush() pcalls its failure — so an unthrottled save path does not
+	-- crash, it silently stops saving. Every rejected Buy and Equip used to write: tapping down
+	-- the eight-pet list to compare multipliers was eight UpdateAsyncs.
+	FlushTickSeconds = 5,
+	LockSeconds = 120,          -- soft session lock TTL, renewed by every write
 }
 
 --============================================================================ vault geometry
@@ -44,8 +49,15 @@ Config.Vault = {
 	StepSize = 5,           -- step tread is StepSize x 1 x StepSize
 	GemHeight = 3,          -- gem centre above the storey floor
 	ExitHeight = 3,
-	KillPlaneStart = -10,   -- the collapse starts this far under storey 0
-	-- ...and finishes this far above the TOP storey's floor. ZERO on purpose: the plane must
+	-- WHERE THE COLLAPSE STARTS, in STOREYS below the height at which it kills a runner standing
+	-- on storey 0 — never as a bare stud offset. v1 wrote -10 here, which gave storey 0 only
+	-- eleven studs of plane travel where every storey above it got eighteen: the ground floor of
+	-- every vault in the game had 39% less time than the ones above it, on top of the countdown
+	-- bug this whole file's collapse section now exists to prevent. Derived from the runner's own
+	-- height (Run.RunnerRootHeight - Run.KillMargin) in VaultFloor, so EVERY storey — including
+	-- the one you land on — gets exactly one storey-height of collapse to outrun.
+	KillPlaneLeadStoreys = 1,
+	-- ...and it finishes this far above the TOP storey's floor. ZERO on purpose: the plane must
 	-- consume every storey's floor, and then STOP. If it climbed past the top floor it would
 	-- kill a runner standing at the exit a second or two before the countdown expired, and the
 	-- seal — the thing the whole game is named after — would never once fire in a real run.
@@ -62,7 +74,7 @@ Config.Tiers = {
 	{
 		id = "bronze", name = "Bronze Vault", emoji = "🥉",
 		unlockGems = 0,
-		cells = 4, storeys = 3, gemsPerStorey = 4, gemValue = 4, collapseSeconds = 70,
+		cells = 4, storeys = 3, gemsPerStorey = 4, gemValue = 4,
 		wallColor = { r = 104, g = 78, b = 48 },
 		floorColor = { r = 72, g = 58, b = 42 },
 		gemColor = { r = 255, g = 176, b = 92 },
@@ -70,7 +82,7 @@ Config.Tiers = {
 	{
 		id = "silver", name = "Silver Vault", emoji = "🥈",
 		unlockGems = 1200,
-		cells = 5, storeys = 4, gemsPerStorey = 5, gemValue = 10, collapseSeconds = 80,
+		cells = 5, storeys = 4, gemsPerStorey = 5, gemValue = 10,
 		wallColor = { r = 118, g = 126, b = 140 },
 		floorColor = { r = 78, g = 84, b = 96 },
 		gemColor = { r = 168, g = 226, b = 255 },
@@ -78,7 +90,7 @@ Config.Tiers = {
 	{
 		id = "gold", name = "Gold Vault", emoji = "🥇",
 		unlockGems = 6000,
-		cells = 6, storeys = 5, gemsPerStorey = 6, gemValue = 22, collapseSeconds = 90,
+		cells = 6, storeys = 5, gemsPerStorey = 6, gemValue = 22,
 		wallColor = { r = 150, g = 122, b = 46 },
 		floorColor = { r = 96, g = 78, b = 34 },
 		gemColor = { r = 255, g = 226, b = 120 },
@@ -86,15 +98,20 @@ Config.Tiers = {
 }
 
 -- How a tier gets meaner the deeper you go INSIDE it. Floors are 1-based.
+--
+-- THE CAPS ARE A PACING BUDGET, NOT A RENDER BUDGET. The countdown is derived from how long the
+-- maze takes to walk, so every cell and every storey added here lengthens the run for real. At
+-- the old caps (8 cells x 7 storeys) a Gold floor 21 measured 542 seconds of optimal route and
+-- would have been handed a FOURTEEN MINUTE countdown, all of it lost on a single death.
+-- tests/Collapse.spec.luau asserts the derived countdown stays under Config.Collapse.MaxSeconds
+-- across every tier and a hundred floors, which is what holds these two numbers down.
 Config.Curve = {
 	CellsEveryNFloors = 6,
-	MaxCells = 8,
+	MaxCells = 6,
 	StoreysEveryNFloors = 10,
-	MaxStoreys = 7,
+	MaxStoreys = 5,
 	GemsEveryNFloors = 5,
 	MaxGemsPerStorey = 9,
-	CollapseTightenPerFloor = 1.5,  -- seconds shaved per floor
-	MinCollapseFraction = 0.55,     -- never below this fraction of the tier's base timer
 }
 
 --============================================================================ the run
@@ -105,6 +122,62 @@ Config.Run = {
 	ExitRadius = 9,          -- studs, to the exit pad's centre
 	KillMargin = 2,          -- the plane kills once it is this far above your feet
 	SealWarnSeconds = 10,    -- HUD goes red under this
+	-- Where a standing runner's HumanoidRootPart sits above the floor it is standing on. R15's
+	-- root is one half-root + HipHeight over the ground. This is not decoration: it is the
+	-- height the kill plane is compared against, so the plane's own start is derived FROM it.
+	RunnerRootHeight = 3,
+	-- THE CLIENT OWNS ITS OWN CHARACTER'S PHYSICS, so hrp.Position is a claim, not an
+	-- observation. src/shared/Trace.luau keeps the server's own position for the runner and
+	-- moves it toward that claim no faster than these allow; every rule in the run loop reads
+	-- the trusted position instead. Read Trace.luau's header for what this does NOT stop.
+	TrustedSpeedFactor = 1.35,   -- horizontal, over Movement.WalkSpeed — jitter, not speed
+	TrustedClimbFactor = 2.5,    -- upward, over the modelled climb rate; players skip treads
+	TrustedBurstSeconds = 3,     -- how much unused allowance can bank, for replication jitter
+}
+
+--============================================================================ movement
+
+-- What a player can actually do, in the units the collapse is measured in.
+--
+-- THE SERVER WRITES WalkSpeed ONTO THE HUMANOID (Main.server, onCharacter). It has to: the
+-- countdown is derived from distance / WalkSpeed, so a number here the engine does not honour
+-- would be worse than no number at all — it would be a lie the whole difficulty curve is built
+-- on. Roblox's default is 16, which is a walk; a vault runner outrunning a collapse runs.
+Config.Movement = {
+	WalkSpeed = 24,             -- studs/second, written onto every character that spawns
+	-- One 3-stud step of the climb shaft, jumped. A default jump is ~1.0s in the air; landing
+	-- on the next tread and setting up the following jump is costed a little under that, and
+	-- the spec's slack requirement is what absorbs the difference. NOT affected by WalkSpeed.
+	ClimbSecondsPerStep = 0.9,
+}
+
+--============================================================================ the collapse
+
+-- THE COUNTDOWN IS DERIVED, NOT TYPED. See src/shared/VaultPath.luau for the derivation.
+--
+-- v1 shipped 70 / 80 / 90 seconds as three hand-picked numbers and computed the plane's speed as
+-- (vault height) / (countdown). Adding a storey therefore made the plane RISE FASTER through the
+-- lower ones: Silver and Gold killed a BFS-optimal runner on storey 0, and no test in the repo
+-- measured a traversal time to notice. Now the vault is generated first, its optimal route is
+-- measured, and the countdown follows from that. The only thing left to tune is how much slack
+-- the runner is owed — which is what these numbers are.
+Config.Collapse = {
+	-- Multiplier on the optimal route. Everything a real player does that a BFS solver does not
+	-- — detouring for gems, reading the maze, missing a jump, backtracking a dead end — comes
+	-- out of this.
+	Slack = 2.0,
+	-- ...shaved as you go deeper into a tier. THIS is the difficulty curve now: the same maze,
+	-- less room for error. It can never take the run below MinSlack, which is the point at which
+	-- a perfect route with one gem per storey stops fitting.
+	TightenPerFloor = 0.02,
+	MinSlack = 1.5,
+	-- A vault so small the derivation asks for twelve seconds is not a run, it is a corridor.
+	MinSeconds = 30,
+	-- ...and the other end. This is a PACING promise, not a safety clamp: nothing clamps the
+	-- countdown to it, because clamping would make a big vault unwinnable again — which is the
+	-- exact bug this section exists to prevent. It is the bound Config.Curve's caps are chosen
+	-- to satisfy, and tests/Collapse.spec.luau fails if a generated floor ever exceeds it.
+	MaxSeconds = 300,
 }
 
 --============================================================================ pets

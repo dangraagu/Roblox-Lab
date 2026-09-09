@@ -1,0 +1,74 @@
+# Deep Vein - review after the first round of fixes
+
+**Verdict: BLOCK**
+
+Second pass, 2026-09-10. The reviewer verified each claimed fix with its OWN measurement
+rather than by re-running the fixer's tests, and then went looking for what the fixing
+broke. Read alongside REVIEW.md, which is the first pass.
+
+## Independently confirmed closed (8)
+
+- REVIEW #1 — mined blocks grow back. CLOSED, verified with my own patterns rather than theirs. In robloxemu: mined 3:1:3, then broke its DIAGONAL neighbour 4:1:4 (the pair only the 26-cell LOOK loop touches, never the 6-cell WALK loop) — 3:1:3 stayed gone. Dug 10 layers straight down at x=7,z=7 and re-checked every one from above: 0 resealed. Mined a different ore cell than their test uses, broke its diagonal neighbour, and the ore did not stand again. Root cause is genuinely in the pure module: mutating `if not opened[k]` out of Mine.reveal's LOOK loop (src/shared/Mine.luau:290) turns Mine.spec red (100 -> 98 passed, 2 failed), so the rule is unit-testable where the review said it should be.
+
+- REVIEW #1, second-order — the fix does not leave holes. My own world-integrity flood (D:/Claude/Roblox/robloxemu, real Mine/Ore/Config required directly plus the live workspace): carved an 80-cell tunnel network (centre column to layer 24, horizontal galleries at layers 4/8/12/16/20/24, a second column at 2:y:8), flooded the Part-free space from the mouth — 458 reachable empty cells — and checked all 26 neighbours of every one. Solid cells visible from open space with NO Part: 0. Suppressing already-opened solids does not produce a hole with nothing behind it.
+
+- REVIEW #2 — SURFACE drops you down your own hole. CLOSED, verified by a harsher path than theirs. Their test digs one column (12 cells); I dug the ENTIRE 7x7 mouth floor plus the spawn column, 64 cells, then fired SURFACE: landing y=4.00, ground under it SurfaceDeck_3003 with top y=0.00, drop 4.00 studs, no ClickDetector on it. Mutating out the `buildSurfaceDeck(plr)` call reproduces the original defect exactly — drop 148.0 studs onto Bedrock_1212_5:25:2, which is itself clickable — and takes the headless check to 107 passed / 5 failed.
+
+- REVIEW #3 — one swing, one frame. CLOSED. I found the largest connected void per rebirth myself and re-ran Mine.reveal from inside it: r0 144-cell void -> 334 solids, r24 1137-cell void -> 3031 solids, truncated=false everywhere. Their 3031 figure is exact. At PartsPerFrame=64 that is 48 frames. Measured first-frame bursts on BOTH paths (they only tested one): swing path 63 parts before yielding, rejoin-restore path 120 (the fixed 115-part mouth plus 5 from the restore's first column cell). Mutating PartsPerFrame to 100000 puts the burst back to 313 and turns the check red. Median reveal at r0 is 49 solids, so the pump is a no-op for most swings.
+
+- REVIEW #3's open question — 'gravity could outrun the BFS front' — I measured it and it does not. For the worst reveal in the game (break at 2:194:2, rebirth 24), the first solid directly below the break is solid #127 of 3031, i.e. built on frame 2 (0.033 s), by which time a free-falling player has covered 0.1 studs against a 42-stud drop. The front reaches 5 cells out in frame 1 and 8 cells by frame 3; the furthest solid in the whole 3031 is 53 cells away. This item can come off the notFixed list.
+
+- REVIEW #4 — obsidian could not spawn. CLOSED. My own census of the rebirth-0 shaft: 842 rock, Copper 108 / Iron 69 / Gold 27 / Diamond 7 / Obsidian 4, every tier legal at or above the layer-24 wall. Total ore weight peaks at 0.4108 (layer 62) so stone survives at every depth and no band is clipped. Reverting obsidian's MinLayer to 26 turns Ore.spec red (1272 -> 1267, 5 failed) and Mine.spec red.
+
+- NOT-IN-REVIEW — the restored elevator column was solid rock. CLOSED, counted myself: for a veteran loaded at depthLayer 24, blocks left standing at 5:1:5 .. 5:24:5 = 0 of 24. Mutating `local standing = cellParts[plr][k]` to `local standing = nil` in openCell puts it straight back to 18 blocked layers (1,2,3,4,5,6,11,12,13,14,15,17,18,19,20,22,23,24).
+
+- TEST COUNTS REPRODUCE EXACTLY. Unit 1681 passed / 0 failed with the real luau.exe (Economy 122, Mine 100, Ore 1272, Prestige 117, Responsive 70). Headless 116 passed / 0 failed, 0 server warnings, 0 scheduler errors, after `py -3 wrap.py --game ../deep-vein --out build/deep-vein.luau` then `luau check_deepvein.luau`. luau-analyze clean on all ten sources with only the usual Roblox Unknown global / Unknown type noise. Every number the fixer reported is honest.
+
+## Still open (8)
+
+### THE CURRENCY PRINTER IS NOT CLOSED, IT IS THROTTLED TO ONE SHAFT PER REJOIN. `opened` is per-session; on rejoin only the centre elevator column is restored, so every other cell of the cave — and all of its ore — is standing again. This was pre-existing and invisible behind finding #1, but the economy retune makes it load-bearing: Config.luau and Prestige.spec both state the premise 'a cave holds a fixed, countable amount of ore … once mined cells stop growing back there is no second helping', and that premise is false across a relog. The new 'payable out of the shaft it is charged against' invariant therefore bounds income by a number a player resets by leaving and coming back.
+
+**Proof:** Proved end to end against the real server in robloxemu, not by reading. Session 1: mined all 8 ore cells exposed in the mouth, clicked the SELL pad, cash $48; confirmed all 8 were out of the world. h:leave, h:join with the same UserId, simulateSpawn. After rejoin: 8 of the 8 mined ore cells were STANDING AGAIN, 0 stayed gone. Mined and sold the same 8 again: cash $48 -> $96, no rebirth, same seed, same cave. Repeat at will. src/server/Main.server.luau buildShaft sets `opened[plr] = {}` and only `Mine.column(...)` is replayed.
+
+### THE SHOP CAN SPEND A REBIRTH-0 PLAYER OUT OF THE REBIRTH, PERMANENTLY (absent the relog above). The new Prestige.spec invariant compares GROSS shaft ore ($12,168) against the price ($3,500) and is blind to the three upgrade tracks, which offer $214,756 of purchases against that $12,168 shaft. Every purchase is affordable at the moment it is shown, nothing warns that it competes with the rebirth, and rebirth wipes the upgrades anyway.
+
+**Proof:** Exact reachable sequence, run against the real Economy/Prestige with the real full-shaft income. Start: entire rebirth-0 shaft mined, cash $12,168. Buy pickaxe t2 $260 -> $11,908; t3 $2,100 -> $9,808; backpack L1 $130, L2 $201, L3 $312, L4 $484, L5 $750, L6 $1,163, L7 $1,802, L8 $2,794 -> cash $2,172. Prestige.canRebirth = false, reason 'poor', needs $3,500, and the cave is empty. Spend budget is $12,168 - $3,500 = $8,668; backpack L9 alone is cumulative $11,967. My honest-path simulator with a greedy-upgrade policy reproduces it: r=0 ok=false, 842 blocks broken, 1,427 swings, $9,996 spent, WHOLE SHAFT, cash $2,172 vs need $3,500.
+
+### 46% OF THE REBIRTH-0 SHAFT'S VALUE IS NOW FOUR OBSIDIAN CELLS, created by the MinLayer retune (obsidian 26 -> 19). Rebirth 0 is therefore either 'find 3 of 4 needles in a 7x7x24 box' or 'mine essentially the whole cave'. The headline '3.48x, you can buy it having mined under a third of your cave' is half price-cut and half world-enrichment: the retune more than doubled the rebirth-0 shaft, from $5,876 to $12,168. Mine.spec asserts >= 3 cells of every tier and reality is 4 — one tuning nudge from red.
+
+**Proof:** Independent per-layer census of the rebirth-0 shaft. Top cells by value: Obsidian layer 19 $1,400; Obsidian layer 22 $1,400; Obsidian layer 21 $1,400; Obsidian layer 19 $1,400 — top 4 cells = $5,600 = 46% of $12,168. #5 and #6 are Diamonds at $340. Cumulative value by layer only crosses the $3,500 price at layer 18 ($3,862), which is 647 of the 842 rock cells.
+
+### THE MIDDLE OF THE LADDER IS NOT MERELY GENEROUS, IT IS SKIPPABLE — the cave stops being the constraint. The fixer flagged this as pacing; I measured it and it is stronger than 'generous': from rebirth 1 to about 17 a player buys the next rebirth having touched 4-7% of their cave, so exploring, the lamp, the backpack and the whole cave-void payoff have no role in progression.
+
+**Proof:** My own honest-path simulator over the real modules (dig the centre column, then strip from the deepest layer, sell when the bag fills, 0.28 s swing cooldown, 6 s per surface trip). Pickaxe-only upgrade policy: r=0 619 swings / 3.5 min / 181 blocks; r=1 393 / 2.2 min / 79 blocks of a 1,479-cell cave; r=2 449 / 2.4 min / 89 blocks; r=3 579 / 3.1 min / 86 blocks. Ratio of shaft value to rebirth price, measured independently: 3.48x at r0, then 9.5, 12.9, 17.9, 26.6, 25.9, 27.0 … i.e. r=6 costs 3.7% of its own cave.
+
+### THE DECK'S LANDING FOOTPRINT IS ASSERTED NOWHERE. 'Provably safe by CONSTRUCTION' rests on a size number no test can see, in the one place the fix claims certainty over search.
+
+**Proof:** Two surviving mutations, source mutated and the FULL gate re-run: `deck.Size = Vector3.new(s - 1, 1, s - 1)` -> 1681 unit / 116 headless all GREEN; `deck.Size = Vector3.new(1, 1, 1)` -> 1681 unit / 116 headless all GREEN. A 1x1 stud pillar under a 6x6 cell passes every assertion in the repo.
+
+### `pumping` IS ONE MODULE-LEVEL BOOLEAN WITH NO pcall AROUND THE DRAIN, so any error thrown inside makeCellPart kills the spawned pump thread with the flag stuck true and no Part is ever built again for ANY player in that server — the world silently stops growing. Before the fix, building happened inline in the ClickDetector handler, so one error cost one swing. Reading-level only: I could not reach an error through a legitimate path, because drainBuild drops a queue whenever shaftFolders[plr] or cellParts[plr] is nil.
+
+**Proof:** D:/Claude/Roblox/deep-vein/src/server/Main.server.luau: `local pumping = false` above pumpBuild, and pumpBuild's `task.spawn(function() while true do if drainBuild(Config.Mine.PartsPerFrame) == 0 then break end; task.wait() end; pumping = false end)` — the `pumping = false` is only reached on the normal exit, and every other call site returns early on `if pumping then return end`.
+
+### THE SURFACE TEST IS BOUND TO A HARD-CODED COLUMN, so the 'one name, they cannot drift apart' claim holds in src and not in the gate.
+
+**Proof:** D:/Claude/Roblox/robloxemu/check_deepvein.luau calls `digColumn(surfer, SURF, 5, 2, 24)` with a literal z=2, while src now reads `SPAWN_CELL_Z`. Control mutation C2, `local SPAWN_CELL_Z = 4` — a change that leaves the game correct because the landing and the deck move together — turns the headless check RED: 'FAIL: …and that floor is not something they can mine away too (Rock_1212_5:1:4)', 115 passed / 1 failed.
+
+### CONFIRMED STILL OPEN, exactly as the fixer listed them: no SpawnLocation anywhere (Roblox picks its own spot for the frame or two before the CharacterAdded CFrame lands, in a world with a sealed shell — the failure mode this repo shipped hours ago); no unload of Parts far above the player, so lifetime cost is bounded only by the box; reveal is triggered only by a break, never by movement, with 1.4x headroom on RevealBudget (worst connected void 1137 vs 1600, which I re-measured myself); and NOTHING HAS EVER BEEN RENDERED — no material, colour, lighting, camera, click reach or humanoid-on-a-6-stud-grid observation exists anywhere.
+
+**Proof:** I re-measured the reveal headroom (worst void 1137 cells at rebirth 24, truncated=false at every seed) and grepped src for SpawnLocation (zero hits; spawning is spawnCFrame + CharacterAdded in src/server/Main.server.luau). The rest I confirmed by reading, as they did.
+
+## Broken BY the fixes (3)
+
+### THE SURFACE DECK IS COPLANAR AND VOLUME-OVERLAPPING WITH THE ROCK IT SITS INSIDE — introduced by the fix for REVIEW #2, at the exact tile the player spawns on and returns to on every SURFACE press. The deck's top face and the top face of Rock_<uid>_5:1:2 are both at y=0.00 with the same 6x6 footprint. Two consequences: opaque coplanar faces z-fight, and the deck has CanQuery=true with no ClickDetector, so a mouse ray aimed straight down at the spawn cell resolves to a tie and a click that lands on the deck is a silent no-op on the first block the game points the player at. Once the neighbouring floor cells are dug the four side faces are coplanar too. The fixer's comment ('the deck is buried inside it and invisible') is wrong by exactly 0 studs, and README.md documents this as an intentional rule ('The surface deck blocks one cell … they have to step one cell over') that the code does not implement — I mined 5:1:2 straight out through its ClickDetector.
+
+**Proof:** Measured in robloxemu against the real server: deck pos=(0, -0.5, -18) size=(6, 1, 6), top=0.00, bottom=-1.00. Parts sharing the deck's VOLUME: Rock_3001_5:1:2. Parts sharing the deck's TOP PLANE at y=0.00: Rock_3001_5:1:2. The headless check's own groundUnder helper demonstrates the tie — under control mutation C2 it resolves it to the minable rock and goes red. FIX AND EVIDENCE FOR IT: changing src/server/Main.server.luau:560 to `Vector3.new(0, -s / 2 - 1.5, 0)` buries the deck (top y=-1, landing drop 4 -> 5 studs, still within the 8-stud assertion) and I ran the full gate on it — the ONLY thing that turns red is check_deepvein.luau's `eq(deck.Position.Y + deck.Size.Y / 2, 0, "…with its top flush with the mouth floor")`. The fix's own assertion is what pins the defect in place.
+
+### A REACHABLE, PERMANENT-LOOKING DEAD END WAS CREATED WHERE PREVIOUSLY EVERY PATH WAS EQUALLY DEAD. Before the retune the rebirth was unpayable at all 25 levels, so there was nothing to be locked out of. Now rebirth 0 is payable — but only by a player who does not shop — and the two new defects cover for each other: the soft-lock is escapable only by the relog that also regrows the whole cave, which no player would guess and which the design explicitly does not intend.
+
+**Proof:** See the two stillOpen entries above for the full traces: the $9,996 purchase sequence that ends at $2,172 against a $3,500 price with an empty cave, and the $48 -> $96 double sale of the same 8 ore cells across a leave/rejoin. Both were run against the real modules and the real server, not modelled.
+
+### ONE MUTATION SURVIVED THAT SHOWS DEAD CODE, NOT A GATE HOLE — worth recording so nobody re-derives it. drainBuild's `and not opened[plr][s.key]` re-check is unreachable: a queued solid has no Part yet, so it cannot be clicked, so it cannot be opened between queueing and building. The comment 'Both are re-checked here rather than assumed' describes a branch that cannot fire.
+
+**Proof:** Mutation M9, `if not cellParts[plr][s.key] and not opened[plr][s.key] then` -> `if not cellParts[plr][s.key] then`, full gate re-run: 1681 unit / 116 headless all GREEN. Harmless, but it is not the guard the comment claims.
+

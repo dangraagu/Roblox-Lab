@@ -202,6 +202,7 @@ local cellHp = {} -- [player] = { [cellKey] = remaining hit points }
 local deepestOpen = {} -- [player] = { x, y, z } — where the "DESCEND" elevator drops you
 local lastSwing = {} -- [player] = tick() of the last accepted swing
 local lampOf = {} -- [player] = PointLight on the character
+local buildQueue = {} -- [player] = { cells, head, folder } — solids waiting for a frame's budget
 
 local function claimShaft(plr: Player): number
 	local i = 0
@@ -228,12 +229,16 @@ local function standY(y: number): number
 	return Mine.floorY(Config, y) + 4
 end
 
+-- The cell the SURFACE button and every respawn aim at. One name, used by the landing and by the
+-- thing the landing stands on, so the two cannot drift apart.
+local SPAWN_CELL_Z = 2
+
 local function spawnCFrame(plr: Player): CFrame
 	-- On the north edge of the mouth, feet on the layer-1 floor, looking south across the shaft
 	-- so the first thing on screen is the SELL pad and then the hole you are about to dig.
 	-- CFrame.new's identity frame looks down -Z, so this MUST be the two-argument form.
 	local c = Mine.center(Config)
-	local base = worldPos(plr, c, 0, 2)
+	local base = worldPos(plr, c, 0, SPAWN_CELL_Z)
 	local at = Vector3.new(base.X, standY(0), base.Z)
 	return CFrame.new(at, at + Vector3.new(0, 0, 1))
 end
@@ -340,6 +345,75 @@ local function makeCellPart(plr: Player, cell): BasePart
 	return part
 end
 
+--============================================================================== the build pump
+
+-- ONE SWING MUST COST ONE FRAME'S WORTH OF WORK, WHATEVER IS BEHIND THE WALL.
+--
+-- Config.Mine.RevealBudget bounds the AIR cells a single break may flood through. It does not
+-- bound the SOLID list that comes out of that flood, and the solid list is what costs: every
+-- entry is an Instance.new("Part"), a ClickDetector, four SetAttribute calls and a signal
+-- connection. Measured against the real modules, breaking into the 144-cell cave in a rebirth-0
+-- shaft produced 334 of those, and the largest void at rebirth 24 produced 3031 — all of them
+-- built synchronously inside the ClickDetector handler, so the frame the README sells as the
+-- game's best moment ("a natural cave void that opens up all at once") was the frame the whole
+-- server froze, every other miner in it included.
+--
+-- So the reveal now hands its solids to this queue, and the queue is drained PartsPerFrame at a
+-- time. That bounds the per-frame cost by a CONSTANT rather than by the size of the cave, which
+-- is the part that matters: no seed, no rebirth and no lucky void can push it back up. The order
+-- is the flood's own breadth-first order, so the faces closest to the player — the floor they
+-- are standing on, the walls beside them — are always in the first batch.
+local function drainBuild(budget: number): number
+	local made = 0
+	for plr, q in pairs(buildQueue) do
+		if shaftFolders[plr] == nil or shaftFolders[plr] ~= q.folder or cellParts[plr] == nil then
+			-- the player left, or rebirthed into a brand new cave: these cells are about a world
+			-- that no longer exists
+			buildQueue[plr] = nil
+		else
+			while q.head <= #q.cells do
+				if made >= budget then return made end
+				local s = q.cells[q.head]
+				q.head += 1
+				-- A cell can be built by another reveal, or dug out, between being queued and
+				-- being built. Both are re-checked here rather than assumed.
+				if not cellParts[plr][s.key] and not opened[plr][s.key] then
+					makeCellPart(plr, s)
+					made += 1
+				end
+			end
+			buildQueue[plr] = nil
+		end
+	end
+	return made
+end
+
+local pumping = false
+local function pumpBuild()
+	if pumping then return end
+	pumping = true
+	task.spawn(function()
+		while true do
+			-- The first batch runs in the caller's own frame, so a swing still puts the walls
+			-- around the player up immediately; everything past the budget waits for a frame.
+			if drainBuild(Config.Mine.PartsPerFrame) == 0 then break end
+			task.wait()
+		end
+		pumping = false
+	end)
+end
+
+local function enqueueBuild(plr: Player, cells)
+	if #cells == 0 then return end
+	local q = buildQueue[plr]
+	if q == nil or q.folder ~= shaftFolders[plr] then
+		q = { cells = {}, head = 1, folder = shaftFolders[plr] }
+		buildQueue[plr] = q
+	end
+	for _, c in ipairs(cells) do q.cells[#q.cells + 1] = c end
+	pumpBuild()
+end
+
 --============================================================================== opening cells
 
 -- One place that records "this cell is now open", so the depth readout, the leaderboard figure
@@ -353,12 +427,29 @@ local function noteOpen(plr: Player, x: number, y: number, z: number)
 	if not d or y > d.y then deepestOpen[plr] = { x = x, y = y, z = z } end
 end
 
--- Mark a cell open, then ask Mine what became visible and what became walkable, and build it.
--- Returns the number of parts added, so the caller can budget a yield.
-local function openCell(plr: Player, x: number, y: number, z: number): number
+-- Mark a cell open, then ask Mine what became visible and what became walkable. Returns the
+-- solid cells that still need a Part; the caller decides whether to build them now or to hand
+-- them to the pump above.
+local function openCell(plr: Player, x: number, y: number, z: number): { any }
 	local w = worlds[plr]
 	local op = opened[plr]
-	op[Mine.key(x, y, z)] = true
+	local k = Mine.key(x, y, z)
+	op[k] = true
+
+	-- AN OPENED CELL HOLDS NO PART, and this is the only place that can guarantee it. A swing
+	-- destroys the block before it gets here, so this looks redundant — but the rejoin restore
+	-- opens the elevator column WITHOUT breaking anything, and each of those cells is holding a
+	-- Part that the reveal of the cell above it built moments earlier. Nothing removed them, so
+	-- the "restored elevator shaft" a returning player got was 18 layers of solid rock, and
+	-- DESCEND aimed them at the bottom of it.
+	local standing = cellParts[plr][k]
+	if standing then
+		cellParts[plr][k] = nil
+		cellDefs[plr][k] = nil
+		cellHp[plr][k] = nil
+		standing:Destroy()
+	end
+
 	noteOpen(plr, x, y, z)
 
 	local r = Mine.reveal(Config, Ore, w, op, x, y, z)
@@ -368,17 +459,15 @@ local function openCell(plr: Player, x: number, y: number, z: number): number
 		op[a.key] = true
 		noteOpen(plr, a.x, a.y, a.z)
 	end
-	local made = 0
-	for _, s in ipairs(r.solids) do
-		if not cellParts[plr][s.key] then
-			makeCellPart(plr, s)
-			made += 1
-		end
-	end
 	if r.truncated then
 		warn("[DeepVein] reveal budget exhausted for " .. plr.Name .. " at " .. Mine.key(x, y, z))
 	end
-	return made
+
+	local todo = {}
+	for _, s in ipairs(r.solids) do
+		if not cellParts[plr][s.key] then todo[#todo + 1] = s end
+	end
+	return todo
 end
 
 --============================================================================== the shaft
@@ -437,6 +526,43 @@ local function buildSellPad(plr: Player)
 	Fx.attachGlow(pad, Color3.fromRGB(90, 220, 130), 2, 30)
 end
 
+-- A LANDING THAT CANNOT BE DUG AWAY.
+--
+-- SURFACE is the button that also sells your haul, so it is the button a player presses more
+-- than any other, and it teleports to a FIXED point at the mouth. The floor under that point was
+-- ordinary breakable rock, all the way down to bedrock — and digging straight down from where
+-- you are standing is the most natural first move in a mining game, so the spawn column is the
+-- first thing a player removes. Every SURFACE press after that dropped them straight back down
+-- the hole they had just dug (measured: 13 layers, 78 studs, and the drop only ends at the
+-- bedrock floor 150 studs down). The SELL pad does not catch them either; it is one cell south.
+--
+-- The fix is not a cleverer destination, it is a destination that is guaranteed to have ground.
+-- This deck is an anchored slab filling the top stud of the cell below the landing point, with
+-- no ClickDetector and no cell of its own — nothing in the game can aim a swing at it. While the
+-- rock under the spawn is intact the deck is buried inside it and invisible; the moment that
+-- rock is mined out, the deck is the ledge that is left standing.
+local function buildSurfaceDeck(plr: Player)
+	local c = Mine.center(Config)
+	local s = Config.Mine.CellSize
+	local deck = Instance.new("Part")
+	deck.Name = "SurfaceDeck_" .. plr.UserId
+	deck.Anchored = true
+	deck.CanCollide = true
+	deck.CanTouch = false
+	deck.CanQuery = true
+	deck.CastShadow = false
+	deck.TopSurface = Enum.SurfaceType.Smooth
+	deck.BottomSurface = Enum.SurfaceType.Smooth
+	deck.Size = Vector3.new(s, 1, s)
+	-- Top face flush with the mouth floor, Mine.floorY(Config, 0): the same surface the spawn
+	-- height is measured from, so standing on the deck and standing on the rock are the same
+	-- thing to a character.
+	deck.Position = worldPos(plr, c, 0, SPAWN_CELL_Z) + Vector3.new(0, -s / 2 - 0.5, 0)
+	deck.Material = Enum.Material.DiamondPlate
+	deck.Color = Color3.fromRGB(118, 124, 136)
+	deck.Parent = shaftFolders[plr]
+end
+
 local function buildShaft(plr: Player)
 	local idx = shaftIndex[plr]
 	local p = profiles[plr]
@@ -455,10 +581,19 @@ local function buildShaft(plr: Player)
 	deepestOpen[plr] = { x = Mine.center(Config), y = 0, z = Mine.center(Config) }
 
 	-- The mouth: one flood from its centre opens the whole 7x7 surface room and builds the rim
-	-- and the floor a player lands on.
+	-- and the floor a player lands on. This one is built OUTRIGHT rather than pumped — it is a
+	-- fixed 113 cells at every rebirth, bounded by the grid rather than by the cave, and the
+	-- count below has to be able to see all of them.
 	local c = Mine.center(Config)
-	local made = openCell(plr, c, 0, c)
+	local made = 0
+	for _, s in ipairs(openCell(plr, c, 0, c)) do
+		if not cellParts[plr][s.key] then
+			makeCellPart(plr, s)
+			made += 1
+		end
+	end
 	buildSellPad(plr)
+	buildSurfaceDeck(plr)
 
 	-- ASK THE FOLDER. Not the counter next to the build loop — that is the same arithmetic on
 	-- both sides of the comparison and can never disagree with itself. The only question that
@@ -475,14 +610,13 @@ local function buildShaft(plr: Player)
 	-- tunnels are not saved (see README); the column that makes the depth reachable again is.
 	if p.depthLayer > 0 then
 		task.spawn(function()
-			local since = 0
 			for _, cellPos in ipairs(Mine.column(Config, worlds[plr], p.depthLayer)) do
 				if shaftFolders[plr] ~= folder then return end -- the player left mid-restore
-				since += openCell(plr, cellPos.x, cellPos.y, cellPos.z)
-				if since >= 40 then
-					since = 0
-					task.wait()
-				end
+				-- One column cell per frame, and the parts it exposes go to the pump. The single
+				-- worst cell of a rebirth-0 restore exposes 361 faces on its own; the old
+				-- "yield every 40" counted between openCell calls, never inside one.
+				enqueueBuild(plr, openCell(plr, cellPos.x, cellPos.y, cellPos.z))
+				task.wait()
 			end
 		end)
 	end
@@ -492,6 +626,7 @@ local function teardownShaft(plr: Player)
 	local folder = shaftFolders[plr]
 	shaftFolders[plr] = nil
 	if folder then folder:Destroy() end -- one Destroy takes the entire shaft; nothing leaks
+	buildQueue[plr] = nil -- solids still queued are about a cave that no longer exists
 	cellParts[plr] = nil
 	cellDefs[plr] = nil
 	cellHp[plr] = nil
@@ -616,7 +751,7 @@ swing = function(plr: Player, cellKey: string)
 	cellHp[plr][cellKey] = nil
 	part:Destroy()
 
-	openCell(plr, cell.x, cell.y, cell.z)
+	enqueueBuild(plr, openCell(plr, cell.x, cell.y, cell.z))
 	pushState(plr)
 end
 
@@ -795,6 +930,7 @@ local function onPlayerRemoving(plr: Player)
 	profiles[plr] = nil
 	lastSwing[plr] = nil
 	lampOf[plr] = nil
+	buildQueue[plr] = nil
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)

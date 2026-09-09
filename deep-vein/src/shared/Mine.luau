@@ -257,6 +257,14 @@ export type Reveal = { air: { Cell }, solids: { Cell }, truncated: boolean }
 -- returned air cell as opened itself, and builds a Part for every returned solid it does not
 -- already have. Keeping the mutation on the caller's side is what makes this testable with a
 -- plain table and no bookkeeping.
+--
+-- `opened` IS THE WORLD'S STATE, AND BOTH HALVES OF THIS FUNCTION HAVE TO READ IT. The generator
+-- is stateless by design — kindAt calls a mined cell "rock" for ever, because a cell's contents
+-- must not depend on when it was first looked at — so `opened` is the only record that a block
+-- has been dug out. The air half consults it below; the solid half must too, or breaking any of
+-- the 26 neighbours of a cell the player already mined reports that cell as a visible face
+-- again, the caller has no Part for it any more, and it comes back at full hit points with a
+-- fresh ore payload.
 function Mine.reveal(cfg: any, Ore: any, w: World, opened: { [string]: boolean },
 	sx: number, sy: number, sz: number): Reveal
 	local budget = cfg.Mine.RevealBudget
@@ -271,14 +279,17 @@ function Mine.reveal(cfg: any, Ore: any, w: World, opened: { [string]: boolean }
 		local c = queue[head]
 		head += 1
 
-		-- Every solid the player could see from this open cell gets a face.
+		-- Every solid the player could see from this open cell gets a face — unless the caller
+		-- has already opened it, in which case there is nothing there to see.
 		for _, d in LOOK do
 			local nx, ny, nz = c[1] + d[1], c[2] + d[2], c[3] + d[3]
 			if Mine.inWorld(cfg, w, nx, ny, nz) then
 				local k = Mine.key(nx, ny, nz)
 				if not visited[k] and Mine.isSolid(cfg, w, nx, ny, nz) then
 					visited[k] = true
-					solids[#solids + 1] = Mine.cell(cfg, Ore, w, nx, ny, nz)
+					if not opened[k] then
+						solids[#solids + 1] = Mine.cell(cfg, Ore, w, nx, ny, nz)
+					end
 				end
 			end
 		end

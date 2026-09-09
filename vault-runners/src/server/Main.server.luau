@@ -22,9 +22,11 @@ local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Rng = require(ReplicatedStorage:WaitForChild("Rng"))
 local MazeGen = require(ReplicatedStorage:WaitForChild("MazeGen"))
 local VaultFloor = require(ReplicatedStorage:WaitForChild("VaultFloor"))
+local VaultPath = require(ReplicatedStorage:WaitForChild("VaultPath"))
 local Progression = require(ReplicatedStorage:WaitForChild("Progression"))
 local RunState = require(ReplicatedStorage:WaitForChild("RunState"))
 local Pets = require(ReplicatedStorage:WaitForChild("Pets"))
+local Trace = require(ReplicatedStorage:WaitForChild("Trace"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
 
 -- Visuals are part of the first build, not a later pass (docs/new-game-checklist.md §2).
@@ -76,6 +78,8 @@ local store = tryStore(function()
 end, "profiles")
 
 local profiles = {}   -- [player] = profile
+local pendingSave = {}   -- [player] = true, "this profile wants a write on the next flush tick"
+local requestSave     -- forward declaration; defined under flush()
 
 local function defaultProfile()
 	local floors = {}
@@ -148,9 +152,44 @@ local function loadProfile(plr)
 	return p
 end
 
+-- EXACTLY the fields flush() writes, as one comparable string. A profile whose fingerprint has
+-- not moved since the last successful write has nothing to save, and writing it anyway is how a
+-- rejected remote used to cost a DataStore call: doBuy and doEquip fell out of their "poor" /
+-- "owned" / "unknown" / "unowned" branches straight into flush().
+--
+-- A fingerprint rather than a `dirty` flag set at each mutation site, deliberately: a flag has
+-- to be remembered at every future place that touches the profile, and the one that is forgotten
+-- is silent in exactly the same way the original defect was. This reads the fields instead, so a
+-- new field is only invisible here if it is also not being saved.
+local function saveFingerprint(p)
+	local owned = {}
+	-- Config order, not pairs() order: a Lua table's iteration order is not stable, and a
+	-- fingerprint that reshuffles itself would report every profile as changed forever.
+	for _, pet in ipairs(Config.Pets.List) do
+		if p.pets and p.pets[pet.id] == true then owned[#owned + 1] = pet.id end
+	end
+	local floors = {}
+	for i = 1, #Config.Tiers do floors[i] = tostring(p.floors[i] or 1) end
+	return table.concat({
+		tostring(p.gems), tostring(p.totalBanked), tostring(p.escapes), tostring(p.wipes),
+		tostring(p.equipped), table.concat(owned, ","), table.concat(floors, ","),
+	}, "|")
+end
+
 local function flush(plr, releaseLock)
 	local p = profiles[plr]
 	if not store or not p or not p.canSave then return false end
+
+	-- Nothing changed, nothing to write. The lock release is the one exception: it is a write
+	-- ABOUT the write, not about the data, and skipping it strands the player's own save behind
+	-- a 120-second lock they would experience as "the game would not let me back in".
+	local fingerprint = saveFingerprint(p)
+	if not releaseLock and fingerprint == p.savedFingerprint then
+		pendingSave[plr] = nil
+		return false
+	end
+
+	local wrote = false
 	local ok, err = pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
 			old = old or {}
@@ -170,11 +209,27 @@ local function flush(plr, releaseLock)
 				pets = p.pets, equipped = p.equipped,
 				floors = p.floors, escapes = p.escapes, wipes = p.wipes,
 			}
+			wrote = true
 			return old
 		end)
 	end)
 	if not ok then warn("[Vault] save failed for " .. plr.Name .. ": " .. tostring(err)) end
-	return ok
+	-- Only a transform that actually RETURNED a value wrote anything. The abort branch above
+	-- returns nil, which is a successful pcall and a save that did not happen; treating that as
+	-- written would clear the fingerprint and lose the change for good.
+	if ok and wrote then
+		p.savedFingerprint = fingerprint
+		pendingSave[plr] = nil
+	end
+	return ok and wrote
+end
+
+-- Ask for a save; the flush loop performs it, at most once per Config.Save.FlushTickSeconds.
+-- Remote handlers call THIS, never flush: a client firing EquipEvent in a loop between two pets
+-- it owns changes the profile every time, so a "did anything change" test alone would still let
+-- it drive the write rate.
+function requestSave(plr)
+	pendingSave[plr] = true
 end
 
 --============================================================================ world roots
@@ -491,6 +546,14 @@ local function buildVault(plr, tierIndex, floor)
 	spec.seed = Progression.seedFor(Config, tierIndex, floor)
 	local model = VaultFloor.build(Config, spec, MazeGen, Rng)
 
+	-- THE COUNTDOWN IS DERIVED FROM THE VAULT THAT WAS JUST BUILT, and it has to happen in this
+	-- order: BFS the maze that actually generated, price the climb, then hand the runner that
+	-- much time times the floor's slack. v1 read three typed numbers off the tier and computed
+	-- the plane's speed as height/countdown, so every storey added made the plane sweep the lower
+	-- ones FASTER — Silver and Gold were unwinnable on floor 1 and nothing in the repo measured a
+	-- traversal to notice. See src/shared/VaultPath.luau and tests/Collapse.spec.luau.
+	spec.collapseSeconds = VaultPath.countdown(Config, model, spec.slack, VaultFloor)
+
 	local idx = claimSlot(plr)
 	local origin = slotOrigin(idx)
 
@@ -573,7 +636,7 @@ end
 
 local finishRun
 
-local function tickRun(plr, a)
+local function tickRun(plr, a, dt)
 	local p = profiles[plr]
 	if not p then return end
 	local model, run = a.model, a.run
@@ -594,7 +657,13 @@ local function tickRun(plr, a)
 	local char = plr.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if hrp then
-		local local_ = hrp.Position - a.origin
+		-- WHERE THE CLIENT SAYS IT IS...
+		local claimed = hrp.Position - a.origin
+		-- ...and where a runner could actually have got to by now. Every rule below reads the
+		-- second one. In Roblox the client owns its character's physics, so the first is a claim;
+		-- writing the root part onto the exit pad used to bank a whole vault instantly.
+		local t = Trace.step(a.trace, { x = claimed.X, y = claimed.Y, z = claimed.Z }, dt)
+		local local_ = Vector3.new(t.x, t.y, t.z)
 
 		for id, part in pairs(a.gemParts) do
 			local g = a.gemById[id]
@@ -617,8 +686,10 @@ local function tickRun(plr, a)
 			return
 		end
 
-		-- The collapse caught you: your feet are under the plane.
-		if local_.Y <= planeY + RUN.KillMargin then
+		-- The collapse caught you: your feet are under the plane. RunState owns the comparison,
+		-- so tests/Collapse.spec.luau can ask "would this runner have died here" a few thousand
+		-- times per vault without booting a server, against the same rule that runs live.
+		if RunState.caught(run, model, local_.Y, now) then
 			finishRun(plr, "collapse")
 			return
 		end
@@ -684,6 +755,10 @@ function finishRun(plr, cause)
 	updateLeaderstats(plr)
 	RunEvent:FireClient(plr, "end", outcome)
 	pushState(plr)
+	-- The one remaining IMMEDIATE write, and it is safe to make immediate: a run cannot end more
+	-- often than a run can be started, and the shortest countdown the game can generate is
+	-- Config.Collapse.MinSeconds. This is also the moment worth not losing — gems just became
+	-- real, or a wipe just happened.
 	flush(plr, false)
 end
 
@@ -697,6 +772,20 @@ local function beginRun(plr, tierIndex)
 		toast(plr, "You are already inside a vault.")
 		return
 	end
+
+	-- NO BODY, NO RUN — and this check has to come BEFORE anything is built or claimed, not just
+	-- before the teleport. Players.RespawnTime is 5 seconds and Reset is how a stuck player gets
+	-- unstuck, so `plr.Character == nil` is a window every player passes through several times a
+	-- session. Starting the run anyway built a vault they were not in, refused every further tap
+	-- with "You are already inside a vault" for the whole countdown, and charged them a permanent
+	-- wipe at the end for a run they never took.
+	local char = plr.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		toast(plr, "⏳ Still respawning — tap again once you are back on your feet.")
+		return
+	end
+
 	local tier = Progression.tier(Config, tierIndex)
 	if not tier then
 		toast(plr, "That vault does not exist.")
@@ -722,14 +811,17 @@ local function beginRun(plr, tierIndex)
 		plane = plane, seal = seal,
 		tierIndex = tierIndex, floor = floor,
 		elapsed = 0, sinceTick = 0,
+		-- Seeded from the drop-in the SERVER is about to write, never from anything the client
+		-- said. If the trace started at the client's claimed position, a client that claimed to
+		-- be at the exit before the run began would start there.
+		trace = Trace.new(Config, model.spawn.position),
 	}
 	active[plr] = a
 
-	local char = plr.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	if hrp then
-		hrp.CFrame = CFrame.new(origin + vec(model.spawn.position))
-	end
+	-- `hrp` was captured before the vault was built, and nothing between here and there yields,
+	-- so it is still the same root part. Re-reading plr.Character here instead would reintroduce
+	-- the guard-shaped-but-not-guarding shape this whole block exists to remove.
+	hrp.CFrame = CFrame.new(origin + vec(model.spawn.position))
 
 	RunEvent:FireClient(plr, "start", {
 		tier = tierIndex, tierName = tier.name, emoji = tier.emoji,
@@ -745,7 +837,7 @@ local function beginRun(plr, tierIndex)
 			if type(dt) ~= "number" then dt = RUN.TickSeconds end
 			if active[plr] ~= a then break end
 			a.elapsed += dt
-			tickRun(plr, a)
+			tickRun(plr, a, dt)
 		end
 	end)
 end
@@ -775,7 +867,10 @@ local function doBuy(plr, petId)
 	updateLeaderstats(plr)
 	refreshCompanion(plr)
 	pushState(plr)
-	flush(plr, false)
+	-- The player sees the toast, the wallet and the companion IMMEDIATELY; only the DataStore
+	-- write is coalesced. A refusal above leaves the profile untouched, so it will not produce a
+	-- write at all.
+	requestSave(plr)
 end
 
 local function doEquip(plr, petId)
@@ -789,7 +884,7 @@ local function doEquip(plr, petId)
 	end
 	refreshCompanion(plr)
 	pushState(plr)
-	flush(plr, false)
+	requestSave(plr)
 end
 
 BuyEvent.OnServerEvent:Connect(doBuy)
@@ -824,12 +919,24 @@ local function onCharacter(plr, char)
 			if active[plr] then finishRun(plr, "collapse") end
 		end)
 	end
-	local _ = char
+
+	-- MAKE Config.Movement.WalkSpeed TRUE. Every countdown in the game is derived from
+	-- (distance along the BFS-optimal route) / WalkSpeed, so if the Humanoid keeps Roblox's
+	-- default 16 while Config says 24, every vault in the game is 50% harder than the spec that
+	-- signed it off believes — and the spec would still be green, because it reads Config too.
+	-- The review's exact words were "nothing in the game sets WalkSpeed".
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.WalkSpeed = Config.Movement.WalkSpeed
+	end
 end
 
 local function onPlayerAdded(plr)
 	local p = loadProfile(plr)
 	profiles[plr] = p
+	-- What is already on disk. Without this a player who joins and changes nothing still writes
+	-- on their first flush tick, which is the same wasted call the fingerprint exists to stop.
+	p.savedFingerprint = saveFingerprint(p)
 
 	local ls = Instance.new("Folder")
 	ls.Name = "leaderstats"
@@ -865,15 +972,22 @@ Players.PlayerRemoving:Connect(function(plr)
 	if comp then comp:Destroy() end
 	companions[plr] = nil
 	teardownRun(plr)
-	flush(plr, true)
+	flush(plr, true)   -- forced: the lock has to come off even if nothing changed
+	pendingSave[plr] = nil
 	profiles[plr] = nil
 end)
 
+-- THE ONLY PLACE A REMOTE-DRIVEN SAVE ACTUALLY WRITES. Handlers mark the profile pending and
+-- this loop performs at most one write per player per tick, so the write rate is bounded by the
+-- clock rather than by how fast a client can fire a RemoteEvent. It replaces a 45-second
+-- autosave that wrote every profile whether or not anything had changed: a profile with nothing
+-- pending now has nothing to write, and a change reaches the DataStore within one tick instead
+-- of within forty-five seconds.
 task.spawn(function()
 	while true do
-		task.wait(Config.Save.AutosaveSeconds)
-		for plr in pairs(profiles) do
-			flush(plr, false)
+		task.wait(Config.Save.FlushTickSeconds)
+		for plr in pairs(pendingSave) do
+			if profiles[plr] ~= nil then flush(plr, false) end
 		end
 	end
 end)

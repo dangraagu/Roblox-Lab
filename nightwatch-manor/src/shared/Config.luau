@@ -38,11 +38,25 @@ Config.Manor = {
 	DoorHeight = 10,
 	GridSpan = 5, -- rooms live in [-GridSpan, GridSpan] on both axes
 
-	-- Room count grows with the night AND with how much safehouse you have built.
+	-- Room count grows with the NIGHT, and with nothing else. It deliberately does NOT read the
+	-- player's hub level: night N has to be the same manor for everybody or the best-night number
+	-- compares nothing, and with the exit always in the deepest room, sizing the manor off the
+	-- safehouse made every upgrade quietly lengthen the walk out.
 	BaseRooms = 6,
 	RoomsPerNight = 0.5,
-	RoomsPerHubLevel = 0.35,
 	MaxRooms = 18,
+
+	-- Chance of a doorway through each wall a new room shares with an ALREADY-BUILT room other
+	-- than the one it grew from. This is what puts circuits in the manor. At 0 the generator
+	-- makes a pure tree, every branch of which ends in a dead end — and a dead end against a
+	-- pursuer is a kill regardless of how fast the player is, which is exactly how a fleeing
+	-- player was still being cornered on 8 of nights 1-12 after the chase speeds were fixed.
+	ExtraDoorChance = 0.75,
+
+	-- Rooms the generator may add ON TOP of the target while closing dead ends (see the repair
+	-- pass in Manor.plan). A one-door room is somewhere a chased player cannot leave, so the
+	-- manor is grown to `roomCount` and then closed; without a budget here it could not be.
+	MaxRepairRooms = 5,
 
 	-- Patrol route length (rooms). Consecutive entries are always LINKED rooms, so the
 	-- Nightwatcher walks through doorways instead of through walls.
@@ -82,17 +96,39 @@ Config.Relics = {
 	MaxPerRoom = 2,
 }
 
+-- ------------------------------------------------------------------ The player
+-- The player's speed is part of the MODEL, not an engine default nobody wrote down. The server
+-- assigns WalkSpeed onto every Humanoid it sees, and Watcher.speed measures itself against this
+-- number. It had to be added: with nothing setting it, the Nightwatcher was implicitly racing
+-- Roblox's default 16, a value no config knew, no test asserted and no retune could see — and it
+-- was losing that race from 0.8 seconds into night one.
+Config.Player = {
+	WalkSpeed = 20, -- studs/second on foot
+}
+
 -- ------------------------------------------------------------------ The Nightwatcher
 -- No pathfinding, no chase AI. It walks the patrol route at a speed that rises with dread,
 -- and it "sees" you when you are inside its view cone AND in its room or a linked one.
+--
+-- THE SPEEDS BELOW ARE BOUNDED BY THE PLAYER'S, NOT BY THEMSELVES. `MaxSpeedFraction` is a hard
+-- ceiling applied inside Watcher.speed, and Main.server refuses to boot if the curve below ever
+-- reaches the player. Retune BaseSpeed / SpeedPerDread / HuntSpeedMul freely: the one thing that
+-- cannot happen is a Nightwatcher the player cannot outrun, because that turns "it saw me" into
+-- "I am dead" with no counterplay, and makes the game's own advice ("break line of sight and keep
+-- moving") a lie — you cannot break sight with something that closes distance on you.
 Config.Watcher = {
-	BaseSpeed = 11, -- studs/second at dread 0
-	SpeedPerDread = 9, -- + this much at dread 1
+	BaseSpeed = 8, -- studs/second at dread 0
+	SpeedPerDread = 2.4, -- + this much at dread 1
 	SightRange = 55,
 	SightHalfAngleDeg = 50,
 	CatchRadius = 7,
-	HuntSpeedMul = 1.45, -- while it has seen you
+	HuntSpeedMul = 1.2, -- while it has seen you
 	HuntSeconds = 7, -- how long it keeps coming after losing sight
+	-- Hard ceiling, as a fraction of Config.Player.WalkSpeed. 0.65 * 20 = 13 studs/s, which the
+	-- curve above never reaches (12.48 at dread 1 while hunting) — the ceiling is a guard rail,
+	-- not the operating point. A fleeing player gains at least 7.5 studs/s, i.e. more than a
+	-- room's width over one hunt window, which is what makes running an actual escape.
+	MaxSpeedFraction = 0.65,
 }
 
 -- ------------------------------------------------------------------ The night itself
@@ -115,7 +151,12 @@ Config.Upgrades = {
 		{ id = "lanterns", name = "Safehouse Lanterns", blurb = "Light you can carry into the manor.", max = 5, baseCost = 40, costMul = 1.6, per = { lampRadius = 6 } },
 		{ id = "wardstones", name = "Wardstones", blurb = "The manor wakes up slower.", max = 5, baseCost = 60, costMul = 1.7, per = { dreadSlow = 0.07 } },
 		{ id = "beartraps", name = "Bear Traps", blurb = "The Nightwatcher walks slower.", max = 5, baseCost = 75, costMul = 1.75, per = { watcherSlow = 0.05 } },
-		{ id = "alarmbell", name = "Alarm Bell", blurb = "Warns you sooner that it has seen you.", max = 3, baseCost = 120, costMul = 1.9, per = { warnRange = 25 } },
+		-- The bell HEARS. Watcher.hears has no facing argument and no sight argument, so it cannot
+		-- know whether you have been noticed; what it does is ring when something walks close by,
+		-- through walls and behind its back, which sight cannot do. The blurb used to promise the
+		-- other thing ("Warns you sooner that it has seen you") — 120 relics for a product the code
+		-- does not sell. 25 studs clears the 20-stud half-room, so level 1 reaches next door.
+		{ id = "alarmbell", name = "Alarm Bell", blurb = "Rings when something is close, through walls and around corners.", max = 3, baseCost = 120, costMul = 1.9, per = { warnRange = 25 } },
 		{ id = "relicvault", name = "Relic Vault", blurb = "Every relic banks for more.", max = 5, baseCost = 100, costMul = 1.8, per = { relicValue = 0.15 } },
 		{ id = "lockbox", name = "Lockbox", blurb = "Keep some of your haul when caught.", max = 3, baseCost = 150, costMul = 2, per = { keepOnCaught = 0.2 } },
 		{ id = "floodlights", name = "Floodlights", blurb = "Buys you more time in the manor.", max = 4, baseCost = 200, costMul = 1.9, per = { extractSeconds = 15 } },

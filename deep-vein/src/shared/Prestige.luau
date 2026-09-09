@@ -16,9 +16,18 @@
 local Prestige = {}
 
 -- Cash needed to buy the NEXT rebirth when you already have `rebirths`.
+--
+-- QUOTED IN ORE, NOT IN CASH. Every sale a player makes is already multiplied by
+-- `Prestige.multiplier`, so a price that ignores that multiplier is measured in a unit that
+-- shrinks by 0.8 of itself every rebirth — the reward would be paying for its own successor. The
+-- multiplier factor below cancels it out, which leaves `RequirementGrowth` free to track the one
+-- thing that actually limits a player: how much ore their cave contains. See the note in
+-- Config.Prestige for the measurement, and Prestige.spec for the assertion that keeps the two in
+-- step.
 function Prestige.requirement(cfg: any, rebirths: number): number
 	local pc = cfg.Prestige
-	return math.floor(pc.BaseRequirement * (pc.RequirementGrowth ^ math.max(0, rebirths or 0)))
+	local r = math.max(0, rebirths or 0)
+	return math.floor(pc.BaseRequirement * Prestige.multiplier(cfg, r) * (pc.RequirementGrowth ^ r))
 end
 
 -- Permanent cash multiplier granted by `rebirths` rebirths. Applied to the whole haul at sale.

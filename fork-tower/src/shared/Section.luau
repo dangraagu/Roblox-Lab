@@ -126,17 +126,28 @@ function Section.shape(cfg, level: number, penalty: boolean)
 	return step, gap, count, hazards
 end
 
--- Section.build(cfg, runSeed, level, theme, penalty, Rng) -> section
+-- Section.build(cfg, runSeed, level, theme, penalty, Rng, originX) -> section
+--
+-- `originX` is where this section's origin sits relative to its LANE'S CENTRE LINE, and it is the
+-- argument that keeps a tower inside its own lane. The server chains sections — each exit becomes
+-- the next floor's fork origin — so without it the tower's X is a free random walk over the whole
+-- run: 364 studs of drift in ten floors against a 220-stud lane, 2942 over five hundred, which is
+-- a player's tower standing inside a stranger's. Every step below is refused if it would leave
+-- +/- cfg.World.CorridorHalfWidth, and since the fallback is FORWARD (dx = 0), the exit is inside
+-- the corridor too — so the next floor starts inside it, and the bound holds by induction for any
+-- number of floors. Section.check re-derives it rather than trusting this loop.
 --
 -- section = {
---   level, theme, penalty, step, gap, tileSize, thickness,
---   platforms = { { index, dx, dy, dz, size }, ... },   -- dy = walkable TOP
+--   level, theme, penalty, step, gap, tileSize, thickness, originX,
+--   platforms = { { index, dx, dy, dz, size, safeDx, safeDz }, ... },  -- dy = walkable TOP
 --   hazards   = { { platform, dx, dy, dz, size, kind, axis } , ... }, -- dy = hazard CENTRE
 --   exit = { dx, dy, dz },                              -- where the next fork platform goes
 -- }
-function Section.build(cfg, runSeed: number, level: number, theme: string, penalty: boolean, Rng)
+function Section.build(cfg, runSeed: number, level: number, theme: string, penalty: boolean, Rng, originX: number?)
 	assert(level >= 1, "Section.build: level must be >= 1")
 	local tw = cfg.Tower
+	local ox = originX or 0
+	local corridor = cfg.World.CorridorHalfWidth
 
 	local s = math.floor(runSeed)
 	if s < 0 then s = -s end
@@ -151,22 +162,35 @@ function Section.build(cfg, runSeed: number, level: number, theme: string, penal
 	local platforms = {}
 	local cx, cz = 0, 0
 	local lastName = "none"
+	-- A direction is refused for either reason, and for the SAME reason: the walk has to stay
+	-- somewhere. Reversing puts a platform over a jump; leaving the corridor puts the tower in the
+	-- neighbour's lane. Forward breaks neither, which is why it is the fallback for both.
+	local function refused(d): boolean
+		if d.opposite == lastName then
+			return true
+		end
+		return math.abs(ox + cx + d.dx * reach) > corridor + 1e-9
+	end
 	for i = 1, count do
 		-- Redraw rather than filter, so the forward bias in DIRS is preserved: filtering would
 		-- quietly reweight the remaining directions every time a reversal was excluded.
 		local d = DIRS[rng:below(#DIRS)]
 		local tries = 0
-		while d.opposite == lastName and tries < 8 do
+		while refused(d) and tries < 8 do
 			d = DIRS[rng:below(#DIRS)]
 			tries += 1
 		end
-		if d.opposite == lastName then
-			d = DIRS[1] -- forward is never the reverse of anything in this table
+		if refused(d) then
+			d = DIRS[1] -- forward: never the reverse of anything here, and dx = 0, so never outside
 		end
 		lastName = d.name
 		cx += d.dx * reach
 		cz += d.dz * reach
-		platforms[i] = { index = i, dx = cx, dy = i * step, dz = cz, size = tw.TileSize }
+		platforms[i] = {
+			index = i, dx = cx, dy = i * step, dz = cz, size = tw.TileSize,
+			-- Overwritten below for any platform that ends up carrying a hazard.
+			safeDx = cx, safeDz = cz,
+		}
 	end
 
 	--------------------------------------------------------------------- hazards
@@ -200,6 +224,20 @@ function Section.build(cfg, runSeed: number, level: number, theme: string, penal
 			axis = axis,
 			kind = HAZARD_KINDS[rng:below(#HAZARD_KINDS)],
 		}
+
+		-- WHERE IT IS SAFE TO STAND. The checkpoint used to be the platform's centre, and a hazard
+		-- sits `offset` studs from that centre with its near face only TileSize/2 - HazardBite =
+		-- 1.50 studs away — closer than a character is wide. So touching a hazard returned the
+		-- player onto the hazard, which fired it again. The clear band is on the far side; put the
+		-- character's CENTRE as far into it as it can go while staying wholly on the platform, and
+		-- let Section.check prove the clearance rather than assume it.
+		local inner = p.size / 2 - cfg.World.CharacterHalfWidth
+		local h = hazards[n]
+		if axis == "x" then
+			p.safeDx = p.dx + (if h.dx >= p.dx then -inner else inner)
+		else
+			p.safeDz = p.dz + (if h.dz >= p.dz then -inner else inner)
+		end
 	end
 
 	local last = platforms[count]
@@ -211,10 +249,23 @@ function Section.build(cfg, runSeed: number, level: number, theme: string, penal
 		gap = gap,
 		tileSize = tw.TileSize,
 		thickness = tw.PlatformThickness,
+		originX = ox,
 		platforms = platforms,
 		hazards = hazards,
 		exit = { dx = last.dx, dy = last.dy, dz = last.dz },
 	}
+end
+
+-- Where the server puts a player it is returning to platform `index`: a point on that platform
+-- clear of whatever is standing on it, with `dy` the walkable TOP so the caller adds its own lift.
+-- Callers must not reach for platform.dx/dz for this — that is the centre, and the centre is
+-- exactly where the hazard is.
+function Section.respawn(section, index: number)
+	local p = section.platforms[index]
+	if p == nil then
+		return nil
+	end
+	return { dx = p.safeDx, dy = p.dy, dz = p.safeDz }
 end
 
 -- The runtime guard. The server calls this at startup for a spread of levels and warns loudly
@@ -224,10 +275,20 @@ function Section.check(section, cfg): (boolean, { string })
 	local problems = {}
 	local maxRise, maxGap = Section.maxRise(cfg), Section.maxGap(cfg)
 
+	local corridor = cfg.World.CorridorHalfWidth
+	local laneOrigin = section.originX or 0
+
 	local prev = nil
 	for _, p in ipairs(section.platforms) do
 		if p.size <= 0 then
 			problems[#problems + 1] = string.format("platform %d has size %.2f", p.index, p.size)
+		end
+		-- Re-derived from the platform's own x, not trusted from the walk that placed it: this is
+		-- the assertion that a tower cannot reach into the lane beside it.
+		if math.abs(laneOrigin + p.dx) > corridor + 1e-9 then
+			problems[#problems + 1] = string.format(
+				"platform %d sits %.2f studs off the lane centre, past the %.2f corridor",
+				p.index, laneOrigin + p.dx, corridor)
 		end
 		if prev then
 			local rise = p.dy - prev.dy
@@ -283,6 +344,30 @@ function Section.check(section, cfg): (boolean, { string })
 			if band < cfg.Fairness.MinLandingStuds then
 				problems[#problems + 1] = string.format(
 					"platform %d is left with a %.2f-stud landing band", hz.platform, band)
+			end
+
+			-- And the point the server actually returns a player to. A landing band nobody is
+			-- placed in is a band that proves nothing: this is the assertion that says the
+			-- checkpoint is IN it. Two AABBs — the standing character and the hazard cube — must
+			-- be disjoint on at least one horizontal axis, and the character must be wholly on
+			-- the platform rather than clear of the hazard in mid-air.
+			local ch = cfg.World.CharacterHalfWidth
+			local rp = Section.respawn(section, hz.platform)
+			if rp == nil then
+				problems[#problems + 1] = string.format("platform %d has no respawn point", hz.platform)
+			else
+				local gx = math.abs(hz.dx - rp.dx) - (hz.size / 2 + ch)
+				local gz = math.abs(hz.dz - rp.dz) - (hz.size / 2 + ch)
+				if gx < -1e-9 and gz < -1e-9 then
+					problems[#problems + 1] = string.format(
+						"platform %d's checkpoint is inside its own hazard (%.2f x %.2f studs of overlap)",
+						hz.platform, -gx, -gz)
+				end
+				if math.abs(rp.dx - p.dx) + ch > p.size / 2 + 1e-9
+					or math.abs(rp.dz - p.dz) + ch > p.size / 2 + 1e-9 then
+					problems[#problems + 1] = string.format(
+						"platform %d's checkpoint hangs the player off the edge", hz.platform)
+				end
 			end
 		end
 	end

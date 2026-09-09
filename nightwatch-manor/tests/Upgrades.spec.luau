@@ -24,6 +24,32 @@ end
 
 local U = Config.Upgrades
 
+--=================================================== the catalog has to sell what the code does
+
+-- A blurb is read at the point of sale, and this one was a lie. `Watcher.hears` takes
+-- (warnRange, wx, wz, px, pz): no facing, no sight flag, no room — it is arithmetically
+-- incapable of knowing whether you have been SEEN. The server then fires the bell's notice only
+-- under `elseif near and not spotted`, so it is silent in exactly the case the old blurb
+-- ("Warns you sooner that it has seen you") advertised. 120 relics for level 1, escalating to
+-- 433 by level 3, for an early-warning-of-detection that does not exist. What the player
+-- actually buys is a through-wall proximity ping, which is useful — and is a different product.
+do
+	local bell = Upgrades.byId(Config, "alarmbell")
+	truthy(bell ~= nil, "the Alarm Bell is in the catalog")
+	local blurb = string.lower(tostring(bell and bell.blurb or ""))
+	for _, claim in { "seen", "sees", "sight", "spot" } do
+		falsy(string.find(blurb, claim, 1, true) ~= nil,
+			"the Alarm Bell blurb does not say '" .. claim .. "' — it hears, it cannot see")
+	end
+	truthy(#blurb > 0, "...and it still says something")
+
+	-- An upgrade whose first level grants something you already had is an upgrade that does
+	-- nothing. One level has to reach past the room you are standing in.
+	local per = bell and bell.per and bell.per.warnRange or 0
+	truthy(per > Config.Manor.RoomSize / 2, string.format(
+		"one level of Alarm Bell (%d studs) reaches beyond the room you are standing in (%d)", per, Config.Manor.RoomSize / 2))
+end
+
 --============================================================================ catalog sanity
 
 do

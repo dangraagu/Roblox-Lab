@@ -199,7 +199,24 @@ Config.Passes = {
 -- ── Verden (per-spiller bane, som grow-a-crystal sine plots) ────────────────
 Config.World = {
 	LaneSpacing = 220, -- studs mellom to spilleres tårn
-	MaxLanes = 24,
+	MaxLanes = 24, -- GULV. Serveren tar max(dette, Players.MaxPlayers) — se claimLane.
+
+	-- KORRIDOREN. Hver seksjons utgang blir NESTE etasjes fork-origo, så tårnets X er en
+	-- tilfeldig vandring over hele runet. Uten en grense i MODELLEN vandrer et tårn inn i
+	-- naboens: målt til 364 studs drift på ti etasjer (mot et 220-studs spor) og 2942 studs
+	-- på 500. Section.build klemmer hvert steg mot dette tallet, målt fra banens midtlinje,
+	-- og Section.check håndhever det. Å øke LaneSpacing ville bare flyttet verdien der
+	-- kollisjonen kommer tilbake.
+	--
+	-- Section.spec beviser CorridorHalfWidth + bredeste plate/2 <= LaneSpacing/2, altså at
+	-- ingen del av et tårn kan nå inn i sporet ved siden av.
+	CorridorHalfWidth = 60,
+
+	-- En Roblox-figur er ~4 studs bred. Brukt til å plassere sjekkpunktet på en plattform
+	-- KLAR av hindringen som står der: sjekkpunktet var plattformens senter, og hindringen
+	-- står 1.50 studs fra det — altså inni figuren. Se Section.respawn.
+	CharacterHalfWidth = 2,
+
 	LobbyPadSize = { 26, 2, 22 },
 	ForkPadSize = { 26, 2, 20 },
 	DoorSize = { 6, 11, 1 },
@@ -207,6 +224,31 @@ Config.World = {
 	DoorDepth = 8, -- z fra midten av fork-platået
 	FallGrace = 70, -- studs under sjekkpunktet før du hentes tilbake
 	RespawnLift = 4,
+}
+
+-- ── Takter: hva en klient får be om, hvor ofte ──────────────────────────────
+-- En RemoteEvent er en knapp hvem som helst kan holde inne. Rebirth river ned og bygger opp
+-- hele verdenen OG skriver til DataStore; uten en takt her tømmer én klient hele serverens
+-- skrivebudsjett (60 + 10 pr spiller pr minutt) på under ett sekund, og da slutter ALLE ANDRE
+-- å lagre — inkludert session-låsen, som er det som gjør en økt read-only.
+Config.Limits = {
+	RebirthCooldown = 3, -- sekunder mellom to rebirths fra samme spiller
+	ArmSkipCooldown = 0.25, -- ArmSkip er billig, men den er fortsatt en knapp
+	-- Minste tid mellom to DataStore-skriv for samme spiller. Avslutning, BindToClose og
+	-- kodeinnløsning skriver alltid med én gang (force), for de MÅ lande; alt annet venter til
+	-- autosave-loopen skyller.
+	--
+	-- Tallet er UTLEDET, ikke gjettet. Roblox gir SERVEREN 60 + 10*spillere UpdateAsync-kall i
+	-- minuttet. Et gulv på S sekunder mellom to skriv fra samme spiller gir hver spiller høyst
+	-- 60/S skriv i minuttet, altså 60N/S for N spillere — og 60N/S <= 60 + 10N holder for ENHVER
+	-- N nøyaktig når 60/S <= 10, altså S >= 6. 6 er derfor det minste tallet som holder en full
+	-- server innenfor budsjettet, med de flate 60 igjen som slakk til join, leave og BindToClose.
+	-- Serveren advarer ved oppstart hvis noen senker det under 6.
+	SaveMinInterval = 6,
+	-- Hvor lenge en hindring er «brukt» etter at den sendte deg til sjekkpunktet. Touched
+	-- fyrer mange ganger pr berøring; uten dette er hver berøring en Notice-melding til
+	-- klienten og en ny teleport midt i den forrige.
+	HazardCooldown = 1,
 }
 
 -- ── Lagring ─────────────────────────────────────────────────────────────────

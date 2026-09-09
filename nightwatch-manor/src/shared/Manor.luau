@@ -79,12 +79,16 @@ function Manor.seedFor(cfg: any, night: number): number
 	return cfg.WorldSeed * cfg.SeedPrimeA + math.floor(math.max(night, 0)) * cfg.SeedPrimeB
 end
 
--- How many rooms this night gets. Grows with the night AND with how much safehouse the player
--- has built (a bigger manor is more loot and more walking, i.e. more dread spent).
-function Manor.roomCount(cfg: any, night: number, hubLevel: number): number
+-- How many rooms this night gets. Grows with the NIGHT and with nothing else.
+--
+-- It used to fold in the player's hub level, and that was the single most expensive line in the
+-- game. It made the headline claim ("night 7 is the same manor for everybody") false, so no two
+-- best-night numbers were comparable; and because the exit is always the DEEPEST room, it meant
+-- every upgrade anybody bought lengthened their own walk out — a silent anti-synergy in a tycoon,
+-- with nothing on screen to explain it. The size of a night is a property of the night.
+function Manor.roomCount(cfg: any, night: number): number
 	local M = cfg.Manor
-	local n = M.BaseRooms
-		+ math.floor((math.max(night, 1) - 1) * M.RoomsPerNight + math.max(hubLevel, 0) * M.RoomsPerHubLevel)
+	local n = M.BaseRooms + math.floor((math.max(night, 1) - 1) * M.RoomsPerNight)
 	return clamp(n, 2, M.MaxRooms) -- never below entrance + exit
 end
 
@@ -228,15 +232,26 @@ end
 
 -- ------------------------------------------------------------------ generation
 
--- Build one night's manor. Deterministic in (rng seed, cfg, night, hubLevel).
+-- Build one night's manor. Deterministic in (rng seed, cfg, night) and NOTHING else — no
+-- userId, no hub level, no profile. That is what makes "I got out of night 14" a claim two
+-- players can compare, and it is the only reason memorisable layouts are worth accepting.
 --
 -- Growth, not carving: start with the foyer at (0,0) and repeatedly attach a new room to a
--- random room that still has a free orthogonal neighbour. That yields a connected TREE by
--- construction — every room reachable, no isolated wing, no unreachable exit — and it
--- terminates, because each pass either places a room or permanently retires a full one.
-function Manor.plan(rng: RngLike, cfg: any, night: number, hubLevel: number): Plan
+-- random room that still has a free orthogonal neighbour. Every room is therefore reachable by
+-- construction — no isolated wing, no unreachable exit — and it terminates, because each pass
+-- either places a room or permanently retires a full one.
+--
+-- THEN LOOPS. Attachment alone yields a tree, and a tree is a manor with no way round: every
+-- branch ends in a dead end, so a player being chased runs until the rooms stop and is then
+-- caught no matter how much faster they are. Measured on these exact seeds: 4-6 of every 6-11
+-- rooms were dead ends, and a fleeing player was cornered on 8 of nights 1-12 even against a
+-- Nightwatcher it outran by 7.5 studs/s. So each new room also opens a doorway, with
+-- probability `ExtraDoorChance`, through every OTHER wall it already shares with a built room.
+-- Doorways are only ever ADDED, so nothing can become unreachable; what changes is that the
+-- manor now contains circuits you can run around, which is what "keep moving" needs to be true.
+function Manor.plan(rng: RngLike, cfg: any, night: number): Plan
 	local M = cfg.Manor
-	local target = Manor.roomCount(cfg, night, hubLevel)
+	local target = Manor.roomCount(cfg, night)
 
 	local rooms: { Room } = {}
 	local links: { Link } = {}
@@ -267,12 +282,165 @@ function Manor.plan(rng: RngLike, cfg: any, night: number, hubLevel: number): Pl
 		if #fd == 0 then
 			table.remove(open, pick) -- retired: boxed in on all four sides
 		else
-			local d = fd[rng:below(#fd)]
+			-- Prefer a cell that ALREADY touches other built rooms. A uniform pick grows tendrils,
+			-- and a tendril is a corridor of dead ends; weighting by how many built walls the new
+			-- cell would share makes the manor close on itself into circuits instead.
+			local w = {}
+			for i, cand in fd do
+				local cx, cz = room.gx + cand[1], room.gz + cand[2]
+				local touch = 0
+				for _, dd in DIRS do
+					if cells[cellKey(cx + dd[1], cz + dd[2])] ~= nil then
+						touch += 1
+					end
+				end
+				w[i] = touch * touch -- touch is at least 1: the room it is growing from
+			end
+			local d = fd[weightedIndex(rng, w)]
 			local id = #rooms + 1
-			rooms[id] = { id = id, gx = room.gx + d[1], gz = room.gz + d[2], kind = "hall", depth = room.depth + 1 }
+			rooms[id] = { id = id, gx = room.gx + d[1], gz = room.gz + d[2], kind = "hall", depth = 0 }
 			cells[cellKey(rooms[id].gx, rooms[id].gz)] = id
 			table.insert(links, { a = room.id, b = id })
 			table.insert(open, id)
+
+			-- ...and a doorway through every OTHER wall this room already shares with a built
+			-- one, so the manor has circuits in it rather than only branches.
+			for _, dd in DIRS do
+				local nb = cells[cellKey(rooms[id].gx + dd[1], rooms[id].gz + dd[2])]
+				if nb ~= nil and nb ~= room.id and rng:next() < M.ExtraDoorChance then
+					table.insert(links, { a = nb, b = id })
+				end
+			end
+		end
+	end
+
+	-- CLOSE THE DEAD ENDS. A room with a single doorway is a room a chased player cannot leave,
+	-- and being faster than the Nightwatcher only means something if running has somewhere to go:
+	-- with the speeds fixed but the dead ends left in, a fleeing player was still cornered on 3
+	-- of nights 1-20, every time in a one-door room. Each pass takes a dead end and puts a NEW
+	-- room in a free cell that touches BOTH it and something else already built — so the dead end
+	-- gains a second doorway and the new room is born with two, which is why this pass cannot
+	-- create the problem it exists to fix. It consumes no rng draws (the shape decides
+	-- everything), so the layout downstream of it is unchanged. It stops when no such cell exists
+	-- — some shapes genuinely cannot be closed — or when the repair budget runs out.
+	do
+		local budget = target + M.MaxRepairRooms
+		while #rooms < budget do
+			local deg: { [number]: number } = {}
+			for _, r in rooms do
+				deg[r.id] = 0
+			end
+			for _, l in links do
+				deg[l.a] += 1
+				deg[l.b] += 1
+			end
+
+			local function addRoom(cx: number, cz: number): number
+				local id = #rooms + 1
+				rooms[id] = { id = id, gx = cx, gz = cz, kind = "hall", depth = 0 }
+				cells[cellKey(cx, cz)] = id
+				for _, dd in DIRS do
+					local nb = cells[cellKey(cx + dd[1], cz + dd[2])]
+					if nb ~= nil and nb ~= id then
+						table.insert(links, { a = nb, b = id })
+					end
+				end
+				return id
+			end
+			local function freeCell(cx: number, cz: number): boolean
+				return inBounds(cx, cz) and cells[cellKey(cx, cz)] == nil
+			end
+			local function builtNeighbours(cx: number, cz: number): number
+				local n = 0
+				for _, dd in DIRS do
+					if cells[cellKey(cx + dd[1], cz + dd[2])] ~= nil then
+						n += 1
+					end
+				end
+				return n
+			end
+
+			local placed = false
+			for _, r in rooms do
+				if deg[r.id] > 1 then
+					continue
+				end
+				-- Cheapest close: one new room touching this dead end AND something else.
+				for _, d in DIRS do
+					local cx, cz = r.gx + d[1], r.gz + d[2]
+					if freeCell(cx, cz) and builtNeighbours(cx, cz) >= 2 then
+						addRoom(cx, cz)
+						placed = true
+						break
+					end
+				end
+				-- Failing that, square the corner: two new rooms alongside this one and the room
+				-- it hangs off, which makes a 2x2 block and therefore a circuit. Costs one extra
+				-- room and always works when the two cells are free, which a snaking manor —
+				-- the shape that produces long dead ends — nearly always leaves open.
+				if not placed and #rooms + 2 <= budget then
+					-- `rooms` is indexed by id, so the room on the other end of the link is a
+					-- straight lookup.
+					local host: Room? = nil
+					for _, l in links do
+						if l.a == r.id then
+							host = rooms[l.b]
+						elseif l.b == r.id then
+							host = rooms[l.a]
+						end
+						if host then
+							break
+						end
+					end
+					if host then
+						local px, pz = -(r.gz - host.gz), r.gx - host.gx -- perpendicular to the link
+						for _, sign in { 1, -1 } do
+							local ax, az = r.gx + px * sign, r.gz + pz * sign
+							local bx, bz = host.gx + px * sign, host.gz + pz * sign
+							if freeCell(ax, az) and freeCell(bx, bz) then
+								addRoom(ax, az)
+								addRoom(bx, bz)
+								placed = true
+								break
+							end
+						end
+					end
+				end
+				if placed then
+					break
+				end
+			end
+			if not placed then
+				break
+			end
+		end
+	end
+
+	-- Depth is the number of DOORWAYS from the foyer, measured on the finished graph. It has to
+	-- be computed here rather than stamped on at placement: an extra doorway is a shortcut, and
+	-- a room's parent is no longer necessarily its closest way home.
+	do
+		local adjD: { [number]: { number } } = {}
+		for _, r in rooms do
+			adjD[r.id] = {}
+		end
+		for _, l in links do
+			table.insert(adjD[l.a], l.b)
+			table.insert(adjD[l.b], l.a)
+		end
+		local seen = { [1] = true }
+		local queue, head = { 1 }, 1
+		rooms[1].depth = 0
+		while head <= #queue do
+			local id = queue[head]
+			head += 1
+			for _, nb in adjD[id] do
+				if not seen[nb] then
+					seen[nb] = true
+					rooms[nb].depth = rooms[id].depth + 1
+					table.insert(queue, nb)
+				end
+			end
 		end
 	end
 

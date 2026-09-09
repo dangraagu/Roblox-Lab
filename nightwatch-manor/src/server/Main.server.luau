@@ -76,6 +76,7 @@ type Profile = {
 	best: number,
 	levels: { [string]: number },
 	canSave: boolean, -- true only while we hold the session lock
+	loaded: boolean, -- the DataStore round-trip has landed; nothing may be SPENT before it does
 	lockToken: string, -- STABLE per session; never a timestamp (a timestamp fires against itself)
 	closing: boolean, -- set before the releasing save, blocks any further renewal
 	publishedBest: number,
@@ -351,6 +352,65 @@ for _, up in Config.Upgrades.Catalog do
 	end
 end
 
+-- A fourth guard, and the one that would have caught the worst defect this game shipped with.
+-- The Nightwatcher's speeds are bounded against Config.Player.WalkSpeed inside Watcher.speed;
+-- if a retune ever drives the curve up to the player anyway, being seen becomes being caught on
+-- every night forever, with no counterplay and nothing on screen to explain it. That is a
+-- BALANCE regression, which is exactly the class a unit test cannot see — so it is a boot
+-- failure instead, loud, once, in the F9 console.
+do
+	local walk = Config.Player and Config.Player.WalkSpeed
+	if type(walk) ~= "number" or walk <= 0 then
+		error("[Nightwatch] Config.Player.WalkSpeed must be a positive number — the whole chase is "
+			.. "balanced against it, and the server assigns it onto every Humanoid.", 0)
+	end
+	local worst, worstAt = -1, 0
+	for i = 0, 100 do
+		local s = Watcher.speed(Config, i / 100, 0, true)
+		if s > worst then
+			worst, worstAt = s, i / 100
+		end
+	end
+	if worst >= walk then
+		error(string.format(
+			"[Nightwatch] the Nightwatcher reaches %.2f studs/s at dread %.2f against a player who walks "
+				.. "at %.2f. Being seen would be being caught, always. Lower BaseSpeed / SpeedPerDread / "
+				.. "HuntSpeedMul, or lower Config.Watcher.MaxSpeedFraction.", worst, worstAt, walk), 0)
+	end
+end
+
+-- ------------------------------------------------------------------ the world's own floor
+-- A joining player exists before their zone does, and Roblox does not wait for us. With no
+-- SpawnLocation anywhere in the place and nothing built at the origin — which is what this game
+-- used to be — the character spawns into empty air and falls. At the default gravity it passes
+-- FallenPartsDestroyHeight (-500) in roughly 2.3 seconds, and is then DESTROYED: the player dies
+-- without ever seeing the game and waits out the respawn. The teleport meant to rescue them sat
+-- behind a blocking DataStore round-trip that routinely takes longer than that.
+--
+-- Three things fix it, and all three are here: this floor, which exists before anybody can join;
+-- a real SpawnLocation in each safehouse with `plr.RespawnLocation` pointed at it (buildSafehouse);
+-- and building the zone BEFORE the profile round-trip rather than after it (onPlayerAdded).
+local originFolder = Instance.new("Folder")
+originFolder.Name = "NightwatchOrigin"
+originFolder.Parent = workspace
+do
+	newPart({
+		Name = "OriginPlate", Size = Vector3.new(48, 2, 48), CFrame = CFrame.new(0, 0, 0),
+		Color = STONE, Material = Enum.Material.Slate, Parent = originFolder,
+	})
+	local sp = Instance.new("SpawnLocation")
+	sp.Name = "OriginSpawn"
+	sp.Size = Vector3.new(12, 1, 12)
+	sp.CFrame = CFrame.new(0, 1.5, 0)
+	sp.Anchored = true
+	sp.CanCollide = true
+	sp.Transparency = 1
+	sp.Neutral = true
+	sp.Duration = 0 -- no forcefield
+	sp.Enabled = true -- explicit: a disabled SpawnLocation is not a legal RespawnLocation either
+	sp.Parent = originFolder
+end
+
 -- ------------------------------------------------------------------ persistence
 local PUBLISH_MIN_INTERVAL = 30
 
@@ -375,6 +435,7 @@ local function defaultProfile(): Profile
 		best = 0,
 		levels = {},
 		canSave = false,
+		loaded = false,
 		lockToken = "",
 		closing = false,
 		publishedBest = 0,
@@ -562,8 +623,28 @@ local function buildSafehouse(plr: Player, zone: Model, index: number)
 		newPart({ Name = "WallS" .. i, Size = Vector3.new(segW, H.WallHeight, 1), CFrame = CFrame.new(origin + Vector3.new(i * (7 + segW / 2), H.WallHeight / 2, -half)), Color = STONE, Parent = house })
 	end
 
-	-- the spawn pad you land on
-	newPart({ Name = "SpawnPad", Size = Vector3.new(8, 0.2, 8), CFrame = CFrame.new(origin + Vector3.new(0, 0.6, half - 10)), Color = Color3.fromRGB(70, 110, 150), Material = Enum.Material.Neon, Transparency = 0.35, Parent = house })
+	-- The spawn pad you land on, and it is a REAL SpawnLocation rather than a decorative slab.
+	-- Setting the root part's CFrame on CharacterAdded is not enough on its own: with no
+	-- SpawnLocation in the place the engine picks its own spot, and every zone in this game sits
+	-- at index * 3000 studs along +X, so the spot it picks is nowhere near the player's safehouse.
+	-- A sibling game shipped exactly this defect and put every player on the ROOF of their own
+	-- sealed cavern, 55 studs from anything they could interact with. `plr.RespawnLocation` is
+	-- what makes the engine agree with us, and it also covers the respawn after a death, which no
+	-- CharacterAdded teleport can be relied on to win.
+	local spawnPad = Instance.new("SpawnLocation")
+	spawnPad.Name = "SpawnPad"
+	spawnPad.Size = Vector3.new(8, 0.2, 8)
+	spawnPad.CFrame = CFrame.new(origin + Vector3.new(0, 0.6, half - 10))
+	spawnPad.Color = Color3.fromRGB(70, 110, 150)
+	spawnPad.Material = Enum.Material.Neon
+	spawnPad.Transparency = 0.35
+	spawnPad.Anchored = true
+	spawnPad.CanCollide = true
+	spawnPad.Neutral = true
+	spawnPad.Duration = 0 -- no forcefield: this is a horror game, not an arena
+	spawnPad.Enabled = true -- explicit: Roblox will not respawn anyone at a disabled SpawnLocation
+	spawnPad.Parent = house
+	plr.RespawnLocation = spawnPad
 
 	-- the door into the manor
 	local door = newPart({
@@ -605,6 +686,14 @@ local function buildSafehouse(plr: Player, zone: Model, index: number)
 			local p = profiles[plr]
 			local run = runs[plr]
 			if not p or not run or run.phase ~= "DAY" then
+				return
+			end
+			-- The safehouse is standing before the DataStore round-trip lands, so that a joining
+			-- player has a floor. Until it does, the levels and the stash on screen are the
+			-- DEFAULT ones, and spending against them would either refuse a purchase the player
+			-- can afford or grant one they cannot.
+			if not p.loaded then
+				notice(plr, "DENIED", "Still opening your safehouse — one moment.")
 				return
 			end
 			local ok, newLevels, newStash, reason = Upgrades.buy(Config, p.levels, p.stash, e.id)
@@ -836,20 +925,46 @@ local function douseLantern(plr: Player)
 	end
 end
 
+-- The player's walk speed is a NUMBER THE GAME OWNS. Watcher.speed bounds the Nightwatcher
+-- against Config.Player.WalkSpeed, so leaving it to whatever the engine defaults to would rest
+-- the entire balance of the chase on a value written down nowhere — which is precisely how a
+-- hunter that outran the player from 0.8 seconds into night one shipped green.
+local function applyWalkSpeed(char: Model?)
+	if not char then
+		return
+	end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		(hum :: any).WalkSpeed = Config.Player.WalkSpeed
+	end
+end
+
 local function teleport(plr: Player, pos: Vector3)
 	local char = plr.Character
 	if not char then
 		return
 	end
-	local okPivot = pcall(function()
-		char:PivotTo(CFrame.new(pos))
-	end)
-	if not okPivot then
-		local hrp = char:FindFirstChild("HumanoidRootPart")
-		if hrp and hrp:IsA("BasePart") then
-			hrp.CFrame = CFrame.new(pos)
+	local frame = CFrame.new(pos)
+	local function place()
+		local okPivot = pcall(function()
+			char:PivotTo(frame)
+		end)
+		if not okPivot then
+			local hrp = char:FindFirstChild("HumanoidRootPart")
+			if hrp and hrp:IsA("BasePart") then
+				hrp.CFrame = frame
+			end
 		end
 	end
+	place()
+	-- And again next frame. The engine finishes placing a SPAWNING character after this handler
+	-- returns, and whichever write lands last wins; doing it twice makes that us. (Taken from
+	-- grow-a-crystal, where one write was measurably not enough.)
+	task.defer(function()
+		if char.Parent ~= nil and plr.Character == char then
+			place()
+		end
+	end)
 end
 
 local function playerPos(plr: Player): Vector3?
@@ -936,7 +1051,12 @@ local function stepNight(plr: Player, dt: number)
 		run.spotted = spotted
 		run.near = near
 		if spotted and not wasSpotted then
-			notice(plr, "SPOTTED", "IT SEES YOU", "Break line of sight and keep moving.")
+			-- This advice has to be TRUE. It was not: the Nightwatcher used to be faster than the
+			-- player from 0.8s into night one, so "keep moving" described something that could
+			-- not be done. It is now capped below the player's walk speed (Watcher.speed), so
+			-- running gains ground — and the text says which way the fight goes, because a player
+			-- who does not know they are faster will freeze instead of run.
+			notice(plr, "SPOTTED", "IT SEES YOU", "You are faster than it. Run, and put a room between you.")
 		elseif near and not spotted then
 			notice(plr, "NEAR", "THE BELL RINGS", "Something is close by.")
 		end
@@ -1083,14 +1203,21 @@ beginNight = function(plr: Player)
 	if not prof or not run or not zone or run.phase ~= "DAY" then
 		return
 	end
+	-- Never start a night on the default profile. Somebody really on night 14 with 900 relics
+	-- would walk into night 1's manor, and the load landing mid-night would rewrite the night
+	-- number under them.
+	if not prof.loaded then
+		notice(plr, "DENIED", "Still opening your safehouse — one moment.")
+		return
+	end
 	local index = tonumber(zone:GetAttribute("Index")) or 0
 	local origin = manorOrigin(index)
 
 	run.effects = Upgrades.effects(Config, prof.levels)
-	local hubLevel = Upgrades.hubLevel(prof.levels)
 
-	-- Seeded by WorldSeed and the night, and nothing else: night 7 is night 7 for everybody.
-	local plan = Manor.plan(Rng.new(Manor.seedFor(Config, prof.night)), Config, prof.night, hubLevel)
+	-- Seeded by WorldSeed and the night, and nothing else: night 7 is night 7 for everybody. The
+	-- player's hub level is deliberately NOT passed — see Manor.roomCount.
+	local plan = Manor.plan(Rng.new(Manor.seedFor(Config, prof.night)), Config, prof.night)
 
 	clearManor(zone)
 	run.phase = "NIGHT"
@@ -1154,20 +1281,21 @@ local function ensureLeaderstats(plr: Player, prof: Profile)
 	ls.Parent = plr
 end
 
+-- THE WORLD IS BUILT BEFORE THE NETWORK CALL, NOT AFTER IT.
+--
+-- claimProfile YIELDS on DataStore UpdateAsync. This function used to do that first and build
+-- the zone afterwards, which meant a joining player had no floor anywhere near them for the
+-- whole round-trip: no SpawnLocation in the place, nothing at the origin, and their safehouse
+-- 3000 studs away and not yet created. A cold server or a throttled request outlasts the ~2.3
+-- seconds it takes to fall past FallenPartsDestroyHeight, and the character is destroyed.
+--
+-- So: zone, safehouse, spawn point and character placement all happen synchronously here, off
+-- the DEFAULT profile, and the real profile is applied when it lands. The one thing that must
+-- not happen in between is SPENDING — a purchase against a stash of 0, or a night entered as
+-- night 1 by somebody who is really on night 14 — so `prof.loaded` gates both.
 local function onPlayerAdded(plr: Player)
 	local prof = defaultProfile()
 	profiles[plr] = prof
-
-	local token = newSessionToken()
-	local claim = claimProfile(plr, token)
-	local loaded = Night.startState(Config, claim.data)
-	prof.night = loaded.night
-	prof.stash = loaded.stash
-	prof.best = loaded.best
-	prof.levels = Upgrades.sanitize(Config, claim.data and claim.data.levels)
-	prof.lockToken = token
-	prof.canSave = claim.got
-	prof.publishedBest = prof.best
 
 	ensureLeaderstats(plr, prof)
 
@@ -1210,44 +1338,107 @@ local function onPlayerAdded(plr: Player)
 		end)
 	end
 
-	if not prof.canSave then
-		notice(plr, "READONLY", "Another session is live",
-			"You can play, but progress will not be saved until it closes.")
-	end
-
-	-- The body runs in its own task: a Roblox event handler already gets one, but firing a
-	-- signal is synchronous in the headless emulator, so a bare `task.wait` in here would yield
-	-- whichever thread happened to spawn the character.
-	plr.CharacterAdded:Connect(function()
-		task.spawn(function()
-			task.wait(0.2)
-			local run = runs[plr]
-			local z = zones[plr]
-			if not run or not z then
+	-- Where this player's character belongs RIGHT NOW: the foyer if a night is running (the manor
+	-- is still standing and the clock is still going), their safehouse otherwise.
+	local function placeCharacter()
+		local run = runs[plr]
+		local z = zones[plr]
+		if not run or not z then
+			return
+		end
+		local idx = tonumber(z:GetAttribute("Index")) or 0
+		if run.phase == "NIGHT" and run.plan then
+			local entrance = Manor.roomById(run.plan, run.plan.entranceId)
+			if entrance then
+				local mo = manorOrigin(idx)
+				local x, z2 = Manor.roomCenter(Config, entrance)
+				teleport(plr, mo + Vector3.new(x, 4, z2 + 12))
+				lightPlayer(plr) -- the light lived on the old character; respawning replaced it
 				return
 			end
-			local idx = tonumber(z:GetAttribute("Index")) or 0
-			if run.phase == "NIGHT" and run.plan then
-				-- Respawning mid-night puts you back at the foyer rather than in the safehouse:
-				-- the manor is still standing and the night is still running.
-				local entrance = Manor.roomById(run.plan, run.plan.entranceId)
-				if entrance then
-					local mo = manorOrigin(idx)
-					local x, z2 = Manor.roomCenter(Config, entrance)
-					teleport(plr, mo + Vector3.new(x, 4, z2 + 12))
-					lightPlayer(plr) -- the light lived on the old character; respawning replaced it
-					return
-				end
+		end
+		teleport(plr, zoneOrigin(idx) + Vector3.new(0, 4, Config.Hub.Size / 2 - 10))
+	end
+
+	plr.CharacterAdded:Connect(function(char)
+		-- Immediately, on the frame the character appears. This used to wait 0.2 seconds, which
+		-- is 0.2 seconds of falling at 196 studs/s^2 before anything catches you; `teleport`
+		-- re-asserts the CFrame next frame so the engine's own placement cannot win the race.
+		applyWalkSpeed(char)
+		placeCharacter()
+
+		-- The body runs in its own task: a Roblox event handler already gets one, but firing a
+		-- signal is synchronous in the headless emulator, so a bare `task.wait` in here would
+		-- yield whichever thread happened to spawn the character.
+		task.spawn(function()
+			task.wait(0.2)
+			if plr.Character ~= char then
+				return
 			end
-			teleport(plr, zoneOrigin(idx) + Vector3.new(0, 4, Config.Hub.Size / 2 - 10))
+			applyWalkSpeed(char) -- again, in case anything on the character reset it
+			-- Only re-place if the first attempt PLAINLY did not take. A character still hundreds
+			-- of studs from its own zone never walked there; one that has moved a little has a
+			-- player at the controls, and yanking them back would be worse than the bug.
+			local pos = playerPos(plr)
+			local z = zones[plr]
+			local idx = z and tonumber(z:GetAttribute("Index")) or 0
+			if pos == nil or (pos - zoneOrigin(idx)).Magnitude > 600 then
+				placeCharacter()
+			end
 		end)
 	end)
 
 	-- The character can already exist by the time this runs (a rejoin, or a slow PlayerAdded),
 	-- in which case CharacterAdded has ALREADY fired and the handler above will never see it.
-	-- Without this the player stands at the world origin, where this game builds nothing at all.
+	-- Without this the player stands on the origin plate, 3000 studs from their own safehouse.
 	if plr.Character then
-		teleport(plr, zoneOrigin(index) + Vector3.new(0, 4, Config.Hub.Size / 2 - 10))
+		applyWalkSpeed(plr.Character)
+		placeCharacter()
+	end
+
+	-- ---------------------------------------------------------------- and NOW the network call
+	-- Everything above is synchronous. Everything below can yield for as long as Roblox likes.
+	local token = newSessionToken()
+	local claim = claimProfile(plr, token)
+
+	-- Leaving during that yield is one of the commonest things a real player does, and
+	-- PlayerRemoving has already run: it tore the zone down and freed the index. Writing into
+	-- these tables now would resurrect a departed player's profile and leak their zone entry for
+	-- the life of the server.
+	if profiles[plr] ~= prof or plr.Parent == nil then
+		return
+	end
+
+	local loaded = Night.startState(Config, claim.data)
+	prof.night = loaded.night
+	prof.stash = loaded.stash
+	prof.best = loaded.best
+	prof.levels = Upgrades.sanitize(Config, claim.data and claim.data.levels)
+	prof.lockToken = token
+	prof.canSave = claim.got
+	prof.publishedBest = prof.best
+	prof.loaded = true
+
+	local run = runs[plr]
+	if run then
+		run.effects = Upgrades.effects(Config, prof.levels)
+	end
+	local ls = plr:FindFirstChild("leaderstats")
+	if ls then
+		local n = ls:FindFirstChild("Night")
+		if n then (n :: IntValue).Value = prof.night end
+		local r = ls:FindFirstChild("Relics")
+		if r then (r :: IntValue).Value = prof.stash end
+		local b = ls:FindFirstChild("Best")
+		if b then (b :: IntValue).Value = prof.best end
+	end
+	for _, e in Config.Upgrades.Catalog do
+		refreshPad(plr, e.id) -- the pads were built off the default profile
+	end
+
+	if not prof.canSave then
+		notice(plr, "READONLY", "Another session is live",
+			"You can play, but progress will not be saved until it closes.")
 	end
 
 	pushState(plr)

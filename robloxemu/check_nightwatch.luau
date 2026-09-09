@@ -51,9 +51,60 @@ store:SetAsync("u_" .. ME, {
 assert(h:tryRun("server/Main.server"))
 h:advance(1)
 
+--=========================================== there is a floor before there is a player
+
+-- Roblox spawns a character wherever it likes when the place contains no SpawnLocation, and this
+-- game builds nothing at the world origin: every zone is at index * 3000 along +X. Measured on
+-- the shipped build, the workspace held 0 BaseParts and 0 SpawnLocations before anyone joined,
+-- so a joining character was dropped into empty air and fell — past FallenPartsDestroyHeight in
+-- about 2.3 seconds, at which point it is destroyed and the player dies without seeing the game.
+do
+	local nearOrigin, spawns = 0, 0
+	for _, d in h.workspace:GetDescendants() do
+		if d:IsA("BasePart") then
+			local p = d.Position
+			if math.abs(p.X) < 500 and math.abs(p.Y) < 500 and math.abs(p.Z) < 500 then
+				nearOrigin += 1
+			end
+		end
+		if d.ClassName == "SpawnLocation" then spawns += 1 end
+	end
+	truthy(nearOrigin > 0, "before ANY player joins there is something solid at the world origin to land on")
+	truthy(spawns > 0, "and a SpawnLocation, so the engine has somewhere to put a character it spawns itself")
+end
+
 local me = h:join("Nightwatchman", ME)
 h:advance(1)
-h.Players:simulateSpawn(me, h.workspace)
+
+--============================ the character is placed on the frame it spawns, not a fifth of a second later
+
+do
+	local char = h.Players:simulateSpawn(me, h.workspace)
+	-- NO h:advance here on purpose. CharacterAdded has fired and returned; a placement that
+	-- waits `task.wait(0.2)` has not run, and 0.2 seconds is 0.2 seconds of falling.
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	truthy(hrp ~= nil, "the character has a root part")
+	local at = hrp and hrp.Position
+	truthy(at ~= nil and at.Magnitude > 1000, "the joining character is moved to its own zone on the SAME frame it appears")
+
+	-- ...and the engine is told where to put it as well, which is the half a CFrame write cannot
+	-- do: a death mid-night respawns through RespawnLocation, not through our handler.
+	local respawn = (me :: any).RespawnLocation
+	truthy(respawn ~= nil, "the player has a RespawnLocation")
+	truthy(respawn ~= nil and respawn.ClassName == "SpawnLocation", "...and it is a real SpawnLocation")
+	local zoneOf = respawn
+	while zoneOf ~= nil and not string.match(tostring(zoneOf.Name), "^Zone_") do
+		zoneOf = zoneOf.Parent
+	end
+	truthy(zoneOf ~= nil, "...standing inside that player's own zone, so leaving takes it with them")
+
+	-- The player's speed is the number the whole chase is balanced against; leaving it to the
+	-- engine's default is what let a Nightwatcher that outran the player ship green.
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	truthy(hum ~= nil, "the character has a Humanoid")
+	local cfg = h.modules["shared/Config"].value
+	eq(hum and hum.WalkSpeed, cfg.Player.WalkSpeed, "and the server set its WalkSpeed from Config.Player")
+end
 h:advance(1)
 
 local remotes = h.ReplicatedStorage:FindFirstChild("ManorRemotes")
@@ -319,6 +370,41 @@ do
 	end
 end
 
+--=================================================== the two prompts INSIDE the manor are mine
+
+-- The upgrade-pad guard is covered above ("a stranger pressing my pad spends none of my relics").
+-- These two were not, and a review removed both `who ~= plr` checks — anyone could empty your
+-- pedestals or end your night — with all 390 spec assertions and all 84 headless ones still
+-- green. Zones are 3000 studs apart and MaxActivationDistance is 12, so this is defence in
+-- depth rather than a live exploit; the point is that nothing noticed it was gone.
+do
+	local intruder = h:join("Intruder", 3131)
+	h:advance(1)
+
+	local carriedBefore = lastState().carried
+	local emptyPedestal
+	for _, p in pedestals do
+		if p:FindFirstChild("Relic") ~= nil then emptyPedestal = p break end
+	end
+	truthy(emptyPedestal ~= nil, "there is still a loaded pedestal to try")
+	if emptyPedestal then
+		emptyPedestal:FindFirstChildOfClass("ProximityPrompt").Triggered:Fire(intruder)
+		h:advance(0.3)
+		eq(lastState().carried, carriedBefore, "a STRANGER pressing my pedestal puts nothing in my bag")
+		truthy(emptyPedestal:FindFirstChild("Relic") ~= nil, "...and does not take the relic out of my world")
+	end
+
+	local nightBefore = lastState().night
+	exitDoor:FindFirstChildOfClass("ProximityPrompt").Triggered:Fire(intruder)
+	h:advance(0.3)
+	eq(lastState().phase, "NIGHT", "a STRANGER pressing my exit door does NOT end my night")
+	eq(lastState().night, nightBefore, "...and does not advance it")
+	eq(noticesOfKind("EXTRACTED"), 0, "...and I am not told I got out")
+
+	h:leave(intruder)
+	h:advance(0.5)
+end
+
 --================================================================================== escaping
 
 local stashBeforeEscape = lastState().stash
@@ -446,6 +532,90 @@ do
 		if string.match(tostring(c.Name), "^Zone_") then after += 1 end
 	end
 	eq(after, before, "no zone leaked")
+end
+
+--=========================== the world exists BEFORE the profile round-trip, not after it
+
+-- The defect this covers: onPlayerAdded used to call claimProfile — a blocking UpdateAsync —
+-- FIRST and build the zone afterwards, so for the entire round-trip the joining player had
+-- nothing under them anywhere in the world. This harness could not see it, because its DataStore
+-- is synchronous and never yields ("the harness cannot reproduce it" is exactly what the review
+-- wrote). So: wrap the very store object the server is holding and make UpdateAsync take a
+-- second, the way a cold server or a throttled request does.
+do
+	local g = h.scheduler:globals()
+	local slowStore = h.services.DataStoreService:GetDataStore("NightwatchManor_v1")
+	slowStore:SetAsync("u_5150", { data = { night = 9, stash = 123, best = 8, levels = {} } })
+	local realUpdate = getmetatable(slowStore).UpdateAsync
+	local calls = 0
+	slowStore.UpdateAsync = function(self, key, fn)
+		calls += 1
+		g.task.wait(1.0)
+		return realUpdate(self, key, fn)
+	end
+
+	-- The join runs on a scheduler thread: the emulator fires PlayerAdded synchronously on
+	-- whoever called it, and yielding the runner's own thread would stop the clock that has to
+	-- resume it.
+	g.task.spawn(function()
+		h:join("Slowpoke", 5150)
+	end)
+	h:advance(0.2) -- less than the round-trip: the server is still inside UpdateAsync
+
+	truthy(calls > 0, "CONTROL: the join really is blocked inside a DataStore call")
+	local slow = h.Players:GetPlayerByUserId(5150)
+	truthy(slow ~= nil, "the player is in the game while their profile is still in flight")
+
+	local zone = h.workspace:FindFirstChild("Zone_5150")
+	truthy(zone ~= nil, "their zone exists WHILE the profile call is still in flight")
+	local house = zone and zone:FindFirstChild("Safehouse")
+	truthy(house ~= nil, "...with the safehouse already built in it")
+	local pad = house and house:FindFirstChild("SpawnPad")
+	truthy(pad ~= nil, "...and a spawn point standing on its floor")
+	truthy(pad ~= nil and pad.ClassName == "SpawnLocation", "...which is a real SpawnLocation")
+	truthy(slow ~= nil and (slow :: any).RespawnLocation ~= nil, "...and is already this player's RespawnLocation")
+
+	-- What must NOT happen in that window is spending: the levels and the stash on screen are
+	-- still the defaults, so a purchase would either refuse one the player can afford or grant
+	-- one they cannot.
+	local lantern
+	if house then
+		for _, d in house:GetChildren() do
+			if d:GetAttribute("UpgradeId") == "lanterns" then lantern = d end
+		end
+	end
+	truthy(lantern ~= nil, "their lantern pad is standing too")
+	if lantern and slow then
+		local props = lantern:FindFirstChild("Props")
+		lantern:FindFirstChildOfClass("ProximityPrompt").Triggered:Fire(slow)
+		h:advance(0.1)
+		eq(#props:GetChildren(), 0, "pressing a pad before the profile lands builds nothing")
+		local denied = 0
+		for _, s in noticeRemote:sentTo(slow) do
+			if type(s.args[1]) == "table" and s.args[1].kind == "DENIED" then denied += 1 end
+		end
+		truthy(denied > 0, "...and says so rather than failing silently")
+	end
+
+	-- ...and once it lands, the real profile is what is on screen.
+	h:advance(2)
+	local landed
+	if slow then
+		local sent = stateRemote:sentTo(slow)
+		for i = #sent, 1, -1 do
+			if type(sent[i].args[1]) == "table" then landed = sent[i].args[1]; break end
+		end
+	end
+	truthy(landed ~= nil, "the profile landed and the HUD was told")
+	eq(landed and landed.stash, 123, "...with the stash that was in the DataStore")
+	eq(landed and landed.night, 9, "...and the night they were really on")
+
+	slowStore.UpdateAsync = nil -- back to the metatable's own, so leaving does not yield
+	if slow then
+		h:leave(slow)
+		h:advance(1)
+	end
+	eq(h.workspace:FindFirstChild("Zone_5150"), nil, "and leaving took the zone with them")
 end
 
 --=========================================================================================== done

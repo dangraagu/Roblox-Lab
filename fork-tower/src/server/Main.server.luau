@@ -99,23 +99,46 @@ local function billboard(parent: Instance, name: string, text: string, offsetY: 
 	return bb
 end
 
+--============================================================================ the clock
+
+-- ONE clock for every throttle below. os.clock() is the obvious-looking choice and it is WRONG
+-- here: in Roblox it measures CPU time used by Lua, so on a quiet server a three-second cooldown
+-- outlives the player who is waiting on it. GetServerTimeNow is the modern wall clock; tick() is
+-- the fallback for engines (and for the headless harness) that do not have it. Probed once, at
+-- load, rather than pcalled on every check.
+local clock: () -> number
+do
+	local ok, t = pcall(function()
+		return (workspace :: any):GetServerTimeNow()
+	end)
+	clock = if ok and type(t) == "number" then function()
+		return (workspace :: any):GetServerTimeNow()
+	end else tick
+end
+
 --============================================================================ startup guard
 
 -- The reachability invariant, re-checked at boot. Section.spec proves it for 200 levels across
 -- every theme; this is the runtime half, so that a live tuning change to Config shows up in the
 -- Output rather than as a floor nobody can climb. It warns rather than refusing to build: a
 -- tuning mistake should not brick a running game.
+--
+-- The tower is chained the way buildSection chains it — each section's exit is the next floor's
+-- fork origin — because that chain is where the lane corridor is actually spent. Checking ten
+-- independent sections would have said nothing about the run that walks through all ten.
 do
 	local firstBad, detail = nil, ""
-	for level = 1, Config.Tower.Floors do
-		for _, penalty in ipairs({ false, true }) do
-			for seed = 1, 8 do
-				local sec = Section.build(Config, seed, level, "fire", penalty, Rng)
+	for _, penalty in ipairs({ false, true }) do
+		for seed = 1, 8 do
+			local originX = 0
+			for level = 1, Config.Tower.Floors do
+				local sec = Section.build(Config, seed, level, "fire", penalty, Rng, originX)
 				local ok, problems = Section.check(sec, Config)
 				if not ok and firstBad == nil then
 					firstBad = level
 					detail = problems[1] or "?"
 				end
+				originX += sec.exit.dx
 			end
 		end
 	end
@@ -123,6 +146,31 @@ do
 		warn(string.format(
 			"[ForkTower] ADVARSEL: klarerbarhets-invarianten BRUTT på etasje %d (%s). Juster Config.Tower — tårnet kan bli uklarerbart!",
 			firstBad, detail))
+	end
+
+	-- The write budget. Roblox grants the SERVER 60 + 10 per player UpdateAsync calls a minute. A
+	-- floor of S seconds between one player's writes caps them at 60/S a minute, so N players cost
+	-- 60N/S — which stays inside 60 + 10N for every N exactly when S >= 6. This is the assertion
+	-- that says SaveMinInterval is derived and not decorative.
+	if 60 / Config.Limits.SaveMinInterval > 10 then
+		warn(string.format(
+			"[ForkTower] ADVARSEL: SaveMinInterval %.1fs gir %.0f skriv/spiller/minutt — over de 10 Roblox gir pr spiller. En full server vil miste lagringer.",
+			Config.Limits.SaveMinInterval, 60 / Config.Limits.SaveMinInterval))
+	end
+	-- The autosave loop is the only thing refreshing the session lock, so it has to run inside it.
+	if Config.Save.AutosaveSeconds >= Config.Save.SessionLockSeconds then
+		warn(string.format(
+			"[ForkTower] ADVARSEL: AutosaveSeconds (%d) >= SessionLockSeconds (%d) — session-låsen rekker å utløpe mellom to lagringer.",
+			Config.Save.AutosaveSeconds, Config.Save.SessionLockSeconds))
+	end
+
+	-- The lane budget. A corridor that does not fit inside half a lane means two towers touch,
+	-- and Config is the only place either number lives.
+	local WIDEST_PAD = 30 -- the summit pad; the fork and lobby pads are 26
+	if Config.World.CorridorHalfWidth + WIDEST_PAD / 2 > Config.World.LaneSpacing / 2 then
+		warn(string.format(
+			"[ForkTower] ADVARSEL: korridoren (%.0f) + bredeste plate (%.0f) går utenfor halve banen (%.0f) — nabotårn kan overlappe!",
+			Config.World.CorridorHalfWidth, WIDEST_PAD / 2, Config.World.LaneSpacing / 2))
 	end
 end
 
@@ -292,11 +340,30 @@ local function loadProfile(plr: Player): Profile
 	return p
 end
 
-local function saveProfile(plr: Player, releaseLock: boolean)
+-- When each player's profile last actually reached the DataStore, and the score last published to
+-- the ordered leaderboard.
+local lastSaveAt: { [Player]: number } = {}
+local lastBanked: { [Player]: number } = {}
+
+-- `force` is for the writes that MUST land: leaving, BindToClose, and redeeming a code (which
+-- grants a reward in memory and would otherwise be re-redeemable after a crash).
+--
+-- Everything else is COALESCED, and that is the fix for a real hole rather than a nicety. A
+-- DataStore write comes out of a budget the whole SERVER shares — 60 + 10 per player per minute —
+-- so any remote that makes the server write on demand lets one client starve every other player's
+-- autosave and, with it, the 45-second session-lock refresh that is the only thing keeping their
+-- session writable. Measured before this: 200 Rebirth fires in a single frame produced 200
+-- UpdateAsync calls and nothing refused them.
+local function saveProfile(plr: Player, releaseLock: boolean, force: boolean?)
 	local p = profiles[plr]
 	if not p or not p.canSave or not store then
 		return
 	end
+	local t = clock()
+	if not (force or releaseLock) and t - (lastSaveAt[plr] or -math.huge) < Config.Limits.SaveMinInterval then
+		return -- the autosave loop below forces a write every AutosaveSeconds, so nothing is lost
+	end
+	lastSaveAt[plr] = t
 	pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
 			old = old or {}
@@ -311,10 +378,17 @@ local function saveProfile(plr: Player, releaseLock: boolean)
 			return old
 		end)
 	end)
-	if orderedLB and p.bestScore > 0 then
-		pcall(function()
-			orderedLB:SetAsync(key(plr.UserId), p.bestScore)
+	-- Only when it has actually MOVED. bestScore changes once per summit, so re-publishing it on
+	-- every autosave was a second write per save buying nothing — the same amplification as above,
+	-- one budget over.
+	if orderedLB and p.bestScore > 0 and p.bestScore ~= lastBanked[plr] then
+		local banked = p.bestScore
+		local ok = pcall(function()
+			orderedLB:SetAsync(key(plr.UserId), banked)
 		end)
+		if ok then
+			lastBanked[plr] = banked
+		end
 	end
 end
 
@@ -336,20 +410,60 @@ type Lane = {
 local lanes: { [Player]: Lane } = {}
 local laneTaken: { [number]: boolean } = {}
 
+-- HOW MANY LANES THERE ARE, and why it is not just Config.World.MaxLanes.
+--
+-- Nothing in this repo coupled MaxLanes to the place's max-player count — default.project.json
+-- has no Workspace or place-config entry at all — so the 24 was one Studio slider away from being
+-- smaller than the number of players who can be in the server. MaxLanes is therefore a FLOOR, and
+-- the pool is sized to whichever is larger. That makes "every player in this server stands in a
+-- tower nobody else is standing in" true by construction instead of by hoping the slider agrees.
+local laneCount = math.max(Config.World.MaxLanes, tonumber(Players.MaxPlayers) or 0)
+
 -- Recycled, never incremented forever: a server that hands out a fresh index per join walks its
--- lanes out along +X until they are kilometres from spawn.
-local function claimLane(): number
-	for i = 0, Config.World.MaxLanes - 1 do
+-- lanes out along X until they are kilometres from spawn.
+--
+-- Returns NIL when the pool is empty, never 0. Handing back a real-looking index for "no room"
+-- is exactly what built the 25th player's tower at the coordinates of the first player's, and
+-- teardownLane then freed that index on their way out while the original owner was still standing
+-- in it, so the collision spread instead of clearing.
+local function claimLane(): number?
+	for i = 0, laneCount - 1 do
 		if not laneTaken[i] then
 			laneTaken[i] = true
 			return i
 		end
 	end
-	return 0
+	return nil
 end
 
+-- Alternating around the origin — 0, +1, -1, +2, -2 — rather than marching out along +X, so a
+-- full server's furthest tower is half as far from spawn.
 local function laneOrigin(index: number): Vector3
-	return Vector3.new(index * Config.World.LaneSpacing, 0, 0)
+	local step = math.floor((index + 1) / 2)
+	local dir = if index % 2 == 1 then 1 else -1
+	return Vector3.new(dir * step * Config.World.LaneSpacing, 0, 0)
+end
+
+-- Somewhere solid for a player the server has no lane for, and the place's only ENABLED
+-- SpawnLocation. Without one, Roblox drops a character at the world origin: over a sealed shell
+-- that is the roof, and over a tower with no floor at (0,0,0) it is a fall with no bottom. Placed
+-- well behind every lobby pad on Z, so it sits in nobody's corridor.
+local waiting = make("Folder", workspace, { Name = "Waiting" })
+do
+	local pad = slab(waiting, "WaitingPad", Vector3.new(30, 2, 30),
+		Vector3.new(0, -1, -160), Color3.fromRGB(44, 42, 62), Enum.Material.Slate)
+	billboard(pad, "WaitingLabel", "🔀 FORK TOWER\nVenter på et ledig tårn …", 8,
+		Color3.fromRGB(235, 225, 255), Vector2.new(400, 120))
+	make("SpawnLocation", waiting, {
+		Name = "WaitingSpawn",
+		Anchored = true,
+		CanCollide = false,
+		Transparency = 1,
+		Size = Vector3.new(6, 1, 6),
+		Position = Vector3.new(0, 0.5, -160),
+		Neutral = true,
+		Enabled = true,
+	})
 end
 
 --------------------------------------------------------------------- fork platform + doors
@@ -475,7 +589,14 @@ local function buildSection(plr: Player, lane: Lane, level: number, theme: strin
 	if lane.sectionFolder[level] then
 		return lane.sectionFolder[level]
 	end
-	local sec = Section.build(Config, lane.plan.runSeed, level, theme, penalty, Rng)
+	-- WHERE THIS SECTION STARTS, measured from the lane's centre line. Handing it to Section.build
+	-- is what keeps the tower inside its own lane: the exit of each section becomes the next
+	-- floor's fork origin, so without a bound the tower's X is one long random walk — measured at
+	-- 364 studs of drift over ten floors against a 220-stud lane, and 2942 over five hundred, with
+	-- towers physically interpenetrating at the top. The generator now refuses any step that would
+	-- leave Config.World.CorridorHalfWidth, and Section.check re-derives the bound.
+	local originX = lane.forkTop[level].X - lane.origin.X
+	local sec = Section.build(Config, lane.plan.runSeed, level, theme, penalty, Rng, originX)
 	local themeCfg = Config.Themes[theme] or Config.Themes.fire
 	local material = Enum.Material[themeCfg.material] or Enum.Material.SmoothPlastic
 
@@ -508,6 +629,20 @@ local function buildSection(plr: Player, lane: Lane, level: number, theme: strin
 			Fx.sparkle(part, c3(themeCfg.accent))
 		end
 
+		-- THE POINT THIS PLATFORM HANDS BACK. Section.respawn, never `pos`: `pos` is the platform's
+		-- CENTRE, and the centre is exactly where a hazard standing on this platform is — its near
+		-- face is TileSize/2 - HazardBite = 1.50 studs from the middle, closer than a character is
+		-- wide. So the checkpoint a hazard sent you to used to be inside that same hazard, which
+		-- fired it again, and again. Section.respawn is the clear band, and Section.check refuses a
+		-- section whose respawn point is not in it.
+		local rp = Section.respawn(sec, pf.index)
+		local checkpoint = base + Vector3.new(rp.dx, rp.dy + Config.World.RespawnLift, rp.dz)
+		if pf.index == 1 then
+			-- Where answering this floor's fork drops you. Kept on the lane so onDoorChosen and
+			-- the mid-climb restore both read the same number instead of re-deriving it.
+			lane.entry[level] = checkpoint
+		end
+
 		part.Touched:Connect(function(hit)
 			local char = hit and hit.Parent
 			local who = char and Players:GetPlayerFromCharacter(char)
@@ -520,7 +655,7 @@ local function buildSection(plr: Player, lane: Lane, level: number, theme: strin
 			end
 			-- Landing anywhere in the section moves your checkpoint up with you, so a hazard
 			-- costs you a few platforms rather than the whole climb.
-			lane.checkpoint = pos + Vector3.new(0, Config.World.RespawnLift, 0)
+			lane.checkpoint = checkpoint
 			if pf.index == #sec.platforms and prof.level == level and prof.stage == "climb" then
 				lane.reachExit(level)
 			end
@@ -538,12 +673,22 @@ local function buildSection(plr: Player, lane: Lane, level: number, theme: strin
 			Color = Color3.fromRGB(255, 70, 70),
 		})
 		part:SetAttribute("Hazard", hz.kind)
+		part:SetAttribute("Platform", hz.platform)
 		part.Touched:Connect(function(hit)
 			local char = hit and hit.Parent
 			local who = char and Players:GetPlayerFromCharacter(char)
 			if who ~= plr then
 				return
 			end
+			-- Touched fires many times for one contact — a limb per frame while the parts overlap.
+			-- Without this every one of them was another teleport landing on top of the previous
+			-- one AND another Notice down the wire: forty per contact, measured. One bite per
+			-- HazardCooldown, per lane.
+			local t = clock()
+			if t < lane.hazardReadyAt then
+				return
+			end
+			lane.hazardReadyAt = t + Config.Limits.HazardCooldown
 			local hrp = char:FindFirstChild("HumanoidRootPart")
 			if hrp then
 				(hrp :: BasePart).CFrame = CFrame.new(lane.checkpoint)
@@ -693,6 +838,15 @@ local function buildLane(plr: Player)
 	teardownLane(plr)
 
 	local index = claimLane()
+	if index == nil then
+		-- Trap 3: never refuse silently — and never pretend, either. The player waits on the
+		-- waiting pad with an explanation rather than inside somebody else's tower.
+		warn(string.format(
+			"[ForkTower] ingen ledig bane til %s (%d baner, %d spillere). Hev Config.World.MaxLanes eller senk MaxPlayers.",
+			plr.Name, laneCount, #Players:GetPlayers()))
+		notice(plr, "full", "Serveren har ingen ledig bane akkurat nå — prøv en annen server.")
+		return
+	end
 	local origin = laneOrigin(index)
 	local folder = make("Folder", towers, { Name = "Lane_" .. index })
 	folder:SetAttribute("Owner", plr.UserId)
@@ -705,6 +859,8 @@ local function buildLane(plr: Player)
 		forkTop = {},
 		forkFolder = {},
 		sectionFolder = {},
+		entry = {}, -- level -> the checkpoint at the bottom of that floor's section
+		hazardReadyAt = 0,
 		checkpoint = origin + Vector3.new(0, Config.World.RespawnLift, -4),
 	}
 	lanes[plr] = lane
@@ -772,13 +928,10 @@ local function buildLane(plr: Player)
 	end
 
 	local restoreLevel = math.min(p.level, Config.Tower.Floors + 1)
-	if p.stage == "climb" and lane.sectionFolder[p.level] then
+	if p.stage == "climb" and lane.entry[p.level] then
 		-- Mid-climb: put them back at the bottom of the section they were on, not at the fork —
 		-- the fork has already been answered and its prompts are disabled.
-		local first = lane.sectionFolder[p.level]:FindFirstChild("Plat_" .. p.level .. "_1")
-		if first then
-			lane.checkpoint = (first :: BasePart).Position + Vector3.new(0, Config.World.RespawnLift, 0)
-		end
+		lane.checkpoint = lane.entry[p.level]
 	elseif lane.forkTop[restoreLevel] then
 		lane.checkpoint = lane.forkTop[restoreLevel] + Vector3.new(0, Config.World.RespawnLift, 0)
 	end
@@ -843,15 +996,22 @@ onDoorChosen = function(plr: Player, owner: Player, level: number, slot: number)
 	p.stage = "climb"
 
 	buildSection(plr, lane, level, doorData.theme, trapped)
-	local section = lane.sectionFolder[level]
-	local first = section and section:FindFirstChild("Plat_" .. level .. "_1")
-	local char = plr.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	if first and hrp then
-		local target = (first :: BasePart).Position + Vector3.new(0, Config.World.RespawnLift, 0)
-		;(hrp :: BasePart).CFrame = CFrame.new(target)
-		;(hrp :: BasePart).AssemblyLinearVelocity = Vector3.zero
+
+	-- THE CHECKPOINT MOVES WHETHER OR NOT THE PLAYER HAS A CHARACTER RIGHT NOW. Everything above
+	-- has already spent the floor — stage, picks, slots, and both ProximityPrompts go dead below —
+	-- so gating this on `hrp` (as it used to be) left a player who reset during the 0.35s prompt
+	-- hold standing on a spent fork pad, 13.5 studs from a platform a traitless jump clears 8.67
+	-- of, with both doors dead and Rebirth the only way out. Only the TELEPORT needs a character;
+	-- the checkpoint is a number on the lane, and CharacterAdded will read it.
+	local target = lane.entry[level]
+	if target then
 		lane.checkpoint = target
+		local char = plr.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			(hrp :: BasePart).CFrame = CFrame.new(target)
+			;(hrp :: BasePart).AssemblyLinearVelocity = Vector3.zero
+		end
 	end
 
 	for _, d in ipairs(lane.forkFolder[level]:GetChildren()) do
@@ -875,9 +1035,49 @@ end
 
 --============================================================================ remotes: in
 
+-- A RemoteEvent is a button anybody can hold down, and these two are the only ones a client can
+-- press at will. Rebirth is the expensive one: each fire is a full teardown, a Fork.plan, a whole
+-- world rebuild and a DataStore write. Measured before this, 200 fires in a single frame were all
+-- honoured — 200 UpdateAsync calls, the entire server's minute budget, spent by one player in
+-- under a second, and every other player silently stopped saving.
+type Gate = { readyAt: number, told: boolean }
+local gates: { [Player]: { [string]: Gate } } = {}
+
+-- Returns true when the action is refused, and TELLS the player why (trap 3) — but only ONCE per
+-- cooldown window. A refusal that answers every fire turns a held-down button into a remote sent
+-- back at exactly the rate it came in, which is the amplification this throttle exists to stop;
+-- refusing 199 fires with 199 messages would have moved the bug rather than fixed it.
+local function onCooldown(plr: Player, what: string, seconds: number, msg: string): boolean
+	local mine = gates[plr]
+	if mine == nil then
+		mine = {}
+		gates[plr] = mine
+	end
+	local g = mine[what]
+	if g == nil then
+		g = { readyAt = 0, told = false }
+		mine[what] = g
+	end
+	local t = clock()
+	if t < g.readyAt then
+		if not g.told then
+			g.told = true
+			notice(plr, "blocked", msg)
+		end
+		return true
+	end
+	g.readyAt = t + seconds
+	g.told = false
+	return false
+end
+
 RebirthEvent.OnServerEvent:Connect(function(plr)
 	local p = profiles[plr]
 	if not p then
+		return
+	end
+	if onCooldown(plr, "rebirth", Config.Limits.RebirthCooldown,
+		string.format("Vent %d sekunder før neste rebirth.", Config.Limits.RebirthCooldown)) then
 		return
 	end
 	if p.stage ~= "summit" then
@@ -907,6 +1107,9 @@ end)
 ArmSkipEvent.OnServerEvent:Connect(function(plr, wanted)
 	local p = profiles[plr]
 	if not p then
+		return
+	end
+	if onCooldown(plr, "armskip", Config.Limits.ArmSkipCooldown, "Rolig — ett trykk om gangen.") then
 		return
 	end
 	local want = wanted == true
@@ -939,7 +1142,7 @@ RedeemFunc.OnServerInvoke = function(plr, input)
 	end
 	p.redeemed[code] = true
 	p.skips = math.min(p.skips + (reward.skips or 0), Config.Skips.MaxSkips)
-	saveProfile(plr, false)
+	saveProfile(plr, false, true) -- forced: a granted-but-unwritten code is free skips forever
 	pushState(plr)
 	return { ok = true, reason = "ok", skips = reward.skips }
 end
@@ -974,6 +1177,12 @@ local function onCharacter(plr: Player, char: Model)
 	local lane = lanes[plr]
 	if hrp and lane then
 		(hrp :: BasePart).CFrame = CFrame.new(lane.checkpoint)
+	elseif lane == nil then
+		-- Said again HERE, not only in buildLane. buildLane runs inside PlayerAdded, and a
+		-- FireClient sent before the player's own scripts have connected OnClientEvent is simply
+		-- dropped — so the one message that explains why this player has no tower was the one
+		-- message they could not receive. By CharacterAdded the HUD is listening.
+		notice(plr, "full", "Serveren har ingen ledig bane akkurat nå — prøv en annen server.")
 	end
 	applyTraits(plr)
 	pushState(plr)
@@ -1023,9 +1232,12 @@ local function onPlayerAdded(plr: Player)
 end
 
 local function onPlayerRemoving(plr: Player)
-	saveProfile(plr, true) -- release the lock
+	saveProfile(plr, true) -- release the lock; releaseLock always writes, throttle or no throttle
 	teardownLane(plr)
 	profiles[plr] = nil
+	lastSaveAt[plr] = nil
+	lastBanked[plr] = nil
+	gates[plr] = nil
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
@@ -1044,7 +1256,10 @@ task.spawn(function()
 	while true do
 		task.wait(Config.Save.AutosaveSeconds)
 		for _, plr in ipairs(Players:GetPlayers()) do
-			saveProfile(plr, false)
+			-- Forced: this loop is what flushes every write the throttle above coalesced, and it
+			-- is the only thing refreshing the session lock. AutosaveSeconds must stay under
+			-- SessionLockSeconds for that to hold.
+			saveProfile(plr, false, true)
 		end
 	end
 end)

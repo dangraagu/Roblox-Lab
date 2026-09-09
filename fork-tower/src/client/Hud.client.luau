@@ -801,7 +801,7 @@ NoticeEvent.OnClientEvent:Connect(function(n)
 	elseif n.kind == "summit" then
 		color = GOLD
 		FxClient.fovPunch(8)
-	elseif n.kind == "blocked" then
+	elseif n.kind == "blocked" or n.kind == "full" then
 		color = WARN
 	end
 	showToast(tostring(n.text), color)

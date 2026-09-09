@@ -17,9 +17,11 @@ Built from Game-Radar #3 (2026-09-09). Sibling of `labyrint-spill/`, `plus1-jump
 2. **Click a block to swing at it.** Each block has hit points; your pickaxe has power. Break it
    and the faces behind it appear — including, sooner or later, a natural cave void that opens up
    all at once.
-3. **Ore goes in your backpack** (copper and iron near the top; gold, diamond and obsidian only
-   deeper). Stone is real, minable and worth nothing.
-4. **🛗 SURFACE + SELL** teleports you back to the mouth and sells the haul in one press.
+3. **Ore goes in your backpack** (copper from layer 1, iron from 4, gold from 9, diamond from 14
+   and obsidian from 19 — every tier reachable inside the rebirth-0 depth wall at layer 24).
+   Stone is real, minable and worth nothing.
+4. **🛗 SURFACE + SELL** teleports you back to the mouth, onto an anchored deck that no
+   swing can reach, and sells the haul in one press.
    **⬇️ DESCEND** drops you back to the deepest cell you have opened.
 5. **Spend cash** on pickaxe tier (swing power), backpack capacity, and lamp radius — the mine
    has no sun, so the lamp is the difference between seeing a vein and walking past it.
@@ -83,10 +85,10 @@ test stayed green.
 
 ```
 cd deep-vein
-luau tests/Ore.spec.luau            # 1260 passed, 0 failed
-luau tests/Mine.spec.luau           #   86 passed, 0 failed
+luau tests/Ore.spec.luau            # 1272 passed, 0 failed
+luau tests/Mine.spec.luau           #  100 passed, 0 failed
 luau tests/Economy.spec.luau        #  122 passed, 0 failed
-luau tests/Prestige.spec.luau       #   89 passed, 0 failed
+luau tests/Prestige.spec.luau       #  117 passed, 0 failed
 luau tests/Responsive.spec.luau     #   70 passed, 0 failed
 ```
 
@@ -133,9 +135,16 @@ workspace.
 - **Balance is arithmetic, not play.** Expected value and swings-per-block were computed at every
   depth and the incentive gradient is right (deeper always pays more per swing, and each pickaxe
   tier is a large multiplier), but nobody has actually played it for an hour.
-- **`SURFACE` can put you over a hole.** The spawn point is a fixed cell in the mouth; a player
-  who mines out the floor beneath it will drop one cell on arrival. Not a soft-lock — you can
-  jump back out of a single cell — but it is untidy.
-- **A very large excavation keeps adding Parts.** The count is bounded (the shaft is a closed
-  box: at most ~2,000 cells at rebirth 0) but there is no budget cap and no unload of blocks far
-  above the player.
+- **The surface deck blocks one cell.** The landing point is held up by an anchored slab filling
+  the top stud of the cell below it, so a player cannot dig straight down from exactly where they
+  spawn — they have to step one cell over. That is the price of SURFACE always having ground
+  under it; the alternative was a 150-stud drop onto bedrock every time they pressed it.
+- **A very large excavation keeps adding Parts.** One swing now costs at most
+  `Config.Mine.PartsPerFrame` (64) instances per frame, whatever size the void behind the wall
+  turns out to be, but the TOTAL is still only bounded by the shaft itself (a closed box, at most
+  ~2,000 cells at rebirth 0) and there is no unload of blocks far above the player.
+- **Balance is measured, not played.** Every rebirth is now provably payable out of the shaft it
+  is charged against — the tightest is rebirth 0 at 3.5x, i.e. you can buy it having mined
+  under a third of your cave — but the middle of the ladder is generous (rebirths 3-15 cost
+  under a tenth of their cave) and nobody has played an hour of it to say whether that reads as
+  momentum or as a missing gate.

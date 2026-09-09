@@ -259,6 +259,117 @@ do
 	eq(sameHazards, 0, "...and always busier, once hazards exist at all")
 end
 
+--============================================================================ the lane corridor
+
+do
+	-- REVIEW FINDING 1. The server chains `forkTop[level + 1] = base + sec.exit`, so a section's
+	-- exit X is the NEXT floor's fork origin and the tower's X is one long random walk over the
+	-- whole run. Nothing bounded it. Chaining the real generator the way the server does measured
+	-- 364.0 studs of drift in ten floors against a 220-stud lane (19.1% of runs finish outside
+	-- their own slot) and 2942.2 studs over 500 floors — a tower standing inside a stranger's.
+	--
+	-- The bound belongs in the MODEL, not in a bigger LaneSpacing: a bigger spacing only moves
+	-- the value at which the same walk collides again. Section.build takes the section origin's
+	-- offset from the lane centre and refuses any step that would leave the corridor.
+	local half = Config.World.CorridorHalfWidth
+
+	-- The number has to MEAN something, so it is tied to the widest thing a lane contains.
+	-- 30 = the summit pad (Main.server buildSummit); the fork and lobby pads are 26.
+	local widestPad = 30
+	truthy(half + widestPad / 2 <= Config.World.LaneSpacing / 2,
+		string.format("the corridor (%.0f) plus the widest pad's half (%.0f) fits inside half a lane (%.0f)",
+			half, widestPad / 2, Config.World.LaneSpacing / 2))
+
+	-- Hundreds of floors, chained exactly as the server chains them.
+	local worst, worstSeed, worstLevel = 0, 0, 0
+	local exitWorst = 0
+	for seed = 1, 60 do
+		for _, theme in ipairs({ "fire", "void" }) do
+			local laneX = 0
+			for level = 1, 500 do
+				local sec = Section.build(Config, seed, level, theme, level % 3 == 0, Rng, laneX)
+				for _, p in ipairs(sec.platforms) do
+					if math.abs(laneX + p.dx) > math.abs(worst) then
+						worst, worstSeed, worstLevel = laneX + p.dx, seed, level
+					end
+				end
+				laneX += sec.exit.dx
+				exitWorst = math.max(exitWorst, math.abs(laneX))
+			end
+		end
+	end
+	truthy(math.abs(worst) <= half + 1e-9, string.format(
+		"no platform of 500 chained floors leaves the corridor (worst %.1f at seed %d floor %d, bound %.0f)",
+		worst, worstSeed, worstLevel, half))
+	truthy(exitWorst <= half + 1e-9, string.format(
+		"...and neither does the exit that becomes the next floor's fork origin (worst %.1f)", exitWorst))
+	truthy(worstLevel > 0, "...and the sweep really walked the tower (the check is not vacuous)")
+
+	-- The clamp must not buy its bound by breaking the invariant it shares the loop with: a
+	-- rejected direction falls back to FORWARD, which is nobody's reverse, so an XZ cell still
+	-- cannot repeat and no platform can sit over a jump.
+	local repeats = 0
+	for seed = 1, 200 do
+		local laneX = 0
+		for level = 1, 12 do
+			local sec = Section.build(Config, seed, level, "ice", true, Rng, laneX)
+			local seen = {}
+			for _, p in ipairs(sec.platforms) do
+				local cell = string.format("%.3f,%.3f", p.dx, p.dz)
+				if seen[cell] then repeats += 1 end
+				seen[cell] = true
+			end
+			laneX += sec.exit.dx
+		end
+	end
+	eq(repeats, 0, "a clamped walk still never returns to an XZ cell it already used")
+end
+
+--============================================================================ a checkpoint you survive
+
+do
+	-- REVIEW FINDING 3. The checkpoint a platform hands the player was the platform's CENTRE, and
+	-- a hazard stands 1.50 studs from that centre — inside a character that is 2.0 studs wide from
+	-- the middle out. Measured across the built tower: 7200 of 7200 hazards overlapped the
+	-- checkpoint their own platform hands you, so touching a hazard teleported you onto it.
+	--
+	-- Fixing the number (a bigger lift, a nudged offset) leaves the same defect waiting at another
+	-- HazardBite. The model now names the point instead: Section.respawn is the platform's clear
+	-- band, and Section.check enforces the clearance.
+	local ch = Config.World.CharacterHalfWidth
+	local inHazard, offPlatform, checked = 0, 0, 0
+	eachSection(function(sec)
+		for _, hz in ipairs(sec.hazards) do
+			local rp = Section.respawn(sec, hz.platform)
+			local p = sec.platforms[hz.platform]
+			checked += 1
+			-- Two AABBs: the standing character, and the hazard cube.
+			local ox = (hz.size / 2 + ch) - math.abs(hz.dx - rp.dx)
+			local oz = (hz.size / 2 + ch) - math.abs(hz.dz - rp.dz)
+			if ox > 1e-9 and oz > 1e-9 then
+				inHazard += 1
+			end
+			-- And it is no good standing clear of the hazard in mid-air.
+			if math.abs(rp.dx - p.dx) + ch > p.size / 2 + 1e-9
+				or math.abs(rp.dz - p.dz) + ch > p.size / 2 + 1e-9 then
+				offPlatform += 1
+			end
+			if rp.dy ~= p.dy then
+				offPlatform += 1
+			end
+		end
+	end)
+	eq(inHazard, 0, "no platform's checkpoint puts the player inside the hazard standing on it")
+	eq(offPlatform, 0, "...and every checkpoint keeps the whole character on its own platform")
+	truthy(checked > 0, "...and there were hazards to measure (the check is not vacuous)")
+
+	-- A hazard-free platform hands back its own centre, so nothing moves where nothing is wrong.
+	local plain = Section.build(Config, 12, 1, "fire", false, Rng, 0)
+	local rp1 = Section.respawn(plain, 1)
+	eq(rp1.dx, plain.platforms[1].dx, "a clear platform's checkpoint is its centre in x")
+	eq(rp1.dz, plain.platforms[1].dz, "...and in z")
+end
+
 --============================================================================ Section.check bites
 
 do
@@ -280,6 +391,26 @@ do
 	wide.platforms[3].dx = wide.platforms[2].dx + 60
 	local ok3 = Section.check(wide, Config)
 	truthy(not ok3, "Section.check rejects a section with an unjumpable gap")
+
+	-- The two guards the review's findings put here. A checker that passes everything is worse
+	-- than no checker, so each one gets the section it exists to refuse.
+	local strayed = Section.build(Config, 3, 7, "void", true, Rng)
+	strayed.originX = Config.World.CorridorHalfWidth + 1
+	local ok4, problems4 = Section.check(strayed, Config)
+	truthy(not ok4, "Section.check rejects a section that has wandered out of its lane corridor")
+	truthy(#problems4 > 0, "...and says how far off the centre line it is")
+
+	local pinned = Section.build(Config, 3, 7, "void", true, Rng)
+	local victim = pinned.hazards[1]
+	truthy(victim ~= nil, "...the twin below has a hazard to move onto (not vacuous)")
+	if victim then
+		-- Exactly the old behaviour: hand the player back the platform's centre.
+		pinned.platforms[victim.platform].safeDx = pinned.platforms[victim.platform].dx
+		pinned.platforms[victim.platform].safeDz = pinned.platforms[victim.platform].dz
+		local ok5, problems5 = Section.check(pinned, Config)
+		truthy(not ok5, "Section.check rejects a checkpoint that sits inside its own hazard")
+		truthy(#problems5 > 0, "...and says which platform and by how much")
+	end
 
 	-- CONTROL for this file. A theme is a colour and a material; it must not move a single stud.
 	-- Without this, any change to Config.Themes would look like a geometry regression.

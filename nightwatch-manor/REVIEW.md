@@ -73,3 +73,195 @@ reading - the proof is quoted with each.
 - Whether night 1 is unwinnable, which finding 1 initially suggested. It is winnable — beeline to the exit extracts in 6.1s, and 1 or 2 relics still extract. I could not construct a hard softlock; the failure mode is loss of counterplay, not an unwinnable state.
 - Note on scope: everything above was measured with the luau CLI and the headless emulator, which model no physics, no rendering and no Raycast. The player-collision consequences of anchored moving parts (the Nightwatcher's torso is CanCollide and moves by PivotTo), whether furniture snags a character, and whether the manor is legible in the dark remain unverified by anything and need a real Studio session — as the builder's notDone item 11 already says.
 
+
+---
+
+# Resolution log — 2026-09-10
+
+Written by the builder, against the six findings above. Every fix has a test that was watched to
+FAIL first; the failures are quoted. Still NOT published, NOT committed. Test totals moved from
+390 spec + 84 headless to **479 spec + 113 headless**.
+
+## 1. The hunter was strictly faster than the player — CLOSED
+
+Two separate defects were holding this up, and fixing only the first left it standing.
+
+**The speed.** The player's speed was not in the model at all. Nothing set `WalkSpeed`, so the
+number the Nightwatcher was racing was Roblox's default of 16 — a value no config knew, no test
+asserted, and no retune could see. `Config.Player.WalkSpeed` (20) is now real data the server
+assigns onto every Humanoid, and `Watcher.speed` clamps itself LAST to
+`Config.Watcher.MaxSpeedFraction * Config.Player.WalkSpeed`. A bare constant here can be retuned
+back into the same state at some other value; a fraction of the thing it is chasing cannot. The
+curve underneath was retuned to sit well below the ceiling (BaseSpeed 11 -> 8, SpeedPerDread 9 ->
+2.4, HuntSpeedMul 1.45 -> 1.2), so the ceiling is a guard rail and not the operating point:
+fastest the watcher ever moves is now **12.48 studs/s at dread 1 while hunting, against 20**.
+Main.server sweeps the whole dread range at boot and `error()`s if that ever stops being true.
+
+Red, from `tests/Chase.spec.luau` against the shipped build:
+
+```
+  fastest the Nightwatcher ever moves: 29.00 studs/s (dread 1.00, slow 0.00, hunting true) vs the player's 16.00
+FAIL: the Nightwatcher is never faster than the player (fastest 29.00 at dread 1.00 ... vs walk 16.00)
+  a fleeing player gains -13.00 studs/s -> -91.0 studs over a 7s hunt
+FAIL: a fleeing player gains at least a room's width (-91.0 studs) over one hunt
+FAIL: a hostile retune (BaseSpeed 55, SpeedPerDread 40, HuntSpeedMul 5.0) still cannot outrun the player (got 475.00)
+  fleeing player, nights 1-12, no upgrades: seen on 9, caught on 7
+FAIL: a player who is seen and runs is never caught: night 1 at 3.6s, night 2 at 2.9s, night 5 at 10.6s, ...
+```
+
+**The manor.** Fixing the speed alone did NOT close the finding, and this is the part the review
+did not reach. `Manor.plan` grew by attachment, which yields a TREE — every branch ends. A dead
+end is a kill against a pursuer at *any* speed, and the measurement said so: with the watcher
+7.5 studs/s slower than the player, a fleeing player was still cornered on **8 of nights 1-12**,
+six of those in a room with exactly one door, after standing still for 3-5 seconds because the
+only way out was through it. 4-6 of every 6-11 rooms were dead ends.
+
+So the generator changed too, in three ways that are all about the same thing — running has to
+have somewhere to go. Growth is now weighted toward cells that already touch built rooms (fill,
+don't grow tendrils); every other shared wall gets a doorway with probability `ExtraDoorChance`;
+and a repair pass then closes any remaining one-door room by placing a room that touches both it
+and something else, or by squaring the corner into a 2x2 block. The repair consumes no rng draws,
+only ever adds, and is bounded by `MaxRepairRooms`. Measured over nights 1-60: **1.36 doorways per
+room, 4 dead ends in 1090 rooms (0.4%), and no night that is a pure tree** — up from 1.0 doorways
+per room and ~55% dead ends.
+
+Green now, with the simulated player *ambushed in its face* on every night rather than merely
+wandering: `ambushed player, nights 1-20, no upgrades: seen on 20, caught on 0`, and
+`running straight away at full dread: out of sight after 6.2s` — i.e. inside the 7-second hunt
+window, so the HUD's advice now describes something that can be done. That advice was reworded to
+say which way the fight goes: **"You are faster than it. Run, and put a room between you."**
+
+The honest consequence, stated plainly: the Nightwatcher can no longer run down a player who
+keeps moving. It is now a positional threat — it blocks routes, forces detours and spends your
+dread — and it catches people who freeze, corner themselves, or walk into it. That also makes
+EVICTED live content for the first time (the review noted it never fired). Whether that is still
+*frightening* is a question only a real Studio session answers, and it is written down as such.
+
+## 2. A joining player free-fell in an empty world — CLOSED
+
+Fixed at the cause, which was the ordering, not just the missing SpawnLocation:
+
+* a plate and a `SpawnLocation` at the world origin, built at script load, before anybody can join;
+* each safehouse's spawn pad **is** a `SpawnLocation` (not a decorative slab) and is assigned as
+  that player's `RespawnLocation`, which also covers the respawn after a death — something no
+  `CharacterAdded` teleport can be relied on to win;
+* the character is placed on the **frame it appears** (it used to wait `task.wait(0.2)`), and
+  `teleport` re-asserts the CFrame on the next frame via `task.defer`, because the engine finishes
+  placing a spawning character after the handler returns — the grow-a-crystal lesson;
+* **the zone, safehouse and spawn point are now built BEFORE `claimProfile`**, not after it. The
+  blocking DataStore round-trip no longer stands in front of the world. Buying and entering a
+  night are gated on `prof.loaded` so nothing can be spent against the default profile, and a
+  `profiles[plr] ~= prof or plr.Parent == nil` guard after the yield stops a departed player's
+  zone from being resurrected and leaked.
+
+The review said "the harness cannot reproduce it: its DataStore is synchronous and never yields".
+It can now: `check_nightwatch.luau` wraps the very store object the server is holding so
+`UpdateAsync` takes a second, joins on a scheduler thread, and asserts the world exists mid-call.
+Every one of these assertions was mutation-verified by putting the defect back:
+
+```
+== A: no floor/SpawnLocation at the world origin       KILLED (2 failures)
+== B: RespawnLocation never assigned                   KILLED (4 failures)
+== C: the spawn pad is a plain Part again              KILLED (2 failures)
+== D: placement waits 0.2s instead of the spawn frame  KILLED — "the joining character is moved to its own zone on the SAME frame it appears"
+== E: the profile round-trip blocks in front again     KILLED (6 failures, incl. "their zone exists WHILE the profile call is still in flight")
+== F: WalkSpeed left to the engine default             KILLED — "and the server set its WalkSpeed from Config.Player -> got 16, want 20"
+```
+
+(F is also the finding-1 premise, confirmed independently: with nothing assigning it, the player
+really does walk at 16.)
+
+## 3. The determinism claim was false — CLOSED, by changing the CODE
+
+Chosen deliberately over editing the README. Comparability of the best-night number is the entire
+justification for accepting memorisable layouts, and the hub-level coupling was additionally a
+silent anti-synergy: `Upgrades.hubLevel` sums EVERY level and the exit is always the deepest room,
+so every purchase in a tycoon game lengthened the walk out with nothing on screen to say so.
+
+`Manor.roomCount(cfg, night)` and `Manor.plan(rng, cfg, night)` no longer take a hub level at all,
+and `Config.Manor.RoomsPerHubLevel` is gone. Manor.spec asserts the property rather than the
+prose: a stray fourth argument must change nothing. Red first, against the shipped build:
+
+```
+FAIL: night 1 is the SAME manor for a hub-level-12 player as for a brand new one
+   fresh   (6 rooms, exit=5): 1:foyer@0,0|2:chapel@0,1|3:hall@1,0|4:dining@0,-1|5:vestibule@0,2|...
+   veteran (10 rooms, exit=8): 1:foyer@0,0|2:hall@0,1|3:dining@1,0|4:library@0,-1|5:cellar@0,2|...
+FAIL: night 7 is the SAME manor ...   fresh 9 rooms exit=8   vs   veteran 13 rooms exit=11
+FAIL: night 14 is the SAME manor ...  fresh 12 rooms exit=10 vs   veteran 16 rooms exit=14
+```
+
+Re-folding hubLevel back into `roomCount` afterwards is killed by those three assertions.
+
+The README said both things in the same document; it now says one, and explains what it used to
+say and why that was wrong.
+
+## 4. Neither gate could see whether the game is playable — CLOSED
+
+`tests/Chase.spec.luau` (79 assertions) asserts OUTCOMES rather than structure: the speed ceiling
+across the whole dread range and every upgrade stack; that the ceiling survives a deliberately
+hostile retune (BaseSpeed 55, SpeedPerDread 40, HuntSpeedMul 5.0); that there is a corner of the
+next room the watcher cannot see; that an ambushed player who runs is not caught on any of nights
+1-20, with and without Bear Traps; that running straight away breaks contact inside the hunt
+window; that the manor has circuits and almost no dead ends; and that crossing the manor never
+eats more than 40% of the night (worst: night 35 at 12.7%).
+
+The two mutations that survived everything:
+
+```
+== HuntSpeedMul 1.2 -> 5.0                        KILLED (Watcher.spec: "hunting multiplies its speed -> got 13, want 40")
+                                                  ...and no longer breaks the GAME: the ceiling absorbs it
+== SightRange 55 -> 2000                          KILLED (Chase.spec: "but NOT in the far corner of that room")
+== MaxSpeedFraction 0.65 -> 3.0                   KILLED
+== the ceiling deleted from Watcher.speed         KILLED
+== ExtraDoorChance 0.75 -> 0                      KILLED (2 nights cornered, 7.6% dead ends)
+== MaxRepairRooms 5 -> 0                          KILLED (6 nights cornered)
+== CONTROL: rewrite an upgrade blurb              SURVIVED (correct)
+== CONTROL: rename a relic tier                   SURVIVED (correct)
+```
+
+Both controls still survive, so the sweep is not simply reporting everything as killed.
+`HuntSpeedMul` has been removed from the list of documented controls in CLAUDE.md — it is
+load-bearing now, and the suite is supposed to notice.
+
+## 5. The Alarm Bell's blurb described a function the code cannot perform — CLOSED
+
+The review is right that the code is coherent and the blurb is the lie, so the blurb changed:
+"Warns you sooner that it has seen you." -> **"Rings when something is close, through walls and
+around corners."** Upgrades.spec now asserts the property, not the sentence: the bell's blurb may
+not contain "seen" / "sees" / "sight" / "spot", because `Watcher.hears` takes no facing argument
+and no sight argument and is arithmetically incapable of knowing about detection. Red first:
+
+```
+FAIL: the Alarm Bell blurb does not say 'seen' — it hears, it cannot see
+```
+
+The 25-stud first level was checked rather than assumed and left alone: it clears the 20-stud
+half-room, so level 1 does reach through the wall into the room next door, which sight cannot do
+at all. That is asserted too, so a retune cannot make the first level a no-op.
+
+## 6. Two of the three ownership guards were untested — CLOSED
+
+The review is explicit that this is a coverage gap and not a live exploit (zones are 3000 studs
+apart, `MaxActivationDistance` is 12), and that reading is correct. `check_nightwatch.luau` now
+joins a second player and has them press the manor's exit door and a loaded pedestal. Verified by
+putting each defect back:
+
+```
+== G: the exit-door owner check -> `if false then`   KILLED (3 failures, incl. "...and I am not told I got out")
+== H: the pedestal owner check -> `if false then`    KILLED ("a STRANGER pressing my pedestal puts nothing in my bag -> got 3, want 2")
+```
+
+## What this log does NOT close
+
+* **Nothing here has been run in Roblox.** The scope note at the end of the review still stands in
+  full, and one item in it got bigger: the manor now has ~36% more doorways and up to 5 extra
+  rooms per night, so there is more geometry for a character to snag on, and the Nightwatcher's
+  anchored CanCollide torso moving by `PivotTo` is still unmodelled by anything.
+* **Whether the Nightwatcher is still scary** is now an open design question rather than a
+  measurement. It cannot run you down any more. That was the point, and it is a real change to how
+  the game feels.
+* **4 dead ends remain in 1090 rooms across nights 1-60** — shapes the repair pass cannot close
+  inside its budget. They are rare, and the exit room is often a legitimate one, but a player who
+  runs into one while being chased is still caught.
+* The store description still says "relics **& cash**" (one currency), and traps still do not
+  fire. Both were already on the notDone list and neither was touched.

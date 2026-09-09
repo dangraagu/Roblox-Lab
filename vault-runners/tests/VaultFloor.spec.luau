@@ -513,11 +513,46 @@ do
 
 	-- A vault nobody can render is a vault nobody plays. This is a budget, not a law of nature;
 	-- if it ever trips, look at the wall merge before raising it.
-	local worst = build(3, 900)
-	truthy(#worst.parts < 1500,
-		string.format("the very worst floor in the game is %d parts, under the 1500 budget", #worst.parts))
-	print(string.format("  parts: bronze f1 = %d, gold f31 = %d, worst case = %d",
-		#small.parts, #big.parts, #worst.parts))
+	--
+	-- THE WORST FLOOR IS FOUND, NOT GUESSED. This used to build `build(3, 900)`, call it "the
+	-- very worst floor in the game", and print gold floor 31 at 620 parts on the very next line —
+	-- larger than the 618 it had just called the maximum. Both floors sit on the Config.Curve
+	-- caps, so they are the same SIZE; what differs is the maze, and a run-length-merged wall
+	-- count depends on which cells the generator happened to join up. "Floor 900" was never
+	-- extremal, only late. README.md and CLAUDE.md both quoted the number as if it were a bound.
+	local worstParts, worstAt, sampled = 0, "", 0
+	local cappedCounts = {}
+	for tier = 1, #C.Tiers do
+		for floor = 1, 120 do
+			local m, spec = build(tier, floor)
+			sampled += 1
+			if #m.parts > worstParts then
+				worstParts, worstAt = #m.parts, C.Tiers[tier].name .. " floor " .. floor
+			end
+			if spec.cells == C.Curve.MaxCells and spec.storeys == C.Curve.MaxStoreys then
+				cappedCounts[#m.parts] = true
+			end
+		end
+	end
+	truthy(worstParts < 1500, string.format(
+		"the worst floor found anywhere in %d floors is %s at %d parts, under the 1500 budget",
+		sampled, worstAt, worstParts))
+	truthy(sampled >= 360, string.format(
+		"the budget was measured over %d floors — a sweep, not a sample", sampled))
+
+	-- WHY THE SWEEP IS NOT OPTIONAL, as an assertion rather than a comment. Two floors that are
+	-- both pinned to the Config.Curve caps are the same SIZE and still produce different part
+	-- counts, because the walls are run-length merged along X and the merge depends on which
+	-- cells that floor's maze happened to join up. If this ever reports one distinct count, the
+	-- generator has stopped varying and the sweep above could safely become a sample again —
+	-- until then, any single "the worst floor in the game is N parts" claim is a guess.
+	local distinct = 0
+	for _ in pairs(cappedCounts) do distinct += 1 end
+	truthy(distinct > 1, string.format(
+		"floors at the caps produce %d distinct part counts, so one sample cannot be the maximum",
+		distinct))
+	print(string.format("  parts: bronze f1 = %d, gold f31 = %d, worst of 360 floors = %d (%s)",
+		#small.parts, #big.parts, worstParts, worstAt))
 end
 
 --============================================================================ mutation gate

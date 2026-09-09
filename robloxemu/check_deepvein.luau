@@ -38,8 +38,12 @@ local function gt(a, b, msg)
 end
 
 local ME, STRANGER, LOADED, GHOST, REUSER = 5150, 6161, 7272, 8383, 9494
+local SURF, CAVER = 1212, 1313
 local CELL = 6 -- Config.Mine.CellSize
 local RIM_MULT = 3
+-- Config.Mine.PartsPerFrame. Written out by hand rather than read from the module: a budget
+-- checked against itself is not a budget.
+local PARTS_PER_FRAME = 64
 
 --============================================================ preloaded saves
 
@@ -57,6 +61,19 @@ store:SetAsync("u_" .. LOADED, {
 		rebirths = 0, depthLayer = 24, bestLayer = 24,
 	},
 })
+
+-- Two miners kitted out to dig FAST, so a test can excavate a whole column without spending a
+-- thousand clicks on it: a Singularity Bore one-shots almost everything, and a maxed backpack
+-- means the "your backpack is full" guard never refuses a swing mid-column.
+for _, uid in { SURF, CAVER } do
+	store:SetAsync("u_" .. uid, {
+		data = {
+			cash = 0, totalCash = 0, inventory = {},
+			pickTier = 5, backpackLevel = 12, lampLevel = 0,
+			rebirths = 0, depthLayer = 0, bestLayer = 0,
+		},
+	})
+end
 
 assert(h:tryRun("server/Main.server"))
 h:advance(1)
@@ -121,9 +138,10 @@ do
 	gt(n.parts, 0, "the shaft is parented into the workspace at all")
 	-- The recorded figure for a brand new miner: the 7x7 mouth exposes 49 floor cells (41 plain
 	-- rock + 8 copper at layer 1) plus the 32-cell bedrock ring at layer 0 and the 32 behind the
-	-- floor at layer 1, plus the SELL pad. Spelled out rather than recomputed from the module,
-	-- because recomputing it here would grade the generator against itself.
-	eq(n.parts, 114, "a fresh miner's shaft holds exactly 114 BaseParts")
+	-- floor at layer 1, plus the SELL pad and the SURFACE DECK the elevator lands on. Spelled out
+	-- rather than recomputed from the module, because recomputing it here would grade the
+	-- generator against itself.
+	eq(n.parts, 115, "a fresh miner's shaft holds exactly 115 BaseParts")
 	eq(n.rock + n.ore, 49, "the whole 7x7 floor of the mouth is exposed")
 	eq(n.bedrock, 64, "…ringed by bedrock at layer 0 and layer 1")
 	eq(n.pads, 1, "…with one SELL pad")
@@ -137,13 +155,28 @@ do
 	-- and two players in one server would mine each other's shafts.
 	local untagged, unowned = 0, 0
 	for _, d in shaft0:GetDescendants() do
-		if d:IsA("BasePart") and not string.match(tostring(d.Name), "^SellPad_") then
+		if d:IsA("BasePart") and not string.match(tostring(d.Name), "^SellPad_")
+			and not string.match(tostring(d.Name), "^SurfaceDeck_") then
 			if d:GetAttribute("CellKey") == nil then untagged += 1 end
 			if d:GetAttribute("Owner") ~= ME then unowned += 1 end
 		end
 	end
 	eq(untagged, 0, "every block carries its cell key")
 	eq(unowned, 0, "every block is tagged with its owner")
+end
+
+do
+	-- The SURFACE deck: the one piece of ground at the mouth that no swing can reach. Without it
+	-- the landing point is held up by ordinary breakable rock, and the first thing a player digs
+	-- is the column they are standing on.
+	local deck = shaft0 and shaft0:FindFirstChild("SurfaceDeck_" .. ME, true)
+	truthy(deck ~= nil, "the mouth has a surface deck under the landing point")
+	if deck then
+		eq(deck:FindFirstChildOfClass("ClickDetector"), nil, "…and it is not something you can mine")
+		eq(deck.Anchored, true, "…and it is anchored, so nothing can drop it down the shaft")
+		eq(deck.CanCollide, true, "…and you can stand on it")
+		eq(deck.Position.Y + deck.Size.Y / 2, 0, "…with its top flush with the mouth floor")
+	end
 end
 
 do
@@ -244,6 +277,79 @@ do
 	end
 	h:leave(other)
 	h:advance(1)
+end
+
+--============================================================ a mined block STAYS mined
+
+do
+	-- The core loop undoing itself. The generator is stateless, so it calls a mined cell "rock"
+	-- forever; `opened` is the only record that the block is gone. When the reveal that follows a
+	-- break collects visible faces without consulting `opened`, breaking ANY of the 26 neighbours
+	-- of a cell you already mined re-collects that cell, the server finds no Part for it, and
+	-- rebuilds it at full hit points with a fresh ore payload. Mine it, mine a neighbour, mine it
+	-- again: cash out of nothing, and a ceiling that reseals over a player digging down.
+	eq(blockAt(ME, "5:1:5"), nil, "CONTROL: the block mined above really is out of the world")
+
+	local nb = blockAt(ME, "4:1:5")
+	truthy(nb ~= nil, "there is a neighbour of the mined cell left to break")
+	if nb then
+		local cd = nb:FindFirstChildOfClass("ClickDetector")
+		for _ = 1, 25 do
+			if nb.Parent == nil then break end
+			cd.MouseClick:Fire(me)
+			h:advance(0.4)
+		end
+		eq(nb.Parent, nil, "CONTROL: the neighbour is mined out")
+	end
+	eq(blockAt(ME, "5:1:5"), nil, "the cell mined a moment ago did NOT grow back")
+
+	-- And the version that costs money: mine an ore cell, mine one of its neighbours, and the ore
+	-- must not be standing there again waiting to be sold a second time.
+	local oreBlock, oreKey = nil, nil
+	for _, d in h.workspace:GetDescendants() do
+		if d:IsA("BasePart") and d:GetAttribute("Owner") == ME and (d:GetAttribute("Ore") or 0) > 0
+			and d:GetAttribute("Layer") == 1 then
+			oreBlock, oreKey = d, tostring(d:GetAttribute("CellKey"))
+			break
+		end
+	end
+	truthy(oreBlock ~= nil, "there is an exposed ore cell to farm")
+	if oreBlock then
+		local cd = oreBlock:FindFirstChildOfClass("ClickDetector")
+		for _ = 1, 25 do
+			if oreBlock.Parent == nil then break end
+			cd.MouseClick:Fire(me)
+			h:advance(0.4)
+		end
+		eq(oreBlock.Parent, nil, "CONTROL: the ore cell is mined out")
+		local carriedAfterFirst = (stateOf(me) or {}).carried or 0
+		gt(carriedAfterFirst, 0, "CONTROL: mining it paid out once (" .. carriedAfterFirst .. " units)")
+
+		-- now break a neighbour of it
+		local x, y, z = string.match(oreKey, "^(%d+):(%d+):(%d+)$")
+		local nkeys = {
+			(tonumber(x) + 1) .. ":" .. y .. ":" .. z,
+			(tonumber(x) - 1) .. ":" .. y .. ":" .. z,
+			x .. ":" .. y .. ":" .. (tonumber(z) + 1),
+			x .. ":" .. y .. ":" .. (tonumber(z) - 1),
+		}
+		local victim = nil
+		for _, k in nkeys do
+			local b = blockAt(ME, k)
+			if b and b:FindFirstChildOfClass("ClickDetector") then victim = b break end
+		end
+		truthy(victim ~= nil, "the ore cell has a breakable neighbour")
+		if victim then
+			local vcd = victim:FindFirstChildOfClass("ClickDetector")
+			for _ = 1, 25 do
+				if victim.Parent == nil then break end
+				vcd.MouseClick:Fire(me)
+				h:advance(0.4)
+			end
+			eq(victim.Parent, nil, "CONTROL: the neighbour is mined out")
+		end
+		eq(blockAt(ME, oreKey), nil, "the ore cell did not respawn to be sold a second time")
+	end
 end
 
 --============================================================ ore, backpack, sale
@@ -361,6 +467,44 @@ do
 		"the restored column actually put blocks at the bottom of the shaft")
 	local n = scan(shaft1)
 	gt(n.parts, 200, "restoring 24 layers built a real shaft (" .. n.parts .. " parts)")
+
+	-- AND IT HAS TO BE HOLLOW. Restoring the column marks each cell opened, but the Part standing
+	-- in that cell was built a moment earlier by the reveal of the cell above it, and marking a
+	-- cell open never removed it. A "restored elevator shaft" that is still full of rock is not a
+	-- shaft, and DESCEND aims the returning player at the bottom of it.
+	local blocked = {}
+	for y = 1, 24 do
+		if blockAt(LOADED, "5:" .. y .. ":5") ~= nil then blocked[#blocked + 1] = y end
+	end
+	eq(#blocked, 0, "the restored elevator column is hollow all the way down (rock left at layers "
+		.. table.concat(blocked, ",") .. ")")
+end
+
+do
+	-- DESCEND must not put the miner inside a block. It aims at the deepest cell they opened, and
+	-- an opened cell is by definition empty — unless something rebuilt it.
+	local hrp = loaded.Character and loaded.Character:FindFirstChild("HumanoidRootPart")
+	truthy(hrp ~= nil, "the veteran has a root part")
+	if hrp then
+		ElevatorEvent:simulateFireServer(loaded, "down")
+		h:advance(0.5)
+		local at = hrp.CFrame.Position
+		truthy(at.Y < -100, "DESCEND took the veteran to the bottom of their shaft (y = "
+			.. string.format("%.1f", at.Y) .. ")")
+		-- what is standing in the cell they landed in?
+		local occupied = nil
+		for _, d in h.workspace:GetDescendants() do
+			if d:IsA("BasePart") and d:GetAttribute("Owner") == LOADED then
+				local p, s = d.Position, d.Size
+				if math.abs(p.X - at.X) < s.X / 2 and math.abs(p.Z - at.Z) < s.Z / 2
+					and at.Y > p.Y - s.Y / 2 and at.Y < p.Y + s.Y / 2 then
+					occupied = d
+				end
+			end
+		end
+		eq(occupied, nil, "…and did not drop them inside a solid block ("
+			.. (occupied and tostring(occupied.Name) or "clear") .. ")")
+	end
 end
 
 do
@@ -438,7 +582,7 @@ do
 	local newShaft = shafts:FindFirstChild("Shaft_1")
 	truthy(newShaft ~= nil, "the veteran still has a shaft after rebirth")
 	local n = scan(newShaft)
-	eq(n.parts, 114, "…and it is a fresh 114-part shaft, rebuilt from scratch")
+	eq(n.parts, 115, "…and it is a fresh 115-part shaft, rebuilt from scratch")
 
 	local moved = 0
 	local seen = 0
@@ -450,6 +594,138 @@ do
 	end
 	gt(seen, 0, "the new cave has ore of its own")
 	gt(moved, 0, "the veins MOVED — rebirth really did regenerate the cave, not just reset the numbers")
+end
+
+--============================================================ SURFACE has to land on something
+
+-- Dig every breakable cell of one column, top to bottom. Returns how many it actually broke.
+local function digColumn(plr, uid, x, z, toLayer)
+	local broke = 0
+	for y = 1, toLayer do
+		local b = blockAt(uid, x .. ":" .. y .. ":" .. z)
+		if b then
+			local cd = b:FindFirstChildOfClass("ClickDetector")
+			if cd then
+				for _ = 1, 6 do
+					if b.Parent == nil then break end
+					cd.MouseClick:Fire(plr)
+					h:advance(0.35)
+				end
+				if b.Parent == nil then broke += 1 end
+			end
+		end
+	end
+	return broke
+end
+
+-- The highest part in `folder` whose footprint covers (x, z) and whose top face is at or below
+-- `fromY`: i.e. what a character standing at that point would actually land on.
+local function groundUnder(folder, x, z, fromY)
+	local bestTop, bestPart = -math.huge, nil
+	for _, d in folder:GetDescendants() do
+		if d:IsA("BasePart") then
+			local p, s = d.Position, d.Size
+			if math.abs(p.X - x) <= s.X / 2 and math.abs(p.Z - z) <= s.Z / 2 then
+				local top = p.Y + s.Y / 2
+				if top <= fromY + 0.001 and top > bestTop then bestTop, bestPart = top, d end
+			end
+		end
+	end
+	return bestPart, bestTop
+end
+
+do
+	-- SURFACE is the button that also sells your haul, so it is the button a player presses more
+	-- than any other, and it teleports to a FIXED point. The floor under that point is ordinary
+	-- breakable rock all the way to bedrock, and digging straight down where you are standing is
+	-- the most natural first move in a mining game. So: dig the spawn column out, press SURFACE,
+	-- and see what is under your feet when you arrive.
+	local surfer = h:join("Surfacer", SURF)
+	h:advance(1)
+	h.Players:simulateSpawn(surfer, h.workspace)
+	h:advance(2)
+
+	local surfShaft = nil
+	for _, f in shafts:GetChildren() do
+		if f:FindFirstChild("SellPad_" .. SURF, true) ~= nil then surfShaft = f end
+	end
+	truthy(surfShaft ~= nil, "the surfacer got a shaft")
+
+	local hrp = surfer.Character:FindFirstChild("HumanoidRootPart")
+	ElevatorEvent:simulateFireServer(surfer, "up")
+	h:advance(0.5)
+	local spawnAt = hrp.CFrame.Position
+
+	local broke = digColumn(surfer, SURF, 5, 2, 24)
+	h:advance(2)
+	gt(broke, 8, "CONTROL: the spawn column really was dug out (" .. broke .. " cells broken)")
+
+	ElevatorEvent:simulateFireServer(surfer, "up")
+	h:advance(1)
+	local at = hrp.CFrame.Position
+	truthy(math.abs(at.X - spawnAt.X) < 0.01 and math.abs(at.Z - spawnAt.Z) < 0.01,
+		"SURFACE still aims at the surface")
+
+	local part, top = groundUnder(surfShaft, at.X, at.Z, at.Y)
+	truthy(part ~= nil, "SURFACE puts the miner over something solid")
+	if part then
+		local drop = at.Y - top
+		truthy(drop <= 8, "…and within a step of it, not over the hole they just dug (drop "
+			.. string.format("%.1f", drop) .. " studs onto " .. tostring(part.Name) .. ")")
+		eq(part:FindFirstChildOfClass("ClickDetector"), nil,
+			"…and that floor is not something they can mine away too (" .. tostring(part.Name) .. ")")
+	end
+end
+
+--============================================================ one swing, one frame's worth of parts
+
+do
+	-- RevealBudget caps how many AIR cells one break may flood through. Nothing caps the SOLID
+	-- list that comes out of it, and every entry in that list is an Instance.new("Part") plus a
+	-- ClickDetector plus four attributes plus a signal connection, built synchronously inside the
+	-- click handler. Digging straight down the middle of a rebirth-0 shaft breaks into a 144-cell
+	-- cave at layer 6: three hundred parts in the single frame that is supposed to be the game's
+	-- best moment, with every other miner on the server hitching along with it.
+	local caver = h:join("Caver", CAVER)
+	h:advance(1)
+	h.Players:simulateSpawn(caver, h.workspace)
+	h:advance(2)
+
+	for y = 1, 5 do
+		local b = blockAt(CAVER, "5:" .. y .. ":5")
+		if b then
+			local cd = b:FindFirstChildOfClass("ClickDetector")
+			for _ = 1, 6 do
+				if b.Parent == nil then break end
+				cd.MouseClick:Fire(caver)
+				h:advance(0.35)
+			end
+		end
+	end
+	h:advance(1)
+
+	local doorway = blockAt(CAVER, "5:6:5")
+	truthy(doorway ~= nil, "the cell that opens into the cave is exposed and ready to break")
+	if doorway then
+		local cd = doorway:FindFirstChildOfClass("ClickDetector")
+		local before = partCount()
+		-- ONE click, and NOT advanced: everything counted here was built without ever yielding.
+		cd.MouseClick:Fire(caver)
+		local burst = partCount() - before
+		h:advance(3)
+		local total = partCount() - before
+		eq(doorway.Parent, nil, "CONTROL: the block broke")
+		-- 314 new faces, measured against the real modules. The bar is set well above one frame's
+		-- budget on purpose: it proves the pump DRAINED, rather than that it merely started and
+		-- left the cave a shell with nothing behind it.
+		gt(total, 300, "CONTROL: breaking in exposes a few hundred faces and every one gets built ("
+			.. total .. " parts)")
+		truthy(burst <= PARTS_PER_FRAME,
+			"no single frame instantiates more than " .. PARTS_PER_FRAME
+				.. " parts (built " .. burst .. " before yielding)")
+		print(string.format("  cave-in at 5:6:5: %d parts total, %d of them in the breaking frame",
+			total, burst))
+	end
 end
 
 --============================================================ leaving takes the whole shaft

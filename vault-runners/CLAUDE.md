@@ -6,15 +6,21 @@ v1 is **built and green, and has never been run by a person or published.** No R
 exists for it, no `publish_*.bat` exists, and the tree was deliberately left dirty and
 uncommitted.
 
+An adversarial review (`REVIEW.md`) returned **BLOCK** on eight findings. Seven are closed; the
+eighth (the game is not the obby its brief sells) is written down in README's "What is NOT built
+yet" rather than built. Read `REVIEW.md` before assuming any number in this file is the original.
+
 ```
-tests/Rng.spec.luau            37 passed, 0 failed
-tests/Progression.spec.luau    63 passed, 0 failed
-tests/Pets.spec.luau           75 passed, 0 failed
-tests/RunState.spec.luau       75 passed, 0 failed
-tests/VaultFloor.spec.luau    199 passed, 0 failed
-tests/responsive.spec.luau     70 passed, 0 failed
-check_vaultrunners.luau        71 passed, 0 failed   (headless boot: builds a vault, plays 5 runs)
-check_vaulthud.luau            PASS                  (HUD fits all 10 viewports)
+tests/Rng.spec.luau             37 passed, 0 failed
+tests/Progression.spec.luau     64 passed, 0 failed
+tests/Pets.spec.luau            75 passed, 0 failed
+tests/RunState.spec.luau        75 passed, 0 failed
+tests/VaultFloor.spec.luau     201 passed, 0 failed
+tests/responsive.spec.luau      70 passed, 0 failed
+tests/Collapse.spec.luau       274 passed, 0 failed   IS THE VAULT WINNABLE AT ALL
+tests/Trace.spec.luau           23 passed, 0 failed   the anti-teleport throttle
+check_vaultrunners.luau        107 passed, 0 failed   (headless boot: builds vaults, plays runs)
+check_vaulthud.luau            PASS                   (11 viewports x {hub, mid-run})
 ```
 
 Regenerate the emulator bundle after ANY edit under `src/`, or the headless checks measure the
@@ -49,6 +55,27 @@ cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runne
    climbs higher it kills a runner standing at the exit a second before the countdown expires, and
    the seal never fires in a real run. `VaultFloor.spec`'s `collapseSweepsVault` asserts both ends
    of that: it must reach the top floor, and it must not go past it by more than `Run.KillMargin`.
+8b. **THE COUNTDOWN IS DERIVED FROM THE VAULT, NOT TYPED INTO IT.** `buildVault` generates the
+   vault and only then calls `VaultPath.countdown`, which BFS-walks the maze that was actually
+   produced and solves one inequality per storey — the runner must be off storey `s` before the
+   plane reaches storey `s`'s kill line — for the countdown, then multiplies by the floor's slack.
+   Do not put a `collapseSeconds` back on a tier. v1 did, with the plane's speed as (height) /
+   (countdown), so a taller vault swept its LOWER storeys faster: Silver and Gold were unwinnable
+   on floor 1 and nothing in the repo measured a traversal time to notice. `Config.Curve`'s
+   `MaxCells` / `MaxStoreys` are now a PACING budget — raise either and the derived countdown
+   grows with it, which is why `tests/Collapse.spec.luau` bounds it at `Collapse.MaxSeconds`.
+8c. **The collapse's head start is in STOREYS** (`Config.Vault.KillPlaneLeadStoreys = 1`), derived
+   in `VaultFloor` from `Run.RunnerRootHeight - Run.KillMargin`. Written as a stud offset (-10, as
+   v1 had it) storey 0 got 11 studs of plane travel where every storey above it got 18 — the
+   ground floor of every vault in the game had 39% less time than the ones above it.
+9b. **Every rule in the run loop reads `Trace`, never `hrp.Position`.** The client owns its own
+   character's physics, so the position the server reads is a claim. `Trace` moves the server's
+   own position toward that claim at walking pace and the gem, exit and kill tests all read the
+   trusted one. If you add a rule that reads a player position, read `local_`, not `claimed`.
+9c. **A rejected remote must not write to the DataStore.** `flush` compares a fingerprint of
+   exactly the fields it saves and returns early when nothing moved; remote handlers call
+   `requestSave`, which only marks the profile pending for the flush loop. Do not call `flush`
+   from a remote handler.
 9. **One CONFIG table.** Every tunable is in `src/shared/Config.luau`. Per-feature RNG salts live
    in `VaultFloor.luau` (same convention as grow-a-crystal's `Cavern.luau`) because they are
    structure, not tuning.
@@ -76,29 +103,50 @@ solid slab and the spec's first run said *"storey 1 floor covers its own entry h
 vault, full of gems, that no player could ever climb out of. That is what `CHECK.climbHoleOpen`
 exists for.
 
-Wall cells are run-length merged along X (Bronze floor 1 is 96 parts; the worst floor in the game
-is 618, against a 1500 budget the spec asserts). `CHECK.wallsMatchMaze` verifies the merge
-cell-by-cell in both directions AND that every wall edge lands on a grid boundary — sampling cell
-centres alone could not see a run that grew half a cell at each end, and the mutation gate proved
-it.
+Wall cells are run-length merged along X (Bronze floor 1 is 96 parts; the worst floor found by
+sweeping all three tiers across 120 floors is Silver floor 42 at 314, against a 1500 budget the
+spec asserts). That worst case is **found by a sweep, not sampled**: the spec used to build one
+arbitrary late floor, call it "the very worst floor in the game", and print a different floor with
+more parts on the next line. Two floors pinned to the same `Config.Curve` caps are the same SIZE
+and still merge differently, so a single sample can never be a maximum — `VaultFloor.spec` asserts
+that too, by counting the distinct part totals at the caps.
+
+`CHECK.wallsMatchMaze` verifies the merge cell-by-cell in both directions AND that every wall edge
+lands on a grid boundary — sampling cell centres alone could not see a run that grew half a cell
+at each end, and the mutation gate proved it.
 
 ## Known noise
 
-`luau-analyze src/shared/MazeGen.luau` prints 18 lines of type noise about `{{number}}` vs
+`luau-analyze src/shared/MazeGen.luau` prints type noise about `{{number}}` vs
 `{{unknown & unknown}}`. It is **byte-identical to the noise labyrint-spill's own copy produces**
-(verified by diff) and is inherited with the verbatim copy. Every other file analyses clean.
+(verified by diff) and is inherited with the verbatim copy.
+
+There is **no `.luaurc` and no Roblox type definitions in this tree**, so `Fx`, `FxClient`,
+`Main.server` and `Hud.client` each emit roughly 25 `Unknown global Instance/game/Enum/Color3`
+lines. That is environmental, not a defect — but "clean on every file except MazeGen" was never
+what the tool actually printed, and `MisleadingAndOr` still surfaces through the noise, which is
+how the session-lock and-or was found in the first place. One real line remains and predates this
+work: `Main.server(860,85)`, a `never & number` complaint about `p.gems` inside a `string.format`
+in `doBuy`'s "poor" branch. It is a narrowing artefact, not a bug.
 
 ## What to do next, in order
 
-1. **Play it.** Nobody has. The 70-second Bronze countdown against a 3-storey 4x4 maze is a guess.
-   Time a real climb before touching anything else; `Config.Tiers[n].collapseSeconds` and
-   `Config.Curve.CollapseTightenPerFloor` are the two dials.
-2. Close the gap between the store description and the build — see README's "What is NOT built
-   yet". The two that a player will actually notice are **pets are bought rather than hatched**
-   and **pets do not level**.
-3. Sound. There is not one Sound instance in the game, and a rising collapse with no audio is half
+1. **Play it.** Nobody has. The countdown is no longer a guess — it is derived from the vault's own
+   BFS-optimal route and `tests/Collapse.spec.luau` proves every generated floor is clearable with
+   slack — but `Config.Collapse.Slack` (2.0, tightening to `MinSlack` 1.5) is a judgement about how
+   much worse a human is than a BFS solver, and only a playtest settles it. That single number is
+   the dial; do not go back to typing seconds onto a tier. Watch for two things in particular:
+   Gold floor 1 is a 258-second run, and `Config.Movement.WalkSpeed` is now 24 rather than Roblox's
+   16 and the server writes it onto the Humanoid, so the game feels faster than the brief imagined.
+2. **Decide what this game IS.** The brief sells a "Procedural Rage-Obby" with crumbling platforms
+   and the build is a maze runner with one unfailable staircase — see the first entry in README's
+   "What is NOT built yet". That is a product decision (build the platforming, or rewrite the
+   genre line, thumbnail and store copy), not a bug to fix quietly.
+3. Close the rest of the gap between the store description and the build. The two a player will
+   actually notice are **pets are bought rather than hatched** and **pets do not level**.
+4. Sound. There is not one Sound instance in the game, and a rising collapse with no audio is half
    a collapse.
-4. A leaderboard. Runs are already deterministic per (tier, floor), so a time is comparable; only
+5. A leaderboard. Runs are already deterministic per (tier, floor), so a time is comparable; only
    the recording is missing.
 
 ## What this game deliberately does NOT have

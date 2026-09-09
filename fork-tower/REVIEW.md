@@ -1,6 +1,7 @@
 # Fork Tower - adversarial review
 
-**Verdict: BLOCK**
+**Verdict: BLOCK** — all six findings CLOSED 2026-09-10; see the Resolution at the
+bottom of this file for what changed, and for the gaps that are still open.
 
 Built and reviewed 2026-09-09/10. NOT published, and not to be published until the
 findings below are closed. Every one of them was proved by running something, not by
@@ -69,3 +70,146 @@ reading - the proof is quoted with each.
 - Every item on the builder's own notDone list checks out: Config.Passes is read by nothing (profile.passes appears exactly twice, both in load and save), there is not one Sound/SoundService reference in src/, and hz.kind is written to an attribute and never rendered — all four hazard kinds are the same red neon cube.
 - The cross-lane door guard is real and correctly ordered: onDoorChosen compares the prompt's captured lane owner against the puller BEFORE reading any profile, so a prompt fired in someone else's tower advances nobody. Confirmed by mutation (disabling it turns the headless check red).
 
+
+---
+
+# Resolution — 2026-09-10
+
+All six findings closed. Every fix was driven by an assertion that was watched to FAIL first, and
+every new guard was then mutated to prove it bites. The suites now read:
+
+```
+Fork 53/0   Section 47/0   Build 31/0   Codes 19/0   Rng 32/0   responsive 70/0
+check_forktower.luau 85/0
+```
+
+**Still not published.** The findings are closed; the game has still never been opened in Studio
+and no human has ever played it. See "What is still not good enough" at the bottom.
+
+## What changed, per finding
+
+**1 — unbounded X random walk.** Fixed in the MODEL, not by widening the lane. `Section.build`
+now takes `originX` (the section origin's offset from its lane's centre line) and refuses any step
+that would leave `Config.World.CorridorHalfWidth` = 60 studs; the fallback is FORWARD, which has
+`dx = 0`, so the exit is inside the corridor too and the bound holds by induction over any number
+of floors. `Section.check` re-derives it. `buildSection` passes
+`lane.forkTop[level].X - lane.origin.X`, and the boot guard now chains the tower the way the
+server does instead of checking ten independent sections.
+
+*Red first:* `no platform of 500 chained floors leaves the corridor (worst 2544.8 at seed 8 floor
+500, bound 60)`, and in the world `no tower reaches outside its own 220-stud lane slot (worst
+152.0 studs, Lane_3)` plus `no two towers overlap in X (Lane_2/Lane_3)`.
+
+Lanes also alternate around the origin now (0, +220, -220, +440 ...) rather than marching out
+along +X, halving how far a full server's furthest tower sits from spawn.
+
+**2 — claimLane returned 0 when full.** It returns `nil` now, and the pool is
+`math.max(Config.World.MaxLanes, Players.MaxPlayers)` — MaxLanes is a floor, so a Studio slider
+can no longer put more players in the server than there are towers. A player the server genuinely
+cannot seat is refused out loud (`notice(..., "full", ...)`, repeated on CharacterAdded because the
+first one goes out before their HUD can have connected) and stands on a new `workspace.Waiting`
+pad carrying the place's only ENABLED SpawnLocation — every lane spawn is `Enabled = false`, and a
+world whose spawns are all disabled drops the character wherever Roblox likes.
+
+*Red first:* `no two towers share a lane index (Lane_0,Lane_0,Lane_0,Lane_0,Lane_0,Lane_0,Lane_0,
+Lane_0,Lane_0,Lane_0) -> got 10, want 0`.
+
+**3 — checkpoint inside the hazard.** A platform's centre is exactly where a hazard standing on it
+is (near face 1.50 studs out, against a 2.0-stud character half-width): 7200 of 7200 hazards
+overlapped the checkpoint their own platform handed back. `Section.respawn(section, index)` names
+the point now — the clear band on the far side, as far in as the character can go while staying
+wholly on the platform — and `Section.check` refuses a section whose respawn point is not in it.
+Hazards also carry a `Platform` attribute and a per-lane `HazardCooldown`, because `Touched` fires
+once per limb per frame and every one of them used to be another teleport landing on the last one
+plus another Notice down the wire.
+
+*Red first:* `Section.respawn` did not exist (`attempt to call a nil value`), and in the world
+`forty Touched fires in one contact cost the client 40 notices, not forty`.
+
+**4 — Rebirth had no throttle.** Two layers, because the button was the symptom and write
+amplification was the cause. `saveProfile` coalesces: a floor of `SaveMinInterval` seconds between
+one player's writes, forced only for leaving, BindToClose and code redemption. The number is
+derived — Roblox grants the server 60 + 10*players UpdateAsync calls a minute, so 60N/S <= 60 + 10N
+holds for every N exactly when S >= 6 — and the boot guard warns if anyone lowers it. The ordered
+leaderboard is only written when the score has actually moved. Rebirth and ArmSkip additionally sit
+behind `onCooldown`, which refuses ONCE per window rather than answering every fire (a refusal per
+fire would have moved the amplification rather than removed it).
+
+*Red first:* `200 Rebirth fires in one frame granted 200 rebirths, not 200` and `...cost 200
+DataStore calls, not 200`; then, after the first fix, `...answered them with 200 messages, not one
+refusal per fire`.
+
+**5 — the floor spent while the character was absent.** `lane.entry[level]` is recorded when the
+section is built, and `onDoorChosen` assigns `lane.checkpoint = entry` unconditionally; only the
+TELEPORT is still gated on a HumanoidRootPart. The mid-climb restore in `buildLane` reads the same
+table instead of re-deriving the position from `Plat_<level>_1`.
+
+*Red first:* `a player who spawns AFTER answering a fork stands on their new section (20.2 studs
+from platform 1)` and `...and not stranded on the spent fork pad (0.0 studs away from it)` — 0.0,
+i.e. standing exactly on it.
+
+**6 — the fairness spec could not see an unreadable fork.** Correct, and the review was right that
+`Fork.luau` itself is not wrong. `Fork.readTrap` reads `markedDoor`, which `Fork.plan` derives from
+`trapDoor` eight lines earlier, so the old assertion compared a field with the field it came from.
+Fork.spec now also reads every fork off the DOORS' own sign lists (`bearerOfTell`) and asserts
+three things: exactly one door bears the named sign, it is the door the plan calls marked, and
+reading it names the trap. WITNESS E is the review's own mutation, kept permanently.
+
+*Red first:* re-applying that mutation to `src/shared/Fork.luau` now gives `FAIRNESS 2: exactly one
+of the two doors bears the sign the inscription names, on all 40000 forks -> got 15985, want 0` —
+where before it left Fork.spec at 47 passed, 0 failed. Fork.luau was restored byte-identical.
+
+## Mutation sweep over the new guards
+
+Every guard this pass added, mutated on the shipping source, plus a control the suite must NOT
+notice:
+
+| mutation | result |
+|---|---|
+| corridor clamp removed | Section 45/2, headless 76/3 |
+| `Section.respawn` returns the platform centre | Section 44/3, headless 77/2 |
+| `claimLane` returns 0 when full | headless 76/3 |
+| rebirth cooldown removed | headless 78/1 |
+| checkpoint moved back inside the `hrp` test | headless 77/2 |
+| hazard debounce removed | headless 78/1 |
+| `saveProfile` coalescing removed | headless 78/1 |
+| leaderboard write-dedup removed | headless 84/1 |
+| refusal sent on every fire | headless 82/1 |
+| WaitingSpawn `Enabled = false` | headless 80/1 |
+| CONTROL: `ArmSkipCooldown` 0.25 -> 0 | 47/0, 53/0, 79/0 — correctly invisible |
+
+The control is doing its job in both directions: it shows the harness is not simply reporting
+everything red, and it names a real gap (below). The `saveProfile` coalescing SURVIVED the first
+sweep — the rebirth cooldown alone satisfied the DataStore assertion — which is why the check now
+also measures the cost of one ordinary ten-floor run.
+
+## What is still not good enough
+
+Written down here rather than left for a player to find.
+
+1. **Nothing in this repo simulates a character.** Every reachability claim — "a traitless player
+   clears every jump", "the checkpoint is clear of the hazard" — is arithmetic over axis-aligned
+   boxes. The emulator has no physics on purpose (`Workspace:Raycast` raises). A character in
+   motion, or one that lands on a platform edge, can still brush a hazard the instant it respawns;
+   the one-second cooldown covers that window but nothing has measured it.
+2. **`CharacterHalfWidth = 2` is taken from Roblox's default character, not derived from anything
+   in this repo,** and nothing verifies it against a real Humanoid. If an avatar scale setting ever
+   widens the character, the hazard clearance shrinks silently.
+3. **`Config.Limits.ArmSkipCooldown` is asserted by nothing** — the mutation control proved it:
+   setting it to 0 changed no test. It is a belt on a cheap remote.
+4. **The three `AutomaticCanvasSize` ScrollingFrames (Stats, List, CardTraits) are still
+   unmeasured.** The HUD gate lists them NOT VERIFIED, so "can you scroll to the last of your ten
+   picks" remains an open question. Unchanged by this pass.
+5. **`hudcheck.luau` is still not wired into this repo's gates.** The review ran it from an ad-hoc
+   runner that was never committed, so nothing re-runs it.
+6. **Lane count at large `MaxPlayers` is untested.** At 220 studs a slot and an alternating layout,
+   a 50-player server puts the furthest tower about 5 500 studs from spawn; nothing has been
+   measured at that range, and Roblox's streaming and float precision out there are unexamined.
+7. **The clock falls back to `tick()`,** which Roblox documents as deprecated, when
+   `workspace:GetServerTimeNow()` is unavailable. It works today and it is what makes the throttles
+   testable headless, but it is a call that could be removed under us.
+8. **Everything on the builder's original notDone list is still true:** `Config.Passes` is read by
+   nothing, there is not one Sound in `src/`, and `hz.kind` is written to an attribute and never
+   rendered — all four hazard kinds are the same red neon cube.
+9. **The game has never been opened in Roblox Studio and has never been published.** Every claim
+   above is made by the luau CLI and by an emulator, not by the engine.

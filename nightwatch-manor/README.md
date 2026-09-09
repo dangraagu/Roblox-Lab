@@ -20,19 +20,34 @@ through the doorways. It sees you inside a view cone, and only in its own room o
 linked to it, so walls actually hide you. Once it has seen you it comes at you along the shortest
 room path until its hunt timer runs out. Take relics, reach the Servants' Exit before DREAD fills.
 
+**You are faster than it, always.** `Watcher.speed` is capped at a fraction of
+`Config.Player.WalkSpeed` — 12.5 studs/s at its worst against your 20 — so turning and running
+gains you ground, and the manor is generated with circuits in it rather than as a tree of dead
+ends, so running has somewhere to go. That is the whole counterplay: the Nightwatcher costs you
+route and dread, not the run. It catches people who freeze, who corner themselves, or who walk
+into it. The real timer is DREAD.
+
 **DAY.** Back in your own safehouse, every upgrade is a pad on the floor with a prompt on it.
 Buying a level costs relics, stacks a visible piece of hardware on the pad, and changes a number
 the next night reads: how far your lantern lights, how fast the manor wakes, how fast the
 Nightwatcher walks, how early the alarm bell warns you, what a relic banks for, how much you keep
-when it catches you, how long you get. The manor also grows with your hub level, so a stronger
-safehouse buys a bigger, richer, longer night.
+when it catches you, how long you get. The manor does **not** grow with your hub level — see
+Determinism.
 
 Getting caught, or running out of night, costs you the haul you were carrying — never the night
 you are on and never the safehouse. The tycoon progress is the thing you are allowed to keep.
 
-**Determinism.** A manor is seeded from `WorldSeed` and the night number and nothing else — not
-your userId. Night 7 is the same manor for every player in the world, which is what makes "I got
-out of night 14" a claim worth comparing.
+**Determinism.** A manor is generated from `WorldSeed` and the night number and nothing else —
+not your userId, and not your hub level. Night 7 is the same manor for every player in the world,
+which is what makes "I got out of night 14" a claim worth comparing.
+
+This claim used to be false. The SEED was only `WorldSeed + night`, but `Manor.roomCount` folded
+in the player's hub level, so the room target, the exit, the relics and the patrol all moved with
+how much safehouse you had built: night 7 was a 9-room manor for a new player and a 13-room one
+at hub level 12. Worse, `Upgrades.hubLevel` sums EVERY upgrade level and the exit is always the
+deepest room, so every purchase in the game quietly lengthened your walk out, with nothing on
+screen to say so. The hub level no longer reaches the generator at all — `Manor.plan` does not
+take it — and `Manor.spec` asserts that passing it changes nothing.
 
 ## Layout
 
@@ -51,7 +66,7 @@ src/shared/FxClient.luau    camera + HUD juice             (copied verbatim)
 src/shared/Responsive.luau  phone-first layout maths       (copied verbatim)
 src/server/Main.server.luau authoritative: builds the world, runs the night, persists
 src/client/Hud.client.luau  display only — it sends the server nothing
-tests/*.spec.luau           one spec per pure module
+tests/*.spec.luau           one spec per pure module, plus Chase.spec (is it PLAYABLE)
 ```
 
 Every module in `src/shared` takes its dependencies **as arguments** and requires nothing. A bare
@@ -64,13 +79,24 @@ server and client scripts require, and they do it from `ReplicatedStorage` with 
 From this directory, with the luau CLI on hand:
 
 ```
-luau tests/Manor.spec.luau        # 61 passed, 0 failed
+luau tests/Manor.spec.luau        # 64 passed, 0 failed
 luau tests/Watcher.spec.luau      # 71 passed, 0 failed
-luau tests/Upgrades.spec.luau     # 92 passed, 0 failed
+luau tests/Upgrades.spec.luau     # 99 passed, 0 failed
 luau tests/Night.spec.luau        # 64 passed, 0 failed
 luau tests/Rng.spec.luau          # 32 passed, 0 failed
 luau tests/responsive.spec.luau   # 70 passed, 0 failed
+luau tests/Chase.spec.luau        # 79 passed, 0 failed
 ```
+
+`Chase.spec.luau` is the odd one out and the important one. Every other spec asserts STRUCTURE,
+and structure was never the problem: an adversarial review retuned `HuntSpeedMul` from 1.45 to
+5.0 — a Nightwatcher sprinting at 55-100 studs/s at a player fixed at 16, an unavoidable death
+every night — and all 390 assertions plus all 84 headless ones stayed green, because nothing in
+the repo knew how fast the player was. So this file asserts OUTCOMES instead: that the watcher can
+never be faster than the player at any dread, with any upgrades, under a deliberately hostile
+retune; that there is a corner of the next room it cannot see; that a player ambushed in its face
+and running is not caught on any of nights 1-20; and that crossing the manor never eats more than
+40% of the night.
 
 Syntax and types:
 
@@ -88,7 +114,7 @@ so this game is also booted for real, outside Roblox:
 ```
 cd ../robloxemu
 py -3 wrap.py --game ../nightwatch-manor --out build/nightwatch-manor.luau
-luau check_nightwatch.luau        # 84 passed, 0 failed
+luau check_nightwatch.luau        # 113 passed, 0 failed
 luau check_nightwatch_hud.luau    # PASS — fits every viewport checked
 ```
 
@@ -96,6 +122,11 @@ luau check_nightwatch_hud.luau    # PASS — fits every viewport checked
 parts that actually arrived in the workspace, buys upgrades off their pads and checks the hardware
 appears, presses a stranger's finger on your pad and checks nothing is spent, walks into the manor,
 takes relics off pedestals, escapes, gets caught, and checks the zone index is recycled on leave.
+It also holds the line on the join: that something solid and a `SpawnLocation` exist at the world
+origin before anybody joins, that the character is moved into its own zone on the SAME frame it
+appears, that `plr.RespawnLocation` points at a real `SpawnLocation` inside that zone, and — by
+wrapping the harness's DataStore so `UpdateAsync` takes a second — that the whole zone is standing
+WHILE the profile round-trip is still in flight, with spending refused until it lands.
 
 `check_nightwatch_hud.luau` loads the real HUD across ten viewports from 414x800 to 1920x1080 and
 measures every panel — with both phone drawers **opened** first, because a drawer parked shut

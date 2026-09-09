@@ -58,16 +58,25 @@ function Progression.difficulty(cfg: any, tierIndex: number, floor: number): any
 	local storeys = math.min(t.storeys + math.floor((f - 1) / c.StoreysEveryNFloors), c.MaxStoreys)
 	local gemsPerStorey = math.min(
 		t.gemsPerStorey + math.floor((f - 1) / c.GemsEveryNFloors), c.MaxGemsPerStorey)
-	local collapse = math.max(
-		t.collapseSeconds - (f - 1) * c.CollapseTightenPerFloor,
-		t.collapseSeconds * c.MinCollapseFraction)
+
+	-- SLACK, NOT SECONDS. This used to return `collapseSeconds`, shaved 1.5s per floor off a
+	-- number typed into the tier. It could not possibly be right: the difficulty curve above
+	-- makes the maze BIGGER on exactly the floors this made the timer SHORTER, and nothing
+	-- anywhere measured how long the maze took to walk. Silver and Gold were unwinnable on floor
+	-- 1 and Bronze died around floor 7.
+	--
+	-- Now the vault is built first and VaultPath.countdown measures it. What the curve controls
+	-- is how much slack over the optimal route the runner is owed — so a deeper floor is a
+	-- tighter run through a bigger maze, and never an impossible one.
+	local k = cfg.Collapse
+	local slack = math.max(k.MinSlack, k.Slack - (f - 1) * k.TightenPerFloor)
 
 	return {
 		tier = tierIndex, floor = f,
 		cells = cells, storeys = storeys,
 		gemsPerStorey = gemsPerStorey, gemValue = t.gemValue,
 		gemCount = storeys * gemsPerStorey,
-		collapseSeconds = collapse,
+		slack = slack,
 	}
 end
 

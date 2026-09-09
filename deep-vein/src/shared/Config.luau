@@ -38,6 +38,16 @@ Config.Mine = {
 	HardnessPerLayer = 0.035, -- block hit points grow this fraction per layer of depth
 	RevealBudget = 1600, -- max air cells one break may flood through in a single reveal
 
+	-- …and the budget that actually costs a frame. RevealBudget bounds the AIR the flood walks
+	-- through; every one of those cells contributes up to 26 SOLID faces, and a solid face is an
+	-- Instance.new("Part") plus a ClickDetector plus four attributes plus a signal connection.
+	-- Breaking into a large natural void produced several hundred of those in one synchronous
+	-- burst — the frame that should be the game's best moment was the frame it froze, for every
+	-- player in the server. The parts are now built by a pump that spends this many per frame and
+	-- yields, so the cost of one swing is bounded by a constant no matter how big the cave behind
+	-- the wall turns out to be.
+	PartsPerFrame = 64,
+
 	ReachStuds = 26, -- ClickDetector activation distance on a rock face
 	SwingCooldown = 0.28, -- seconds the server enforces between two swings
 }
@@ -65,9 +75,18 @@ Config.Ores = {
 	-- BaseWeight at MinLayer, drifting by DepthGain per layer below it, clamped to MaxWeight.
 	-- Copper's DepthGain is NEGATIVE: it thins out as you go down, which is what makes the
 	-- deep biomes read as different rather than just richer.
-	MinLayer = { 1, 4, 10, 18, 26 },
-	BaseWeight = { 0.150, 0.070, 0.030, 0.012, 0.004 },
-	DepthGain = { -0.0022, 0.0013, 0.0018, 0.0013, 0.0009 },
+	--
+	-- MINLAYER IS MEASURED IN THE SAME UNITS AS Mine.BaseMaxLayer AND HAS TO FIT INSIDE IT.
+	-- Obsidian shipped at MinLayer 26 against a rebirth-0 depth wall of 24: Ore.weight returned
+	-- zero for it at every layer a pre-rebirth player could stand on, so the deepest tier in the
+	-- game — the one the store description promises and the one the first rebirth is meant to pay
+	-- for — could not spawn at all. Diamond was legal but produced six cells in the entire shaft.
+	-- The ladder below is spread over the 24 layers that actually exist, and the census in
+	-- Mine.spec plus the reachability gate in Ore.spec now fail if either number drifts out from
+	-- under the other.
+	MinLayer = { 1, 4, 9, 14, 19 },
+	BaseWeight = { 0.150, 0.070, 0.030, 0.020, 0.008 },
+	DepthGain = { -0.0022, 0.0013, 0.0018, 0.0016, 0.0012 },
 	MaxWeight = { 0.150, 0.150, 0.110, 0.080, 0.060 },
 }
 
@@ -95,9 +114,23 @@ Config.Economy = {
 -- ── Prestige / Rebirth ───────────────────────────────────────────────────────
 -- Wipes cash, haul, upgrades and this run's depth; keeps rebirths, best depth and total cash.
 -- In exchange: a permanent cash multiplier, a deeper depth wall, and a NEW cave seed.
+--
+-- THE PRICE IS CHARGED AGAINST A FINITE SHAFT. A player's only income is selling ore out of
+-- their own cave, and that cave holds a fixed, countable amount of it — once mined cells stop
+-- growing back there is no second helping. The shipped numbers asked $30 000 of a rebirth-0
+-- shaft that contains $5 876 of ore in total, and then multiplied the price by 3.2 per rebirth
+-- against a world that only grows about 1.21x per rebirth: mining out EVERY cell of EVERY cave
+-- paid at most 38% of the next rebirth, at every one of the 25 levels. The depth wall could
+-- never move, so the deep ores could never be reached, so the second half of the game was dead.
+--
+-- Two things changed. The growth now tracks the world's own measured growth, and the price is
+-- quoted in ORE rather than in cash: it is multiplied by the same rebirth multiplier that
+-- inflates every sale, so a reward that makes your ore worth 20x does not also make the next
+-- rebirth 20x cheaper. Prestige.spec now walks all 25 levels and fails if any of them costs more
+-- than half of what its own cave contains.
 Config.Prestige = {
-	BaseRequirement = 30000,
-	RequirementGrowth = 3.2,
+	BaseRequirement = 3500,
+	RequirementGrowth = 1.21, -- measured: the shaft's total ore value grows 1.2124x per rebirth
 	MultiplierPerRebirth = 0.8, -- cash multiplier = 1 + rebirths * 0.8
 	MaxRebirths = 25,
 }

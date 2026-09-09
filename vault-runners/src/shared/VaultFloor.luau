@@ -194,6 +194,10 @@ function VaultFloor.build(cfg: any, spec: any, MazeGen: any, Rng: any): any
 			local fx, fy = cellFine(c[1], c[2])
 			gems[#gems + 1] = {
 				id = s * 1000 + i, storey = s, value = spec.gemValue,
+				-- The MAZE cell as well as the world position: VaultPath prices the detour to
+				-- this gem in cell steps, and re-deriving the cell from the position would be
+				-- the same arithmetic run backwards, one rounding error from a wrong answer.
+				cell = { cx = c[1], cy = c[2] },
 				position = v3(lx(fx), baseY + V.GemHeight, lz(fy)),
 				color = tier.gemColor,
 			}
@@ -221,7 +225,18 @@ function VaultFloor.build(cfg: any, spec: any, MazeGen: any, Rng: any): any
 		material = "Neon", color = cfg.Hud.DangerColor, transparency = 0.35,
 	})
 
-	local planeStart = V.KillPlaneStart
+	-- The height at which the collapse kills a runner STANDING on storey s. This is the only
+	-- place that arithmetic exists: the server's kill test, the plane's own start, and the
+	-- countdown's per-storey deadline all read it from here, so they cannot disagree.
+	local killLines = {}
+	for s = 0, storeys - 1 do
+		killLines[s + 1] = s * storeyHeight + cfg.Run.RunnerRootHeight - cfg.Run.KillMargin
+	end
+
+	-- The plane starts KillPlaneLeadStoreys BELOW the height at which it kills a runner standing
+	-- on storey 0, so the ground floor gets exactly as much collapse to outrun as every storey
+	-- above it. Written as a stud offset (-10) this was 11 studs against everyone else's 18.
+	local planeStart = killLines[1] - V.KillPlaneLeadStoreys * storeyHeight
 	local planeEnd = topBase + V.KillPlaneTop
 	block({
 		name = "Collapse", group = "killplane", storey = -1,
@@ -246,6 +261,7 @@ function VaultFloor.build(cfg: any, spec: any, MazeGen: any, Rng: any): any
 		storeyHeight = storeyHeight, wallHeight = wallHeight, floorThickness = floorT,
 		stepRise = V.StepRise,
 		killMargin = cfg.Run.KillMargin,
+		killLines = killLines,
 		footprint = { w = footW, d = footD },
 		spawn = { position = v3(lx(sfx), 4, lz(sfy)), look = v3(0, 0, 1) },
 		exit = { storey = top, cell = ec, position = v3(exX, topBase + V.ExitHeight, exZ),
@@ -255,6 +271,18 @@ function VaultFloor.build(cfg: any, spec: any, MazeGen: any, Rng: any): any
 			size = v3(footW, V.KillPlaneThickness, footD) },
 		bounds = bounds,
 	}
+end
+
+-- What fraction of the countdown has passed when the collapse plane reaches height `y`. The
+-- plane sweeps startY -> endY over exactly one countdown, so this is the ONE place that maps a
+-- height in the vault onto a moment on the clock. VaultPath.countdown solves it backwards (given
+-- the moment a runner can be there, how long must the countdown be); RunState.planeY runs it
+-- forwards. Neither owns the arithmetic.
+function VaultFloor.planeFractionAt(model: any, y: number): number
+	local k = model.killPlane
+	local span = k.endY - k.startY
+	if span <= 0 then return 1 end
+	return (y - k.startY) / span
 end
 
 return VaultFloor

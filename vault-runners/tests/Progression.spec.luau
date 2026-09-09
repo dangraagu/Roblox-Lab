@@ -98,7 +98,9 @@ do
 	eq(d.gemsPerStorey, 4, "four gems a storey")
 	eq(d.gemValue, 4, "worth four each")
 	eq(d.gemCount, 12, "twelve gems on the floor in total")
-	near(d.collapseSeconds, 70, 1e-9, "and 70 seconds before it seals")
+	near(d.slack, C.Collapse.Slack, 1e-9, "and the runner is owed the full slack on floor 1")
+	eq(d.collapseSeconds, nil, "difficulty does NOT decide the countdown — it cannot, the maze "
+		.. "does not exist yet. VaultPath.countdown measures the built vault.")
 end
 
 do -- growth, capped
@@ -117,34 +119,41 @@ do -- growth, capped
 	eq(Progression.difficulty(C, 1, 900).gemsPerStorey, C.Curve.MaxGemsPerStorey, "capped")
 end
 
-do -- the timer tightens, but the floor is never impossible
-	near(Progression.difficulty(C, 1, 2).collapseSeconds, 68.5, 1e-9, "floor 2 sheds 1.5s")
-	near(Progression.difficulty(C, 1, 11).collapseSeconds, 55, 1e-9, "floor 11 sheds 15s")
-	near(Progression.difficulty(C, 1, 900).collapseSeconds, 70 * C.Curve.MinCollapseFraction,
-		1e-9, "and it bottoms out at MinCollapseFraction of the tier's base")
+do -- the SLACK tightens, and that is the whole difficulty curve now
+	-- This block used to assert seconds: "floor 2 sheds 1.5s", "floor 11 sheds 15s". Those
+	-- assertions were all true and the game was still unwinnable from Silver floor 1 onwards,
+	-- because a countdown decided here cannot know how big the maze it is timing is. What the
+	-- curve controls now is how much room over the BFS-optimal route the runner is owed;
+	-- tests/Collapse.spec.luau is what checks the resulting run is survivable.
+	near(Progression.difficulty(C, 1, 2).slack, C.Collapse.Slack - C.Collapse.TightenPerFloor,
+		1e-9, "floor 2 sheds one step of slack")
+	near(Progression.difficulty(C, 1, 11).slack, C.Collapse.Slack - 10 * C.Collapse.TightenPerFloor,
+		1e-9, "floor 11 has shed ten")
+	near(Progression.difficulty(C, 1, 900).slack, C.Collapse.MinSlack, 1e-9,
+		"and it bottoms out at MinSlack rather than running to zero")
 
 	local prev = math.huge
 	local shrinking = true
 	for f = 1, 200 do
-		local s = Progression.difficulty(C, 1, f).collapseSeconds
+		local s = Progression.difficulty(C, 1, f).slack
 		if s > prev + 1e-9 then shrinking = false end
 		prev = s
 	end
-	truthy(shrinking, "the countdown never gets longer as you go deeper")
+	truthy(shrinking, "the slack never grows as you go deeper")
 
 	local minSeen = math.huge
 	for t = 1, 3 do
 		for f = 1, 300 do
-			minSeen = math.min(minSeen, Progression.difficulty(C, t, f).collapseSeconds)
+			minSeen = math.min(minSeen, Progression.difficulty(C, t, f).slack)
 		end
 	end
-	truthy(minSeen > 20, "no floor in the game seals in under 20 seconds")
+	truthy(minSeen > 1, "no floor is ever given LESS time than the optimal route takes")
 end
 
 do -- a floor below 1 is a bug upstream; it must not produce a bigger maze than floor 1
 	eq(Progression.difficulty(C, 1, 0).cells, 4, "floor 0 is treated as floor 1")
 	eq(Progression.difficulty(C, 1, -5).cells, 4, "and so is a negative floor")
-	near(Progression.difficulty(C, 1, 0).collapseSeconds, 70, 1e-9, "with floor 1's timer")
+	near(Progression.difficulty(C, 1, 0).slack, C.Collapse.Slack, 1e-9, "with floor 1's slack")
 end
 
 do -- an out-of-range tier is a programming error and must be loud, not silently Bronze
@@ -183,7 +192,7 @@ end
 -- depend on them. If this fails, some rule above has started reading the paint.
 do
 	local painted = {
-		Tiers = {}, Curve = C.Curve, Seed = C.Seed, WorldSeed = C.WorldSeed,
+		Tiers = {}, Curve = C.Curve, Collapse = C.Collapse, Seed = C.Seed, WorldSeed = C.WorldSeed,
 	}
 	for i, t in ipairs(C.Tiers) do
 		local copy = {}
@@ -200,9 +209,9 @@ do
 		"CONTROL: repainting the vaults does not change what is unlocked")
 	eq(Progression.difficulty(painted, 2, 9).cells, Progression.difficulty(C, 2, 9).cells,
 		"CONTROL: nor the maze size")
-	near(Progression.difficulty(painted, 2, 9).collapseSeconds,
-		Progression.difficulty(C, 2, 9).collapseSeconds, 1e-9,
-		"CONTROL: nor the countdown")
+	near(Progression.difficulty(painted, 2, 9).slack,
+		Progression.difficulty(C, 2, 9).slack, 1e-9,
+		"CONTROL: nor how much slack the runner is owed")
 	eq(Progression.seedFor(painted, 2, 9), Progression.seedFor(C, 2, 9),
 		"CONTROL: nor the seed")
 end

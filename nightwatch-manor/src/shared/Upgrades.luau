@@ -55,7 +55,8 @@ function Upgrades.level(levels: Levels, id: string): number
 	return v
 end
 
--- Sum of every level. Gates manor size (see Manor.roomCount) and is the number the HUD shows.
+-- Sum of every level. This is the number the HUD shows; it deliberately does NOT reach the manor
+-- generator (see Manor.roomCount) — the layout of night N is a property of night N alone.
 function Upgrades.hubLevel(levels: Levels): number
 	local n = 0
 	for _, v in levels do

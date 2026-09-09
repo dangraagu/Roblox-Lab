@@ -69,6 +69,17 @@ function RunState.planeY(run: any, geom: any, now: number): number
 	return k.startY + (k.endY - k.startY) * RunState.collapseProgress(run, now)
 end
 
+-- THE KILL RULE, in one place. `y` is the runner's root height in VAULT-LOCAL studs — the
+-- server subtracts the vault origin before calling, so this stays free of world coordinates.
+--
+-- It lived inline in the server's run loop as `local_.Y <= planeY + KillMargin`, which meant the
+-- only way to ask "would this runner have died here" was to boot a server. tests/Collapse.spec
+-- has to ask that question a few thousand times per run, against every tier and floor, so the
+-- rule moved here — and now the simulation and the live server cannot drift apart.
+function RunState.caught(run: any, geom: any, y: number, now: number): boolean
+	return y <= RunState.planeY(run, geom, now) + geom.killMargin
+end
+
 function RunState.status(run: any, now: number): string
 	if run.escaped then return "escaped" end
 	if not run.alive then

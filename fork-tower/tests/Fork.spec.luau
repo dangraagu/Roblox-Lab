@@ -52,6 +52,31 @@ for s = 1, SWEEP do
 	plans[s] = Fork.plan(Config, s, Rng)
 end
 
+-- Which door VISIBLY bears the sign the inscription names — read off the door's own sign list,
+-- which is exactly what the server carves onto the door and what a player standing on the pad can
+-- see. Returns nil when the fork is unreadable: nought or both doors bearing it, either of which
+-- turns the floor into a coin flip. Nothing here consults markedDoor, and that is the whole point
+-- (see FINDING 6 below).
+local function bearerOfTell(floor): number?
+	local bearer, count = nil, 0
+	for slot = 1, 2 do
+		local has = false
+		for _, kind in ipairs(floor.doors[slot].signs) do
+			if kind == floor.tellKind then
+				has = true
+			end
+		end
+		if has then
+			count += 1
+			bearer = slot
+		end
+	end
+	if count ~= 1 then
+		return nil
+	end
+	return bearer
+end
+
 local function eachFloor(fn)
 	for s = 1, SWEEP do
 		for _, floor in ipairs(plans[s].floors) do
@@ -190,16 +215,46 @@ do
 	-- A player who always takes the left door.
 	local blindTrapped = 0
 
+	-- ...and the same player, reading the same fork off the DOORS instead of off the plan.
+	local unreadable, doorTrapped, markedDisagrees = 0, 0, 0
+
 	eachFloor(function(floor)
 		if Fork.readTrap(floor) ~= floor.trapDoor then readerTrapped += 1 end
 		if floor.markedDoor ~= floor.trapDoor then naiveTrapped += 1 end
 		if floor.ruleInverted then inverted += 1 end
 		if floor.trapDoor == 1 then blindTrapped += 1 end
+
+		local bearer = bearerOfTell(floor)
+		if bearer == nil then
+			unreadable += 1
+		else
+			if bearer ~= floor.markedDoor then markedDisagrees += 1 end
+			local said = if floor.ruleInverted then 3 - bearer else bearer
+			if said ~= floor.trapDoor then doorTrapped += 1 end
+		end
 	end)
 
 	local total = SWEEP * FLOORS
 	eq(readerTrapped, 0,
 		"FAIRNESS 2: a player who reads the inscription hits ZERO traps across every seed and floor")
+
+	-- REVIEW FINDING 6. The line above is weaker than it looks, and it took an adversarial review
+	-- to say so: Fork.readTrap reads the markedDoor FIELD, and markedDoor is computed FROM trapDoor
+	-- eight lines up in Fork.plan. So it compares a field against the field it is derived from, and
+	-- it is true by construction on any generator — including one where the tell is on both doors
+	-- and the fork is a genuine coin flip. That exact mutation left this file at 47 passed, 0
+	-- failed; only the end-to-end world check, which derives the marked door from the doors the way
+	-- a player does, went red.
+	--
+	-- These three assert the property promise 2 actually is: exactly one door BEARS the named sign,
+	-- it is the door the plan calls marked (so the server's `Marked` attribute is not a second,
+	-- independent claim), and reading it names the trap.
+	eq(unreadable, 0, string.format(
+		"FAIRNESS 2: exactly one of the two doors bears the sign the inscription names, on all %d forks", total))
+	eq(markedDisagrees, 0,
+		"FAIRNESS 2: ...and that door is the one the plan calls marked, so the doors and the plan agree")
+	eq(doorTrapped, 0,
+		"FAIRNESS 2: ...so a player reading the SIGNS, not the plan, still walks past every trap")
 
 	-- And the reading has to be worth doing. If the tell were decoration, the blind player would
 	-- score the same as the reader; this is the assertion that says it does not.
@@ -542,6 +597,44 @@ truthy(readerMisses(silent) > 400,
 	"witness B: the reader check KILLS a generator whose mark does not follow the trap")
 truthy(sideBalanceOff(silent) <= Config.Fairness.SideBalanceTolerance,
 	"witness B: ...and that generator is still position-balanced, which is why one check is not enough")
+
+-- WITNESS E — the fork the review actually broke: the tell is no longer restricted to signs the
+-- marked door holds EXCLUSIVELY, so both doors may bear it and the inscription points at nothing.
+-- Every floor is then a genuine coin flip, which is the one thing this game promises it is not.
+--
+-- The old reader check cannot see it — it reads the markedDoor FIELD, which the mutation leaves
+-- perfectly consistent — and that is exactly how the mutation survived all six suites at 47/0.
+-- Only reading the doors catches it. This witness is here so the finding cannot come back.
+local function doorMisses(gen)
+	local miss = 0
+	for s = 1, 400 do
+		for l = 1, FLOORS do
+			local f = gen(s, l)
+			if bearerOfTell(f) == nil then
+				miss += 1
+			else
+				local said = if f.ruleInverted then 3 - bearerOfTell(f) else bearerOfTell(f)
+				if said ~= f.trapDoor then miss += 1 end
+			end
+		end
+	end
+	return miss
+end
+
+local ambiguous = function(s, l)
+	local f = Fork.floor(Config, s, l, Rng)
+	local other = f.doors[3 - f.markedDoor]
+	if not other.signSet[f.tellKind] then
+		other.signs[#other.signs + 1] = f.tellKind
+		other.signSet[f.tellKind] = true
+	end
+	return f
+end
+eq(doorMisses(real), 0, "witness E: the real fork reads correctly off the doors themselves")
+truthy(doorMisses(ambiguous) > 400,
+	"witness E: the door-reading check KILLS a fork where BOTH doors bear the named sign")
+eq(readerMisses(ambiguous), 0,
+	"witness E: ...and the field-reading check cannot see it at all, which is why it was not enough")
 
 -- WITNESS C — a generator that hands the trap door the better prize. Perfectly readable,
 -- perfectly balanced, and solvable without ever reading a sign.
