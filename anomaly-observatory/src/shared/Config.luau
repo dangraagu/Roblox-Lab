@@ -59,7 +59,9 @@ Config.Anomaly = {
 		{ id = "sign_swap", name = "Misdirection", kind = "SWAP", hint = "an exit sign pointing the wrong way" },
 		{ id = "floor_tilt", name = "The Lean", kind = "ROTATE", hint = "the floor tiles tilted a few degrees" },
 		{ id = "dupe_door", name = "Hall of Doors", kind = "DUPLICATE", hint = "a duplicated doorway" },
-		{ id = "moon_recolor", name = "Blood Moon", kind = "RECOLOR", hint = "the moon through the dome is red" },
+		-- The hall has no dome and no moon; the applier recolours the part named `Window`. The
+		-- old hint sent the player looking for scenery that was never built.
+		{ id = "moon_recolor", name = "Blood Moon", kind = "RECOLOR", hint = "the sky through the observation window has gone red" },
 		{ id = "static_screen", name = "Dead Channel", kind = "TOGGLE", hint = "a monitor showing static" },
 		{ id = "figure_ceiling", name = "The Climber", kind = "FIGURE", hint = "something on the ceiling" },
 		{ id = "mirror_extra", name = "One Too Many", kind = "ADD", hint = "an extra mirror on the wall" },
