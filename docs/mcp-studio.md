@@ -12,10 +12,9 @@ The standalone `Roblox/studio-rust-mcp-server` project is **discontinued** (its
 last tag is literally `END`) and now points at a server that ships inside Studio
 itself. That built-in server is what we register.
 
-`%LOCALAPPDATA%\Roblox\mcp.bat` is the launcher. It re-resolves the versioned
-folder (`Versions\version-<hash>\StudioMCP.exe`) from the registry on every run,
-so registering the `.bat` — rather than the `.exe` — survives Studio's automatic
-updates. It is registered in `~/.claude.json` at user scope:
+`%LOCALAPPDATA%\Roblox\mcp.bat` is the launcher, and it is what gets registered in
+`~/.claude.json` at user scope rather than the versioned
+`Versions\version-<hash>\StudioMCP.exe` directly:
 
 ```json
 "Roblox_Studio": {
