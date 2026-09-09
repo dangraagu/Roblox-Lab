@@ -1,5 +1,5 @@
 --!nolint GlobalUsedAsLocal
--- harness.luau Ã¢â‚¬â€ assembles the fake Roblox environment and runs real game scripts in it.
+-- harness.luau — assembles the fake Roblox environment and runs real game scripts in it.
 --
 -- The point of the whole emulator: `require("./Rng")` compiled clean, passed 119 unit tests,
 -- and would still have made the anomaly server fail to load in Roblox. A headless boot catches
@@ -9,11 +9,11 @@
 -- How a game script gets to run against fake globals
 --
 -- The luau CLI has no file IO and no `setfenv`, and it sandboxes every `require`d module
--- behind its own globals table Ã¢â‚¬â€ a global set here is NOT visible in a module required from
+-- behind its own globals table — a global set here is NOT visible in a module required from
 -- here. Two facts make this work anyway:
 --
 --   1. `loadstring` exists, and the chunk it returns is bound to the globals of the THREAD that
---      called it Ã¢â‚¬â€ not of the file the call is written in. Since the runner calls into this
+--      called it — not of the file the call is written in. Since the runner calls into this
 --      file, both the global install and the game chunks bind to the runner's table, which is
 --      what makes them see the same `game` / `Instance` / `task`. See `_installGlobals`; the
 --      obvious `game = svc.game` here does NOT work, and cost an afternoon to pin down.
@@ -170,7 +170,7 @@ end
 --
 -- The luau CLI gives every required module its own globals table, and `loadstring` binds a
 -- chunk to the globals of the THREAD THAT CALLS IT. A plain assignment inside this file writes
--- into harness.luau's own table Ã¢â‚¬â€ but `Harness.new` and `Harness.run` are called from the
+-- into harness.luau's own table — but `Harness.new` and `Harness.run` are called from the
 -- runner script, on the runner's thread, so the chunks compiled in `_exec` bind to the RUNNER's
 -- globals. Assigning here and compiling there put the values in two different tables, and every
 -- game script saw `game == nil`.
@@ -215,7 +215,7 @@ end
 function Harness._require(self, target)
 	if type(target) == "string" then
 		error(
-			"require(\"" .. target .. "\") Ã¢â‚¬â€ Roblox `require` takes an Instance, not a string. "
+			"require(\"" .. target .. "\") — Roblox `require` takes an Instance, not a string. "
 				.. "This resolves in the luau CLI and FAILS in Roblox. Use "
 				.. "require(ReplicatedStorage:WaitForChild(\"...\")).",
 			3
@@ -373,8 +373,8 @@ end
 -- the property fires the game's own GetPropertyChangedSignal handler, which is what makes the
 -- canvas maths run for real.
 --
--- Values are SCREEN px, like Roblox's. The UIGridLayout arithmetic is an approximation Ã¢â‚¬â€ cells
--- per row from the parent's width, rows from the count Ã¢â‚¬â€ which is enough to catch a canvas that
+-- Values are SCREEN px, like Roblox's. The UIGridLayout arithmetic is an approximation — cells
+-- per row from the parent's width, rows from the count — which is enough to catch a canvas that
 -- is short by a scale factor, and not enough to trust for pixel work.
 function Harness.settleLayouts(self, root, viewportW: number, viewportH: number)
 	local rects = self:guiRects(root, viewportW, viewportH)
@@ -415,7 +415,7 @@ function Harness.settleLayouts(self, root, viewportW: number, viewportH: number)
 				parent.CanvasSize = Datatypes.UDim2.new(0, 0, 0, math.ceil(contentScreen / scale))
 				-- Mark it. A checker that then reads this value back and compares it to the same
 				-- content figure is grading the shim's arithmetic against itself and would pass
-				-- whatever the game did Ã¢â‚¬â€ so the canvas check must SKIP these and say so.
+				-- whatever the game did — so the canvas check must SKIP these and say so.
 				parent:SetAttribute("__emuAutoCanvas", true)
 			end
 
@@ -578,7 +578,7 @@ function Harness.guiRects(self, root, viewportW: number, viewportH: number): { a
 		end
 	end
 
-	-- A ScreenGui with IgnoreGuiInset false Ã¢â‚¬â€ the Roblox default Ã¢â‚¬â€ does NOT span the viewport:
+	-- A ScreenGui with IgnoreGuiInset false — the Roblox default — does NOT span the viewport:
 	-- Roblox shortens it by the topbar inset and pushes its origin down by the same amount. Every
 	-- child therefore resolves against a smaller box than the raw viewport, and a panel budgeted
 	-- from the full height overflows the real bottom by the inset, straight into the touch-control

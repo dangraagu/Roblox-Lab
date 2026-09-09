@@ -66,8 +66,22 @@ local RedeemFunc = mkRemote("RemoteFunction", "Redeem")   -- klient -> server: l
 local LeaderboardEvent = mkRemote("RemoteEvent", "Leaderboard") -- server -> klient: topp 10
 
 -- ── Data ────────────────────────────────────────────────────────────────────
-local store = Config.Save.Enabled and DataStoreService:GetDataStore(Config.Save.Store) or nil
-local orderedLB = Config.Save.Enabled and DataStoreService:GetOrderedDataStore(Config.Save.Leaderboard) or nil
+-- GetDataStore RAISES in a place that has not been published to the web, and again when
+-- "Enable Studio Access to API Services" is off. Unwrapped, that error killed this whole server
+-- script at load - no tower, no remotes, no game - which is why this one could not be opened in
+-- Studio at all without publishing first. Saving is what should degrade, not the game; every
+-- write path already checks `store`.
+local function tryStore(fn, what)
+	if not Config.Save.Enabled then return nil end
+	local ok, ds = pcall(fn)
+	if ok then return ds end
+	warn("[Plus1] " .. what .. " datastore unavailable (" .. tostring(ds)
+		.. ") - the game runs, progress will NOT be saved this session.")
+	return nil
+end
+
+local store = tryStore(function() return DataStoreService:GetDataStore(Config.Save.Store) end, "profiles")
+local orderedLB = tryStore(function() return DataStoreService:GetOrderedDataStore(Config.Save.Leaderboard) end, "leaderboard")
 
 -- Per-spiller runtime-tilstand (i minne). `saved` = det som skrives til DataStore.
 type Profile = {

@@ -1,5 +1,5 @@
--- GROW A CRYSTAL ðŸ’Ž â€” klient-HUD. Havner i StarterPlayerScripts.
--- Ren visning + valg. Server eier all Ã¸konomi/vekst. Plant/hÃ¸st = klikk soklene i
+-- GROW A CRYSTAL 💎 — klient-HUD. Havner i StarterPlayerScripts.
+-- Ren visning + valg. Server eier all økonomi/vekst. Plant/høst = klikk soklene i
 -- verden (server ClickDetector). Denne setter valgt seed + viser butikk/Codex/koder.
 
 local Players = game:GetService("Players")
@@ -87,7 +87,7 @@ local function touchSize(designPx: number): number
 	return math.ceil(math.max(designPx, MIN_TAP) / layout.scale)
 end
 
--- â”€â”€ Top: Dust â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── Top: Dust ─────────────────────────────────────────────────────────────
 local top = Instance.new("Frame")
 top.AnchorPoint = Vector2.new(0.5, 0); top.Position = UDim2.new(0.5, 0, 0, 10)
 top.Size = UDim2.new(0, 300, 0, 56); top.BackgroundColor3 = Color3.fromRGB(24, 26, 40)
@@ -95,7 +95,7 @@ top.BackgroundTransparency = 0.1; top.Parent = root; corner(top, 12)
 local dustLabel = Instance.new("TextLabel")
 dustLabel.BackgroundTransparency = 1; dustLabel.Size = UDim2.new(1, 0, 1, 0)
 dustLabel.Font = Enum.Font.GothamBlack; dustLabel.TextScaled = true
-dustLabel.TextColor3 = Color3.fromRGB(150, 230, 255); dustLabel.Text = "ðŸ’Ž 0"
+dustLabel.TextColor3 = Color3.fromRGB(150, 230, 255); dustLabel.Text = "💎 0"
 dustLabel.Parent = top
 do local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 30; cc.Parent = dustLabel end
 
@@ -106,7 +106,7 @@ hint.AnchorPoint = Vector2.new(0.5, 0); hint.Position = UDim2.new(0.5, 0, 0, 70)
 hint.Size = UDim2.new(0.9, 0, 0, 22); hint.BackgroundTransparency = 1
 hint.Font = Enum.Font.GothamMedium; hint.TextScaled = true
 hint.TextColor3 = Color3.fromRGB(210, 214, 230)
-hint.Text = "ðŸ‘† Click a glowing socket to PLANT (you start with 3 free seeds!) Â· click a grown crystal to HARVEST ðŸ’Ž"
+hint.Text = "👆 Click a glowing socket to PLANT (you start with 3 free seeds!) · click a grown crystal to HARVEST 💎"
 hint.Parent = root
 do local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 14; cc.Parent = hint end
 do local sc = Instance.new("UISizeConstraint"); sc.MaxSize = Vector2.new(460, math.huge); sc.Parent = hint end
@@ -128,7 +128,7 @@ ToastEvent.OnClientEvent:Connect(function(msg)
 	end)
 end)
 
--- â”€â”€ Left: Seeds + shop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── Left: Seeds + shop ──────────────────────────────────────────────────────
 -- One row per tier plus the shop buttons is more than the box can hold once the box has to
 -- shrink to fit a phone, so this is a ScrollingFrame: the canvas follows the list layout's
 -- content and the panel scrolls instead of clipping.
@@ -157,7 +157,7 @@ refreshCanvas()
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1; title.Size = UDim2.new(1, 0, 0, 22); title.LayoutOrder = 0
 title.Font = Enum.Font.GothamBlack; title.TextScaled = true; title.TextColor3 = Color3.fromRGB(150, 230, 255)
-title.Text = "ðŸŒ± SEEDS"; title.Parent = left
+title.Text = "🌱 SEEDS"; title.Parent = left
 do local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 16; cc.Parent = title end
 
 -- One row per tier: select (plant this) + owned count + buy
@@ -202,10 +202,10 @@ local geodeBtn = shopBtn(23, "Crack Geode", Color3.fromRGB(180, 90, 220), functi
 local codexLabel = Instance.new("TextLabel")
 codexLabel.BackgroundTransparency = 1; codexLabel.Size = UDim2.new(1, 0, 0, 22); codexLabel.LayoutOrder = 24
 codexLabel.Font = Enum.Font.GothamMedium; codexLabel.TextScaled = true
-codexLabel.TextColor3 = Color3.fromRGB(230, 234, 245); codexLabel.Text = "ðŸ“– Codex: 0/" .. MAXT; codexLabel.Parent = left
+codexLabel.TextColor3 = Color3.fromRGB(230, 234, 245); codexLabel.Text = "📖 Codex: 0/" .. MAXT; codexLabel.Parent = left
 do local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 14; cc.Parent = codexLabel end
 
--- â”€â”€ Codes (bottom-left on desktop, a top drawer on a phone) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── Codes (bottom-left on desktop, a top drawer on a phone) ─────────────────
 -- Bottom-left is where Roblox draws the movement thumbstick, so on touch this frame is lifted
 -- clear of the control band, and on a phone it moves to the top entirely.
 local codeFrame = Instance.new("Frame")
@@ -227,7 +227,7 @@ codeBtn.Activated:Connect(function()
 	if input == "" then return end
 	local ok, res = pcall(function() return RedeemFunc:InvokeServer(input) end)
 	if ok and type(res) == "table" then
-		if res.ok then codeBox.Text = ""; codeBtn.Text = "âœ… Redeemed!"
+		if res.ok then codeBox.Text = ""; codeBtn.Text = "✅ Redeemed!"
 		elseif res.reason == "already" then codeBtn.Text = "Already used"
 		elseif res.reason == "unknown" then codeBtn.Text = "Invalid code"
 		else codeBtn.Text = "Try again" end
@@ -235,7 +235,7 @@ codeBtn.Activated:Connect(function()
 	end
 end)
 
--- â”€â”€ Leaderboard (right) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── Leaderboard (right) ──────────────────────────────────────────────────────
 local lb = Instance.new("Frame")
 lb.AnchorPoint = Vector2.new(1, 0.5); lb.Position = UDim2.new(1, -12, 0.5, 0)
 lb.Size = UDim2.new(0, DESIGN_LB_W, 0, DESIGN_LB_H); lb.BackgroundColor3 = Color3.fromRGB(24, 26, 40)
@@ -244,7 +244,7 @@ lb.Parent = root; corner(lb, 12); pad(lb, 8)
 local lbTitle = Instance.new("TextLabel")
 lbTitle.BackgroundTransparency = 1; lbTitle.Size = UDim2.new(1, 0, 0, 24)
 lbTitle.Font = Enum.Font.GothamBlack; lbTitle.TextScaled = true
-lbTitle.TextColor3 = Color3.fromRGB(255, 215, 90); lbTitle.Text = "ðŸ† TOP MINERS"; lbTitle.Parent = lb
+lbTitle.TextColor3 = Color3.fromRGB(255, 215, 90); lbTitle.Text = "🏆 TOP MINERS"; lbTitle.Parent = lb
 do local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 17; cc.Parent = lbTitle end
 -- Scrollable for the same reason as the seed panel: ten entries do not fit once the board is
 -- shrunk to a phone's usable height.
@@ -271,42 +271,42 @@ LeaderboardEvent.OnClientEvent:Connect(function(top)
 		local name = "Player"
 		local okn, res = pcall(function() return Players:GetNameFromUserIdAsync(e.userId) end)
 		if okn then name = res end
-		l.Text = string.format("%d. %s â€” ðŸ’Ž%d", i, name, e.dust); l.Parent = lbList
+		l.Text = string.format("%d. %s — 💎%d", i, name, e.dust); l.Parent = lbList
 		local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 14; cc.Parent = l
 	end
 end)
 
--- â”€â”€ State render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── State render ───────────────────────────────────────────────────────────
 StateEvent.OnClientEvent:Connect(function(s)
-	dustLabel.Text = "ðŸ’Ž " .. tostring(s.dust)
+	dustLabel.Text = "💎 " .. tostring(s.dust)
 	for t = 1, MAXT do
 		local r = seedRows[t]
 		local owned = (s.seeds and s.seeds[t]) or 0
 		r.sel.Text = TIERS[t] .. " (" .. owned .. ")"
 		local unlocked = s.chambers >= (unlockByChamber[t] or 999)
 		if unlocked then
-			r.buy.Text = "Buy ðŸ’Ž" .. tostring(Config.Economy.SeedCost[t])
+			r.buy.Text = "Buy 💎" .. tostring(Config.Economy.SeedCost[t])
 			r.buy.BackgroundColor3 = Color3.fromRGB(70, 150, 90); r.buy.Active = true
 		else
-			r.buy.Text = "ðŸ”’ Ch." .. tostring(unlockByChamber[t])
+			r.buy.Text = "🔒 Ch." .. tostring(unlockByChamber[t])
 			r.buy.BackgroundColor3 = Color3.fromRGB(80, 84, 100); r.buy.Active = false
 		end
 	end
 	chamberBtn.Text = (s.chambers >= Config.Economy.MaxChambers) and "Chambers MAX"
-		or ("Buy Chamber ðŸ’Ž" .. tostring(s.chamberCost) .. " (" .. s.chambers .. ")")
-	luckBtn.Text = "Luck Lv" .. s.luckLevel .. " â†’ ðŸ’Ž" .. tostring(s.luckCost)
-	growthBtn.Text = "Growth Lv" .. s.growthLevel .. " â†’ ðŸ’Ž" .. tostring(s.growthCost)
+		or ("Buy Chamber 💎" .. tostring(s.chamberCost) .. " (" .. s.chambers .. ")")
+	luckBtn.Text = "Luck Lv" .. s.luckLevel .. " → 💎" .. tostring(s.luckCost)
+	growthBtn.Text = "Growth Lv" .. s.growthLevel .. " → 💎" .. tostring(s.growthCost)
 	if s.geodeCanCrack then
-		geodeBtn.Text = "Crack Geode ðŸ’Ž" .. s.geodeCost .. " â†’ " .. TIERS[s.geodeExclusive]
+		geodeBtn.Text = "Crack Geode 💎" .. s.geodeCost .. " → " .. TIERS[s.geodeExclusive]
 		geodeBtn.BackgroundColor3 = Color3.fromRGB(180, 90, 220)
 	else
 		geodeBtn.Text = "Geode used (back next week)"
 		geodeBtn.BackgroundColor3 = Color3.fromRGB(80, 84, 100)
 	end
-	codexLabel.Text = "ðŸ“– Codex: " .. tostring(s.codexCount) .. "/" .. MAXT
+	codexLabel.Text = "📖 Codex: " .. tostring(s.codexCount) .. "/" .. MAXT
 end)
 
--- â”€â”€ Responsive layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── Responsive layout ───────────────────────────────────────────────────────
 -- On a phone the three panels are drawers behind toggle buttons along the TOP edge (the
 -- bottom belongs to Roblox's movement stick and jump button), and only one drawer is open at
 -- a time so two of them can never cover the screen together. On desktop nothing collapses and
@@ -359,9 +359,9 @@ local function toggleBtn(order: number, key: string, text: string)
 	b.Activated:Connect(function() setDrawer(key) end)
 	toggleButtons[key] = b
 end
-toggleBtn(1, "seeds", "ðŸŒ± Seeds")
-toggleBtn(2, "code", "ðŸŽŸ Code")
-toggleBtn(3, "board", "ðŸ† Top")
+toggleBtn(1, "seeds", "🌱 Seeds")
+toggleBtn(2, "code", "🎟 Code")
+toggleBtn(3, "board", "🏆 Top")
 
 local function applyLayout()
 	local v = camera.ViewportSize
@@ -450,7 +450,7 @@ local function applyLayout()
 		-- bottom-anchored and grows upward as its tap targets grow, and both panels are opaque,
 		-- so where they meet the code frame simply covers the shop buttons. The seed panel is
 		-- centred rather than top-anchored, so shortening it by X lifts its bottom edge by only
-		-- X/2 â€” hence twice the code panel's real height plus a 12 px gap, multiplied by the
+		-- X/2 — hence twice the code panel's real height plus a 12 px gap, multiplied by the
 		-- scale because `usable` is screen px while codeH is design px. Where the panel has to
 		-- shrink at all this leaves exactly 12 screen px between the two; on a desktop window it
 		-- never binds, because 470 px already fits with room to spare.
@@ -477,14 +477,14 @@ camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
 
 -- Every tap target above is sized from layout.controlPad, which comes from TouchEnabled, not
 -- from the pixel size of the window. A viewport-only listener therefore never re-runs when a
--- device gains or loses touch without resizing â€” a Windows touch laptop, a phone handing over
--- to a paired controller â€” and the HUD keeps whichever set of sizes it happened to be built
+-- device gains or loses touch without resizing — a Windows touch laptop, a phone handing over
+-- to a paired controller — and the HUD keeps whichever set of sizes it happened to be built
 -- with. So watch the flag as well.
 --
 -- Two deliberate details. This sits at the very bottom, below every OnClientEvent and Activated
 -- handler: wiring a cosmetic listener before the state pipeline would mean a failure here left
 -- a live player with a HUD frozen at its startup values and no hint that anything was wrong.
--- And the connect is wrapped in pcall for the same reason â€” the layout is cosmetic, the dust
+-- And the connect is wrapped in pcall for the same reason — the layout is cosmetic, the dust
 -- counter and the leaderboard are not, and no failure of the former may cost a player the latter.
 pcall(function()
 	UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(applyLayout)

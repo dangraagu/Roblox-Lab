@@ -41,8 +41,23 @@ local LeaderboardEvent = mk("RemoteEvent", "Leaderboard")
 local ToastEvent = mk("RemoteEvent", "Toast")        -- server -> klient: kort melding (f.eks. "kjøp en seed")
 
 -- ── Data ─────────────────────────────────────────────────────────────────────
-local store = Config.Save.Enabled and DataStoreService:GetDataStore(Config.Save.Store) or nil
-local orderedLB = Config.Save.Enabled and DataStoreService:GetOrderedDataStore(Config.Save.Leaderboard) or nil
+-- GetDataStore RAISES in a place that has not been published to the web, and again when
+-- "Enable Studio Access to API Services" is off. Unwrapped, that error killed this entire server
+-- script at load: no world, no remotes, no game, and the only clue a line in the console. It is
+-- why this game could not be opened in Studio at all without publishing first, which is a large
+-- part of why it went so long without ever being run by a person.
+-- Saving is what should degrade, not the game. Every write path already checks `store`.
+local function tryStore(fn, what)
+	if not Config.Save.Enabled then return nil end
+	local ok, ds = pcall(fn)
+	if ok then return ds end
+	warn("[Crystal] " .. what .. " datastore unavailable (" .. tostring(ds)
+		.. ") - the game runs, progress will NOT be saved this session.")
+	return nil
+end
+
+local store = tryStore(function() return DataStoreService:GetDataStore(Config.Save.Store) end, "profiles")
+local orderedLB = tryStore(function() return DataStoreService:GetOrderedDataStore(Config.Save.Leaderboard) end, "leaderboard")
 
 local profiles = {} -- [player] = profile
 local selected = {} -- [player] = seedTier currently selected in the shop UI
