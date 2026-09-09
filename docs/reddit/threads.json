@@ -1,0 +1,32 @@
+{
+  "_comment": "Registry of Reddit threads the watcher routine follows. It maintains this file itself: every new submission by the account is appended automatically, so publishing a new game and posting about it is enough to put that thread under watch. Hand-edit only to close a thread early or to add one posted from another account.",
+  "account": "Inside_Importance_90",
+  "games": [
+    { "key": "labyrint-spill",       "name": "Labyrinth Mariozo",   "place": "121268951050692", "announced": true },
+    { "key": "grow-a-crystal",       "name": "Grow a Crystal",      "place": "106123351742435", "announced": false },
+    { "key": "plus1-jump",           "name": "+1 Jump Every Step",  "place": "120040655253410", "announced": false },
+    { "key": "anomaly-observatory",  "name": "Anomaly: Night Shift","place": "123669267191209", "announced": false }
+  ],
+  "threads": [
+    {
+      "id": "1w661c3",
+      "subreddit": "robloxgamedev",
+      "url": "https://www.reddit.com/r/robloxgamedev/comments/1w661c3/feedback_on_my_500level_maze_obby_and_could/",
+      "game": "labyrint-spill",
+      "posted": "2026-09-06",
+      "state": "active",
+      "last_seen_comment_utc": 0,
+      "notes": "First feedback post. u/popovitsj reported the lava-pool blocker that led to pulsing traps."
+    },
+    {
+      "id": "1w70kjb",
+      "subreddit": "RobloxDevelopers",
+      "url": "https://www.reddit.com/r/RobloxDevelopers/comments/1w70kjb/sharing_my_500level_maze_obby_labyrinth_mariozo/",
+      "game": "labyrint-spill",
+      "posted": "2026-09-07",
+      "state": "active",
+      "last_seen_comment_utc": 0,
+      "notes": ""
+    }
+  ]
+}
