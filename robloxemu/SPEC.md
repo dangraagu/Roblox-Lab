@@ -97,7 +97,8 @@ The harness must:
 
 **Built and working.** `wrap.py` + `emu/harness.luau` + `emu/hudcheck.luau` boot the real server
 and client scripts of all four games headless. `check_crystal.luau`, `check_plus1.luau`,
-`check_anomaly.luau`, `check_labyrint.luau`, `check_lighting.luau` and `check_secretdoors.luau` are the runners; they take a
+`check_anomaly.luau`, `check_labyrint.luau`, `check_lighting.luau`, `check_secretdoors.luau` and
+`check_themes.luau` are the runners; they take a
 config table rather than command-line arguments because the luau CLI has none (every extra
 argument is another file to execute).
 

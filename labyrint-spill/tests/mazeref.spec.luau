@@ -54,7 +54,7 @@ local function fakePlayer(attr)
 end
 
 -- ── navnet på attributtet er en kontrakt mellom server og klient ─────────────
--- Serveren setter det, tre klientskript leser det. Endres strengen ett sted uten de andre,
+-- Serveren setter det, to klientskript leser det. Endres strengen ett sted uten de andre,
 -- er temaene døde igjen — og det er nøyaktig feilen dette skal hindre.
 eq(MazeRef.ATTRIBUTE, "MazeFolder", "attributtnavnet er MazeFolder")
 eq(MazeRef.LEGACY_NAME, "MazeGame", "det gamle, delte navnet er MazeGame")

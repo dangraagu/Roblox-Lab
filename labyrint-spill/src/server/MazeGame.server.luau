@@ -1894,6 +1894,20 @@ local function buildInstance(inst)
 	-- Start + utgang
 	local sw = MazeGen.cellCenterWorld(0, 0, gCols, gRows, S, origin)
 	inst.spawnPos = Vector3.new(sw.X, 4, sw.Z)
+	-- Start-markoren. Den fantes bare i buildLevel (rollback-stien), sa minikartet -- som leter
+	-- etter navnet "MazeSpawn" -- tegnet aldri startprikken i live-spillet, og perken til 800
+	-- mynter viste to av de tre markorene den lover. Samme feilklasse som `MazeGame` mot
+	-- `Maze_<id>`: et navne-oppslag som stille gir nil fordi bare den dode byggeren lager navnet.
+	-- Vanlig Part, ikke SpawnLocation: i lobby-modus teleporterer placeInInstance spilleren hit,
+	-- og en ekte SpawnLocation ville blandet seg inn i hvor Roblox respawner folk.
+	makePart({
+		Name = "MazeSpawn",
+		Size = Vector3.new(S - 3, 1, S - 3),
+		Position = Vector3.new(sw.X, 0.6, sw.Z),
+		Color = Color3.fromRGB(60, 200, 90),
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+	}).Parent = folder
 	local ew = MazeGen.cellCenterWorld(cols - 1, rows - 1, gCols, gRows, S, origin)
 	local pad = makePart({ Name = "Exit", Size = Vector3.new(S - 3, 1, S - 3),
 		Position = Vector3.new(ew.X, 0.6, ew.Z), Color = Color3.fromRGB(60, 200, 90),
@@ -1992,11 +2006,10 @@ local function buildInstance(inst)
 	-- deler etter NAVN vil ellers vaske koblingen bort. Tema-butikka gjor nettopp det --
 	-- ShopClient.PART_FIELD mapper "SecretWall" til temaets ene `secret`-farge -- og "SecretMark"
 	-- star ikke i den tabellen, sa den blir staende uansett tema.
-	-- MERK: i dag treffer tema-omfargingen ikke live-labyrinten i det hele tatt. ShopClient og
-	-- MinimapClient leter etter workspace.MazeGame, mens buildInstance navngir mappa
-	-- "Maze_<id>" -- se linje 1804 mot 853. Det er en EGEN, storre feil (temaer og minikart-perk
-	-- er betalt for og gjor ingenting), ikke noe denne endringen innforte eller loser. Markoren
-	-- er riktig plassert uansett hvilken av dem som fikses forst.
+	-- Historikk, siden markoren ellers ser overflodig ut: da den ble lagt inn traff tema-
+	-- omfargingen ikke live-labyrinten i det hele tatt -- klientene lette etter workspace.MazeGame
+	-- mens denne byggeren navngir mappa "Maze_<id>". Det er rettet na (se MazeRef), sa omfargingen
+	-- treffer, og da er det nettopp den som ville vasket parfargen bort om den lag pa veggen.
 	-- Veggen selv beholder den klassiske hemmelig-fargen, sa temaene virker akkurat som for.
 	-- Baandet stikker bare 0.125 studs ut fra en 9x9-vegg, og en dor star alltid mellom to apne
 	-- celler, sa to av sidene er begravd i naboveggene: den leses fra de to passasje-sidene.
@@ -2355,6 +2368,11 @@ end
 endInstance = function(inst)
 	for _, p in ipairs(participantList(inst)) do
 		playerInstance[p] = nil
+		-- Fjern merkelappen her ogsaa. teardownPlayerInstance gjor det, denne gjorde det ikke, og
+		-- asymmetrien var bare ufarlig fordi nextInstanceId aldri gjenbruker et navn: en spiller
+		-- sto igjen merket med en revet mappe. MazeRef faller riktignok tilbake, men en peker som
+		-- lyver er ikke noe aa spare paa.
+		p:SetAttribute(MazeRef.ATTRIBUTE, nil)
 		local char = p.Character
 		if char then pcall(function() char:PivotTo(CFrame.new(LOBBY_ORIGIN + Vector3.new(0, 5, 0))) end) end
 		sendInstanceInfo(p, nil)

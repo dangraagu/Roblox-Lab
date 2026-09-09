@@ -9,7 +9,7 @@
 -- Å bare bytte navnet holder ikke. Med per-spiller-instanser står det mange `Maze_<id>`-mapper
 -- der samtidig, én pr aktiv spiller, så en klient som tar den første ville farget om eller tegnet
 -- kart over en ANNEN spillers labyrint. Serveren merker derfor spilleren med sin egen mappe
--- (`placeInInstance` setter attributtet, `teardownPlayerInstance` fjerner det), og alt som
+-- (`placeInInstance` setter det, `teardownPlayerInstance` og `endInstance` fjerner det), og alt som
 -- trenger labyrinten spør her.
 --
 -- Modulen rører ingen Roblox-API selv: workspace og spilleren kommer inn som argumenter, slik at
@@ -23,7 +23,7 @@
 
 local MazeRef = {}
 
--- Kontrakt mellom serveren og de tre klientskriptene. Endres denne strengen ett sted uten de
+-- Kontrakt mellom serveren og de to klientskriptene som leser den (ShopClient, MinimapClient). Endres denne strengen ett sted uten de
 -- andre, er temaene og minikartet døde igjen — testene låser den derfor eksplisitt.
 MazeRef.ATTRIBUTE = "MazeFolder"
 

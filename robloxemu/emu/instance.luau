@@ -415,6 +415,35 @@ function InstanceLib.new(deps)
 				guard += 1
 			end
 		end
+		-- DescendantAdded / DescendantRemoving fire on EVERY ancestor, once per descendant --
+		-- not just on the immediate parent. Leaving them unfired was not a harmless gap: a HUD
+		-- that repaints parts as the server streams a level in listens on exactly this signal,
+		-- so a theme measured as painting 0 of 95 walls here while working in game, and every
+		-- future client test would have inherited the same blind spot.
+		local function everyDescendant(node, visit)
+			for _, child in stateOf(node).children do
+				visit(child)
+				everyDescendant(child, visit)
+			end
+		end
+		local function fireUpTree(from, event, subject)
+			local node, guard = from, 0
+			while node ~= nil and guard < 512 do
+				fireIfExists(node, event, subject)
+				node = stateOf(node).parent
+				guard += 1
+			end
+		end
+
+		-- Roblox reports the removal while the instance is STILL attached, so a handler can read
+		-- its parent one last time. Fire before touching the tree.
+		if old ~= nil then
+			fireUpTree(old, "DescendantRemoving", inst)
+			everyDescendant(inst, function(d)
+				fireUpTree(old, "DescendantRemoving", d)
+			end)
+		end
+
 		if old ~= nil then
 			removeChild(old, inst)
 		end
@@ -427,6 +456,12 @@ function InstanceLib.new(deps)
 		end
 		if newParent ~= nil then
 			fireIfExists(newParent, "ChildAdded", inst)
+			fireUpTree(newParent, "DescendantAdded", inst)
+			-- A subtree arriving reports each of its own descendants too, so a listener sees the
+			-- parts inside a folder that was assembled before being parented.
+			everyDescendant(inst, function(d)
+				fireUpTree(newParent, "DescendantAdded", d)
+			end)
 		end
 		fireIfExists(inst, "AncestryChanged", inst, newParent)
 	end
