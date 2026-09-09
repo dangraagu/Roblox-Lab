@@ -143,6 +143,7 @@ local Hazard = require(ReplicatedStorage:WaitForChild("Hazard"))
 local Assist = require(ReplicatedStorage:WaitForChild("Assist"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
 local LightingPresets = require(ReplicatedStorage:WaitForChild("LightingPresets"))
+local MazeRef = require(ReplicatedStorage:WaitForChild("MazeRef"))
 
 -- Presetene lagrer farger som {r, g, b} 0-255 så de kan enhetstestes uten Roblox-API.
 local function rgb(c: { number }): Color3
@@ -2259,6 +2260,7 @@ teardownPlayerInstance = function(plr, voluntary)
 		stuckState[plr] = Assist.noteFail(stuckState[plr], inst.level)
 	end
 	playerInstance[plr] = nil
+	plr:SetAttribute(MazeRef.ATTRIBUTE, nil)
 	if inst.participants then inst.participants[plr] = nil end
 	if not inst.participants or not next(inst.participants) then
 		inst.gen = (inst.gen or 0) + 1
@@ -2288,6 +2290,14 @@ local function placeInInstance(plr, inst)
 	if char then pcall(function() char:PivotTo(CFrame.new(inst.spawnPos)) end) end
 	startClock[plr] = os.clock()
 	shieldUsed[plr] = false
+	-- Merk spilleren med SIN egen labyrint-mappe. Klientene (tema-omfarging, minikart) sto og
+	-- lette etter `workspace.MazeGame`, som bare den ubrukte buildLevel lager -- derfor var
+	-- temaene og minikart-perken doede i live-spillet. Attributtet replikeres, sa hvert
+	-- klientskript kan sla opp sin egen instans uten en ny remote, og uten a gjette pa den
+	-- forste `Maze_<id>`-mappa i workspace (som ofte tilhorer en annen spiller).
+	if inst.folder then
+		plr:SetAttribute(MazeRef.ATTRIBUTE, inst.folder.Name)
+	end
 	sendInstanceInfo(plr, inst)
 	sendAssistState(plr)   -- inne i labyrinten: her dukker kjøp-knappen opp
 end

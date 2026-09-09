@@ -33,6 +33,7 @@ local player = Players.LocalPlayer
 
 -- Delt skjermstørrelse-modul (ren data — se src/shared/Responsive.luau).
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+local MazeRef = require(ReplicatedStorage:WaitForChild("MazeRef"))
 -- Delt trykk-mål-modul (ren data — se src/shared/TouchTarget.luau).
 local TouchTarget = require(ReplicatedStorage:WaitForChild("TouchTarget"))
 
@@ -358,7 +359,7 @@ end
 
 --============================  SYNLIGHET  ========================--
 local function updateVisibility()
-	local folder = workspace:FindFirstChild("MazeGame")
+	local folder = MazeRef.folder(workspace, player)
 	mapFrame.Visible = hasMinimap and folder ~= nil and floorSizeX > 0
 end
 
@@ -384,7 +385,7 @@ local function requestRebuild(folder)
 	end)
 end
 
--- Bytt til en ny (eller ingen) MazeGame-mappe.
+-- Bytt til en ny (eller ingen) labyrint-mappe.
 local function attachFolder(folder)
 	if folder == activeFolder then
 		return
@@ -412,7 +413,7 @@ end
 
 -- Ny labyrint dukker opp (nytt nivå).
 workspace.ChildAdded:Connect(function(child)
-	if child.Name == "MazeGame" then
+	if MazeRef.matchesName(player, child.Name) then
 		attachFolder(child)
 	end
 end)
@@ -424,13 +425,14 @@ workspace.ChildRemoved:Connect(function(child)
 	end
 end)
 
+-- Serveren merker spilleren med sin instans-mappe idet han plasseres i den, og mappa finnes
+-- ofte FØR merkelappen. ChildAdded alene ville derfor sett feil navn og hoppet over.
+player:GetAttributeChangedSignal(MazeRef.ATTRIBUTE):Connect(function()
+	attachFolder(MazeRef.folder(workspace, player))
+end)
+
 -- Håndter at labyrinten alt finnes når skriptet starter.
-do
-	local existing = workspace:FindFirstChild("MazeGame")
-	if existing then
-		attachFolder(existing)
-	end
-end
+attachFolder(MazeRef.folder(workspace, player))
 
 --============================  DIN PRIKK PR BILDE  ===============--
 -- Eneste arbeidet pr bilde: flytt spiller-prikken. Alt annet er statisk.
