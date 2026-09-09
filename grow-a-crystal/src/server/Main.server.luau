@@ -643,14 +643,45 @@ local function onPlayerAdded(plr)
 	local idx = claimPlot(plr)
 	buildCavern(plr)
 
-	-- Spawn on the entrance apron looking down +Z into the cavern. The identity frame looks
-	-- down -Z, so this MUST be the two-argument form or the player faces the entrance wall.
+	-- SPAWN INSIDE THE CAVERN, and make Roblox agree.
+	--
+	-- Setting the root part's CFrame on CharacterAdded is not enough on its own. With no
+	-- SpawnLocation anywhere, Roblox drops the character above the highest ground at the origin -
+	-- which, now that the cavern is a sealed shell 48 studs tall, is its ROOF. Measured in a real
+	-- play session: the player stood at y=51 on Plot_0.CeilFront, 55 studs from the nearest
+	-- socket against a ClickDetector range of 32. They could see nothing and reach nothing. The
+	-- core loop was unreachable again, for a completely different reason than the unparented
+	-- sockets, and the emulator cannot see this because it has no spawn behaviour and no gravity.
+	--
+	-- A real SpawnLocation inside the cavern, assigned as this player's RespawnLocation, is what
+	-- makes the engine put them where the game means to. The CFrame set stays as well, because it
+	-- also fixes which way they are facing - the identity frame looks down -Z, i.e. at the
+	-- entrance wall, and the cavern is the other way.
 	local sp = Cavern.spawn(Config)
 	local origin = plotOrigin(idx)
+	local at = origin + Vector3.new(sp.position.x, sp.position.y, sp.position.z)
+
+	local spawnPad = Instance.new("SpawnLocation")
+	spawnPad.Name = "Spawn_" .. plr.UserId
+	spawnPad.Size = Vector3.new(6, 1, 6)
+	spawnPad.Position = at - Vector3.new(0, 4, 0) -- the pad is under the feet, not at the root
+	spawnPad.Anchored = true
+	spawnPad.CanCollide = false
+	spawnPad.Transparency = 1
+	spawnPad.Neutral = true
+	spawnPad.Duration = 0
+	spawnPad.Parent = plotFolders[plr]  -- inside the plot, so teardown takes it too
+	plr.RespawnLocation = spawnPad
+
 	local function place(char)
 		local hrp = char:WaitForChild("HumanoidRootPart") :: BasePart
-		local at = origin + Vector3.new(sp.position.x, sp.position.y, sp.position.z)
-		hrp.CFrame = CFrame.new(at, at + Vector3.new(sp.look.x, sp.look.y, sp.look.z))
+		local frame = CFrame.new(at, at + Vector3.new(sp.look.x, sp.look.y, sp.look.z))
+		hrp.CFrame = frame
+		-- Again next frame. The engine finishes placing a spawning character after this handler
+		-- returns, and whichever write lands last wins; doing it twice makes that us.
+		task.defer(function()
+			if hrp.Parent then hrp.CFrame = frame end
+		end)
 	end
 	plr.CharacterAdded:Connect(place)
 	if plr.Character then place(plr.Character) end

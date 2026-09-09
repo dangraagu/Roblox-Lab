@@ -120,11 +120,42 @@ if plot0 ~= nil then
 	end
 	print(string.format("  Plot_0: %d BaseParts, %d PointLights", baseParts, lights))
 	-- 154 is the empty-plot figure. This player joins with one crystal already grown on socket
-	-- 4 (that is what makes the harvest test below possible), and a growing crystal is a part,
-	-- so the expected count is 155. Spelled out rather than folded into the constant: if the
-	-- pre-planted crystal ever stops rendering, this number is the thing that notices.
-	eq(baseParts, 155, "a 1-chamber player with one crystal growing holds exactly 155 BaseParts")
+	-- 4 (that is what makes the harvest test below possible), and the plot also holds an
+	-- invisible SpawnLocation, so the expected count is 156. Spelled out rather than folded into
+	-- the constant: if the pre-planted crystal ever stops rendering, this is what notices.
+	eq(baseParts, 156, "a 1-chamber player with one crystal growing holds exactly 156 BaseParts")
 	eq(lights, 10, "a 1-chamber player's plot holds exactly 10 PointLights")
+end
+
+--=========================================================== the spawn point is INSIDE the cavern
+
+-- A live play session found the player standing at y=51 on the cavern's own CeilFront - on the
+-- ROOF of a sealed shell, 55 studs from the nearest socket against a 32-stud click range. With no
+-- SpawnLocation anywhere, Roblox drops the character above the highest ground at the origin, and
+-- setting the root part's CFrame afterwards lost a race with the engine's own placement.
+--
+-- The emulator has no gravity and no spawn behaviour, so it cannot reproduce that. What it CAN
+-- check is the thing that made the fix work: a SpawnLocation exists, and it is under the ceiling
+-- rather than on top of it.
+if plot0 ~= nil then
+	local spawns = {}
+	local ceilingY = nil
+	for _, d in plot0:GetDescendants() do
+		if d.ClassName == "SpawnLocation" then table.insert(spawns, d) end
+		if d:IsA("BasePart") and string.match(tostring(d.Name), "^Ceil") then
+			local underside = d.Position.Y - d.Size.Y / 2
+			if ceilingY == nil or underside < ceilingY then ceilingY = underside end
+		end
+	end
+	eq(#spawns, 1, "the plot carries exactly one SpawnLocation")
+	truthy(ceilingY ~= nil, "the cavern has a ceiling to be under")
+	if spawns[1] ~= nil and ceilingY ~= nil then
+		print(string.format("  spawn y=%.1f   ceiling underside y=%.1f", spawns[1].Position.Y, ceilingY))
+		truthy(spawns[1].Position.Y < ceilingY,
+			"the spawn point is UNDER the ceiling, not on top of the cavern")
+		truthy(spawns[1].Parent == plot0 or spawns[1]:IsDescendantOf(plot0),
+			"the spawn point lives in the plot folder, so teardown takes it with everything else")
+	end
 end
 
 --=============================================================== and clicking one actually plants

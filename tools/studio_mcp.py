@@ -145,6 +145,17 @@ def require_tools(st):
     return tools
 
 
+def safe(s):
+    """Make text printable on whatever the console actually is.
+
+    A Windows console is cp1252 and these games' HUDs are full of emoji, so printing a captured
+    HUD string raised UnicodeEncodeError and took the whole command down - the diagnosis was
+    fine and the tool died delivering it. Replace what cannot be encoded rather than refuse.
+    """
+    enc = (sys.stdout.encoding or "utf-8")
+    return s.encode(enc, errors="replace").decode(enc, errors="replace")
+
+
 def text_of(result):
     """Flatten a tool result's content blocks into readable text."""
     out = []
@@ -229,7 +240,7 @@ def main():
         require_tools(st)
 
         if args.cmd == "studios":
-            print(text_of(st.call("list_roblox_studios", {})))
+            print(safe(text_of(st.call("list_roblox_studios", {}))))
             return 0
 
         if args.cmd == "luau":
@@ -238,8 +249,8 @@ def main():
                 code = io.open(args.file, encoding="utf-8").read()
             if not code:
                 raise SystemExit("give some code, or --file")
-            print(text_of(st.call("execute_luau",
-                                  {"code": code, "datamodel_type": args.datamodel})))
+            print(safe(text_of(st.call("execute_luau",
+                                       {"code": code, "datamodel_type": args.datamodel}))))
             return 0
 
         if args.cmd == "capture":
@@ -254,7 +265,7 @@ def main():
             paths = save_images(result, args.out)
             if not paths:
                 print("no image came back. What the tool said:")
-                print(text_of(result))
+                print(safe(text_of(result)))
                 return 1
             for path in paths:
                 print("saved %s (%d bytes)" % (path, os.path.getsize(path)))
@@ -272,7 +283,7 @@ def main():
             if args.out:
                 for path in save_images(result, args.out):
                     print("saved %s (%d bytes)" % (path, os.path.getsize(path)))
-            print(text_of(result))
+            print(safe(text_of(result)))
             return 0
     finally:
         st.close()
