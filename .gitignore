@@ -16,3 +16,6 @@ Thumbs.db
 robloxemu/build/
 robloxemu/__pycache__/
 robloxemu/scenes/
+
+# Any Python cache, not just the emulator's.
+__pycache__/
