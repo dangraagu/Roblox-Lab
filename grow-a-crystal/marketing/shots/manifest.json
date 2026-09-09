@@ -1,48 +1,48 @@
 [
   {
-    "name": "cavern_entrance",
-    "file": "grow-a-crystal/marketing/shots/gameplay/cavern_entrance.png",
+    "name": "entrance",
+    "file": "grow-a-crystal/marketing/shots/gameplay/entrance.png",
     "camera": [
+      0.0,
+      8.0,
+      -12.0
+    ],
+    "look_at": [
+      0.0,
+      4.0,
+      40.0
+    ],
+    "fog_lifted": false,
+    "note": "As the game actually looks."
+  },
+  {
+    "name": "terraces",
+    "file": "grow-a-crystal/marketing/shots/gameplay/terraces.png",
+    "camera": [
+      0.0,
+      26.0,
+      20.0
+    ],
+    "look_at": [
       0.0,
       6.0,
-      -44.0
-    ],
-    "look_at": [
-      0.0,
-      15.0,
-      60.0
+      90.0
     ],
     "fog_lifted": false,
     "note": "As the game actually looks."
   },
   {
-    "name": "cavern_pool",
-    "file": "grow-a-crystal/marketing/shots/gameplay/cavern_pool.png",
+    "name": "pool",
+    "file": "grow-a-crystal/marketing/shots/gameplay/pool.png",
     "camera": [
       0.0,
-      43.0,
-      108.0
+      30.0,
+      95.0
     ],
     "look_at": [
       0.0,
-      21.0,
-      134.0
-    ],
-    "fog_lifted": false,
-    "note": "As the game actually looks."
-  },
-  {
-    "name": "cavern_iso",
-    "file": "grow-a-crystal/marketing/shots/gameplay/cavern_iso.png",
-    "camera": [
-      -66.0,
-      58.0,
-      -38.0
-    ],
-    "look_at": [
-      0.0,
-      21.0,
-      60.0
+      20.0,
+      125.0
     ],
     "fog_lifted": false,
     "note": "As the game actually looks."

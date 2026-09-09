@@ -110,30 +110,39 @@ GAMES = {
         "setup": [],
         "settle": 5,
         "anchor": "^Plots$",
+        # The cavern is a SEALED shell: x[-36,36], z[-18,138]. Every camera has to be INSIDE it.
+        # The first attempt put one at z = mnz-26, which is 26 studs into the rock behind the
+        # entrance wall, and duly photographed the inside of a boulder.
         "shots": [
-            ("cavern_entrance", ("cx", "mny+12", "mnz-26"), ("cx", "cy-6", "cz")),
-            ("cavern_pool",     ("cx", "cy+22", "mxz-30"),  ("cx", "cy", "mxz-4")),
-            ("cavern_iso",      ("mnx-30", "mxy+10", "mnz-20"), ("cx", "cy", "cz")),
+            ("entrance", ("cx", "mny+14", "mnz+6"), ("cx", "mny+10", "cz-20")),
+            ("terraces", ("cx", "cy+5", "mnz+38"),  ("cx", "mny+12", "cz+30")),
+            ("pool",     ("cx", "cy+9", "mxz-43"),  ("cx", "cy-1", "mxz-13")),
         ],
     },
     "plus1": {
         "dir": "plus1-jump",
         "setup": [],
         "settle": 4,
-        "anchor": "^Tower$|^Workspace$",
+        "anchor": "^Tower$",
+        # The tower streams six tiers ahead of the highest player, so at a fresh join it is a
+        # stack a few hundred studs tall starting at y = 8. Shoot it from beside and below.
         "shots": [
-            ("tower_up",   ("cx+40", "mny+8", "cz+40"), ("cx", "mny+60", "cz")),
-            ("tower_iso",  ("cx-70", "cy+30", "cz-70"), ("cx", "cy", "cz")),
+            ("climb",     ("cx+34", "mny+16", "cz+34"), ("cx", "mny+90", "cz")),
+            ("tower_iso", ("cx-90", "cy", "cz-90"),     ("cx", "cy", "cz")),
+            ("from_top",  ("cx+20", "mxy-20", "cz+20"), ("cx", "mny+20", "cz")),
         ],
     },
     "anomaly": {
         "dir": "anomaly-observatory",
         "setup": [],
         "settle": 4,
-        "anchor": "^Zone|^Hall",
+        # Each player gets a private Model named Concourse_<userId>, not a folder called Zone.
+        "anchor": "^Concourse_",
+        # The hall runs 80 studs away from the start pad and is deliberately near-black
+        # (ClockTime 0.2). Shoot it down its own length, which is the only view a player has.
         "shots": [
-            ("hall_down", ("cx", "mny+7", "mnz+4"), ("cx", "mny+7", "mxz")),
-            ("hall_iso",  ("mnx-14", "mxy+6", "mnz-10"), ("cx", "cy", "cz")),
+            ("the_walk",  ("cx", "mny+8", "mxz-6"),  ("cx", "mny+8", "mnz+6")),
+            ("far_end",   ("cx", "mny+8", "mnz+20"), ("cx", "mny+8", "mnz+2")),
         ],
     },
 }

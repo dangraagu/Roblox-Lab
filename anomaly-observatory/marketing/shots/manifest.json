@@ -1,0 +1,34 @@
+[
+  {
+    "name": "the_walk",
+    "file": "anomaly-observatory/marketing/shots/gameplay/the_walk.png",
+    "camera": [
+      1000.0,
+      107.5,
+      4.0
+    ],
+    "look_at": [
+      1000.0,
+      107.5,
+      -84.0
+    ],
+    "fog_lifted": false,
+    "note": "As the game actually looks."
+  },
+  {
+    "name": "far_end",
+    "file": "anomaly-observatory/marketing/shots/gameplay/far_end.png",
+    "camera": [
+      1000.0,
+      107.5,
+      -70.0
+    ],
+    "look_at": [
+      1000.0,
+      107.5,
+      -88.0
+    ],
+    "fog_lifted": false,
+    "note": "As the game actually looks."
+  }
+]
