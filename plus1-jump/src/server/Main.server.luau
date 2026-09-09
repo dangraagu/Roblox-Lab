@@ -428,13 +428,20 @@ local function onPlayerAdded(plr: Player)
 	end
 	ls.Parent = plr
 
-	plr.CharacterAdded:Connect(function(char) onCharacter(plr, char) end)
-	if plr.Character then onCharacter(plr, plr.Character) end
-
-	-- Bygg nok tårn til spillerens frontier
+	-- Bygg tårnet FØR karakteren plasseres. onCharacter setter deg på frontier-plattformen din,
+	-- men bare hvis etasjen finnes: `builtTiers[p.frontierTier]` er nil ellers, og da faller
+	-- den tilbake til sokkelen. Ved oppstart er kun etasje 1 bygd, så alle over etasje 1 landet
+	-- på bakken. Fall-redningen napper deg opp igjen innen ~0,5 s, så klatringen gikk aldri
+	-- tapt — men du så et teleport-rykk hver gang du kom tilbake.
+	-- Rekkefølgen er hele fiksen. check_plus1_rejoin.luau måler plasseringen i selve øyeblikket,
+	-- ikke etter en frame, nettopp fordi redningen ellers skjuler feilen.
 	if p.frontierTier + Config.Tower.StreamAhead > highestBuilt then
 		for tt = highestBuilt + 1, p.frontierTier + Config.Tower.StreamAhead do buildTier(tt) end
 	end
+
+	plr.CharacterAdded:Connect(function(char) onCharacter(plr, char) end)
+	if plr.Character then onCharacter(plr, plr.Character) end
+
 	pushState(plr)
 end
 
