@@ -8,6 +8,18 @@ local Config = {}
 -- Deterministic cavern socket layout (same seed = same cavern shape for everyone).
 Config.WorldSeed = 20260905
 
+-- ── Cavern decoration budget ────────────────────────────────────────────────
+-- Every decoration count lives here so a low-detail pass can halve them without touching the
+-- structure or any invariant test. Structure (41), lamp nubs (10) and lock caps (24) are fixed
+-- by the geometry itself and are NOT tunable: 41 + 10 + 24 + 16+14+10+10 + 2*12 = 149 parts.
+Config.Cavern = {
+	Stalactites = 16,
+	Boulders = 14,
+	Rubble = 10,
+	Veins = 10,
+	Mushrooms = 12, -- 12 stems + 12 caps = 24 parts
+}
+
 -- ── Rarity tiers (index 1..6, low → high) ───────────────────────────────────
 Config.Tiers = { "Shard", "Quartz", "Amethyst", "Prism", "Legendary", "Mythic" }
 Config.MaxTier = 6

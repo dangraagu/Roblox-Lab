@@ -19,10 +19,13 @@ local Geode = require(ReplicatedStorage:WaitForChild("Geode"))
 local Codex = require(ReplicatedStorage:WaitForChild("Codex"))
 local Codes = require(ReplicatedStorage:WaitForChild("Codes"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
+local Cavern = require(ReplicatedStorage:WaitForChild("Cavern"))
 
--- Visual polish (code-only, additive): warm glowing cavern lighting + post-fx + ambient dust.
+-- Visual polish (code-only, additive): warm glowing cavern lighting + post-fx.
+-- The ambient dust is PER PLOT now (Cavern returns two volumes per cavern). The single global
+-- 600x600 volume that used to live here was centred on x = 0, so it covered plots 0-3 and left
+-- plot 19 at x = 1520 with no dust at all.
 Fx.applyLighting(Fx.Presets.Cozy)
-Fx.dustVolume(workspace, Vector3.new(600, 160, 600), CFrame.new(0, 70, 0), Color3.fromRGB(150, 200, 220), 40)
 
 -- ── Remotes ─────────────────────────────────────────────────────────────────
 local remotes = Instance.new("Folder")
@@ -154,6 +157,7 @@ plotsFolder.Parent = workspace
 local PLOT_SPACING = 80
 local usedPlots = {}          -- [plotIndex]=player
 local playerPlot = {}         -- [player]=plotIndex
+local plotFolders = {}        -- [player]=Folder ("Plot_<idx>"; EVERYTHING the player owns lives here)
 local socketParts = {}        -- [player]={ [socketId]=Part }
 
 local function claimPlot(plr)
@@ -164,29 +168,98 @@ local function claimPlot(plr)
 	return i
 end
 
-local function socketWorldPos(plotIndex, socketId)
-	local ec = Config.Economy
-	local chamber = math.floor((socketId - 1) / ec.SocketsPerChamber) -- 0-based
-	local col = (socketId - 1) % ec.SocketsPerChamber
-	local origin = Vector3.new(plotIndex * PLOT_SPACING, 3, 0)
-	-- deterministic tiny jitter per socket so caverns feel organic (shared shape)
-	local rng = Rng.new(Config.WorldSeed + socketId * 31 + chamber * 7)
-	local jitter = (rng:int(-15, 15)) / 10
-	return origin + Vector3.new(col * 8 - 20, 0, chamber * 10 + jitter)
+local function plotOrigin(plotIndex)
+	return Vector3.new(plotIndex * PLOT_SPACING, 0, 0)
+end
+
+-- Cavern returns plot-LOCAL coordinates; the plot offset is added here and nowhere else.
+local function socketWorldPos(plr, socketId)
+	local local_ = Cavern.socketPos(Config, socketId, Rng)
+	return plotOrigin(playerPlot[plr]) + Vector3.new(local_.x, local_.y, local_.z)
 end
 
 local grantHarvest, tryPlant -- forward decls
 
+-- ── Turning one PartDef into one Part. The pure generator owns every number; this owns every
+--    engine call, and nothing in between decides anything.
+local function instantiate(def, origin, folder)
+	local part = Instance.new("Part")
+	part.Name = def.name
+	part.Anchored = true
+	if def.shape ~= "Block" then part.Shape = Enum.PartType[def.shape] end
+	part.Size = Vector3.new(def.size.x, def.size.y, def.size.z)
+	local pos = origin + Vector3.new(def.position.x, def.position.y, def.position.z)
+	part.CFrame = CFrame.new(pos) * CFrame.Angles(
+		math.rad(def.orientation.x), math.rad(def.orientation.y), math.rad(def.orientation.z))
+	part.Material = Enum.Material[def.material]
+	part.Color = Color3.fromRGB(def.color.r, def.color.g, def.color.b)
+	part.Transparency = def.transparency
+	part.Reflectance = def.reflectance
+	part.CanCollide = def.collide
+	part.CanQuery = def.query
+	part.CanTouch = false
+	part.CastShadow = def.castShadow
+	part:SetAttribute("Chamber", def.chamber)
+	part.Parent = folder
+	return part
+end
+
+-- The price tag is painted on the TOP of the last step up to the terrace it belongs to. It used
+-- to go on the deck's own -Z face with Face = Front, which is buried: that face is coplanar with
+-- the back of the tread in front of it, an opaque collider of identical width and height, and
+-- review measured it 100% occluded on all seven decks. Cavern emits the chamber INDEX; the money
+-- is formatted here, so the pure generator never imports Economy.
+local function attachPriceLabel(part, chamberIndex)
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = "ChamberLabel"
+	gui.Face = Enum.NormalId.Top
+	gui.MaxDistance = 60
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 20
+	gui:SetAttribute("ChamberIndex", chamberIndex)
+	local label = Instance.new("TextLabel")
+	label.Name = "Text"
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.TextColor3 = Color3.fromRGB(190, 220, 240)
+	label.Text = ""
+	label.Parent = gui
+	gui.Parent = part
+end
+
+local function refreshChamberLabels(plr)
+	local folder, p = plotFolders[plr], profiles[plr]
+	if not folder or not p then return end
+	for _, d in ipairs(folder:GetDescendants()) do
+		if d.Name == "ChamberLabel" and d.ClassName == "SurfaceGui" then
+			local c = d:GetAttribute("ChamberIndex")
+			local label = d:FindFirstChild("Text")
+			if c ~= nil and label then
+				if c < p.chambers then
+					label.Text = "CHAMBER " .. (c + 1)
+				else
+					label.Text = "CHAMBER " .. (c + 1) .. "  ·  "
+						.. Economy.chamberCost(c, Config.Economy) .. " DUST"
+				end
+			end
+		end
+	end
+end
+
 local function makeSocket(plr, socketId)
-	local plotIndex = playerPlot[plr]
 	local part = Instance.new("Part")
 	part.Anchored = true
 	part.Size = Vector3.new(6, 1, 6)
-	part.Position = socketWorldPos(plotIndex, socketId)
-	part.Material = Enum.Material.Slate
-	part.Color = Color3.fromRGB(70, 74, 92)
-	-- a faint rim glow so empty sockets read as "plantable" (onboarding affordance)
-	Fx.attachGlow(part, Color3.fromRGB(90, 150, 200), 0.6, 8)
+	part.Position = socketWorldPos(plr, socketId)
+	-- An EMPTY plate is the glowing thing: Neon at 1 part and 0 lights, which keeps the HUD's
+	-- "click a glowing socket to PLANT" literally true. It used to be a Slate plate with its own
+	-- PointLight, i.e. 48 lights per plot before a single crystal existed.
+	part.Material = Enum.Material.Neon
+	part.Color = Color3.fromRGB(58, 104, 132)
+	part.Transparency = 0.35
+	part.CanTouch = false
 	part.Name = "Socket_" .. plr.UserId .. "_" .. socketId
 	part:SetAttribute("SocketId", socketId)
 	part:SetAttribute("Owner", plr.UserId)
@@ -213,7 +286,7 @@ local function makeSocket(plr, socketId)
 	--
 	-- Parent LAST, with the ClickDetector already inside, so the socket never exists in the
 	-- world for a frame without the thing that makes it clickable.
-	part.Parent = plotsFolder
+	part.Parent = plotFolders[plr] or plotsFolder
 
 	socketParts[plr] = socketParts[plr] or {}
 	socketParts[plr][socketId] = part
@@ -228,11 +301,22 @@ local function refreshSocketVisual(plr, socketId)
 	if old then old:Destroy() end
 	local p = profiles[plr]
 	local plant = p and p.plants[socketId]
-	if not plant then return end
+	if not plant then
+		-- empty again: back to the dim Neon "plant here" plate
+		part.Material = Enum.Material.Neon
+		part.Color = Color3.fromRGB(58, 104, 132)
+		part.Transparency = 0.35
+		return
+	end
+	-- planted: the PLATE goes dark so the crystal is the bright thing on it
+	part.Material = Enum.Material.Slate
+	part.Color = Color3.fromRGB(52, 56, 70)
+	part.Transparency = 0
 	local c = Instance.new("Part")
 	c.Name = "Crystal"
 	c.Anchored = true
 	c.CanCollide = false
+	c.CanTouch = false
 	local prog = Growth.progress(plant.at, os.time(), plant.tier, Config.Growth, growthMultOf(p))
 	c.Size = Vector3.new(1.5, 2 + 4 * prog, 1.5)
 	c.Position = part.Position + Vector3.new(0, c.Size.Y / 2, 0)
@@ -241,9 +325,24 @@ local function refreshSocketVisual(plr, socketId)
 	local col = Color3.fromRGB(rgb[1], rgb[2], rgb[3])
 	c.Color = col
 	c.Parent = part
-	-- visual polish: crystals glow + sparkle, brighter as they mature and by tier
-	Fx.attachGlow(c, col, 1 + 2 * prog, 10 + 6 * plant.tier)
+	-- A ClickDetector only fires from the surface of the part it is parented to, so the HUD's
+	-- "click a grown crystal to HARVEST" was false until the crystal got its own.
+	local ccd = Instance.new("ClickDetector")
+	ccd.MaxActivationDistance = 32
+	ccd.Parent = c
+	ccd.MouseClick:Connect(function(clicker)
+		if clicker ~= plr then return end
+		local prof = profiles[plr]
+		if not prof then return end
+		if prof.plants[socketId] then grantHarvest(plr, socketId) else tryPlant(plr, socketId) end
+	end)
+	-- A growing crystal is Neon under a threshold-0.9 Bloom and glows fine unlit. The light is
+	-- gated so it means "ready, and it is a rare one" — without this gate the 10-light budget
+	-- for the whole plot is a lie.
 	if prog >= 1 then
+		if plant.tier >= 3 then
+			Fx.attachGlow(c, col, 1 + 2 * prog, 10 + 6 * plant.tier)
+		end
 		Fx.sparkle(c, col) -- mature crystals glint (ready to harvest)
 	end
 end
@@ -257,6 +356,94 @@ local function buildChambers(plr)
 			makeSocket(plr, socketId)
 		end
 		refreshSocketVisual(plr, socketId)
+	end
+end
+
+-- Everything a player owns goes in one folder, so teardown is a single :Destroy() and nothing
+-- can leak. Build order matters: the 36 colliders synchronously first, so a character that
+-- spawns on the very first frame cannot drop through the world; then the sockets; then the
+-- decoration, lamps and dust in yielding chunks, so twenty players joining at once do not
+-- instantiate ~3,000 parts in one burst.
+local function buildCavern(plr)
+	local idx = playerPlot[plr]
+	local p = profiles[plr]
+	if idx == nil or p == nil then return end
+
+	local folder = Instance.new("Folder")
+	folder.Name = "Plot_" .. idx
+	folder.Parent = plotsFolder
+	plotFolders[plr] = folder
+
+	local cav = Cavern.build(Config, idx, Rng)
+	local origin = plotOrigin(idx)
+
+	local wanted, deferred = 0, {}
+	for _, def in ipairs(cav.parts) do
+		local live = (def.chamber == -1 or def.chamber >= p.chambers)
+		if live then
+			wanted += 1
+			if def.collide then
+				local part = instantiate(def, origin, folder)
+				if def.chamberLabel then attachPriceLabel(part, def.chamberLabel) end
+			else
+				deferred[#deferred + 1] = def
+			end
+		end
+	end
+	refreshChamberLabels(plr)
+
+	buildChambers(plr)
+
+	task.spawn(function()
+		local made = wanted - #deferred
+		local since = 0
+		for _, def in ipairs(deferred) do
+			if plotFolders[plr] ~= folder then return end -- the player left mid-build
+			instantiate(def, origin, folder)
+			made += 1
+			since += 1
+			if since >= 30 then since = 0; task.wait() end
+		end
+		for _, d in ipairs(cav.dust) do
+			if plotFolders[plr] ~= folder then return end
+			Fx.dustVolume(folder, Vector3.new(d.size.x, d.size.y, d.size.z),
+				CFrame.new(origin + Vector3.new(d.position.x, d.position.y, d.position.z)),
+				Color3.fromRGB(d.color.r, d.color.g, d.color.b), d.rate)
+		end
+		for _, l in ipairs(cav.lights) do
+			if plotFolders[plr] ~= folder then return end
+			local nub = folder:FindFirstChild(l.name)
+			if nub then
+				Fx.attachGlow(nub, Color3.fromRGB(l.color.r, l.color.g, l.color.b), l.brightness, l.range)
+			end
+		end
+		-- ASK THE FOLDER, do not count the loop. The previous version compared `made` - a counter
+		-- incremented beside each instantiate call - against `wanted`, which is the same
+		-- arithmetic on both sides and can never disagree. Review proved it: deleting
+		-- `part.Parent = folder` from instantiate, which is exactly the defect that shipped on
+		-- 5 September, left 8 parts of 154 in the world and this assert stayed silent.
+		-- An unparented Instance raises nothing and logs nothing. The only question worth
+		-- asking is how many actually landed.
+		local landed = 0
+		for _, d in folder:GetDescendants() do
+			if d:IsA("BasePart") then landed += 1 end
+		end
+		assert(landed >= wanted,
+			"[Crystal] cavern build put " .. landed .. " parts in " .. folder.Name
+				.. ", wanted at least " .. wanted .. " (made=" .. made .. ")")
+	end)
+end
+
+-- Buying a chamber clears its rubble cap. Sweep every already-owned index, so the folder is
+-- correct even if an earlier sweep was interrupted.
+local function clearOwnedLocks(plr)
+	local folder, p = plotFolders[plr], profiles[plr]
+	if not folder or not p then return end
+	for _, d in ipairs(folder:GetDescendants()) do
+		local c = d:GetAttribute("Chamber")
+		if type(c) == "number" and c >= 0 and c < p.chambers then
+			d:Destroy()
+		end
 	end
 end
 
@@ -345,7 +532,11 @@ BuyEvent.OnServerEvent:Connect(function(plr, kind, arg)
 		if tier then ok = Economy.buySeed(p, tier, Config.Economy) end
 	elseif kind == "chamber" then
 		ok = Economy.buyChamber(p, Config.Economy)
-		if ok then buildChambers(plr) end
+		if ok then
+			buildChambers(plr)
+			clearOwnedLocks(plr)      -- the rubble over the new terrace goes
+			refreshChamberLabels(plr) -- and its riser stops advertising a price
+		end
 	elseif kind == "booster" then
 		if arg == "Luck" or arg == "Growth" then ok = Economy.buyBooster(p, arg, Config.Boosters) end
 	end
@@ -414,26 +605,37 @@ end
 -- ── Player lifecycle ────────────────────────────────────────────────────────
 local function onPlayerAdded(plr)
 	profiles[plr] = loadProfile(plr)
+
+	-- loadProfile YIELDS on DataStore:UpdateAsync, and leaving during that yield is one of the
+	-- commonest things a real player does. PlayerRemoving fires while profiles/playerPlot/
+	-- plotFolders are still empty, so onPlayerRemoving frees nothing - there is nothing yet -
+	-- and then THIS function resumes and builds a whole cavern for somebody who is gone.
+	-- Per occurrence, for the life of the server: a plot index never released, and a live folder
+	-- holding 154 parts, 10 lights, 2 emitters and 6 ClickDetectors.
+	-- Found by review, by reading. The harness cannot reproduce it: its DataStore is synchronous
+	-- and never yields, so no ordering it can produce exercises the race.
+	if plr.Parent == nil then
+		profiles[plr] = nil
+		return
+	end
+
 	selected[plr] = 1
 
 	local ls = Instance.new("Folder"); ls.Name = "leaderstats"
 	local dust = Instance.new("IntValue"); dust.Name = "Dust"; dust.Parent = ls
 	ls.Parent = plr
 
-	claimPlot(plr)
-	buildChambers(plr)
+	local idx = claimPlot(plr)
+	buildCavern(plr)
 
-	-- Spawn the player on/near their plot pad
-	local pad = Instance.new("Part")
-	pad.Anchored = true; pad.Size = Vector3.new(48, 1, 60)
-	pad.Position = Vector3.new(playerPlot[plr] * PLOT_SPACING, 2, 20)
-	pad.Material = Enum.Material.SmoothPlastic; pad.Color = Color3.fromRGB(40, 44, 60)
-	pad.Name = "Pad_" .. plr.UserId
-	pad.Parent = plotsFolder
-
+	-- Spawn on the entrance apron looking down +Z into the cavern. The identity frame looks
+	-- down -Z, so this MUST be the two-argument form or the player faces the entrance wall.
+	local sp = Cavern.spawn(Config)
+	local origin = plotOrigin(idx)
 	local function place(char)
 		local hrp = char:WaitForChild("HumanoidRootPart") :: BasePart
-		hrp.CFrame = CFrame.new(pad.Position + Vector3.new(0, 4, 0))
+		local at = origin + Vector3.new(sp.position.x, sp.position.y, sp.position.z)
+		hrp.CFrame = CFrame.new(at, at + Vector3.new(sp.look.x, sp.look.y, sp.look.z))
 	end
 	plr.CharacterAdded:Connect(place)
 	if plr.Character then place(plr.Character) end
@@ -443,16 +645,16 @@ end
 
 local function onPlayerRemoving(plr)
 	saveProfile(plr, true)
-	-- free the plot + destroy its parts
-	local idx = playerPlot[plr]
-	if idx ~= nil then usedPlots[idx] = nil end
-	playerPlot[plr] = nil
-	if socketParts[plr] then
-		for _, part in pairs(socketParts[plr]) do part:Destroy() end
-	end
+	-- Destroy the plot FIRST, then free the index: a join in the same frame must never be able
+	-- to claim a name that is still taken. One :Destroy() takes the whole cavern with it —
+	-- previously only the sockets and the pad were ever cleaned up, so everything else leaked.
+	local folder = plotFolders[plr]
+	plotFolders[plr] = nil
+	if folder then folder:Destroy() end
 	socketParts[plr] = nil
-	local pad = plotsFolder:FindFirstChild("Pad_" .. plr.UserId)
-	if pad then pad:Destroy() end
+	local idx = playerPlot[plr]
+	playerPlot[plr] = nil
+	if idx ~= nil then usedPlots[idx] = nil end
 	profiles[plr] = nil
 	selected[plr] = nil
 end

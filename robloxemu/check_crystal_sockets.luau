@@ -37,11 +37,24 @@ local function truthy(c, msg) if c then passed += 1 else failed += 1; print("FAI
 local ME = 5150
 local START_CHAMBERS, PER_CHAMBER = 1, 6 -- Config.Economy.StartChambers / SocketsPerChamber
 
+-- The server stores under "u_<uid>" and reads the profile out of `.data`; this file used to
+-- write "p_<uid>" with the profile at the top level, so the seed silently never loaded and every
+-- run below was really testing defaultProfile(). Written the way loadProfile actually reads it,
+-- with enough Dust to afford the second chamber (chamberCost(1) = 500).
 local store = h.services.DataStoreService:GetDataStore("GrowCrystal_v1")
-store:SetAsync("p_" .. ME, {
-	dust = 500, seeds = { [1] = 3 }, chambers = START_CHAMBERS,
-	luckLevel = 0, growthLevel = 0, plants = {}, codex = {}, redeemed = {},
-	lastGeodeWeek = -1, totalDust = 0, passes = {},
+-- Socket 4 starts with a crystal planted long ago, so it is already mature when the plot builds
+-- and the HARVEST half of the loop can be exercised. `at = 1` is 1970; every growth stage is
+-- long done. The integer key goes through the emulator's real JSON round-trip on write, so
+-- loadProfile's numKeys normalisation is exercised rather than assumed.
+local PLANTED = 4
+store:SetAsync("u_" .. ME, {
+	data = {
+		dust = 5000, seeds = { [1] = 3 }, chambers = START_CHAMBERS,
+		luckLevel = 0, growthLevel = 0,
+		plants = { [PLANTED] = { tier = 1, at = 1 } },
+		codex = {}, redeemed = {},
+		lastGeodeWeek = -1, totalDust = 0, passes = {},
+	},
 })
 
 assert(h:tryRun("server/Main.server"))
@@ -76,21 +89,50 @@ for _, s in sockets do
 end
 eq(mine, #sockets, "every socket in the world is tagged with its owner")
 
--- The pad is the one thing that WAS parented, so it is the control: if the pad is missing too,
--- the failure is "nothing was built", not "the sockets were orphaned", and the diagnosis differs.
-local pad = nil
-local function findPad(node)
+-- CONTROL. The flat 48x1x60 pad is gone (the cavern replaces it), so the control is now the
+-- plot folder: if THAT is missing too, the failure is "nothing was built", not "the sockets were
+-- orphaned", and the diagnosis differs. The pad must also be provably gone, or a half-applied
+-- change would leave players standing on a slab inside the rock.
+local plots = h.workspace:FindFirstChild("Plots")
+truthy(plots ~= nil, "workspace.Plots exists (control: the builder ran at all)")
+local plot0 = plots and plots:FindFirstChild("Plot_0")
+truthy(plot0 ~= nil, "the joining player got workspace.Plots.Plot_0")
+
+local pads = 0
+local function findPads(node)
 	for _, c in node:GetChildren() do
-		if string.match(tostring(c.Name), "^Pad_") then pad = c; return end
-		findPad(c)
+		if string.match(tostring(c.Name), "^Pad_") then pads += 1 end
+		findPads(c)
 	end
 end
-findPad(h.workspace)
-truthy(pad ~= nil, "the plot pad is in the workspace (control: the builder ran at all)")
+findPads(h.workspace)
+eq(pads, 0, "the old flat pad is gone")
+
+-- Part and light budget for a 1-chamber player: 125 always-present + 21 lock caps + 2 dust
+-- hosts + 6 sockets = 154 BaseParts, and TEN PointLights. The preset sets ClockTime = 0, so
+-- there is no sun and no fill: if the lamps do not parent, the cavern is pitch black and
+-- completely silent about it. Counting them is the only thing that catches that.
+if plot0 ~= nil then
+	local baseParts, lights = 0, 0
+	for _, d in plot0:GetDescendants() do
+		if d:IsA("BasePart") then baseParts += 1 end
+		if d.ClassName == "PointLight" then lights += 1 end
+	end
+	print(string.format("  Plot_0: %d BaseParts, %d PointLights", baseParts, lights))
+	-- 154 is the empty-plot figure. This player joins with one crystal already grown on socket
+	-- 4 (that is what makes the harvest test below possible), and a growing crystal is a part,
+	-- so the expected count is 155. Spelled out rather than folded into the constant: if the
+	-- pre-planted crystal ever stops rendering, this number is the thing that notices.
+	eq(baseParts, 155, "a 1-chamber player with one crystal growing holds exactly 155 BaseParts")
+	eq(lights, 10, "a 1-chamber player's plot holds exactly 10 PointLights")
+end
 
 --=============================================================== and clicking one actually plants
 
-local first = sockets[1]
+local byId = {}
+for _, s in sockets do byId[s:GetAttribute("SocketId")] = s end
+
+local first = byId[1]
 if first == nil then
 	failed += 1
 	print("FAIL: no socket to click, so the plant path cannot be exercised")
@@ -112,7 +154,7 @@ else
 	-- assertion that keeps that check honest.
 	local other = h:join("Stranger", 6161)
 	h:advance(0.5)
-	local second = sockets[2]
+	local second = byId[2]
 	if second ~= nil then
 		local cd2 = second:FindFirstChildOfClass("ClickDetector")
 		if cd2 ~= nil then
@@ -123,6 +165,102 @@ else
 		end
 	end
 end
+
+--=============================================================== and harvesting one actually pays
+
+-- The OTHER half of the core loop, and it had no coverage at all. A review mutation removed the
+-- grown crystal's own ClickDetector - the same defect class as the unparented sockets, applied
+-- to harvesting - and the entire suite stayed green. A crystal you cannot click is a crystal you
+-- cannot sell, which is the whole economy.
+local grown = byId[PLANTED]
+if grown == nil then
+	failed += 1
+	print("FAIL: socket " .. PLANTED .. " is missing, so harvest cannot be exercised")
+else
+	local crystal = grown:FindFirstChild("Crystal")
+	truthy(crystal ~= nil, "the crystal planted before this session is standing in the world")
+	if crystal ~= nil then
+		local cd = crystal:FindFirstChildOfClass("ClickDetector")
+		truthy(cd ~= nil, "the grown crystal carries its OWN ClickDetector, not just the plate")
+
+		local ls = me:FindFirstChild("leaderstats")
+		local dustValue = ls and ls:FindFirstChild("Dust")
+		truthy(dustValue ~= nil, "the player has a Dust readout to check against")
+
+		if cd ~= nil and dustValue ~= nil then
+			local before = dustValue.Value
+			cd.MouseClick:Fire(me)
+			h:advance(1)
+			truthy(dustValue.Value > before,
+				string.format("harvesting paid out (%d -> %d dust)", before, dustValue.Value))
+			eq(grown:FindFirstChild("Crystal"), nil, "the harvested crystal is gone from the world")
+		end
+	end
+end
+
+--================================================ buying a chamber opens it, and the rubble goes
+
+-- A locked chamber is covered by three non-colliding rubble slabs tagged with its index. Buying
+-- the chamber must both add its six sockets AND take that cap away; the cap is never a wall, so
+-- the worst a missed sweep can do is leave a rock over working sockets.
+if plot0 ~= nil then
+	local function capsFor(c)
+		local n = 0
+		for _, d in plot0:GetDescendants() do
+			if d:GetAttribute("Chamber") == c then n += 1 end
+		end
+		return n
+	end
+	eq(capsFor(1), 3, "chamber 1 is capped with rubble before it is bought")
+
+	local buy = h.services.ReplicatedStorage:FindFirstChild("CrystalRemotes"):FindFirstChild("Buy")
+	buy:simulateFireServer(me, "chamber", nil)
+	h:advance(1)
+
+	eq(capsFor(1), 0, "buying chamber 1 removed its rubble cap")
+	local now = 0
+	local function count(node)
+		for _, c in node:GetChildren() do
+			if string.match(tostring(c.Name), "^Socket_" .. ME .. "_") then now += 1 end
+			count(c)
+		end
+	end
+	count(h.workspace)
+	eq(now, 2 * PER_CHAMBER, "buying a chamber added its six sockets")
+end
+
+--================================================================ leaving takes the whole plot
+
+-- Teardown is one :Destroy() on the plot folder. Before this it walked a Lua table of sockets
+-- plus a pad by name, so every cavern part would have leaked, every join, forever.
+local before = #plots:GetChildren()
+local ghost = h:join("Passerby", 7171)
+h:advance(1)
+eq(#plots:GetChildren(), before + 1, "a third player got their own plot folder")
+
+-- Which index did they get? A freed index has to come back, or a server slowly walks its plots
+-- out along +X until they are kilometres from the spawn. The teardown assertion below counts
+-- FOLDERS, which a leaked index satisfies perfectly well, so the index is checked by name.
+local ghostPlot = nil
+for _, f in plots:GetChildren() do
+	if f:FindFirstChild("Socket_7171_1", true) ~= nil then ghostPlot = f.Name end
+end
+truthy(ghostPlot ~= nil, "the third player's plot folder is identifiable by their sockets")
+
+h:leave(ghost)
+h:advance(1)
+eq(#plots:GetChildren(), before, "leaving destroyed the whole plot, not just the sockets")
+
+local reuser = h:join("Reuser", 8181)
+h:advance(1)
+local reuserPlot = nil
+for _, f in plots:GetChildren() do
+	if f:FindFirstChild("Socket_8181_1", true) ~= nil then reuserPlot = f.Name end
+end
+eq(reuserPlot, ghostPlot, "the next player REUSES the freed plot index instead of taking a new one")
+h:leave(reuser)
+h:advance(1)
+eq(#plots:GetChildren(), before, "and that plot goes away too")
 
 --=========================================================================================== done
 
