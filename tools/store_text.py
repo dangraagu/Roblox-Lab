@@ -161,11 +161,30 @@ def cmd_diff(args, apply=False):
             payload["description"] = want_desc
         status, body = call(key, (API % universe) + "?updateMask=" + mask,
                             method="PATCH", body=payload)
-        if status == 200:
-            print("    PATCH %s -> 200 applied" % mask)
-        else:
+        if status != 200:
             print("    PATCH %s -> %s  %s" % (mask, status, body))
             print("    NOT APPLIED.")
+            continue
+
+        # A 200 here proves nothing. Measured on 2026-09-09: this endpoint accepts a description
+        # of any length - 200, 500, 900, 1000, 1200, 1600 characters were all answered 200 - and
+        # stores none of them. The only evidence a write landed is reading it back.
+        after_status, after = call(key, API % universe)
+        if after_status != 200:
+            print("    PATCH %s -> 200, but the read-back failed (%s). UNVERIFIED."
+                  % (mask, after_status))
+            continue
+        ok_title = (not t) or after.get("displayName", "") == want_title
+        ok_desc = (not d) or after.get("description", "") == want_desc
+        if ok_title and ok_desc:
+            print("    PATCH %s -> 200 and read back identical. APPLIED." % mask)
+        else:
+            print("    PATCH %s -> 200 but Roblox still serves the OLD text. NOT APPLIED." % mask)
+            if d and not ok_desc:
+                print("      wanted %d chars, still has %d"
+                      % (len(want_desc), len(after.get("description", ""))))
+            print("      This endpoint silently discards these fields. Set them in the Creator")
+            print("      Dashboard instead: create.roblox.com -> the experience -> Configure.")
 
     if not changed_any:
         print("\nNothing differs. Roblox already serves what the file says.")
