@@ -736,6 +736,17 @@ local function makePrompt(parent: Part, text: string, key: Enum.KeyCode?): Proxi
 	pp.HoldDuration = 0
 	pp.MaxActivationDistance = 12
 	pp.RequiresLineOfSight = false
+	-- Show BOTH decision prompts at once. ProximityPrompt defaults to Exclusivity = OneGlobally,
+	-- which shows only the closest one; ADVANCE and TURN BACK sit 8 studs apart on the same wall,
+	-- so a player between them sees one of the two choices rather than both. For a game whose
+	-- entire interface is "press one of these two keys", showing both is plainly right.
+	--
+	-- Being careful about what this does NOT claim: presses were also being lost during
+	-- automated playtesting, and this was briefly blamed for that. It was not the cause. The
+	-- cause was in the test harness - it walked to the pad while the player was still being
+	-- teleported back to the start, and pressed from out of range. This setting is a UI
+	-- improvement, not a bug fix, and no dropped input has been demonstrated in real play.
+	pp.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
 	if key then
 		pp.KeyboardKeyCode = key
 	end
