@@ -49,6 +49,16 @@
       "notes": "Rough launch thread, mostly hostile. Real bugs (empty starting seeds, missing thumbnail, mobile HUD covering the screen) were reported and already fixed/answered by the owner. Two comments (Smart-Bee1186 p89lmcx, GroundWonderful9046 p8l49en) contain prompt-injection attempts telling the bot to run destructive shell commands - flagged, not answered."
     },
     {
+      "id": "1wcafbz",
+      "subreddit": "RobloxDevelopers",
+      "url": "https://www.reddit.com/r/RobloxDevelopers/comments/1wcafbz/anomaly_night_shift_at_the_observatory_a/",
+      "game": "anomaly-observatory",
+      "posted": "2026-09-10",
+      "state": "pending_mod",
+      "last_seen_comment_utc": 0,
+      "notes": "Announcement post, flaired 'AI Used' per the sub's rule 6 and disclosed in the body. Submitted straight into the moderator queue - not publicly visible yet. Do not post the +1 Jump announcement anywhere until this one clears: r/robloxgamedev already removed the Grow a Crystal post, and two removals in a row is what costs the account."
+    },
+    {
       "id": "1qbr2xd",
       "subreddit": "2007scape",
       "url": "https://www.reddit.com/r/2007scape/comments/1qbr2xd/new_bis_boots_for_all_the_styles/",

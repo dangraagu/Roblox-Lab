@@ -47,6 +47,9 @@ like a successful one — an expired key would have been indistinguishable from 
    `[Plus1] +1 Jump Every Step lastet.`, `[Anomaly] Night Shift at the Observatory loaded.`
    Its absence is the only signal for a class of failure that raises no error — a `WaitForChild`
    on a module that did not reach ReplicatedStorage yields forever and logs a warning, not a fault.
+3. **The thumbnail is a separate upload again.** Publishing a place does not touch it, and the
+   dashboard's upload control cannot be automated the obvious way. The call that works, and the
+   four routes that do not, are in [thumbnails.md](thumbnails.md).
 
 ## Rolling back
 

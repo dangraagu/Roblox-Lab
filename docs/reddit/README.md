@@ -3,10 +3,17 @@
 A cloud routine reads every thread this account has posted about the games, finds comments that
 have not been answered, and writes a reply draft. It does not post. The owner posts.
 
-That split is deliberate and it is also forced. The routine runs in Anthropic's cloud with no
-browser and no Reddit session, so it *cannot* post even if it were told to. Which is the right
-outcome anyway: the community publicly spotted the earlier AI-written replies, and the owner has
-posted personally ever since.
+That split is forced for the routine: it runs in Anthropic's cloud with no browser and no Reddit
+session, so it *cannot* post even if it were told to.
+
+**The owner-posts-everything rule was lifted on 2026-09-10** ("Dette klarer du selv, gjør jobben
+selv"). Posts and replies may now be written and submitted from an interactive session with a
+logged-in browser. What did *not* change: the community publicly spotted the earlier AI-written
+replies, so anything posted now says plainly that it is AI-assisted. r/RobloxDevelopers requires
+this - its rule 6 is "Label AI", it has an **AI Used** post flair, and an improperly labelled post
+is removed. Use the flair *and* a line in the body.
+
+The scheduled routine still only drafts. Creating a post is an interactive action.
 
 ## Why it expands on its own
 
