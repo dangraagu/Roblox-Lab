@@ -68,6 +68,11 @@ grant — measured, `grantedAt` unchanged and `"denied":[]` both times — and a
 refused outright. Routing the drag through some third application to get around that would be
 defeating the restriction, not solving the problem.
 
+The API route is written up in [tiktok-api.md](tiktok-api.md), including the fact that decides it:
+an **unaudited** app posts privately whatever privacy level it asks for, so getting approved does
+not by itself buy a public post. It also records where it stops — there is no developer account,
+and the login wants a password.
+
 So TikTok is one of two things: the owner drags each file in once (files and captions staged in
 `anomaly-observatory/marketing/tiktok/`), or somebody registers the developer app. Until then,
 **do not report TikTok as pending work each session** — it is blocked on a decision, not on effort.

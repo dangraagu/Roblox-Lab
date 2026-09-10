@@ -19,3 +19,6 @@ robloxemu/scenes/
 
 # Any Python cache, not just the emulator's.
 __pycache__/
+
+# TikTok Content Posting API access token (see docs/tiktok-api.md). Never commit it.
+tiktok_token.txt
