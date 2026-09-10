@@ -490,8 +490,12 @@ StateEvent.OnClientEvent:Connect(function(s)
 		rebirthBtn.Text = "♻️ REBIRTH → x" .. string.format("%.1f", s.mult + Config.Prestige.MultiplierPerRebirth)
 		rebirthBtn.BackgroundColor3 = Color3.fromRGB(140, 80, 200)
 	else
+		-- EARNED, not held. The gate is on what this run has sold, so the button says so — a
+		-- player who reads "need $6473" while holding $6500 and is refused has been lied to, and
+		-- one who watches the number they are chasing FALL every time they buy a pickaxe learns
+		-- not to shop. Both were true while the gate read the wallet.
 		rebirthBtn.Text = "Rebirth " .. s.rebirths .. " (x" .. string.format("%.1f", s.mult)
-			.. ") · need $" .. s.rebirthCost
+			.. ") · earn $" .. s.rebirthCost .. " this run · $" .. tostring(s.earned or 0) .. " so far"
 		rebirthBtn.BackgroundColor3 = Color3.fromRGB(66, 56, 82)
 	end
 

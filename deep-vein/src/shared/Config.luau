@@ -36,6 +36,17 @@ Config.Mine = {
 	OctaveLacunarity = 2.1, -- frequency multiplier per octave
 
 	HardnessPerLayer = 0.035, -- block hit points grow this fraction per layer of depth
+
+	-- …and the ramp STOPS here. The ore weights below clamp at MaxWeight around layer 40, so past
+	-- that point the rock is no richer — and an uncapped hardness ramp therefore made every extra
+	-- layer strictly worse: measured, expected ore value per hit point peaked at 1.2065 on layer
+	-- 40 and fell to 0.3085 by layer 312, a 3.9x DECLINE across exactly the range the last twenty
+	-- rebirths open up. A rebirth is sold as "a deeper wall", so a deeper wall that pays less per
+	-- swing than the one before it is the ladder eating itself. Placed where the weights finish
+	-- saturating; Mine.spec walks all 312 layers and fails if any of them pays under 85% of the
+	-- best layer above it.
+	HardnessCapLayer = 40,
+
 	RevealBudget = 1600, -- max air cells one break may flood through in a single reveal
 
 	-- …and the budget that actually costs a frame. RevealBudget bounds the AIR the flood walks
@@ -50,6 +61,35 @@ Config.Mine = {
 
 	ReachStuds = 26, -- ClickDetector activation distance on a rock face
 	SwingCooldown = 0.28, -- seconds the server enforces between two swings
+
+	-- ── Streaming: only the layers around the miner hold Parts ───────────────
+	--
+	-- NOTHING USED TO UNLOAD, AND THE CAVE IS SAVED, so a veteran's whole excavation was rebuilt
+	-- on every join and kept for the session. Measured on this table: a fully excavated rebirth-24
+	-- shaft is 10 097 Parts (all of them bedrock — see RimCells), an ordinary dig-straight-down is
+	-- 11 960, and a lattice dig exposes 19 115. That is what one player costs the renderer, times
+	-- however many share the server, in a game whose entire loop is "dig more".
+	--
+	-- The band is the bound. Parts exist only for layers within StreamLayers of the miner; the
+	-- rest are destroyed and rebuilt from `opened` (which IS the cave, and is untouched by any of
+	-- this) when the miner comes back. The number is set by the LIGHT, not by taste: the mine has
+	-- no sun, and the best lamp in the game is BaseRadius + MaxLevel * PerLevel = 26 + 8*6 = 74
+	-- studs = 12.3 layers. 16 layers is 96 studs — a third further than the best lamp money can
+	-- buy can light, so nothing a player could have seen is ever missing.
+	StreamLayers = 16,
+	-- …and how far they have to move before the band is recomputed. Without it the sweep re-derives
+	-- the face set every time the miner steps down one cell, for no change at all.
+	StreamHysteresis = 4,
+	StreamPeriod = 0.35, -- seconds between band checks
+	-- Built outright, synchronously, around a teleport destination before the miner is moved there:
+	-- DESCEND aims at an opened (empty) cell, and if the floor under it has not been built yet the
+	-- miner falls through it to the bottom of the shaft.
+	StreamLandingLayers = 2,
+
+	-- The bedrock ring stands this many cells tall above the mouth. One cell is 6 studs and a
+	-- Roblox jump clears about 7.2, so a one-cell lip lets a player hop out of the mine and stand
+	-- on the roof of the world. Used by Mine.shell.
+	RimCells = 3,
 }
 
 -- ── Ores ─────────────────────────────────────────────────────────────────────
@@ -67,7 +107,12 @@ Config.Ores = {
 		{ 128, 232, 246 }, -- Diamond
 		{ 152, 92, 224 }, -- Obsidian
 	},
-	Value = { [0] = 0, 6, 20, 80, 340, 1400 }, -- cash per unit, before the rebirth multiplier
+	-- Cash per unit, before the rebirth multiplier. The top of the ladder used to be 1400 against
+	-- a 4-cell obsidian population, which put 46% of a whole rebirth-0 shaft into FOUR cells:
+	-- finding them or not was the difference between buying the first rebirth and mining the
+	-- entire cave. Flattening the top two tiers (1400 -> 800, 340 -> 240) and making them commoner
+	-- (below) takes that to 15.7%, which Mine.spec now asserts.
+	Value = { [0] = 0, 6, 20, 70, 240, 800 },
 	Hardness = { [0] = 10, 18, 30, 52, 92, 165 }, -- block hit points at layer 0
 	Yield = { [0] = 0, 1, 1, 1, 1, 1 }, -- ore units a broken block drops
 
@@ -84,8 +129,15 @@ Config.Ores = {
 	-- The ladder below is spread over the 24 layers that actually exist, and the census in
 	-- Mine.spec plus the reachability gate in Ore.spec now fail if either number drifts out from
 	-- under the other.
-	MinLayer = { 1, 4, 9, 14, 19 },
-	BaseWeight = { 0.150, 0.070, 0.030, 0.020, 0.008 },
+	--
+	-- THE LADDER ALSO HAS TO FIT INSIDE ONE SHAFT'S WORTH OF DIGGING. Spread over layers
+	-- 1/4/9/14/19 with the old base weights, a rebirth-0 shaft held 7 diamond and 4 obsidian
+	-- cells — a census floor of 3 with a margin of one cell, and a first rebirth that was a
+	-- lottery over four blocks. Every tier now starts shallower and commoner: measured on the
+	-- rebirth-0 shaft, 110 copper / 91 iron / 49 gold / 27 diamond / 10 obsidian, and the richest
+	-- four cells are 15.7% of the shaft rather than 46%.
+	MinLayer = { 1, 3, 6, 10, 14 },
+	BaseWeight = { 0.150, 0.100, 0.060, 0.036, 0.018 },
 	DepthGain = { -0.0022, 0.0013, 0.0018, 0.0016, 0.0012 },
 	MaxWeight = { 0.150, 0.150, 0.110, 0.080, 0.060 },
 }
@@ -115,22 +167,31 @@ Config.Economy = {
 -- Wipes cash, haul, upgrades and this run's depth; keeps rebirths, best depth and total cash.
 -- In exchange: a permanent cash multiplier, a deeper depth wall, and a NEW cave seed.
 --
--- THE PRICE IS CHARGED AGAINST A FINITE SHAFT. A player's only income is selling ore out of
--- their own cave, and that cave holds a fixed, countable amount of it — once mined cells stop
--- growing back there is no second helping. The shipped numbers asked $30 000 of a rebirth-0
--- shaft that contains $5 876 of ore in total, and then multiplied the price by 3.2 per rebirth
--- against a world that only grows about 1.21x per rebirth: mining out EVERY cell of EVERY cave
--- paid at most 38% of the next rebirth, at every one of the 25 levels. The depth wall could
--- never move, so the deep ores could never be reached, so the second half of the game was dead.
+-- THE PRICE IS CHARGED AGAINST A FINITE SHAFT, AND IT IS NOW QUOTED IN ONE. A player's only
+-- income is selling ore out of their own cave, that cave holds a fixed countable amount of it,
+-- and mined cells do not grow back — across a relog either, since this version saves them. So the
+-- only unit the price can honestly be written in is "how much of this cave do I have to mine",
+-- and that is exactly what Config.Prestige.PriceFraction is.
 --
--- Two things changed. The growth now tracks the world's own measured growth, and the price is
--- quoted in ORE rather than in cash: it is multiplied by the same rebirth multiplier that
--- inflates every sale, so a reward that makes your ore worth 20x does not also make the next
--- rebirth 20x cheaper. Prestige.spec now walks all 25 levels and fails if any of them costs more
--- than half of what its own cave contains.
+-- Two hand-tuned curves failed at this before. The shipped one asked $30 000 of a rebirth-0 shaft
+-- containing $5 876 of ore and then grew 3.2x per rebirth against a world growing 1.21x: every
+-- one of the 25 rebirths cost more than its whole cave, so the wall never moved and the second
+-- half of the game was dead. Its replacement fixed rebirth 0 (3.5x) and broke the middle: the
+-- world's value curve triples between the first two rebirths and then flattens as the ore weights
+-- saturate, so no geometric can follow it, and rebirths 4-17 ended up costing 4-7% of their own
+-- cave — a ladder you climb without ever looking at the mine.
+--
+-- Prestige.requirement therefore integrates THE ORE TABLE ITSELF over every layer the current
+-- wall exposes. The price cannot drift away from the world because it is computed from it.
+-- Prestige.spec censuses all 25 real seeded caves and fails if any of them falls outside a
+-- two-sided band — too expensive AND too cheap are both failures now.
 Config.Prestige = {
-	BaseRequirement = 3500,
-	RequirementGrowth = 1.21, -- measured: the shaft's total ore value grows 1.2124x per rebirth
+	-- How much of your own cave the next rebirth costs. The price is no longer a hand-tuned
+	-- curve at all: Prestige.requirement integrates the ore table over every layer the current
+	-- wall exposes and charges this fraction of it, so the price tracks the world by construction
+	-- at all 25 levels instead of being fitted to it. Measured against the real seeded caves,
+	-- every rebirth costs between 27% and 35% of the shaft it is charged against.
+	PriceFraction = 0.24,
 	MultiplierPerRebirth = 0.8, -- cash multiplier = 1 + rebirths * 0.8
 	MaxRebirths = 25,
 }

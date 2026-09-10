@@ -20,7 +20,7 @@ local ec = Config.Economy
 
 local function newProfile()
 	return {
-		cash = 0, totalCash = 0,
+		cash = 0, totalCash = 0, runEarned = 0,
 		inventory = {},
 		pickTier = 1, backpackLevel = 0, lampLevel = 0,
 		rebirths = 0, depth = 0, bestDepth = 0,
@@ -136,20 +136,66 @@ end
 do
 	local p = newProfile()
 	Economy.addOre(p, Config, 1, 3) -- 3 copper  = 18
-	Economy.addOre(p, Config, 3, 2) -- 2 gold    = 160
-	eq(Economy.haulValue(Config, Ore, p.inventory, 1), 178, "a haul is worth the sum of its ore")
-	eq(Economy.haulValue(Config, Ore, p.inventory, 1.8), math.floor(178 * 1.8), "the multiplier applies to the whole haul")
+	Economy.addOre(p, Config, 3, 2) -- 2 gold    = 140
+	eq(Economy.haulValue(Config, Ore, p.inventory, 1), 158, "a haul is worth the sum of its ore")
+	eq(Economy.haulValue(Config, Ore, p.inventory, 1.8), math.floor(158 * 1.8), "the multiplier applies to the whole haul")
 	eq(Economy.haulValue(Config, Ore, {}, 5), 0, "an empty haul is worth nothing")
 	eq(Economy.haulValue(Config, Ore, { [0] = 99 }, 1), 0, "stone is worth nothing however much of it you carry")
 
 	local got = Economy.sell(p, Config, Ore, 1)
-	eq(got, 178, "selling pays out the haul value")
-	eq(p.cash, 178, "into the wallet")
-	eq(p.totalCash, 178, "and onto the lifetime total")
+	eq(got, 158, "selling pays out the haul value")
+	eq(p.cash, 158, "into the wallet")
+	eq(p.totalCash, 158, "and onto the lifetime total")
+	eq(p.runEarned, 158, "…and onto THIS RUN's earnings, which is what the rebirth gate reads")
 	eq(Economy.carried(p), 0, "the backpack is emptied")
 	eq(next(p.inventory), nil, "…completely")
 	eq(Economy.sell(p, Config, Ore, 1), 0, "selling an empty backpack pays nothing")
-	eq(p.cash, 178, "and does not touch the wallet")
+	eq(p.cash, 158, "and does not touch the wallet")
+	eq(p.runEarned, 158, "…nor this run's earnings")
+end
+
+do
+	-- RUN EARNINGS ARE MONOTONE, AND THAT IS THE WHOLE POINT OF THEM. The rebirth gate used to
+	-- read the wallet, and the shop offers more than a whole shaft's worth of upgrades, so a
+	-- player could buy themselves permanently out of a rebirth in a cave that does not refill.
+	-- Every sale adds to this figure and NOTHING subtracts from it.
+	local p = newProfile()
+	Economy.addOre(p, Config, 4, 3) -- 3 diamond
+	local first = Economy.sell(p, Config, Ore, 1)
+	Economy.addOre(p, Config, 2, 5) -- 5 iron
+	local second = Economy.sell(p, Config, Ore, 1)
+	eq(p.runEarned, first + second, "earnings accumulate across sales")
+	local before = p.runEarned
+	local cashBefore = p.cash
+	Economy.buyPickaxe(p, Config)
+	Economy.buyBackpack(p, Config)
+	Economy.buyLamp(p, Config)
+	truthy(p.cash < cashBefore, "CONTROL: the shopping really did take cash out of the wallet ("
+		.. cashBefore .. " -> " .. p.cash .. ")")
+	eq(p.runEarned, before, "spending every upgrade track does not move this run's earnings")
+	-- CASH CAN NEVER EXCEED EARNINGS. The server leans on exactly this to migrate a profile
+	-- written before runEarned existed (it credits the cash in hand rather than zero), and it is
+	-- also what makes "earned" a strictly weaker gate than "held" rather than a different one.
+	do
+		local m = newProfile()
+		local violations = 0
+		for step = 1, 60 do
+			Economy.addOre(m, Config, (step % 5) + 1, 2)
+			if step % 3 == 0 then Economy.sell(m, Config, Ore, 1 + (step % 4) * 0.8) end
+			if step % 4 == 0 then Economy.buyPickaxe(m, Config) end
+			if step % 5 == 0 then Economy.buyBackpack(m, Config) end
+			if step % 7 == 0 then Economy.buyLamp(m, Config) end
+			if m.cash > m.runEarned then violations += 1 end
+		end
+		eq(violations, 0, "cash never exceeds this run's earnings, over 60 mixed sells and buys")
+		truthy(m.runEarned > 0, "CONTROL: that walk really did earn something ($" .. m.runEarned .. ")")
+	end
+
+	-- …and the multiplier is inside the figure, because the price is too.
+	local q = newProfile()
+	Economy.addOre(q, Config, 4, 1)
+	eq(Economy.sell(q, Config, Ore, 2.5), math.floor(Ore.value(Config, 4) * 2.5), "a x2.5 sale pays x2.5")
+	eq(q.runEarned, math.floor(Ore.value(Config, 4) * 2.5), "…and banks x2.5 of earnings")
 end
 
 do
@@ -158,11 +204,11 @@ do
 	local p = newProfile()
 	Economy.addOre(p, Config, 5, 1)
 	Economy.sell(p, Config, Ore, 1)
-	eq(p.cash, 1400, "one obsidian is 1400")
-	eq(p.totalCash, 1400, "lifetime 1400")
+	eq(p.cash, 800, "one obsidian is 800")
+	eq(p.totalCash, 800, "lifetime 800")
 	Economy.buyPickaxe(p, Config)
-	eq(p.cash, 1400 - 260, "the pickaxe came out of the wallet")
-	eq(p.totalCash, 1400, "but the lifetime total is untouched by spending")
+	eq(p.cash, 800 - 260, "the pickaxe came out of the wallet")
+	eq(p.totalCash, 800, "but the lifetime total is untouched by spending")
 end
 
 --============================================================================ THE CONTROL

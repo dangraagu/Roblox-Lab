@@ -142,14 +142,24 @@ function Economy.haulValue(cfg: any, Ore: any, inventory: any, mult: number): nu
 	return math.floor(total * (mult or 1))
 end
 
--- Empty the backpack into the wallet. `totalCash` is the LIFETIME figure and only ever grows:
--- the rebirth threshold and the leaderboard are both built on it, so spending must not move it.
+-- Empty the backpack into the wallet.
+--
+-- TWO FIGURES ONLY EVER GROW, AND NEITHER OF THEM IS THE WALLET. `totalCash` is the lifetime
+-- total across every rebirth — the leaderboard and the lifetime readout are built on it.
+-- `runEarned` is the same thing scoped to THIS run, and it is what Prestige.canRebirth reads.
+--
+-- The rebirth gate used to read `cash`, and that is a gate a player can spend themselves out of
+-- for ever: the three upgrade tracks offer more than a whole shaft's worth of purchases, each one
+-- affordable at the moment it is shown, against a cave that does not refill. Earnings cannot be
+-- spent, so shopping can no longer cost a player the rebirth — and rebirth wipes the upgrades
+-- anyway, which is exactly why competing with it was never a real choice.
 function Economy.sell(profile: any, cfg: any, Ore: any, mult: number): number
 	local value = Economy.haulValue(cfg, Ore, profile.inventory, mult)
 	profile.inventory = {}
 	if value <= 0 then return 0 end
 	profile.cash += value
 	profile.totalCash = (profile.totalCash or 0) + value
+	profile.runEarned = (profile.runEarned or 0) + value
 	return value
 end
 

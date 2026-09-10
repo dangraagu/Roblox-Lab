@@ -12,40 +12,46 @@ are revealed → haul up with 🛗 SURFACE + SELL → buy pickaxe / backpack / l
 the bedrock depth wall → ♻️ REBIRTH for a permanent cash multiplier, a deeper wall and a NEW cave
 seed. Single shared server, one private shaft per player, no PvP.
 
-## State — v1 built + tested + REVIEW FINDINGS CLOSED; NEVER RUN BY A PERSON; NOT published
-- **1681 luau-CLI unit tests pass** (Ore 1272, Mine 100, Economy 122, Prestige 117, Responsive 70).
-- **116 headless assertions pass** (`robloxemu/check_deepvein.luau`) — the real server and the
-  real HUD boot against the fake engine, a fresh shaft lands exactly 115 BaseParts in the
-  workspace, digging breaks blocks and reveals neighbours, a mined block STAYS mined, selling
-  pays, the elevator moves the character, and rebirth rebuilds a different cave.
-- **REVIEW.md's four blocking findings are closed**, plus two more the review did not find:
-  1. *Mined blocks grew back.* `Mine.reveal` collected solid faces without consulting `opened`,
-     although the air half of the same loop did. Any neighbour you broke rebuilt the cell you had
-     just mined, at full hit points with a fresh ore payload. Fixed in `Mine.luau`; the assertion
-     lives in `Mine.spec` ("reveal never reports an already-mined cell as a solid face again").
-  2. *SURFACE dropped you down your own hole.* The landing is a fixed cell whose floor was
-     ordinary breakable rock to bedrock. There is now a `SurfaceDeck_<uid>` — anchored, no
-     ClickDetector, filling the top stud of the cell below the landing point, so the destination's
-     support cannot be removed by any game mechanic.
-  3. *One reveal instantiated unbounded Parts.* `RevealBudget` caps AIR cells, not the solid list
-     that comes out of them (measured: 334 parts at rebirth 0, 3031 at rebirth 24, in ONE frame).
-     Solids now go through a per-player build queue drained `Config.Mine.PartsPerFrame` at a time.
-  4. *Obsidian could not spawn.* MinLayer 26 vs a rebirth-0 wall of 24. The ladder moved to
-     `{1, 4, 9, 14, 19}` with richer deep tiers; `Ore.spec` now asserts every tier is legal above
-     the wall and `Mine.spec` censuses the rebirth-0 shaft for at least 3 cells of each.
-  5. *(new) The restored elevator column was solid rock.* The rejoin restore marked each column
-     cell opened but never removed the Part built for it by the reveal of the cell above — 18 of
-     24 layers, with DESCEND aimed at the bottom. `openCell` now destroys anything standing in a
-     cell it opens.
-  6. *(new) The rebirth ladder was mathematically unreachable.* Mining out EVERY cell of a
-     rebirth-0 shaft pays $5,876 against a $30,000 requirement, and the gap widened at every one
-     of the 25 levels (0.196x, 0.382x, … 0.000x). Finding 1's infinite currency printer was
-     hiding it. `Prestige.requirement` is now quoted in ORE (multiplied by the same rebirth
-     multiplier that inflates every sale) and grows 1.21x per rebirth, which is the world's own
-     measured growth; `Prestige.spec` walks all 25 levels and demands 2x headroom.
+## State — v1 built + tested; REVIEW-3's last blocker closed; NEVER RUN BY A PERSON; NOT published
+- **1866 luau-CLI unit tests pass** (Ore 1272, Mine 173, Economy 131, Prestige 220, Responsive 70).
+- **Two headless gates, both green.** `tests/walk.luau` (ours, 116 passed) and
+  `robloxemu/check_deepvein.luau` (the emulator's, 136 passed).
+- **REVIEW-4 closed the unload.** A fully excavated deep shaft was 10 097 Parts rebuilt on every
+  join; it is 5. The worst state the game can reach — a lattice dig at rebirth 24, which is what a
+  strip mine is and which REVIEW-3's `<= 12000` bound never measured — was 19 115 and is 1 124.
+  Two changes, covering disjoint halves: the bedrock box is `Mine.shell`'s five slabs instead of
+  10 097 cubes, and rock/ore Parts exist only within `Config.Mine.StreamLayers` (16) layers of the
+  miner. See REVIEW-4.md.
+- **`tests/walk.luau` plays the game**, with the miner standing where a player would have to
+  stand: spawn → dig → fill the bag → SURFACE+SELL → shop → descend → repeat → rebirth. Last run:
+  772 swings, 195 blocks broken, 4 surface trips, layer 24, $10 016 earned against a $6 473 price,
+  **peak 491 Parts held** (1 085 for the same dig before REVIEW-4), worst swing 6.0 studs.
+- **REVIEW-2's eight open findings and three regressions are closed**, plus one defect neither
+  review found (the reward gradient inverted below layer 40). See REVIEW-3.md for the measurement
+  behind every number. The load-bearing changes:
+  1. *The cave is saved.* `Mine.packOpened`/`unpackOpened`/`faces` — one bit per cell, 336
+     characters for a fully dug rebirth-0 shaft, 4 224 at the deepest wall. Before this, a relog
+     regrew everything but the centre column and the same ore could be sold for ever.
+  2. *The rebirth gate is on `runEarned`, not on `cash`.* Earnings only go up, so the three
+     upgrade tracks can no longer spend a player permanently out of a rebirth.
+  3. *The price is computed from the ore table*, not fitted to it: `Prestige.requirement` =
+     `PriceFraction` x the analytic value of the whole shaft x the multiplier. All 25 levels now
+     cost 2.88x-3.54x of their own cave; they used to run 3.5x .. 27x.
+  4. *Hardness stops ramping at layer 40* (`Config.Mine.HardnessCapLayer`). It ramped for ever
+     while the ore weights saturate, so expected value per hit point peaked at 1.2065 on layer 40
+     and fell to 0.3085 by layer 312 — every rebirth past the fourth bought a WORSE mine.
+  5. *The ore ladder starts shallower and flatter* (MinLayer 1/3/6/10/14, obsidian 1400 -> 800).
+     The richest four cells were 46% of a rebirth-0 shaft; they are 15.7% now.
+  6. *The surface deck is buried a stud deeper, inset 10%, and CanQuery = false*, so nothing is
+     coplanar with it and no click can resolve to it.
+  7. *The build pump runs on a lease, not a latch*, and pcalls each cell. One bad Part costs one
+     Part; a pump killed by anything at all is replaced within a second.
+  8. *There is a SpawnLocation* (`workspace.MinersRest`), west of shaft 0 and clear of every mine.
+- A 15-mutation sweep killed 13 of 13 real defects; both controls stayed green. Table in REVIEW-3.
 - `luau-compile` clean on all 10 sources; `luau-analyze` clean apart from Roblox global/type noise.
 - **Not published**: no experience, no place ID, no gamepasses, no maturity questionnaire.
-- **Not play-tested**: balance is arithmetic only. See README "What is NOT built yet".
+- **Never rendered**: no material, colour, lighting, camera, click reach or humanoid-on-a-6-stud-
+  grid observation exists anywhere. That is the single largest remaining risk.
 
 ## Core model / important invariants
 - **The cave is a pure function.** `Mine.kindAt(cfg, world, x, y, z)` → `air | rock | bedrock |
@@ -57,10 +63,22 @@ seed. Single shared server, one private shaft per player, no PvP.
   `a * b` near 2^32 is 2^64 and silently loses its low bits in a double).
 - **Determinism**: `seed = WorldSeed * 7919 + rebirths * 104729`. Same rebirth count = same cave
   for everybody, which is the only thing that makes the depth leaderboard mean anything.
-- **The shaft is a sealed box.** Bedrock ring at x/z = 1 and GridW at every layer, bedrock floor
-  at `maxLayer + 1`, open only at the top. `Mine.inWorld` bounds it; the reveal flood cannot
-  escape upward. The layer-0 ring is instantiated **three cells tall** (`RIM_MULT`) because one
-  6-stud cell is under a Roblox jump and a player could hop out of the mine.
+- **The shaft is a sealed box, and the box is FIVE PARTS.** Bedrock ring at x/z = 1 and GridW at
+  every layer, bedrock floor at `maxLayer + 1`, open only at the top. `Mine.inWorld` bounds it; the
+  reveal flood cannot escape upward. Those cells are never breakable and never change, so they are
+  `Mine.shell`'s four wall slabs and one floor slab rather than one cube each — that was 100% of
+  REVIEW-3's 10 097. The walls stand `Config.Mine.RimCells` (3) cells proud of the mouth because
+  one 6-stud cell is under a Roblox jump and a player could hop out of the mine. The floor slab is
+  the only bedrock carrying a ClickDetector: the depth wall has to explain itself.
+- **The shaft STREAMS by depth.** A cell Part exists only while its layer is within
+  `Config.Mine.StreamLayers` (16 = 96 studs, a third past the best lamp's 74) of the miner.
+  `bandOf` / `setBand` / `restream` / `streamTo` in the server; `Mine.faces` takes the window.
+  `opened` is untouched by any of it — the Parts were always derived from it, so unloading one
+  forgets a rendering, not a dig. Three things this has to keep doing, all mutation-tested: a
+  teleport builds its own 3x3 landing column SYNCHRONOUSLY before the CFrame moves (or the miner
+  falls through a floor that does not exist yet), a half-broken block keeps its hit points across
+  an unload, and `drainBuild` re-checks the band so a queue filled for a band the miner has left is
+  dropped rather than built one frame behind the unload that was meant to prevent it.
 - **Reveal: walk with 6, look with 26.** Flood through open cells with 6-neighbour connectivity
   (what you can move through), collect solid faces with all 26 (what you can see). Collecting
   with 6 leaves the four corner columns unbuilt — a diagonal gap straight out of the world.
@@ -74,29 +92,34 @@ seed. Single shared server, one private shaft per player, no PvP.
   a headless run, so a cooldown built on it refuses every swing the emulator makes and the entire
   dig loop becomes untestable. `tick()` is the clock the harness advances.
 - **Rebirth is the only irreversible action** and is granted inside an atomic flush: snapshot →
-  `Prestige.apply` → `saveProfile`; if the write did not persist, roll the snapshot back.
+  `Prestige.apply` → `saveProfile`; if the write did not persist, roll the snapshot back. The
+  snapshot must include `runEarned` and `openedBits`, and `openedBitsOf` refuses to pack while
+  `worlds[plr].rebirths ~= profile.rebirths` — otherwise the flush writes the OLD cave's dug cells
+  under the NEW rebirth's number and the new cave arrives pre-drilled with holes in wrong places.
 - **No silent no-ops.** Every refused action sends a Toast. That is what "i cant even place a
   seed" was in the sibling game.
 
 ## Files
 Server `src/server/Main.server.luau`; client `src/client/Hud.client.luau`; shared
 `Config / Mine / Ore / Economy / Prestige / Fx / FxClient / Responsive.luau`;
-tests `tests/*.spec.luau`; headless gate `../robloxemu/check_deepvein.luau`.
+tests `tests/*.spec.luau`; headless gates `tests/walk.luau` (ours, editable) and
+`../robloxemu/check_deepvein.luau` (the emulator's, read-only). Reviews: `REVIEW.md`,
+`REVIEW-2.md`, `REVIEW-3.md`, `REVIEW-4.md`.
 
 ## Things the suite is known NOT to see
-A mutation sweep ran 12 real defects through the gates; all 12 turned it red, and two controls
-(dropping `part.CastShadow = false`, retuning `Config.Save.AutosaveSeconds`) stayed green as they
-should. What is genuinely uncovered: anything visual (nothing renders), the `plr.Parent == nil`
+Two mutation sweeps have run: 13 real defects in REVIEW-3 and 12 in REVIEW-4, all 25 killed, with
+four controls (deck colour, `AutosaveSeconds`, shell slab colour, `StreamPeriod`) correctly
+unnoticed. What is genuinely uncovered: anything visual (nothing renders), the `plr.Parent == nil`
 race in `onPlayerAdded` (the emulator's DataStore is synchronous and never yields, so no ordering
-it can produce reaches it), and the real `MaxActivationDistance` — the check fires ClickDetectors
-directly and never checks that a player is actually close enough to swing.
+it can produce reaches it), and whether a Roblox humanoid can actually walk and jump on a 6-stud
+grid of cubes. **Reach is now half-covered**: both gates stand the miner on the block before
+swinging (worst measured 6.0 studs against `ReachStuds = 26`), but neither engine-checks
+`MaxActivationDistance` itself. Also uncovered: a player who outruns the streamer in a long fall —
+the emulator has no physics.
 
 ## Next
 1. **Open it in Studio and play it.** Nothing here has been seen by a human. First real session
-   will surface camera/click/fall problems the emulator cannot.
-2. Fix the remaining untidy edges: no unload of blocks far above the player, and no
-   `SpawnLocation` anywhere (the game relies on `CharacterAdded` CFrame-ing the root part, which
-   the headless check does exercise, but Roblox will pick its own spot for the frame before it).
-3. Create the experience, upload, run the content-maturity questionnaire, set Public.
-4. Then: auto-sell upgrade, a drill (area mining), codes, gamepasses (2x cash, auto-sell, lamp),
+   will surface camera/click/fall problems no emulator can.
+2. Create the experience, upload, run the content-maturity questionnaire, set Public.
+3. Then: auto-sell upgrade, a drill (area mining), codes, gamepasses (2x cash, auto-sell, lamp),
    a per-rebirth biome palette so deep caves look different rather than just paying more.

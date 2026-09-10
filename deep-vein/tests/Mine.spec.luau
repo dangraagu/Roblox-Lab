@@ -267,14 +267,135 @@ do
 	local line = ""
 	for t = 0, Config.MaxOre do line ..= " " .. Ore.name(Config, t) .. "=" .. counts[t] end
 	print(string.format("  rebirth-0 shaft: %d rock cells;%s", rock, line))
+	-- The bar is 10, not 3. At 3 the census is one tuning nudge from red — the shipped table
+	-- produced exactly 4 obsidian cells against a floor of 3, which is a margin of one cell in a
+	-- 7x7x24 box. A tier a player can only find by luck is a tier they will conclude is broken.
 	for t = 1, Config.MaxOre do
-		truthy(counts[t] >= 3, Ore.name(Config, t) .. " actually occurs in the rebirth-0 shaft ("
-			.. counts[t] .. " cells in " .. rock .. " rock)")
+		truthy(counts[t] >= 10, Ore.name(Config, t) .. " occurs often enough in the rebirth-0 shaft"
+			.. " to be findable (" .. counts[t] .. " cells in " .. rock .. " rock, floor 10)")
 	end
-	-- CONTROL: the census can tell tiers apart, so "every tier >= 3" cannot pass by counting
+	-- CONTROL: the census can tell tiers apart, so "every tier >= 10" cannot pass by counting
 	-- everything as one tier.
 	truthy(counts[1] > counts[5], "CONTROL: the census still ranks common above rare")
 	truthy(counts[0] > 0, "CONTROL: plain stone is still the bulk of the shaft")
+
+	-- AND NO HANDFUL OF CELLS MAY BE THE SHAFT. 46% of the rebirth-0 shaft's value was once four
+	-- obsidian cells, which makes the first rebirth "find 3 of 4 needles in a 7x7x24 box" rather
+	-- than "mine your cave" — and makes the balance figure the whole ladder rests on a lottery.
+	local values = {}
+	local total = 0
+	for y = 1, w0.maxLayer do
+		for x = 2, W - 1 do
+			for z = 2, W - 1 do
+				local c = Mine.cell(Config, Ore, w0, x, y, z)
+				if c.kind == "rock" then
+					local v = Ore.value(Config, c.ore) * Ore.yieldOf(Config, c.ore)
+					total += v
+					if v > 0 then values[#values + 1] = v end
+				end
+			end
+		end
+	end
+	table.sort(values, function(a, b) return a > b end)
+	local top4 = 0
+	for i = 1, math.min(4, #values) do top4 += values[i] end
+	local share = top4 / math.max(1, total)
+	print(string.format("  rebirth-0 shaft value: %d, richest 4 cells %d (%.1f%%)", total, top4, 100 * share))
+	truthy(share <= 0.25, "no four cells hold more than a quarter of the rebirth-0 shaft's value ("
+		.. string.format("%.1f%%", 100 * share) .. " of $" .. total .. ")")
+	-- CONTROL: the same measurement DOES notice a lottery shaft.
+	do
+		local spike = table.clone(Config)
+		spike.Ores = table.clone(Config.Ores)
+		spike.Ores.Value = { [0] = 0, 0, 0, 0, 0, Config.Ores.Value[5] }
+		local sv, st = {}, 0
+		for y = 1, w0.maxLayer do
+			for x = 2, W - 1 do
+				for z = 2, W - 1 do
+					local c = Mine.cell(spike, Ore, w0, x, y, z)
+					if c.kind == "rock" then
+						local v = Ore.value(spike, c.ore) * Ore.yieldOf(spike, c.ore)
+						st += v
+						if v > 0 then sv[#sv + 1] = v end
+					end
+				end
+			end
+		end
+		table.sort(sv, function(a, b) return a > b end)
+		local s4 = 0
+		for i = 1, math.min(4, #sv) do s4 += sv[i] end
+		truthy(s4 / math.max(1, st) > 0.25,
+			"CONTROL: a shaft whose whole value is one rare tier IS caught by that measurement")
+	end
+end
+
+--=================================================== 4b. DEEPER MUST NEVER PAY LESS PER SWING
+
+-- THE ONE PROMISE THE WHOLE REBIRTH LADDER RESTS ON. A rebirth buys a deeper wall, and a deeper
+-- wall is only a reward if the rock down there pays better. Block hit points grew by
+-- HardnessPerLayer FOR EVER while the ore weights clamp at MaxWeight a few dozen layers down, so
+-- past that point every extra layer was strictly worse: measured on the shipped numbers, the
+-- expected ore value per hit point peaked at 1.2065 on layer 40 and fell to 0.3085 by layer 312,
+-- a 3.9x DECLINE across exactly the range the last twenty rebirths open up. README and CLAUDE.md
+-- both claimed the opposite ("deeper always pays more per swing") and nothing measured it.
+do
+	local function perHp(y: number): number
+		local ev, ehp, acc = 0, 0, 0
+		for t = Config.MaxOre, 1, -1 do
+			local wt = Ore.weight(Config, t, y)
+			acc += wt
+			ev += wt * Ore.value(Config, t) * Ore.yieldOf(Config, t)
+			ehp += wt * Mine.hardnessAt(Config, Ore, t, y)
+		end
+		ehp += (1 - acc) * Mine.hardnessAt(Config, Ore, 0, y)
+		return ev / ehp
+	end
+
+	local deepest = Mine.maxLayer(Config, Config.Prestige.MaxRebirths - 1)
+	local run, worst, worstAt = 0, math.huge, -1
+	for y = 1, deepest do
+		local v = perHp(y)
+		if v > run then run = v end
+		if v / run < worst then worst, worstAt = v / run, y end
+	end
+	print(string.format("  reward gradient: worst layer pays %.1f%% of the best layer above it (layer %d);"
+		.. " layer 1 %.4f, layer %d %.4f", 100 * worst, worstAt, perHp(1), deepest, perHp(deepest)))
+	-- 0.85 rather than 1.0 because hardness is floored to whole hit points, which makes a small
+	-- sawtooth inside each depth band; what must never happen is a sustained DECLINE.
+	truthy(worst >= 0.85, "no layer pays less than 85% of the best layer above it (worst "
+		.. string.format("%.3f", worst) .. " at layer " .. worstAt .. ")")
+	truthy(perHp(deepest) >= 0.95 * run,
+		"the deepest layer in the game still pays within 5% of the best layer anywhere ("
+			.. string.format("%.4f vs a best of %.4f", perHp(deepest), run) .. ")")
+	truthy(perHp(deepest) > perHp(1) * 4,
+		"…and far better than the surface (" .. string.format("%.4f vs %.4f", perHp(deepest), perHp(1)) .. ")")
+
+	-- CONTROL: the measurement must be able to FAIL. An unbounded hardness ramp is exactly the
+	-- defect it exists to catch.
+	do
+		local runaway = table.clone(Config)
+		runaway.Mine = table.clone(Config.Mine)
+		runaway.Mine.HardnessCapLayer = math.huge
+		local function perHp2(y: number): number
+			local ev, ehp, acc = 0, 0, 0
+			for t = runaway.MaxOre, 1, -1 do
+				local wt = Ore.weight(runaway, t, y)
+				acc += wt
+				ev += wt * Ore.value(runaway, t) * Ore.yieldOf(runaway, t)
+				ehp += wt * Mine.hardnessAt(runaway, Ore, t, y)
+			end
+			ehp += (1 - acc) * Mine.hardnessAt(runaway, Ore, 0, y)
+			return ev / ehp
+		end
+		local r2, w2 = 0, math.huge
+		for y = 1, deepest do
+			local v = perHp2(y)
+			if v > r2 then r2 = v end
+			if v / r2 < w2 then w2 = v / r2 end
+		end
+		truthy(w2 < 0.85, "CONTROL: an uncapped hardness ramp IS caught by that measurement ("
+			.. string.format("%.3f", w2) .. ")")
+	end
 end
 
 --============================================================================ 5. cells and yields
@@ -510,6 +631,453 @@ do
 	eq(badCol, 0, "the restored column is the centre column, top to bottom")
 	eq(#Mine.column(Config, w0, 0), 0, "a player who never dug gets no column")
 	eq(#Mine.column(Config, w0, 9999), w0.maxLayer, "a column can never be dug past the depth wall")
+end
+
+--=================================================== 7b. THE CAVE HAS TO SURVIVE A REJOIN
+
+-- THE CURRENCY PRINTER. `opened` is the only record that a block has been dug out — the generator
+-- is stateless and calls a mined cell "rock" for ever — so when `opened` lived only in server
+-- memory, every cell of the cave except the centre elevator column was standing again the moment
+-- a player rejoined, ore and all. Measured end to end against the real server: mine the eight ore
+-- cells exposed in the mouth, sell for $48, leave, come back, and all eight are back; sell them
+-- again for another $48; repeat at will. The rebirth price is charged against a finite shaft, so
+-- an income a player resets by leaving and coming back is not a balance problem, it is the whole
+-- economy having no bottom.
+--
+-- So the set has to be SAVED, which means it has to fit in a DataStore. One bit per cell of the
+-- box, six bits per character: at the deepest wall in the game that is 9x9x314 = 25 434 cells =
+-- 4 239 characters, and a brand new miner's mouth is under 60.
+
+do
+	local BOX = W * W * (w0.maxLayer + 2)
+
+	-- 1. the index is a BIJECTION over the box. Two cells sharing an index is two cells sharing a
+	--    mined/not-mined bit, which is a block that vanishes when its neighbour is dug.
+	local seenIdx, dupes, outOfRange = {}, 0, 0
+	for y = 0, w0.maxLayer + 1 do
+		for x = 1, W do
+			for z = 1, W do
+				local i = Mine.cellIndex(Config, w0, x, y, z)
+				if i == nil or i < 0 or i >= BOX then outOfRange += 1
+				elseif seenIdx[i] then dupes += 1
+				else seenIdx[i] = true end
+			end
+		end
+	end
+	eq(dupes, 0, "no two cells of the shaft share a saved-state bit")
+	eq(outOfRange, 0, "every cell of the shaft has a bit inside the box")
+	eq(Mine.cellIndex(Config, w0, 0, 1, 1), nil, "a cell outside the world has no bit")
+	eq(Mine.cellIndex(Config, w0, 5, w0.maxLayer + 9, 5), nil, "…including one below the floor")
+
+	-- 2. round trip. Hand-built set, exact keys back, nothing invented and nothing dropped.
+	local set = {}
+	for _, k in { Mine.key(5, 1, 5), Mine.key(2, 7, 8), Mine.key(9, 0, 1), Mine.key(4, 24, 6) } do
+		set[k] = true
+	end
+	local packed = Mine.packOpened(Config, w0, set)
+	truthy(type(packed) == "string" and #packed > 0, "a set of opened cells packs to a string")
+	local back = Mine.unpackOpened(Config, w0, packed)
+	local missing, invented = 0, 0
+	for k in pairs(set) do if not back[k] then missing += 1 end end
+	for k in pairs(back) do if not set[k] then invented += 1 end end
+	eq(missing, 0, "every opened cell comes back")
+	eq(invented, 0, "…and nothing else does")
+
+	-- 3. the empty and the corrupt cases, because a save can be either.
+	eq(Mine.packOpened(Config, w0, {}), "", "a miner who has dug nothing saves nothing")
+	eq(next(Mine.unpackOpened(Config, w0, "")), nil, "…and gets nothing back")
+	eq(next(Mine.unpackOpened(Config, w0, nil)), nil, "a missing save unpacks to an empty cave, not a crash")
+	eq(next(Mine.unpackOpened(Config, w0, "!!!***!!!")), nil,
+		"a save with not one usable character unpacks to an empty cave, not a crash")
+	-- …and one that IS made of usable characters still cannot describe a cell that does not exist.
+	-- (The alphabet is 64 of the printable characters, so most junk decodes to SOMETHING; what
+	-- matters is that everything it decodes to is a real cell of this world.)
+	local junk = Mine.unpackOpened(Config, w0, string.rep("_z-9Qk", 900))
+	local outside, junkCells = 0, 0
+	for k in pairs(junk) do
+		junkCells += 1
+		local jx, jy, jz = Mine.parseKey(k)
+		if not Mine.inWorld(Config, w0, jx, jy, jz) then outside += 1 end
+	end
+	truthy(junkCells > 0, "CONTROL: that junk really did decode to cells (" .. junkCells .. ")")
+	eq(outside, 0, "a corrupt save can never name a cell outside the world")
+
+	-- 4. it has to FIT. Mine every diggable cell of a rebirth-0 shaft and pack the lot.
+	local everything = {}
+	local cells = 0
+	for y = 0, w0.maxLayer do
+		for x = 2, W - 1 do
+			for z = 2, W - 1 do
+				everything[Mine.key(x, y, z)] = true
+				cells += 1
+			end
+		end
+	end
+	local full = Mine.packOpened(Config, w0, everything)
+	print(string.format("  a rebirth-0 shaft dug out completely (%d cells) saves as %d characters",
+		cells, #full))
+	truthy(#full <= 400, "a completely excavated rebirth-0 shaft fits in " .. #full .. " characters")
+	local fullBack = Mine.unpackOpened(Config, w0, full)
+	local n = 0
+	for _ in pairs(fullBack) do n += 1 end
+	eq(n, cells, "…and every one of them comes back")
+
+	-- 5. THE ORE DOES NOT COME BACK WITH THE SAVE. This is the pure half of the printer: the faces
+	--    a restored cave rebuilds must never include a cell the player already mined out.
+	local dug = {}
+	local minedOre = {}
+	for y = 1, 6 do
+		local k = Mine.key(5, y, 5)
+		dug[k] = true
+		local c = Mine.cell(Config, Ore, w0, 5, y, 5)
+		if c.ore > 0 then minedOre[k] = true end
+	end
+	-- take a couple of side cells too, so the set is not a bare column
+	for _, c in { { 4, 3, 5 }, { 6, 3, 5 }, { 5, 3, 4 } } do
+		dug[Mine.key(c[1], c[2], c[3])] = true
+		local cell = Mine.cell(Config, Ore, w0, c[1], c[2], c[3])
+		if cell.ore > 0 then minedOre[Mine.key(c[1], c[2], c[3])] = true end
+	end
+	local restored = Mine.unpackOpened(Config, w0, Mine.packOpened(Config, w0, dug))
+	local faces = Mine.faces(Config, Ore, w0, restored)
+	local resurrected, notSolid, notAdjacent = 0, 0, 0
+	local haveFace = {}
+	for _, f in faces do
+		haveFace[f.key] = true
+		if restored[f.key] then resurrected += 1 end
+		if not Mine.isSolid(Config, w0, f.x, f.y, f.z) then notSolid += 1 end
+		local touches = false
+		for dx = -1, 1 do for dy = -1, 1 do for dz = -1, 1 do
+			if restored[Mine.key(f.x + dx, f.y + dy, f.z + dz)] then touches = true end
+		end end end
+		if not touches then notAdjacent += 1 end
+	end
+	eq(resurrected, 0, "a restored cave rebuilds no cell the player had already dug out")
+	eq(notSolid, 0, "…and nothing that is not solid rock or bedrock")
+	eq(notAdjacent, 0, "…and nothing the player could not see from the space they opened")
+
+	-- CONTROL: it is not empty, and it is COMPLETE — every solid the player can see is there, or
+	-- the restored cave is a hole looking out of the world.
+	truthy(#faces > 20, "CONTROL: a restored cave does rebuild the walls around the dig ("
+		.. #faces .. " faces)")
+	local uncovered = 0
+	for k in pairs(restored) do
+		local x, y, z = Mine.parseKey(k)
+		for dx = -1, 1 do for dy = -1, 1 do for dz = -1, 1 do
+			local nx, ny, nz = x + dx, y + dy, z + dz
+			if Mine.inWorld(Config, w0, nx, ny, nz) and Mine.isSolid(Config, w0, nx, ny, nz) then
+				local nk = Mine.key(nx, ny, nz)
+				if not restored[nk] and not haveFace[nk] then uncovered += 1 end
+			end
+		end end end
+	end
+	eq(uncovered, 0, "every solid cell visible from the restored dig has a face to build")
+	eq(next(Mine.faces(Config, Ore, w0, {})), nil, "CONTROL: a cave nobody has dug rebuilds nothing")
+
+	-- 6. and the deepest cell, which is where DESCEND has to aim after a rejoin.
+	local d = Mine.deepestOpened(dug)
+	eq(d.y, 6, "the restored cave knows how deep it goes")
+	eq(d.x, 5, "…and where"); eq(d.z, 5, "…exactly")
+	eq(Mine.deepestOpened({}), nil, "a cave nobody has dug has no bottom to aim at")
+
+	-- 6b. THE WORST CASE IN THE GAME, MEASURED. Saving the cave bought a bounded lifetime cost:
+	--     a player who excavates their whole shaft at the deepest wall has that many Parts
+	--     rebuilt for them on every join, for ever, because nothing unloads. The bound is the
+	--     box, and this is the box — asserted so it cannot grow quietly.
+	do
+		local deep = Mine.world(Config, Config.Prestige.MaxRebirths - 1)
+		local everything = {}
+		local cells = 0
+		for y = 0, deep.maxLayer do
+			for x = 2, W - 1 do
+				for z = 2, W - 1 do
+					everything[Mine.key(x, y, z)] = true
+					cells += 1
+				end
+			end
+		end
+		local bits = Mine.packOpened(Config, deep, everything)
+		local faces = Mine.faces(Config, Ore, deep, everything)
+		print(string.format("  worst case in the game: rebirth %d, %d cells dug, %d characters saved,"
+			.. " %d faces rebuilt on join (%d frames at %d per frame)",
+			Config.Prestige.MaxRebirths - 1, cells, #bits, #faces,
+			math.ceil(#faces / Config.Mine.PartsPerFrame), Config.Mine.PartsPerFrame))
+		truthy(#bits <= 6000, "the biggest save this game can produce is " .. #bits
+			.. " characters, well inside a DataStore value")
+		-- The SAVE is bounded by the box and always was. The RESTORE is not bounded by this
+		-- number, and the old assertion here (`#faces <= 12000`) said it was: the excavated shaft
+		-- is not the state that exposes the most faces, so 12 000 was a bound measured off a
+		-- non-maximum and a lattice dig walks straight through it at 19 115. What is actually
+		-- bounded now is the WINDOW — see 7c/7d — so the restore is asserted there, against the
+		-- band, and this only keeps the historical figure honest.
+		eq(#faces, 10097, "REVIEW-3's figure for the excavated shaft, unchanged: " .. #faces
+			.. " faces — see 7c for why that is not the worst case and not what is built")
+	end
+
+	-- 7. parseKey is the inverse of key, for every cell of the box.
+	local badParse = 0
+	for y = 0, 26 do
+		for x = 1, W do
+			for z = 1, W do
+				local px, py, pz = Mine.parseKey(Mine.key(x, y, z))
+				if px ~= x or py ~= y or pz ~= z then badParse += 1 end
+			end
+		end
+	end
+	eq(badParse, 0, "parseKey is the exact inverse of key")
+end
+
+--============================================== 7c. NOTHING UNLOADS — the shaft has to be bounded
+--
+-- REVIEW-3 left this open and measured: a fully excavated shaft at the deepest wall is 10 097
+-- Parts, rebuilt on every join, for ever. Two measurements settle what to do about it, and both
+-- are asserted here so neither can drift:
+--
+--   1. THAT 10 097 IS 100% BEDROCK. Excavate a shaft completely and every rock face is gone; what
+--      is left is the bedrock ring (32 cells per layer x 314 layers) plus the 7x7 floor. Culling
+--      "the interior of solid rock" therefore saves exactly nothing in the worst case, because
+--      there is no interior left. The ring is a rectangular tube and the floor is a flat slab, so
+--      the answer to that number is GEOMETRY, not policy: Mine.shell describes them as five slabs.
+--   2. AND 10 097 IS NOT THE WORST CASE. A shaft dug in a lattice — every other cell on each axis,
+--      which is what a strip mine is — puts an opened cell within reach of every solid cell in the
+--      box and exposes all of them: 19 115 Parts at rebirth 24, of which 9 018 are rock and ore
+--      that no bedrock trick touches. Even the ordinary "dig straight down to the wall" play
+--      reaches 11 960. So the rock faces need a bound of their own, and that is the depth band:
+--      Mine.faces takes a layer window and answers for it alone.
+
+local function excavated(w)
+	local o = {}
+	for y = 0, w.maxLayer do
+		for x = 2, W - 1 do for z = 2, W - 1 do o[Mine.key(x, y, z)] = true end end
+	end
+	return o
+end
+
+local function lattice(w)
+	local o = {}
+	for y = 0, w.maxLayer, 2 do
+		for x = 2, W - 1, 2 do for z = 2, W - 1, 2 do o[Mine.key(x, y, z)] = true end end
+	end
+	return o
+end
+
+do
+	local deep = Mine.world(Config, Config.Prestige.MaxRebirths - 1)
+
+	-- 1. the shape of the 10 097.
+	do
+		local all = Mine.faces(Config, Ore, deep, excavated(deep))
+		local bed, ring, floor = 0, 0, 0
+		for _, f in all do
+			if f.kind == "bedrock" then
+				bed += 1
+				if f.x == 1 or f.x == W or f.z == 1 or f.z == W then ring += 1 else floor += 1 end
+			end
+		end
+		eq(#all, 10097, "a fully excavated rebirth-24 shaft is 10097 faces — REVIEW-3's number")
+		eq(bed, 10097, "…and every last one of them is BEDROCK, so culling rock saves nothing here")
+		eq(ring, 10048, "…10048 of it the ring, which is a rectangular tube")
+		eq(floor, 49, "…and 49 the floor, which is a slab")
+	end
+
+	-- 2. …and it is not the worst case. The bound REVIEW-3 asserted (<= 12000) was measured
+	--    against a state that is not the maximum.
+	do
+		local lat = #Mine.faces(Config, Ore, deep, lattice(deep))
+		truthy(lat > 12000, "a lattice dig exposes MORE than the fully excavated shaft ("
+			.. lat .. " vs 10097) — the old bound was measured off a non-maximum")
+		print(string.format("  worst case is not the excavated shaft: lattice dig = %d faces", lat))
+	end
+end
+
+--============================================================== 7d. the depth band (Mine.faces)
+
+do
+	local w = Mine.world(Config, 0)
+	local dug = excavated(w)
+
+	-- Everything, then a window: the window must be a strict subset, and must contain exactly the
+	-- faces whose own layer is inside it.
+	local all = Mine.faces(Config, Ore, w, dug)
+	local band = Mine.faces(Config, Ore, w, dug, 4, 9)
+	local outside, inBandTotal = 0, 0
+	for _, f in band do
+		if f.y < 4 or f.y > 9 then outside += 1 end
+	end
+	for _, f in all do
+		if f.y >= 4 and f.y <= 9 then inBandTotal += 1 end
+	end
+	eq(outside, 0, "a banded faces() returns nothing outside the band")
+	eq(#band, inBandTotal, "…and everything inside it (" .. #band .. " of " .. #all .. ")")
+	truthy(#band < #all, "CONTROL: the band really is smaller than the whole shaft")
+	truthy(#band > 0, "CONTROL: …and not empty")
+
+	-- The band is clamped, not wrapped: a window past the ends of the world is the ends of it.
+	eq(#Mine.faces(Config, Ore, w, dug, -50, 500), #all, "a band wider than the world IS the world")
+	eq(#Mine.faces(Config, Ore, w, dug, 900, 950), 0, "…and one past the bottom of it is empty")
+
+	-- No band at all is still the whole shaft: every existing caller passes four arguments.
+	eq(#Mine.faces(Config, Ore, w, dug), #all, "faces() with no band is unchanged")
+end
+
+do
+	-- THE POINT OF THE BAND, MEASURED AT THE WORST WINDOW IN THE GAME. Not the average window: the
+	-- band is a per-player budget, and what matters is the most expensive place a player can stand.
+	local deep = Mine.world(Config, Config.Prestige.MaxRebirths - 1)
+	local k = Config.Mine.StreamLayers
+	for _, dig in { { "excavated", excavated(deep) }, { "lattice", lattice(deep) } } do
+		local worst, worstAt = 0, 0
+		-- step 8 layers: the window is 2k+1 = 33 layers wide, so an 8-layer step cannot skip a peak
+		for at = 0, deep.maxLayer, 8 do
+			local n = 0
+			for _, f in Mine.faces(Config, Ore, deep, dig[2], at - k, at + k) do
+				if f.kind ~= "bedrock" then n += 1 end
+			end
+			if n > worst then worst, worstAt = n, at end
+		end
+		print(string.format("  band +-%d layers, %s dig: worst window %d rock+ore faces (layer %d)",
+			k, dig[1], worst, worstAt))
+		truthy(worst <= 1600, "the worst " .. dig[1] .. " window holds " .. worst
+			.. " rock+ore faces, inside the 1600 budget")
+	end
+
+	-- AND THE PART OF IT THAT IS BUILT SYNCHRONOUSLY. A teleport (DESCEND, SURFACE, a respawn)
+	-- has to have ground under it the instant it lands, so the server builds the landing before it
+	-- sets the CFrame — inside the frame, with no yield. That has to stay inside one frame's
+	-- budget, or the elevator hitches every press. It is the 3x3 column under the miner and NOT
+	-- the whole two-layer band, which measures at 202 and would be three frames.
+	local r = Config.Mine.StreamLandingLayers
+	local worstCol = 0
+	for at = 0, deep.maxLayer, 5 do
+		local per = {}
+		for _, f in Mine.faces(Config, Ore, deep, lattice(deep), at - r, at + r) do
+			if f.kind ~= "bedrock" then
+				for dx = -1, 1 do for dz = -1, 1 do
+					local k2 = (f.x + dx) .. ":" .. (f.z + dz)
+					per[k2] = (per[k2] or 0) + 1
+				end end
+			end
+		end
+		for _, n in pairs(per) do if n > worstCol then worstCol = n end end
+	end
+	print(string.format("  landing build: worst 3x3 column over +-%d layers = %d parts (budget %d/frame)",
+		r, worstCol, Config.Mine.PartsPerFrame))
+	truthy(worstCol > 0, "CONTROL: the landing build is not empty")
+	truthy(worstCol <= Config.Mine.PartsPerFrame,
+		"the synchronous landing build is " .. worstCol .. " parts, inside one frame's "
+			.. Config.Mine.PartsPerFrame)
+end
+
+--=========================================================== 7e. the shell: the box, as five slabs
+--
+-- The bedrock ring and the bedrock floor never change, are never breakable, and are never even
+-- clickable except for the floor. Built cell by cell they are 10 048 + 49 Parts at the deepest
+-- wall — the whole of REVIEW-3's 10 097. Built as geometry they are five: four walls and a floor.
+-- What they have to keep is exactly what the cell grid gave them: a SEALED box (the rim comment in
+-- Mine says why — one cell is 6 studs and a Roblox jump clears 7.2), and no intrusion into a cell
+-- a player is supposed to be able to dig.
+
+do
+	local S = Config.Mine.CellSize
+	for _, r in { 0, 1, 24 } do
+		local w = Mine.world(Config, r)
+		local shell = Mine.shell(Config, w)
+		eq(#shell, 5, "r" .. r .. ": the box is five slabs, not " .. (4 * (W - 1) * (w.maxLayer + 2))
+			.. " cubes")
+
+		local function inside(s, px, py, pz)
+			return math.abs(px - s.x) <= s.sx / 2 + 1e-9
+				and math.abs(py - s.y) <= s.sy / 2 + 1e-9
+				and math.abs(pz - s.z) <= s.sz / 2 + 1e-9
+		end
+		local function covered(px, py, pz)
+			for _, s in shell do if inside(s, px, py, pz) then return true end end
+			return false
+		end
+
+		-- EVERY bedrock cell of the box is inside a slab. Sampled at the cell centre AND at the
+		-- eight corners inset a hair, so a slab that is one stud short somewhere is caught.
+		local missed = 0
+		for y = 0, w.maxLayer + 1 do
+			for x = 1, W do
+				for z = 1, W do
+					if Mine.kindAt(Config, w, x, y, z) == "bedrock" then
+						local p = Mine.localPos(Config, x, y, z)
+						for _, d in { { 0, 0, 0 }, { 1, 1, 1 }, { -1, -1, -1 }, { 1, -1, 1 }, { -1, 1, -1 } } do
+							local e = S / 2 - 0.01
+							if not covered(p.x + d[1] * e, p.y + d[2] * e, p.z + d[3] * e) then
+								missed += 1
+							end
+						end
+					end
+				end
+			end
+		end
+		eq(missed, 0, "r" .. r .. ": every bedrock cell of the box is sealed inside a slab")
+
+		-- …and NOTHING the player is meant to dig is. A slab poking into a diggable cell is a
+		-- block that cannot be mined standing in the middle of the mine.
+		local intruded = 0
+		for y = 0, w.maxLayer do
+			for x = 2, W - 1 do
+				for z = 2, W - 1 do
+					local p = Mine.localPos(Config, x, y, z)
+					if covered(p.x, p.y, p.z) then intruded += 1 end
+				end
+			end
+		end
+		eq(intruded, 0, "r" .. r .. ": and no slab intrudes into a cell a player can dig")
+
+		-- The rim. One cell is 6 studs, a Roblox jump clears about 7.2, so the wall has to stand
+		-- proud of the surface or a player hops out of the mine and onto the roof of the world.
+		local top = -math.huge
+		for _, s in shell do
+			if s.kind == "wall" then top = math.max(top, s.y + s.sy / 2) end
+		end
+		truthy(top >= S * (Config.Mine.RimCells - 1) - 1e-9,
+			"r" .. r .. ": the wall stands " .. top .. " studs above the mouth — nobody jumps out")
+
+		-- exactly one of the five is the floor, and it is the thing the depth wall toast comes off
+		local walls, floors = 0, 0
+		for _, s in shell do
+			if s.kind == "wall" then walls += 1 elseif s.kind == "floor" then floors += 1 end
+		end
+		eq(walls, 4, "r" .. r .. ": four walls")
+		eq(floors, 1, "r" .. r .. ": one floor")
+	end
+
+	-- CONTROL: the shell has to MOVE when the wall does, or it is a constant pretending to be a
+	-- measurement — a floor that stayed at rebirth 0's depth would seal every deeper cave shut.
+	local f0, f24 = nil, nil
+	for _, s in Mine.shell(Config, Mine.world(Config, 0)) do
+		if s.kind == "floor" then f0 = s.y end
+	end
+	for _, s in Mine.shell(Config, Mine.world(Config, 24)) do
+		if s.kind == "floor" then f24 = s.y end
+	end
+	truthy(f24 < f0 - 100, "CONTROL: the floor slab follows the depth wall down (" .. tostring(f0)
+		.. " -> " .. tostring(f24) .. ")")
+end
+
+--=================================================== 7f. which layer a stud height is standing in
+
+do
+	local S = Config.Mine.CellSize
+	-- The streamer centres the band on the player, so it has to be able to turn "the miner's root
+	-- part is at y = -134" back into a layer. Checked against the two mappings that already exist,
+	-- because a third opinion about where the floor is is exactly how an elevator and a spawn end
+	-- up disagreeing.
+	local bad = 0
+	for y = 0, 40 do
+		-- a character standing IN layer y has its feet on the top face of cell y+1
+		if Mine.layerOfY(Config, Mine.floorY(Config, y) + 4) ~= y then bad += 1 end
+		-- and the centre of cell y is inside cell y
+		if Mine.layerOfY(Config, Mine.localPos(Config, 5, y, 5).y) ~= y then bad += 1 end
+	end
+	eq(bad, 0, "layerOfY inverts both the floor mapping and the cell mapping")
+	eq(Mine.layerOfY(Config, 4), 0, "standing at the mouth is layer 0")
+	eq(Mine.layerOfY(Config, 100), 0, "…and so is standing well above it: there is no layer -16")
+	eq(Mine.layerOfY(Config, -S * 24 + 4), 24, "and 144 studs down is layer 24")
 end
 
 --============================================================================ 8. THE CONTROL

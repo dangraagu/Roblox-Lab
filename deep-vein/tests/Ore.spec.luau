@@ -32,20 +32,22 @@ near(Ore.weight(Config, 1, 11), 0.128, "copper thins out with depth")
 near(Ore.weight(Config, 1, 100), 0, "copper is gone by layer 100")
 truthy(Ore.weight(Config, 1, 100) >= 0, "a weight is never negative")
 
-eq(Ore.weight(Config, 2, 3), 0, "iron cannot appear above its MinLayer")
-near(Ore.weight(Config, 2, 4), 0.070, "iron starts at its BaseWeight on its MinLayer")
-near(Ore.weight(Config, 2, 14), 0.083, "iron gets richer with depth")
+eq(Ore.weight(Config, 2, 2), 0, "iron cannot appear above its MinLayer")
+near(Ore.weight(Config, 2, 3), 0.100, "iron starts at its BaseWeight on its MinLayer")
+near(Ore.weight(Config, 2, 14), 0.100 + 0.0013 * 11, "iron gets richer with depth")
 near(Ore.weight(Config, 2, 400), 0.150, "iron is clamped to MaxWeight")
 
-eq(Ore.weight(Config, 3, 8), 0, "gold cannot appear on layer 8")
-near(Ore.weight(Config, 3, 9), 0.030, "gold starts on layer 9")
-eq(Ore.weight(Config, 4, 13), 0, "diamond cannot appear on layer 13")
-near(Ore.weight(Config, 4, 14), 0.020, "diamond starts on layer 14")
--- Obsidian is the tier that shipped stranded below the rebirth-0 depth wall. It now starts at
--- layer 19, five layers above the wall, which is what the reachability gate further down asserts.
-eq(Ore.weight(Config, 5, 18), 0, "obsidian cannot appear on layer 18")
-near(Ore.weight(Config, 5, 19), 0.008, "obsidian starts on layer 19")
-near(Ore.weight(Config, 5, 40), 0.008 + 0.0012 * 21, "obsidian gets richer with depth")
+eq(Ore.weight(Config, 3, 5), 0, "gold cannot appear on layer 5")
+near(Ore.weight(Config, 3, 6), 0.060, "gold starts on layer 6")
+eq(Ore.weight(Config, 4, 9), 0, "diamond cannot appear on layer 9")
+near(Ore.weight(Config, 4, 10), 0.036, "diamond starts on layer 10")
+-- Obsidian is the tier that shipped stranded below the rebirth-0 depth wall (MinLayer 26 against
+-- a wall of 24). It then spent one round at layer 19, which was legal but produced FOUR cells in
+-- the whole rebirth-0 shaft — 46% of the shaft's value in four blocks. It starts at 14 now, and
+-- both the reachability gate below and the census in Mine.spec fail if that drifts back.
+eq(Ore.weight(Config, 5, 13), 0, "obsidian cannot appear on layer 13")
+near(Ore.weight(Config, 5, 14), 0.018, "obsidian starts on layer 14")
+near(Ore.weight(Config, 5, 40), 0.018 + 0.0012 * 26, "obsidian gets richer with depth")
 
 eq(Ore.weight(Config, 0, 50), 0, "tier 0 is stone, not an ore, and has no weight")
 eq(Ore.weight(Config, 99, 50), 0, "an unknown tier weighs nothing rather than raising")
@@ -59,14 +61,14 @@ eq(Ore.tierAt(Config, 1, 0.150), 0, "just outside copper's band is plain stone")
 eq(Ore.tierAt(Config, 1, 0.9), 0, "most of layer 1 is plain stone")
 
 -- Layer 30, every tier live. Bands, rarest first:
---   obsidian [0, 0.0212)  diamond [0.0212, 0.0668)  gold [0.0668, 0.1346)
---   iron     [0.1346, 0.2384)  copper [0.2384, 0.3246)  stone [0.3246, 1)
+--   obsidian [0, 0.0372)  diamond [0.0372, 0.1052)  gold [0.1052, 0.2084)
+--   iron     [0.2084, 0.3435)  copper [0.3435, 0.4297)  stone [0.4297, 1)
 eq(Ore.tierAt(Config, 30, 0.001), 5, "the rarest band on layer 30 is obsidian")
-eq(Ore.tierAt(Config, 30, 0.021), 5, "just inside obsidian's band")
+eq(Ore.tierAt(Config, 30, 0.037), 5, "just inside obsidian's band")
 eq(Ore.tierAt(Config, 30, 0.04), 4, "diamond band on layer 30")
-eq(Ore.tierAt(Config, 30, 0.10), 3, "gold band on layer 30")
-eq(Ore.tierAt(Config, 30, 0.20), 2, "iron band on layer 30")
-eq(Ore.tierAt(Config, 30, 0.28), 1, "copper band on layer 30")
+eq(Ore.tierAt(Config, 30, 0.15), 3, "gold band on layer 30")
+eq(Ore.tierAt(Config, 30, 0.25), 2, "iron band on layer 30")
+eq(Ore.tierAt(Config, 30, 0.40), 1, "copper band on layer 30")
 eq(Ore.tierAt(Config, 30, 0.5), 0, "and the rest of layer 30 is stone")
 
 -- The gate has to hold for EVERY roll, not just the ones spelled out above: an ore that leaks
@@ -120,7 +122,7 @@ eq(Ore.name(Config, 0), "Stone", "tier 0 is named")
 eq(Ore.name(Config, 3), "Gold", "tier 3 is Gold")
 eq(Ore.name(Config, 77), "Stone", "an unknown tier falls back to Stone rather than nil")
 eq(Ore.value(Config, 0), 0, "stone is worth nothing")
-eq(Ore.value(Config, 5), 1400, "obsidian is worth 1400")
+eq(Ore.value(Config, 5), 800, "obsidian is worth 800")
 eq(Ore.value(Config, 77), 0, "an unknown tier is worth nothing")
 eq(Ore.hardness(Config, 0), 10, "stone hardness")
 eq(Ore.hardness(Config, 5), 165, "obsidian hardness")

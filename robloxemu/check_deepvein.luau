@@ -114,7 +114,7 @@ local shaft0 = shafts and shafts:FindFirstChild("Shaft_0")
 truthy(shaft0 ~= nil, "the joining player got workspace.Shafts.Shaft_0")
 
 local function scan(folder)
-	local n = { parts = 0, rock = 0, ore = 0, bedrock = 0, pads = 0, lights = 0, clicks = 0 }
+	local n = { parts = 0, rock = 0, ore = 0, bedrock = 0, shell = 0, pads = 0, lights = 0, clicks = 0 }
 	if not folder then return n end
 	for _, d in folder:GetDescendants() do
 		if d:IsA("BasePart") then
@@ -123,6 +123,7 @@ local function scan(folder)
 			if string.match(nm, "^Rock_") then n.rock += 1 end
 			if string.match(nm, "^Ore_") then n.ore += 1 end
 			if string.match(nm, "^Bedrock_") then n.bedrock += 1 end
+			if d:GetAttribute("Shell") ~= nil then n.shell += 1 end
 			if string.match(nm, "^SellPad_") then n.pads += 1 end
 		end
 		if d.ClassName == "PointLight" then n.lights += 1 end
@@ -133,21 +134,28 @@ end
 
 do
 	local n = scan(shaft0)
-	print(string.format("  Shaft_0 on join: %d parts (%d rock, %d ore, %d bedrock, %d pad), %d clickdetectors",
-		n.parts, n.rock, n.ore, n.bedrock, n.pads, n.clicks))
+	print(string.format("  Shaft_0 on join: %d parts (%d rock, %d ore, %d bedrock cubes,"
+		.. " %d shell slabs, %d pad), %d clickdetectors",
+		n.parts, n.rock, n.ore, n.bedrock, n.shell, n.pads, n.clicks))
 	gt(n.parts, 0, "the shaft is parented into the workspace at all")
 	-- The recorded figure for a brand new miner: the 7x7 mouth exposes 49 floor cells (41 plain
-	-- rock + 8 copper at layer 1) plus the 32-cell bedrock ring at layer 0 and the 32 behind the
-	-- floor at layer 1, plus the SELL pad and the SURFACE DECK the elevator lands on. Spelled out
-	-- rather than recomputed from the module, because recomputing it here would grade the
-	-- generator against itself.
-	eq(n.parts, 115, "a fresh miner's shaft holds exactly 115 BaseParts")
+	-- rock + 8 copper at layer 1); the box is five slabs (four walls and the depth-wall floor);
+	-- then the SELL pad and the SURFACE DECK the elevator lands on. Spelled out rather than
+	-- recomputed from the module, because recomputing it here would grade the generator against
+	-- itself.
+	--
+	-- This was 115, and 64 of those were 6-stud bedrock CUBES: two layers of the ring. Built that
+	-- way, a fully excavated shaft at the deepest wall is 10 097 Parts and every last one of them
+	-- is ring (10 048) or floor (49) — so the ring and the floor are geometry now, and the 10 097
+	-- is 5.
+	eq(n.parts, 56, "a fresh miner's shaft holds exactly 56 BaseParts")
 	eq(n.rock + n.ore, 49, "the whole 7x7 floor of the mouth is exposed")
-	eq(n.bedrock, 64, "…ringed by bedrock at layer 0 and layer 1")
+	eq(n.bedrock, 0, "…and not one bedrock CUBE is left: the box is slabs")
+	eq(n.shell, 5, "…exactly five of them, four walls and a floor")
 	eq(n.pads, 1, "…with one SELL pad")
-	-- Only what you can swing at gets a detector: 49 floor cells + the pad. 32 more per bedrock
-	-- ring layer would buy nothing.
-	eq(n.clicks, 50, "every minable face is clickable and the ring is not")
+	-- Only what you can swing at gets a detector: 49 floor cells, the sell pad, and the depth-wall
+	-- floor slab, which is clickable on purpose so the bottom of the cave can explain itself.
+	eq(n.clicks, 51, "every minable face is clickable, plus the sell pad and the depth wall")
 end
 
 do
@@ -156,7 +164,8 @@ do
 	local untagged, unowned = 0, 0
 	for _, d in shaft0:GetDescendants() do
 		if d:IsA("BasePart") and not string.match(tostring(d.Name), "^SellPad_")
-			and not string.match(tostring(d.Name), "^SurfaceDeck_") then
+			and not string.match(tostring(d.Name), "^SurfaceDeck_")
+			and d:GetAttribute("Shell") == nil then
 			if d:GetAttribute("CellKey") == nil then untagged += 1 end
 			if d:GetAttribute("Owner") ~= ME then unowned += 1 end
 		end
@@ -186,13 +195,26 @@ end
 
 do
 	-- The rim. One cell is 6 studs and a Roblox jump clears about 7.2, so a one-cell lip would
-	-- let a player hop straight out of the mine and stand on the roof of the world.
-	local rim = shaft0:FindFirstChild("Bedrock_" .. ME .. "_1:0:5", true)
-	truthy(rim ~= nil, "the mouth has a bedrock rim")
-	if rim then
-		eq(rim.Size.Y, CELL * RIM_MULT, "the rim is three cells tall — you cannot jump out of the mine")
-		eq(rim:FindFirstChildOfClass("ClickDetector"), nil, "and the rim is not something you can swing at")
+	-- let a player hop straight out of the mine and stand on the roof of the world. It used to be a
+	-- special case in the part factory — the layer-0 ring cells were built RIM_MULT cells tall —
+	-- and it is part of the wall slab now.
+	local walls, floorSlab = {}, nil
+	for _, d in shaft0:GetDescendants() do
+		if d:IsA("BasePart") and d:GetAttribute("Shell") == "wall" then walls[#walls + 1] = d end
+		if d:IsA("BasePart") and d:GetAttribute("Shell") == "floor" then floorSlab = d end
 	end
+	eq(#walls, 4, "the shaft is walled by four slabs")
+	local top = -math.huge
+	for _, wl in walls do
+		top = math.max(top, wl.Position.Y + wl.Size.Y / 2)
+		eq(wl.Anchored, true, "…anchored (" .. tostring(wl.Name) .. ")")
+		eq(wl.CanCollide, true, "…and solid enough to stop a player (" .. tostring(wl.Name) .. ")")
+		eq(wl:FindFirstChildOfClass("ClickDetector"), nil,
+			"…and not something you can swing at (" .. tostring(wl.Name) .. ")")
+	end
+	truthy(top >= CELL * (RIM_MULT - 1),
+		"the wall stands " .. tostring(top) .. " studs proud of the mouth — you cannot jump out")
+	truthy(floorSlab ~= nil, "…and the bottom of the world is one floor slab")
 end
 
 --============================================================ digging actually digs
@@ -467,11 +489,28 @@ do
 	eq(s.depth, 144, "…and their 24 layers of depth (144 studs)")
 	eq(s.maxDepth, 144, "the depth wall at rebirth 0 is 144 studs down")
 
-	-- The elevator shaft is REBUILT, not just remembered as a number.
-	truthy(blockAt(LOADED, "5:25:5") ~= nil or blockAt(LOADED, "4:24:5") ~= nil,
-		"the restored column actually put blocks at the bottom of the shaft")
+	-- The elevator shaft is REBUILT, not just remembered as a number — but only the layers around
+	-- the miner, who is standing at the mouth. The bottom of it arrives when they do (DESCEND,
+	-- below); what has to hold here is that the restore is real where they ARE, and that the whole
+	-- excavation is not standing behind them for the rest of the session.
+	truthy(blockAt(LOADED, "4:1:5") ~= nil or blockAt(LOADED, "5:2:4") ~= nil,
+		"the restored column actually put blocks around the miner")
 	local n = scan(shaft1)
-	gt(n.parts, 200, "restoring 24 layers built a real shaft (" .. n.parts .. " parts)")
+	gt(n.parts, 80, "restoring 24 layers built a real shaft (" .. n.parts .. " parts)")
+	-- Measured: the same restore un-banded is 596 cell Parts plus the box. At rebirth 0 the whole
+	-- world is 24 layers and the band is 16 of them, so most of the shaft IS the band and the
+	-- saving is modest — the band is for DEPTH, and walk.luau section 7 runs it against a
+	-- 120-layer shaft where it is the whole difference.
+	truthy(n.parts < 500, "…without holding all of it at once (" .. n.parts
+		.. " parts against 601 un-banded)")
+	local deepestBuilt = 0
+	for _, d in h.workspace:GetDescendants() do
+		if d:IsA("BasePart") and d:GetAttribute("Owner") == LOADED then
+			deepestBuilt = math.max(deepestBuilt, d:GetAttribute("Layer") or 0)
+		end
+	end
+	truthy(deepestBuilt <= 17, "…and nothing below the miner's band (deepest layer "
+		.. deepestBuilt .. " of 24)")
 
 	-- AND IT HAS TO BE HOLLOW. Restoring the column marks each cell opened, but the Part standing
 	-- in that cell was built a moment earlier by the reveal of the cell above it, and marking a
@@ -492,10 +531,22 @@ do
 	truthy(hrp ~= nil, "the veteran has a root part")
 	if hrp then
 		ElevatorEvent:simulateFireServer(loaded, "down")
-		h:advance(0.5)
+		h:advance(2)
 		local at = hrp.CFrame.Position
 		truthy(at.Y < -100, "DESCEND took the veteran to the bottom of their shaft (y = "
 			.. string.format("%.1f", at.Y) .. ")")
+		-- AND THE BOTTOM IS THERE WHEN THEY ARRIVE. The shaft only holds Parts for the layers
+		-- around the miner, so DESCEND has to move the band and build the landing BEFORE it sets
+		-- the CFrame — otherwise the floor under an opened cell does not exist yet and the veteran
+		-- falls through it to the bedrock a hundred and fifty studs down.
+		local deepestNow = 0
+		for _, d in h.workspace:GetDescendants() do
+			if d:IsA("BasePart") and d:GetAttribute("Owner") == LOADED then
+				deepestNow = math.max(deepestNow, d:GetAttribute("Layer") or 0)
+			end
+		end
+		gt(deepestNow, 20, "…and the bottom of the shaft was built to receive them (deepest layer "
+			.. deepestNow .. ")")
 		-- what is standing in the cell they landed in?
 		local occupied = nil
 		for _, d in h.workspace:GetDescendants() do
@@ -536,14 +587,12 @@ end
 do
 	-- The depth wall explains itself. Bedrock below the wall is clickable ON PURPOSE: a rock
 	-- that silently ignores you is indistinguishable from a broken game.
-	local floorBlock = blockAt(LOADED, "5:25:5")
-	if floorBlock == nil then
-		-- The column stops at the wall; the cell directly under it is the floor. Look for any
-		-- bedrock the restore exposed at layer 25.
-		for _, d in h.workspace:GetDescendants() do
-			if d:IsA("BasePart") and d:GetAttribute("Owner") == LOADED
-				and d:GetAttribute("Layer") == 25 then floorBlock = d end
-		end
+	-- It is ONE SLAB now rather than 49 bedrock cubes, and it carries the single ClickDetector that
+	-- used to be spread across all of them.
+	local floorBlock = nil
+	for _, d in h.workspace:GetDescendants() do
+		if d:IsA("BasePart") and d:GetAttribute("Owner") == LOADED
+			and d:GetAttribute("Shell") == "floor" then floorBlock = d end
 	end
 	truthy(floorBlock ~= nil, "the bedrock floor of the world is built")
 	if floorBlock then
@@ -587,7 +636,8 @@ do
 	local newShaft = shafts:FindFirstChild("Shaft_1")
 	truthy(newShaft ~= nil, "the veteran still has a shaft after rebirth")
 	local n = scan(newShaft)
-	eq(n.parts, 115, "…and it is a fresh 115-part shaft, rebuilt from scratch")
+	eq(n.parts, 56, "…and it is a fresh 56-part shaft, rebuilt from scratch")
+	eq(n.shell, 5, "…inside a fresh five-slab box")
 
 	local moved = 0
 	local seen = 0
@@ -604,13 +654,20 @@ end
 --============================================================ SURFACE has to land on something
 
 -- Dig every breakable cell of one column, top to bottom. Returns how many it actually broke.
+--
+-- THE MINER MOVES DOWN WITH IT. A shaft only holds Parts for the layers around its miner, so a
+-- test that swings at layer 24 from the surface is testing a state no player can be in — and
+-- MaxActivationDistance (26 studs, about four layers) says the same thing about the real game.
+-- Standing on top of the block you are about to break is what digging down IS.
 local function digColumn(plr, uid, x, z, toLayer)
 	local broke = 0
+	local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
 	for y = 1, toLayer do
 		local b = blockAt(uid, x .. ":" .. y .. ":" .. z)
 		if b then
 			local cd = b:FindFirstChildOfClass("ClickDetector")
 			if cd then
+				if hrp then hrp.CFrame = CFrame.new(b.Position + Vector3.new(0, CELL, 0)) end
 				for _ = 1, 6 do
 					if b.Parent == nil then break end
 					cd.MouseClick:Fire(plr)
@@ -705,10 +762,12 @@ do
 	h.Players:simulateSpawn(caver, h.workspace)
 	h:advance(2)
 
+	local caverHrp = caver.Character and caver.Character:FindFirstChild("HumanoidRootPart")
 	for y = 1, 5 do
 		local b = blockAt(CAVER, "5:" .. y .. ":5")
 		if b then
 			local cd = b:FindFirstChildOfClass("ClickDetector")
+			if caverHrp then caverHrp.CFrame = CFrame.new(b.Position + Vector3.new(0, CELL, 0)) end
 			for _ = 1, 6 do
 				if b.Parent == nil then break end
 				cd.MouseClick:Fire(caver)
@@ -732,7 +791,11 @@ do
 		-- 314 new faces, measured against the real modules. The bar is set well above one frame's
 		-- budget on purpose: it proves the pump DRAINED, rather than that it merely started and
 		-- left the cave a shell with nothing behind it.
-		gt(total, 300, "CONTROL: breaking in exposes a few hundred faces and every one gets built ("
+		-- 314 faces before the ring became slabs; about half of those were bedrock cubes on the
+		-- wall behind the void, and the wall is five Parts now. The bar is still set well above one
+		-- frame's budget on purpose: it proves the pump DRAINED, rather than that it merely started
+		-- and left the cave a shell with nothing behind it.
+		gt(total, 140, "CONTROL: breaking in exposes a hundred-odd faces and every one gets built ("
 			.. total .. " parts)")
 		truthy(burst <= PARTS_PER_FRAME,
 			"no single frame instantiates more than " .. PARTS_PER_FRAME
