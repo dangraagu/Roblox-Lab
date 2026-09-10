@@ -14,7 +14,10 @@
 --
 --   * the route is BFS through the maze that was actually generated, entry cell to stair cell,
 --     storey by storey — the shortest walk that exists in that vault;
---   * they move at Config.Movement.WalkSpeed and never hesitate, never backtrack, never miss;
+--   * they move at Config.Movement.WalkSpeed and never hesitate and never backtrack — but they
+--     are only AVERAGE on the obby, paying VaultPath's expected cost for the hops a competent
+--     player misses in the crumbling shaft, because the countdown pays for that cost too and a
+--     runner who never missed would be measured against a budget bought for somebody else;
 --   * the collapse underneath them is RunState.planeY over the model VaultFloor.build returned,
 --     and the kill test is RunState.caught — the same function the server calls;
 --   * they must survive every storey AND escape with real seconds left over, at every tier and
@@ -43,6 +46,11 @@ end
 local function eq(a, b, msg)
 	if a == b then passed += 1 else
 		failed += 1; print("FAIL: " .. msg .. " -> got " .. tostring(a) .. ", want " .. tostring(b))
+	end
+end
+local function near(a, b, tol, msg)
+	if type(a) == "number" and math.abs(a - b) <= tol then passed += 1 else
+		failed += 1; print("FAIL: " .. msg .. " -> got " .. tostring(a) .. ", want ~" .. tostring(b))
 	end
 end
 
@@ -102,22 +110,34 @@ local function simulate(model, spec)
 		end
 		if diedAt ~= nil then break end
 
-		-- How far under the runner's kill line the plane still was as they reached the stair.
-		local left = m.leaveAt[s + 1]
+		-- How far under the runner's kill line the plane still was the LAST TIME they were at
+		-- this storey's height — which is no longer "as they reached the stair", because a missed
+		-- hop puts them back on this floor. On the top storey there is no shaft and no fall, so
+		-- the two are the same moment.
+		local left = m.leaveAt[s + 1] + ((s < model.storeys - 1) and m.climbRetrySeconds or 0)
 		local margin = (model.killLines[s + 1] - RunState.planeY(run, model, left))
 			/ math.max(1e-9, (model.killPlane.endY - model.killPlane.startY) / run.collapseSeconds)
 		if margin < worstMargin then worstMargin, worstStorey = margin, s end
 
 		if s < model.storeys - 1 then
-			-- The climb. The runner rises 18 studs in ~5 seconds against a plane doing well under
-			-- one stud a second, so this leg is not where anybody dies — but it is ticked anyway
-			-- rather than assumed, because "not where anybody dies" is a claim about numbers that
-			-- have all just changed.
-			local from, to = m.leaveAt[s + 1], m.leaveAt[s + 1] + m.climbSeconds
+			-- THE CLIMB, AND IT IS AN OBBY NOW. Six pads with five studs of air between them, and
+			-- every one of them crumbling. A missed hop drops the runner back onto THIS storey,
+			-- so the leg is ticked in two parts: `climbRetrySeconds` spent down at storey height
+			-- falling and re-approaching, and then the clean rise. Modelling the whole leg as a
+			-- monotone rise — which is what this did while the climb was a staircase — would have
+			-- the runner leaving the danger height before they actually do, and the plane
+			-- underneath is the one thing in this file that is not allowed to be flattered.
+			local from = m.leaveAt[s + 1]
+			local retryTo = from + m.climbRetrySeconds
+			local to = from + m.climbSeconds
 			local t2 = from
+			while t2 < retryTo and diedAt == nil do
+				t2 = math.min(t2 + dt, retryTo)
+				if RunState.caught(run, model, standing, t2) then diedAt, diedOn = t2, s end
+			end
 			while t2 < to and diedAt == nil do
 				t2 = math.min(t2 + dt, to)
-				local frac = (t2 - from) / math.max(1e-9, to - from)
+				local frac = (t2 - retryTo) / math.max(1e-9, to - retryTo)
 				if RunState.caught(run, model, standing + frac * model.storeyHeight, t2) then
 					diedAt, diedOn = t2, s
 				end
@@ -207,7 +227,8 @@ do
 			local m = VaultPath.measure(C, model)
 			for s = 0, model.storeys - 2 do
 				local deadline = VaultFloor.planeFractionAt(model, model.killLines[s + 1]) * t
-				local margin = deadline - m.leaveAt[s + 1]
+				-- ...+ the falls back onto this storey, for the same reason as above.
+				local margin = deadline - (m.leaveAt[s + 1] + m.climbRetrySeconds)
 				if margin < tightest then
 					tightest = margin
 					tightestAt = string.format("%s floor %d, storey %d (route %.1fs, deadline %.1fs of %ds)",
@@ -298,7 +319,39 @@ do
 	-- vault in the game look twice as winnable as it is.
 	eq(VaultPath.studsPerStep(model), 2 * model.cellSize, "one maze step is two fine cells of walking")
 	eq(m.secondsPerStep, 2 * model.cellSize / C.Movement.WalkSpeed, "...at the configured walk speed")
-	eq(m.climbSeconds, 6 * C.Movement.ClimbSecondsPerStep, "a storey is six jumped steps")
+	eq(m.climbBaseSeconds, 6 * C.Movement.ClimbSecondsPerStep, "a clean climb is six jumped hops")
+
+	-- THE BUDGET PAYS FOR THE OBBY. The shaft is six pads with five studs of open air between
+	-- them (tests/VaultFloor.spec.luau, `climbIsFailable`) and the pads crumble under you
+	-- (tests/Ascent.spec.luau), so hops get missed — and a countdown derived as if they never
+	-- were would be handing the obby's cost out of the slack that pays for gems. If this ever
+	-- reads equal, the climb has quietly become a staircase again somewhere.
+	ok(m.climbSeconds > m.climbBaseSeconds, string.format(
+		"the priced climb is %.2fs and a clean one is %.2fs — the countdown is not paying for a "
+			.. "single missed hop", m.climbSeconds, m.climbBaseSeconds))
+	near(m.climbRetrySeconds, m.climbSeconds - m.climbBaseSeconds, 1e-9,
+		"the retry cost is exactly the difference between the priced climb and a clean one")
+
+	-- ...and the retries are charged storey by storey, because every one of them is seconds spent
+	-- back on a floor the plane is rising toward. Clearing storey s means the (s+1)-th climb is
+	-- behind you, so s+1 transitions' worth of falls are behind you with it.
+	for s = 0, model.storeys - 1 do
+		near(m.obbyBy[s + 1], (s + 1) * m.climbRetrySeconds, 1e-9,
+			string.format("storey %d's deadline covers the falls back onto it and every storey below", s))
+	end
+	near(m.obbyTotal, (model.storeys - 1) * m.climbRetrySeconds, 1e-9,
+		"the escape is charged one lot of falls per climb in the vault")
+
+	-- THE OBBY IS OUTSIDE THE SLACK. The walk demand must be the clean climb only — if the retry
+	-- ever leaks into it, the slack starts paying a premium on it and the deeper floors get
+	-- EASIER the more the shaft is missed, which is what this whole split exists to stop.
+	local walkOnly = 0
+	for s = 0, model.storeys - 1 do
+		walkOnly += (m.walkSteps[s + 1] + C.Collapse.WasteWeight * m.wasteCells[s + 1]) * m.secondsPerStep
+	end
+	walkOnly += (model.storeys - 1) * m.climbBaseSeconds
+	near(m.walkDemandTotal, walkOnly, 1e-9,
+		"the walk demand is the maze plus CLEAN climbs — no retry seconds have leaked into it")
 
 	-- The route must actually be a route: monotonic, and every storey's walk non-zero (the entry
 	-- and exit cells are opposite corners, so a zero-length leg means BFS found nothing).

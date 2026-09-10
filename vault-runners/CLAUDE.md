@@ -6,21 +6,31 @@ v1 is **built and green, and has never been run by a person or published.** No R
 exists for it, no `publish_*.bat` exists, and the tree was deliberately left dirty and
 uncommitted.
 
-An adversarial review (`REVIEW.md`) returned **BLOCK** on eight findings. Seven are closed; the
-eighth (the game is not the obby its brief sells) is written down in README's "What is NOT built
-yet" rather than built. Read `REVIEW.md` before assuming any number in this file is the original.
+Four review passes so far, and they supersede each other — read them newest first.
+`REVIEW-4.md` is the obby: the crumbling climb shaft, how its cost was priced into the countdown,
+the re-derived monotonicity table, and the mutation gate. `REVIEW-3.md` is the difficulty curve:
+the slack schedule, where its numbers came from, the monotonicity and jitter measurements.
+`REVIEW-2.md` is the independent re-check of the first round of fixes. `REVIEW.md` is the original
+**BLOCK** on eight findings; all eight are now closed — the eighth (finding 7, "the game is not
+the obby its brief sells") was closed by BUILDING the obby, not by retitling the game.
+Do not assume a number in this file is the original.
 
 ```
 tests/Rng.spec.luau             37 passed, 0 failed
-tests/Progression.spec.luau     64 passed, 0 failed
+tests/Progression.spec.luau     66 passed, 0 failed
 tests/Pets.spec.luau            75 passed, 0 failed
 tests/RunState.spec.luau        75 passed, 0 failed
-tests/VaultFloor.spec.luau     201 passed, 0 failed
+tests/VaultFloor.spec.luau     215 passed, 0 failed   (+ climbIsFailable: THE JUMP CAN BE MISSED)
 tests/responsive.spec.luau      70 passed, 0 failed
-tests/Collapse.spec.luau       274 passed, 0 failed   IS THE VAULT WINNABLE AT ALL
-tests/Trace.spec.luau           23 passed, 0 failed   the anti-teleport throttle
-check_vaultrunners.luau        107 passed, 0 failed   (headless boot: builds vaults, plays runs)
+tests/Collapse.spec.luau       281 passed, 0 failed   IS THE VAULT WINNABLE AT ALL
+tests/Curve.spec.luau           23 passed, 0 failed   IS "DEEPER" ACTUALLY HARDER
+tests/Ascent.spec.luau          68 passed, 0 failed   THE PADS CRUMBLE, AND EVERY ONE COMES BACK
+tests/Trace.spec.luau           28 passed, 0 failed   the anti-teleport throttle + its BOUNDS
+check_vaultrunners.luau        115 passed, 0 failed   (headless boot: builds vaults, plays runs)
 check_vaulthud.luau            PASS                   (11 viewports x {hub, mid-run})
+walk_vaultrunners.luau         5 floors x 3 runners   (walks the real server, prints outcomes)
+measure_curve.luau             the tuning instrument  (where Config.Collapse's numbers came from)
+mutate_obby.sh                 the obby's mutation gate (13 mutations + 2 controls)
 ```
 
 Regenerate the emulator bundle after ANY edit under `src/`, or the headless checks measure the
@@ -59,6 +69,10 @@ cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runne
    vault and only then calls `VaultPath.countdown`, which BFS-walks the maze that was actually
    produced and solves one inequality per storey — the runner must be off storey `s` before the
    plane reaches storey `s`'s kill line — for the countdown, then multiplies by the floor's slack.
+   The demand is NOT the bare shortest path: it is the route plus `Config.Collapse.WasteWeight`
+   (0.25) times the cells in dead-end branches off it (`VaultPath.wastedCells`), because the
+   shortest path cannot see how much maze there is to get lost in and that is what varies between
+   two mazes of one floor. See REVIEW-3.md.
    Do not put a `collapseSeconds` back on a tier. v1 did, with the plane's speed as (height) /
    (countdown), so a taller vault swept its LOWER storeys faster: Silver and Gold were unwinnable
    on floor 1 and nothing in the repo measured a traversal time to notice. `Config.Curve`'s
@@ -68,6 +82,33 @@ cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runne
    in `VaultFloor` from `Run.RunnerRootHeight - Run.KillMargin`. Written as a stud offset (-10, as
    v1 had it) storey 0 got 11 studs of plane travel where every storey above it got 18 — the
    ground floor of every vault in the game had 39% less time than the ones above it.
+8d. **THE SLACK SCHEDULE IS THE DIFFICULTY CURVE, AND IT MUST NEVER GO FLAT.** The size caps are
+   a pacing budget and Gold floor 1 already sits at both of them, so from floor 26 the maze cannot
+   grow. v1's slack shed a flat 0.02 a floor to a hard floor of 1.5 and hit it at floor 26 — Gold
+   floor 26 and Gold floor 2000 were byte-identical difficulty specs. It is now a power law
+   (`MinSlack + (Slack-MinSlack) * (1 + (f-1)/TightenFloors)^-TightenExponent`) which decays toward
+   MinSlack and never arrives, so no floor is the last hard one. `tests/Curve.spec.luau` asserts
+   STRICT decrease at every floor 1..1000 and a measured completion rate that falls floor by floor;
+   both halves are needed, because a schedule can be strictly decreasing by 1e-6 and still flat.
+8e. **THE CLIMB IS AN OBBY AND ITS COST IS PAID AT COST, NOT AT SLACK.** The shaft out of every
+   storey is six 3x3 pads at `Vault.StepReach` (8) apart — five studs of open air, wider than
+   `Movement.RunnerWidth`, so a missed hop is a FALL. v1's treads were 5x5 at a 6-stud reach: one
+   stud of slot, and no jump in the game anybody could miss. `tests/VaultFloor.spec.luau`'s
+   `climbIsFailable` holds both ends (the gap must be wider than the runner AND inside what
+   `VaultPath.jumpReach` says a Roblox jump carries at that rise). A miss costs SECONDS and
+   nothing else — no death rule, no lost gems — and the collapse is what spends them.
+   The countdown is now `walk * slack + obby`, NOT `(walk + obby) * slack`. Slack exists for what
+   nobody can predict (how much maze a blind runner wanders into); the obby's expected cost is a
+   number `VaultPath.climbSeconds` computes exactly. Charging it inside the slack was measured at
+   52.1% Gold floor-400 completion against a pre-obby 49.1% — **the rage obby made the game
+   easier**. At cost it reads 50.3% and REVIEW-3's whole curve survives. See REVIEW-4.md §2.
+8f. **`Config.Ascent.ModelMissChance` is a MODEL, and only the budget reads it.** Nothing in the
+   running game consults it; it exists so the countdown can pay for the obby's expected cost, the
+   way `WasteWeight` pays for the maze's. It is an assumption in the same class as
+   `measure_curve.luau`'s blind explorer, and REVIEW-4 sweeps it 0..0.12 rather than defending
+   one value. `E[misses] = p * E[attempts]`, NOT `E[attempts] - n` — the first cut was the second
+   one and over-priced the shaft by 10%; `tests/Curve.spec.luau` rolls 20000 climbs and never
+   reads the closed form, which is how that was caught.
 9b. **Every rule in the run loop reads `Trace`, never `hrp.Position`.** The client owns its own
    character's physics, so the position the server reads is a claim. `Trace` moves the server's
    own position toward that claim at walking pace and the gem, exit and kill tests all read the
@@ -92,6 +133,14 @@ cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runne
 `VaultFloor.build` stacks `storeys` mazes. Storey `s`'s walkable floor top is `y = s * 18`. Walls
 run from there to the underside of the floor above (`WallHeight` is DERIVED as
 `StoreyHeight - FloorThickness`, so a gap band cannot be introduced by editing one number).
+
+The shaft out of storey `s` lives in that storey's EXIT cell and nowhere else, because the hole in
+the floor above is one maze cell wide. `VaultFloor` asserts `StepReach/2 + StepSize/2 <= CellSize/2`
+rather than trusting a comment: a pad that pokes through the stairwell wall is a pad a player
+reaches from the corridor, and the whole climb is then optional. The pads also come out of
+`build` as structured data (`model.shafts[s+1].pads`, whose `y` is the WALKABLE TOP), so the
+server's crumble loop, `src/shared/Ascent.luau` and `walk_vaultrunners.luau` all read the same
+pads the Parts were built from instead of three copies of the same arithmetic.
 
 You enter storey `s` at maze cell `(0,0)` when `s` is even and `(cells-1, cells-1)` when odd, and
 leave from the opposite corner — so **storey s's exit IS storey s+1's entry**, and the stair, the
@@ -126,22 +175,26 @@ There is **no `.luaurc` and no Roblox type definitions in this tree**, so `Fx`, 
 lines. That is environmental, not a defect — but "clean on every file except MazeGen" was never
 what the tool actually printed, and `MisleadingAndOr` still surfaces through the noise, which is
 how the session-lock and-or was found in the first place. One real line remains and predates this
-work: `Main.server(860,85)`, a `never & number` complaint about `p.gems` inside a `string.format`
+work: `Main.server(895,85)`, a `never & number` complaint about `p.gems` inside a `string.format`
 in `doBuy`'s "poor" branch. It is a narrowing artefact, not a bug.
 
 ## What to do next, in order
 
-1. **Play it.** Nobody has. The countdown is no longer a guess — it is derived from the vault's own
-   BFS-optimal route and `tests/Collapse.spec.luau` proves every generated floor is clearable with
-   slack — but `Config.Collapse.Slack` (2.0, tightening to `MinSlack` 1.5) is a judgement about how
-   much worse a human is than a BFS solver, and only a playtest settles it. That single number is
-   the dial; do not go back to typing seconds onto a tier. Watch for two things in particular:
-   Gold floor 1 is a 258-second run, and `Config.Movement.WalkSpeed` is now 24 rather than Roblox's
-   16 and the server writes it onto the Humanoid, so the game feels faster than the brief imagined.
-2. **Decide what this game IS.** The brief sells a "Procedural Rage-Obby" with crumbling platforms
-   and the build is a maze runner with one unfailable staircase — see the first entry in README's
-   "What is NOT built yet". That is a product decision (build the platforming, or rewrite the
-   genre line, thumbnail and store copy), not a bug to fix quietly.
+1. **Play it.** Nobody has. The countdown is derived, `tests/Collapse.spec.luau` proves every floor
+   is clearable and `tests/Curve.spec.luau` proves deeper floors are tighter — but the whole slack
+   schedule is calibrated against a MODEL of a player (`measure_curve.luau`'s blind explorer:
+   perfect memory, no hesitation, no missed jump, no gem detour). It is optimistic by construction,
+   so every completion percentage in this repo is a CEILING. Re-run `measure_curve.luau` after a
+   playtest and move Slack / MinSlack to what real humans do; do not go back to typing seconds onto
+   a tier. Watch for two things in particular: Gold floor 1 is a 264-second run, and
+   `Config.Movement.WalkSpeed` is now 24 rather than Roblox's 16 and the server writes it onto the
+   Humanoid, so the game feels faster than the brief imagined.
+2. **Play the obby.** The decision was to BUILD it rather than retitle the game, and it is built:
+   six 3x3 pads with five studs of air between them, crumbling 1.1s after you land. But
+   `Config.Ascent.ModelMissChance` (0.04) is a MODEL, not a measurement — it is the one number in
+   the obby nobody has checked against a human, and the countdown is priced against it. Re-run
+   `measure_curve.luau` §6 after a playtest. Do NOT re-tune the crumble to make the shaft harder
+   before somebody has climbed it.
 3. Close the rest of the gap between the store description and the build. The two a player will
    actually notice are **pets are bought rather than hatched** and **pets do not level**.
 4. Sound. There is not one Sound instance in the game, and a rising collapse with no audio is half

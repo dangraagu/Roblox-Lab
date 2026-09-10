@@ -1162,6 +1162,281 @@ do
 		unreadDoorsMeasured, #unreadDoorRecords, unreadPadsMeasured, #unreadPadRecords))
 end
 
+--============================================================================ STUDIO FINDING 1
+-- THE ENGINE PLACES THE CHARACTER **AFTER** CharacterAdded, AND THE ENGINE WINS.
+--
+-- Not a guess. Measured in Roblox Studio on 2026-09-10 (fork-tower/STUDIO.md), from a server-side
+-- Player.CharacterAdded handler sampling HumanoidRootPart every Heartbeat, verbatim:
+--
+--     [0.0000] f01 parent=nil        hrp=0.00,0.00,0.00
+--     [0.0051] f02 parent=Workspace  hrp=0.00,3.51,-160.00      <- Waiting.WaitingSpawn
+--     [0.0149] f03 parent=Workspace  hrp=0.00,3.51,-160.00
+--
+-- CharacterAdded fires while the model is STILL UNPARENTED and the root part sits at the origin.
+-- One frame later the engine parents it to Workspace AND drops it on the only enabled
+-- SpawnLocation. Anything a CharacterAdded handler writes to HumanoidRootPart.CFrame before that
+-- is thrown away, silently. In the shipping build that meant every player spawned on the waiting
+-- pad 174 studs from their own tower, over a void, while the HUD told them to read a fork they
+-- could not reach — with this file, world.check and six unit suites all green.
+--
+-- The reason nothing saw it: `Players:simulateSpawn` in emu/services.luau parents the model
+-- FIRST and never applies a spawn point, so the harness modelled the exact opposite order. This
+-- block does not use it. It replays the RECORDED order instead, and it is a recording of the real
+-- engine rather than a model of one:
+--
+--     char.Parent = nil, hrp at the origin  ->  fire CharacterAdded  ->  one frame  ->
+--     char.Parent = workspace AND hrp := the enabled SpawnLocation
+--
+-- The assertion is deliberately about the WORLD, not about a coordinate: the character has to end
+-- up standing inside its own lane's floor-1 fork pad, measured off that Part.
+
+do
+	local SPAWNRACE = 8181
+	seedProfile(SPAWNRACE)
+	local racer = h:join("SpawnRacer", SPAWNRACE)
+	h:advance(1)
+
+	local lane = laneOf(racer)
+	truthy(lane ~= nil, "the spawn-race player got a lane at all (control for the block below)")
+
+	-- The spawn the engine would actually use: the one enabled SpawnLocation in the place.
+	local engineSpawn = nil
+	local function findEnabled(x)
+		for _, c in x:GetChildren() do
+			if engineSpawn == nil and c.ClassName == "SpawnLocation" and c.Enabled == true then
+				engineSpawn = c
+			end
+			findEnabled(c)
+		end
+	end
+	findEnabled(h.workspace)
+	truthy(engineSpawn ~= nil, "...and the place has an enabled SpawnLocation for the engine to use")
+
+	if lane ~= nil and engineSpawn ~= nil then
+		local char = Instance.new("Model")
+		char.Name = "SpawnRacer"
+		local hrp = Instance.new("Part")
+		hrp.Name = "HumanoidRootPart"
+		hrp.Parent = char
+		local hum = Instance.new("Humanoid")
+		hum.Parent = char
+		char.PrimaryPart = hrp
+		hrp.CFrame = CFrame.new(0, 0, 0) -- f01: the origin, exactly as measured
+
+		racer.Character = char
+		-- Fired on its OWN thread, with char.Parent == nil, as measured. Roblox runs every event
+		-- handler in a fresh coroutine, so a CharacterAdded handler is allowed to yield — and the
+		-- fix for this defect has to yield, because it has to wait a frame for the engine. The
+		-- emulator's Signal:Fire calls handlers straight off the calling thread, so firing this
+		-- inline would raise "thread yielded unexpectedly" against correct code. task.spawn
+		-- restores the engine's own threading rather than working around it.
+		task.spawn(function()
+			racer.CharacterAdded:Fire(char)
+		end)
+		h:advance(1 / 60)
+
+		-- f02: the engine finishes the job, one frame later, and overwrites whatever the game
+		-- wrote. Parent and placement land together — that is what the trace shows.
+		char.Parent = h.workspace
+		hrp.CFrame = CFrame.new(engineSpawn.Position.X,
+			engineSpawn.Position.Y + 3, engineSpawn.Position.Z)
+
+		h:advance(2)
+
+		local pad = padOf(lane, 1)
+		truthy(pad ~= nil, "...and that lane has a floor-1 fork pad to stand on")
+		if pad ~= nil then
+			local dx = math.abs(hrp.Position.X - pad.Position.X)
+			local dz = math.abs(hrp.Position.Z - pad.Position.Z)
+			local onOwnPad = dx <= pad.Size.X / 2 and dz <= pad.Size.Z / 2
+				and hrp.Position.Y > pad.Position.Y
+			truthy(onOwnPad, string.format(
+				"a character the engine placed on the spawn AFTER CharacterAdded still ends up "
+					.. "in its own tower (hrp %.1f,%.1f,%.1f; pad %.1f,%.1f,%.1f; off by %.1f x, %.1f z)",
+				hrp.Position.X, hrp.Position.Y, hrp.Position.Z,
+				pad.Position.X, pad.Position.Y, pad.Position.Z, dx, dz))
+
+			-- ...and NOT left standing on the waiting pad, which is the shape the defect had.
+			local waitFolder = h.workspace:FindFirstChild("Waiting")
+			local waitPad = waitFolder and waitFolder:FindFirstChild("WaitingPad")
+			if waitPad ~= nil then
+				local onWait = math.abs(hrp.Position.X - waitPad.Position.X) <= waitPad.Size.X / 2
+					and math.abs(hrp.Position.Z - waitPad.Position.Z) <= waitPad.Size.Z / 2
+				truthy(not onWait,
+					"...and specifically not left standing on the waiting pad, which is where "
+						.. "the engine's own spawn placement had been leaving them")
+			end
+		end
+	end
+end
+
+--============================================================================ STUDIO FINDING 3
+-- THE HOLD REPLICATES — AND IT ARRIVES LATE, SO THE "INSTANT" PATH IS NEVER TAKEN.
+--
+-- REVIEW-3 left this open as an unmeasured engine assumption: does PromptButtonHoldBegan reach
+-- the SERVER? If it did not, a read would cost ~2.2 s instead of 1.1. Measured in Studio
+-- 2026-09-10, three reads, both clocks (STUDIO.md):
+--
+--     client hold began   +0.0000        server hold began   +0.0322   <- 32 ms to replicate
+--     client Triggered    +1.1005        server Triggered    +1.1319
+--     server elapsed = 1.0997 s of the 1.1 s it wants -> `remaining` = ~0.0004 s, POSITIVE
+--     doors resolve, client-side, at +1.1829     total cost of a read: 1.17-1.18 s
+--
+-- So it replicates and 1.1 s is the right number. But the lag means the server's own elapsed is
+-- always a hair UNDER ReadSeconds, `remaining <= 0` is never true for an honest hold, and every
+-- read flashed "Leser innskripsjonen … (0.0 s)" for two frames. The toast is now conditional.
+--
+-- What must NOT change is the CHARGE, so this block measures both halves: the honest hold that
+-- arrives 32 ms late says nothing and still finishes, and the exploiter who fires the prompt with
+-- no hold at all is told, and still waits the full 1.1 s.
+
+do
+	local LAG = 0.032 -- measured: how late PromptButtonHoldBegan reaches the server
+	local notices = h.ReplicatedStorage:FindFirstChild("ForkRemotes"):FindFirstChild("Notice")
+	local function readingToasts(plr, from)
+		local n = 0
+		local all = notices:sentTo(plr)
+		for i = from + 1, #all do
+			local msg = all[i].args and all[i].args[1]
+			if type(msg) == "table" and type(msg.text) == "string"
+				and string.find(msg.text, "Leser innskripsjonen", 1, true) then
+				n += 1
+			end
+		end
+		return n
+	end
+
+	-- (a) the honest hold, arriving LATE, on a floor nobody has read
+	local HONEST = 9191
+	seedProfile(HONEST)
+	local honest = h:join("HonestHolder", HONEST)
+	h:advance(1)
+	h.Players:simulateSpawn(honest, h.workspace)
+	h:advance(1)
+	local hLane = laneOf(honest)
+	if hLane ~= nil and padOf(hLane, 1) ~= nil then
+		local prompt = padOf(hLane, 1):FindFirstChildOfClass("ProximityPrompt")
+		local before = #notices:sentTo(honest)
+		prompt.PromptButtonHoldBegan:Fire(honest)
+		h:advance(READ_SECONDS - LAG) -- the server saw the hold start LAG seconds late
+		prompt.Triggered:Fire(honest)
+		h:advance(0.2)
+		eq(readingToasts(honest, before), 0,
+			"an honest full hold, arriving as late as Studio measured, is not told it is waiting "
+				.. "0.0 s for a read that has already been paid for")
+		truthy(forkOf(hLane, 1):GetAttribute("Read") == true,
+			"...and the read still completes")
+	end
+
+	-- (b) the exploiter: Triggered with no hold at all. Told, and charged in full.
+	local CHEAT = 9292
+	seedProfile(CHEAT)
+	local cheat = h:join("PromptFirer", CHEAT)
+	h:advance(1)
+	h.Players:simulateSpawn(cheat, h.workspace)
+	h:advance(1)
+	local cLane = laneOf(cheat)
+	if cLane ~= nil and padOf(cLane, 1) ~= nil then
+		local prompt = padOf(cLane, 1):FindFirstChildOfClass("ProximityPrompt")
+		local before = #notices:sentTo(cheat)
+		prompt.Triggered:Fire(cheat) -- fireproximityprompt: no hold, no PromptButtonHoldBegan
+		h:advance(READ_SECONDS - 0.2)
+		truthy(forkOf(cLane, 1):GetAttribute("Read") ~= true,
+			"a client that fires the prompt with no hold has NOT read it after 0.9 s")
+		eq(readingToasts(cheat, before), 1,
+			"...and IS told the server is timing them")
+		h:advance(0.4)
+		truthy(forkOf(cLane, 1):GetAttribute("Read") == true,
+			"...and gets the inscription only once the full ReadSeconds has passed on the "
+				.. "server's own clock")
+	end
+end
+
+--============================================================================ STUDIO FINDING 2
+-- NO GLYPH SHIPS WITHOUT SOMEBODY HAVING LOOKED AT IT IN ROBLOX.
+--
+-- `find_mojibake.py` checks the BYTES and reported nothing, and it was right: every string in
+-- this game is valid UTF-8. What it cannot check is whether Roblox's font has a picture for the
+-- codepoint. Measured in Studio on 2026-09-10 by rendering candidates into a GothamBlack
+-- TextLabel and photographing the window (fork-tower/studio-shots/05-glyph-block-test.png):
+--
+--     U+1FA79 (Emoji 12.0, bandage)          renders
+--     U+1FA9F (Emoji 13.0, window)           EMPTY BOX
+--     U+1FAA8 (Emoji 13.0, rock)             EMPTY BOX   <- shipped, as the "crack" sign
+--     U+1FAB0 (Emoji 13.0, fly)              EMPTY BOX
+--     U+1FAE0 (Emoji 14.0, melting face)     EMPTY BOX
+--
+-- `Config.Fork.SignEmoji.crack` was U+1FAA8, so one of the four sign vocabularies the inscription
+-- names rendered as a blank rectangle on the door, on the pad and in the HUD. Not a leak — the
+-- signs are uninformative by construction and a box still matches a box — but the player is being
+-- asked to read a word in a font that has no letter for it.
+--
+-- This is NOT a test of Roblox's font. Nothing headless can be. It is a list of every glyph that
+-- HAS been looked at in Studio, and a demand that the built world contain nothing else: add an
+-- emoji to a label and this goes red until somebody has photographed it rendering. That is the
+-- only claim a file with no renderer in it is entitled to make.
+--
+-- Only codepoints >= U+2000 are checked. Everything below is Latin-1 and the Norwegian letters,
+-- which are not in question.
+
+local GLYPHS_SEEN_IN_STUDIO = {
+	[0x2014] = "— em dash (inscriptions, HUD)",
+	[0x2026] = "… ellipsis (the reading toast)",
+	[0x2605] = "★ black star (door power, reveal card)",
+	[0x2744] = "❄ snowflake — sign 'frost' / RIMET",
+	[0xFE0F] = "variation selector-16 (emoji presentation, invisible)",
+	[0x1F30C] = "🌌 milky way — theme 'void'",
+	[0x1F441] = "👁 eye — sign 'eye' / ØYET",
+	[0x1F451] = "👑 crown — theme 'gold'",
+	[0x1F4A8] = "💨 dash — theme 'wind'",
+	[0x1F500] = "🔀 shuffle — the lobby sign",
+	[0x1F512] = "🔒 lock — the unread inscription",
+	[0x1F525] = "🔥 fire — sign 'flame' / FLAMMEN",
+	[0x1F5FF] = "🗿 moai — sign 'crack' / SPREKKEN (replaced U+1FAA8, which did not render)",
+	[0x1F34C] = "🍌 banana — theme 'troll'",
+	[0x1F0CF] = "🃏 joker — theme 'troll'",
+	[0x1F6AA] = "🚪 door — the unread door label",
+}
+
+do
+	local unseen, sample = {}, {}
+	local function inspect(s, where)
+		if type(s) ~= "string" or s == "" then return end
+		local ok = pcall(function()
+			for _, cp in utf8.codes(s) do
+				if cp >= 0x2000 and GLYPHS_SEEN_IN_STUDIO[cp] == nil then
+					unseen[cp] = (unseen[cp] or 0) + 1
+					sample[cp] = sample[cp] or where
+				end
+			end
+		end)
+		if not ok then
+			unseen[-1] = (unseen[-1] or 0) + 1
+			sample[-1] = where .. " (string is not valid UTF-8)"
+		end
+	end
+	local function walk(x)
+		for _, c in x:GetChildren() do
+			local cls = tostring(c.ClassName)
+			if cls == "TextLabel" or cls == "TextButton" or cls == "TextBox" then
+				inspect(c.Text, c:GetFullName())
+			elseif cls == "ProximityPrompt" then
+				inspect(c.ActionText, c:GetFullName() .. ".ActionText")
+				inspect(c.ObjectText, c:GetFullName() .. ".ObjectText")
+			end
+			walk(c)
+		end
+	end
+	walk(h.workspace)
+
+	local n = 0
+	for cp, count in unseen do
+		n += 1
+		print(string.format("  UNSEEN GLYPH U+%04X, %d time(s), first at %s", cp, count, sample[cp]))
+	end
+	eq(n, 0, "every glyph the built world renders is one that has been looked at in Roblox Studio")
+end
+
 --============================================================================ normal play warned nothing
 
 print("")

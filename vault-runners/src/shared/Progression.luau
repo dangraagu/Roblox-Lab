@@ -66,10 +66,17 @@ function Progression.difficulty(cfg: any, tierIndex: number, floor: number): any
 	-- 1 and Bronze died around floor 7.
 	--
 	-- Now the vault is built first and VaultPath.countdown measures it. What the curve controls
-	-- is how much slack over the optimal route the runner is owed — so a deeper floor is a
-	-- tighter run through a bigger maze, and never an impossible one.
+	-- is how much slack over the demand the runner is owed — so a deeper floor is a tighter run
+	-- through a maze of the same size, and never an impossible one.
+	--
+	-- IT DECAYS TOWARD MinSlack AND NEVER ARRIVES. The first cut shed a flat 0.02 a floor down to
+	-- a hard 1.5, and since the size caps are also reached by floor 26, Gold floor 26 and Gold
+	-- floor 2000 were byte-identical difficulty specs — the whole late game was one floor with
+	-- different seeds. A power law has no such floor: there is no depth at which the next floor
+	-- is not measurably tighter than this one.
 	local k = cfg.Collapse
-	local slack = math.max(k.MinSlack, k.Slack - (f - 1) * k.TightenPerFloor)
+	local slack = k.MinSlack
+		+ (k.Slack - k.MinSlack) * (1 + (f - 1) / k.TightenFloors) ^ (-k.TightenExponent)
 
 	return {
 		tier = tierIndex, floor = f,

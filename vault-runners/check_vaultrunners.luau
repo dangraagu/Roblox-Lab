@@ -301,6 +301,46 @@ eq(sealed and sealed.carried, carriedUpTop, "and every gem being carried was los
 eq(gemsValue.Value, before, "THE RULE: the wallet did not move")
 eq(#vaults:GetChildren(), 0, "and the sealed vault was torn down")
 
+--============================================================================ the pads CRUMBLE
+
+-- The obby, on the live server. tests/Ascent.spec.luau proves the rule; this proves the server
+-- is running it — that standing on a pad actually turns a Roblox Part's CanCollide off, and that
+-- the part comes back. A shaft that never crumbles is v1's staircase with a spec attached, and a
+-- shaft that never comes back is an unwinnable vault; nothing else in this file would notice
+-- either, because the walk helper flies straight up the middle of the stairwell.
+do
+	Enter:simulateFireServer(me, 1)
+	h:advance(0.5)
+	vault = vaults:GetChildren()[1]
+	local pad = vault:FindFirstChild("Step_0_3")
+	truthy(pad ~= nil, "the climb shaft has a third pad")
+	truthy(pad.CanCollide, "...and it is solid before anybody stands on it")
+	local wasTransparency = pad.Transparency
+
+	-- Stand ON it — the pad's top plus a runner's root height, which is what Ascent.padUnder
+	-- measures against. Walked to, not warped to: the server reads the TRUSTED position.
+	walkTo(Vector3.new(pad.Position.X, pad.Position.Y + 0.5 + Config.Run.RunnerRootHeight,
+		pad.Position.Z))
+	truthy(pad.CanCollide, "landing on a pad does not pull it out from under the foot that lands")
+	h:advance(Config.Ascent.CrumbleSeconds + 2 * STEP)
+	falsy(pad.CanCollide, "...and a beat later the pad is gone")
+	falsy(pad.CanQuery, "a pad that is gone cannot be raycast at either")
+	truthy(pad.Transparency > wasTransparency, "and it is drawn as gone, not just made walk-through")
+	h:advance(Config.Ascent.RespawnSeconds + 2 * STEP)
+	truthy(pad.CanCollide, "the pad comes BACK — a shaft that eats its own route is unwinnable")
+	eq(pad.Transparency, wasTransparency, "...and is drawn solid again")
+
+	-- Never touched, never crumbles. Otherwise "the pads crumble" could just be a timer that
+	-- dissolves the whole shaft on a clock and the standing test proves nothing.
+	-- Bronze floor 1 is three storeys, so the shafts are on storey 0 and storey 1; storey 2
+	-- is the top and has none. Pad 5 of storey 1 is eighteen studs above anywhere the walk went.
+	local untouched = vault:FindFirstChild("Step_1_5")
+	truthy(untouched ~= nil and untouched.CanCollide,
+		"a pad nobody has stood on is still there after the whole cycle")
+
+	h:advance(lastRunEvent("start").collapseSeconds + 5)
+end
+
 --============================================================================ run 3: THE COLLAPSE
 
 -- Storey 0, standing still. The plane sweeps that floor long before the countdown expires, so

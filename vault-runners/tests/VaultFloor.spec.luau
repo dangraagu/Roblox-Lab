@@ -18,6 +18,7 @@
 local Config = require("../src/shared/Config")
 local Progression = require("../src/shared/Progression")
 local VaultFloor = require("../src/shared/VaultFloor")
+local VaultPath = require("../src/shared/VaultPath")
 local MazeGen = require("../src/shared/MazeGen")
 local Rng = require("../src/shared/Rng")
 
@@ -303,6 +304,79 @@ CHECK.stairsLineUp = function(m)
 	return true
 end
 
+-- THE CLIMB HAS TO BE A CLIMB YOU CAN FAIL. REVIEW.md's finding 7, as arithmetic.
+--
+-- stairsLineUp above proves the shaft REACHES the floor above and that no rise is taller than a
+-- jump. Both were true of v1's staircase, and v1's staircase was six 5x5 treads one stud apart in
+-- a 12-stud cell: there was no jump in the entire game a player could miss, while the store copy
+-- and the thumbnail led with "ROBLOX RAGE OBBY". A vertical check alone cannot see that, because
+-- the thing that was missing is HORIZONTAL.
+--
+-- So, for every consecutive pair of pads in every shaft:
+--
+--   1. the open air between them is wider than the runner (Movement.RunnerWidth) — otherwise a
+--      miss lands on the next pad anyway and the gap is a seam, not a hazard;
+--   2. the hop is inside what the jump can actually do — VaultPath.jumpReach solves Roblox's own
+--      JumpPower against its own Gravity at the game's own WalkSpeed, so this is the engine's
+--      number and not a designer's hope;
+--   3. ...and it uses enough of that reach to be a jump rather than a formality;
+--   4. the pad is at least as wide as the runner, so there is something to land on.
+--
+-- (1) and (3) are the two v1 fails. (2) and (4) are what stop the fix overshooting into a vault
+-- nobody can climb, which is the same failure mode in the other direction.
+local REACH_CEILING = 0.9   -- of the jump's own maximum: past this the hop is pixel-perfect
+local REACH_FLOOR = 0.6     -- ...and under this it is a staircase with extra steps
+CHECK.climbIsFailable = function(m)
+	for s = 0, m.storeys - 2 do
+		local pads = partsOf(m, "step", s)
+		if #pads < 2 then return false, "storey " .. s .. " has no shaft to climb" end
+		table.sort(pads, function(a, b) return a.position.y < b.position.y end)
+		for k = 2, #pads do
+			local a, b = pads[k - 1], pads[k]
+			local dx, dz = b.position.x - a.position.x, b.position.z - a.position.z
+			local d = math.sqrt(dx * dx + dz * dz)
+			local rise = (b.position.y + b.size.y / 2) - (a.position.y + a.size.y / 2)
+			local reach = VaultPath.jumpReach(C, rise)
+
+			if math.min(a.size.x, a.size.z) < C.Movement.RunnerWidth then
+				return false, string.format(
+					"storey %d pad %d is %.1f studs across, narrower than the %.1f-stud runner",
+					s, k - 1, math.min(a.size.x, a.size.z), C.Movement.RunnerWidth)
+			end
+			if d < 1e-9 then
+				return false, string.format("storey %d hop %d is straight up — nothing to miss", s, k)
+			end
+
+			-- The free air between the two pads, along the line the runner crosses. For an
+			-- axis-aligned box that is the support function in that direction, NOT half the side:
+			-- a diagonal hop between two 3x3 pads has 4.2 studs of pad in the way, not 3.
+			local ux, uz = dx / d, dz / d
+			local extent = (a.size.x / 2) * math.abs(ux) + (a.size.z / 2) * math.abs(uz)
+				+ (b.size.x / 2) * math.abs(ux) + (b.size.z / 2) * math.abs(uz)
+			local gap = d - extent
+			if gap <= C.Movement.RunnerWidth then
+				return false, string.format(
+					"storey %d hop %d clears only %.1f studs of open air, which a %.1f-stud runner "
+						.. "cannot fall through — the hop cannot be missed",
+					s, k, gap, C.Movement.RunnerWidth)
+			end
+			if reach <= 0 or d > REACH_CEILING * reach then
+				return false, string.format(
+					"storey %d hop %d asks for %.1f studs at a %.1f-stud rise, against a jump that "
+						.. "carries %.1f — %.0f%% of the maximum is not a jump, it is a coin flip",
+					s, k, d, rise, reach, 100 * d / math.max(reach, 1e-9))
+			end
+			if d < REACH_FLOOR * reach then
+				return false, string.format(
+					"storey %d hop %d asks for %.1f studs of a %.1f-stud jump (%.0f%%) — that is a "
+						.. "staircase, not an obby",
+					s, k, d, reach, 100 * d / reach)
+			end
+		end
+	end
+	return true
+end
+
 -- The spawn point has to be somewhere a player can actually stand.
 CHECK.spawnClear = function(m)
 	local sp = m.spawn.position
@@ -426,7 +500,7 @@ end
 
 local ORDER = {
 	"everyStoreyHasFloor", "floorTiling", "climbHoleOpen", "wallsMatchMaze", "perimeterSealed",
-	"wallsMeetCeiling", "storeysConnected", "stairsLineUp", "spawnClear", "gemsPlaced",
+	"wallsMeetCeiling", "storeysConnected", "stairsLineUp", "climbIsFailable", "spawnClear", "gemsPlaced",
 	"gemsPerStorey", "exitOnTop", "collapseSweepsVault", "partsSane",
 }
 
@@ -645,6 +719,39 @@ end)
 killed("stairsLineUp", "a step was dropped out of the ladder, leaving a rise nobody can jump", function(m)
 	for _, p in ipairs(m.parts) do
 		if p.group == "step" and p.storey == 0 then p.position.y -= 5; break end
+	end
+end)
+
+-- FINDING 7, AS A MUTATION. Put v1's staircase back — five-stud treads at a six-stud reach —
+-- and the check that must notice is the new one, not stairsLineUp: the rises are untouched, the
+-- top pad still meets the floor above, every pad is still inside the stairwell cell. That is
+-- exactly why the vault shipped with no jump in it that anybody could miss.
+killed("climbIsFailable", "the shaft was packed back into v1's unmissable staircase", function(m)
+	local S = m.cellSize
+	local OFF = { { 1, 1 }, { -1, 1 }, { -1, -1 }, { 1, -1 } }
+	for _, p in ipairs(m.parts) do
+		if p.group == "step" then
+			local k = tonumber(string.match(p.name, "_(%d+)$"))
+			local o = OFF[((k - 1) % 4) + 1]
+			local cx = m.shafts[p.storey + 1].x
+			local cz = m.shafts[p.storey + 1].z
+			p.size.x, p.size.z = 5, 5
+			p.position.x, p.position.z = cx + o[1] * S / 4, cz + o[2] * S / 4
+		end
+	end
+end)
+
+-- ...and the other direction. A shaft nobody can climb is the same defect with the sign flipped,
+-- and a check that only ever refused "too easy" would wave this through.
+killed("climbIsFailable", "the pads were flung to opposite corners of a jump nobody can make", function(m)
+	for _, p in ipairs(m.parts) do
+		if p.group == "step" then
+			local k = tonumber(string.match(p.name, "_(%d+)$"))
+			local sh = m.shafts[p.storey + 1]
+			local sign = (k % 2 == 0) and 1 or -1
+			p.position.x = sh.x + sign * 5.5
+			p.position.z = sh.z + sign * 5.5
+		end
 	end
 end)
 

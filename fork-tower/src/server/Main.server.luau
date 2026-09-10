@@ -1228,7 +1228,22 @@ onReadInscription = function(plr: Player, owner: Player, level: number)
 		return -- already counting down; a held button must not become a queue of timers
 	end
 	lane.readPending[level] = true
-	notice(plr, "read", string.format("Leser innskripsjonen … (%.1f s)", remaining))
+	-- SAY IT ONLY IF THERE IS SOMETHING TO SAY.
+	--
+	-- Measured in Studio 2026-09-10 (STUDIO.md): PromptButtonHoldBegan takes ~32 ms to reach the
+	-- server, so for a full honest 1.1 s hold the server's own elapsed is 1.0997 s and `remaining`
+	-- lands at about 0.0004 s — POSITIVE. The `remaining <= 0` fast path above is therefore never
+	-- taken by an honest player, and every honest read flashed "Leser innskripsjonen … (0.0 s)"
+	-- for the two frames before the inscription's own toast replaced it. Three separate reads,
+	-- timed end to end, showed it every time.
+	--
+	-- What is NOT changed here is the charge: task.delay still runs for the whole remainder on the
+	-- server's clock, so an exploiter firing the prompt with no hold at all still waits the full
+	-- Config.Fork.ReadSeconds. Shortening THAT is the one repair that would make this fail open.
+	-- 0.05 is not a magic number: it is what "%.1f" below rounds to zero.
+	if remaining >= 0.05 then
+		notice(plr, "read", string.format("Leser innskripsjonen … (%.1f s)", remaining))
+	end
 	task.delay(remaining, finish)
 end
 
@@ -1466,6 +1481,39 @@ end
 local function onCharacter(plr: Player, char: Model)
 	local hum = char:WaitForChild("Humanoid", 10)
 	local hrp = char:WaitForChild("HumanoidRootPart", 10)
+
+	-- WAIT FOR THE ENGINE TO FINISH SPAWNING BEFORE PLACING ANYBODY. THIS IS NOT DEFENSIVE, IT IS
+	-- THE WHOLE REASON THE GAME WAS REACHABLE OR NOT.
+	--
+	-- Measured in Roblox Studio, 2026-09-10 (STUDIO.md), sampling every Heartbeat from inside a
+	-- server-side CharacterAdded handler:
+	--
+	--     [0.0000] f01 parent=nil        hrp=0.00,0.00,0.00
+	--     [0.0051] f02 parent=Workspace  hrp=0.00,3.51,-160.00     <- Waiting.WaitingSpawn
+	--
+	-- CharacterAdded fires while the character model is STILL UNPARENTED and its root part is at
+	-- the origin. One frame later the engine parents it AND drops it on the only enabled
+	-- SpawnLocation. A CFrame written here before that happens is thrown away without a warning:
+	-- every player spawned on the waiting pad, 174 studs from their own tower across empty air,
+	-- while the HUD told them to read floor 1's inscription. Eight green suites, an emulator and
+	-- two adversarial reviews all missed it, because nothing outside the engine models this order
+	-- (the emulator's own simulateSpawn parents the model first and never applies a spawn point).
+	--
+	-- So yield until the character is genuinely in the world, then place it. Bounded, so a
+	-- character that never gets parented cannot leave this handler running for the session; and
+	-- `lanes[plr]` is read AFTER the wait, because a rebirth can rebuild the lane while we yield.
+	--
+	-- `task.wait(1 / 60)` and not a bare `task.wait()`: one frame, spelled as a DURATION. A bare
+	-- wait is a zero-length yield on a virtual clock, so a frame-poll written that way spins its
+	-- whole bound inside a single scheduler step and the headless check cannot express this
+	-- defect at all. 300 frames is a five-second bound, which is there so a character that never
+	-- arrives cannot leave this handler parked for the session.
+	local frames = 0
+	while char.Parent == nil and frames < 300 do
+		task.wait(1 / 60)
+		frames += 1
+	end
+
 	local lane = lanes[plr]
 	if hrp and lane then
 		(hrp :: BasePart).CFrame = CFrame.new(lane.checkpoint)

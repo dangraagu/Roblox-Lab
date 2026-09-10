@@ -81,6 +81,7 @@ function VaultFloor.build(cfg: any, spec: any, MazeGen: any, Rng: any): any
 
 	local grids, entryCells, exitCells = {}, {}, {}
 	local gems = {}
+	local shafts = {}
 
 	for s = 0, storeys - 1 do
 		local baseY = s * storeyHeight
@@ -146,21 +147,41 @@ function VaultFloor.build(cfg: any, spec: any, MazeGen: any, Rng: any): any
 			end
 		end
 
+		-- THE ASCENT. Six pads spiralling the four corners of the stairwell cell, StepReach apart,
+		-- with open air between them — not the packed staircase v1 shipped. Missing one drops the
+		-- runner back onto this storey's floor with the collapse still rising, which is the whole
+		-- failure model of the obby: it costs SECONDS, and the countdown is what turns seconds
+		-- into a lost run. See Config.Ascent and tests/VaultFloor.spec.luau `climbIsFailable`.
 		if s < storeys - 1 then
 			local ex = exitCells[s + 1]
 			local fx, fy = cellFine(ex.cx, ex.cy)
 			local cx, cz = lx(fx), lz(fy)
 			local OFF = { { 1, 1 }, { -1, 1 }, { -1, -1 }, { 1, -1 } }
 			local n = math.floor(storeyHeight / V.StepRise)
+			local off = V.StepReach / 2
+			-- The shaft has to fit the one maze cell the hole above it is cut from. Asserted, not
+			-- commented: StepReach and StepSize are two numbers in two places in Config and a pad
+			-- poking through the stairwell wall is a pad a runner lands on from the corridor.
+			assert(off + V.StepSize / 2 <= S / 2 + 1e-9, string.format(
+				"VaultFloor: a %.1f-stud pad at reach %.1f does not fit a %.1f-stud stairwell cell",
+				V.StepSize, V.StepReach, S))
+			local pads = {}
 			for k = 1, n do
 				local o = OFF[((k - 1) % 4) + 1]
+				local px, pz = cx + o[1] * off, cz + o[2] * off
+				local top = baseY + k * V.StepRise
 				block({
 					name = string.format("Step_%d_%d", s, k), group = "step", storey = s,
 					size = v3(V.StepSize, 1, V.StepSize),
-					position = v3(cx + o[1] * S / 4, baseY + k * V.StepRise - 0.5, cz + o[2] * S / 4),
+					position = v3(px, top - 0.5, pz),
 					material = "Slate", color = tier.floorColor, collide = true, query = true,
 				})
+				pads[k] = { index = k, x = px, y = top, z = pz }
 			end
+			-- The shaft as data, so the server's crumble loop, src/shared/Ascent.luau and the
+			-- headless walkthrough all read the SAME pads the parts were built from instead of
+			-- three copies of this arithmetic. `y` is the pad's walkable TOP, not its centre.
+			shafts[s + 1] = { storey = s, cell = ex, x = cx, z = cz, floorY = baseY, pads = pads }
 		end
 
 		local gemRng = Rng.new(VaultFloor.storeySeed(spec, s) + GEM_SALT)
@@ -254,12 +275,12 @@ function VaultFloor.build(cfg: any, spec: any, MazeGen: any, Rng: any): any
 	}
 
 	return {
-		parts = parts, gems = gems, grids = grids,
+		parts = parts, gems = gems, grids = grids, shafts = shafts,
 		entryCells = entryCells, exitCells = exitCells,
 		cells = cells, storeys = storeys, cellSize = S,
 		gCols = gCols, gRows = gRows,
 		storeyHeight = storeyHeight, wallHeight = wallHeight, floorThickness = floorT,
-		stepRise = V.StepRise,
+		stepRise = V.StepRise, stepSize = V.StepSize, stepReach = V.StepReach,
 		killMargin = cfg.Run.KillMargin,
 		killLines = killLines,
 		footprint = { w = footW, d = footD },

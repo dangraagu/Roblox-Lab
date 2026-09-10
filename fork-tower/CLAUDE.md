@@ -5,10 +5,10 @@ in, what must stay true, and what bit us building it.
 
 ---
 
-## State (2026-09-10, after REVIEW-3's fourth pass)
+## State (2026-09-10, after the Studio pass — read STUDIO.md)
 
-**Built and green, never published.** No Roblox experience exists, nothing is committed, nothing
-is pushed — deliberately, per the build instruction. The tree is dirty.
+**Built, green, PLAYED IN STUDIO, never published.** No Roblox experience exists, nothing is
+committed, nothing is pushed — deliberately, per the build instruction. The tree is dirty.
 
 ```
 Fork.spec        53 passed, 0 failed
@@ -17,9 +17,23 @@ Build.spec       31 passed, 0 failed
 Codes.spec       19 passed, 0 failed
 Rng.spec         32 passed, 0 failed
 responsive.spec  70 passed, 0 failed
-check_forktower 108 passed, 0 failed   (robloxemu: reader/naive/liar, plus the wire enumeration)
+check_forktower 119 passed, 0 failed   (robloxemu; was 108 — three new blocks from the Studio pass)
 world.check      71 passed, 0 failed   (fork-tower's own: the read, the lane pool, the saved skip)
 ```
+
+**It has now been opened in Roblox Studio and played.** `STUDIO.md` is the record: what ran, what
+was measured, every screenshot, the console. Three things came out of it and all three are fixed:
+
+1. **Every player spawned 174 studs from their own tower.** `CharacterAdded` fires while the
+   character model is still UNPARENTED; one frame later the engine parents it AND drops it on the
+   only enabled SpawnLocation, throwing away the CFrame `onCharacter` had just written. The game
+   was unreachable, with eight green suites. `onCharacter` now waits for `char.Parent` first.
+2. **A read costs 1.17 s, measured** — `PromptButtonHoldBegan` does reach the server, so REVIEW-3's
+   open item 4 is closed and 1.1 s is the right number. But it arrives ~32 ms late, so the
+   `remaining <= 0` fast path is never taken and every read flashed a "(0.0 s)" toast. The toast is
+   now conditional; **the charge is unchanged.**
+3. **`SignEmoji.crack` was 🪨 U+1FAA8, which Roblox draws as an empty box.** Now 🗿 U+1F5FF.
+   Roblox's font covers Emoji 12.0 and not 13.0 — measured, see STUDIO.md.
 
 `luau-analyze` is clean on every source after filtering Roblox-global noise. `find_mojibake.py`
 reports nothing. REVIEW-3's mutation sweeps applied 11 then 12 deliberate defects to the shipping
@@ -89,6 +103,14 @@ touching `dressFork`, `onReadInscription`, or anything in `Config.Fork`.
     means `buildLane` re-derives `Fork.isTrap` on rejoin and rebuilds the penalty section — the
     player loses the skip AND gets the trap.
 
+12. **NEVER place a character from inside `CharacterAdded` without waiting for `char.Parent`.**
+    Measured in Studio: the event fires while the model is still unparented with the root part at
+    the origin, and one frame later the engine parents it AND puts it on the enabled SpawnLocation,
+    silently discarding whatever CFrame you wrote. This is the defect that made the whole game
+    unreachable while every suite was green — see STUDIO.md §3. The wait is `task.wait(1 / 60)`,
+    a DURATION, because a bare `task.wait()` is a zero-length yield on a virtual clock and the
+    headless check cannot express the defect against one.
+
 11. **The checkpoint sits at the MIDDLE of its clear band.** Hazard clearance and platform-edge
     margin always sum to the width of the feasible interval, so one is bought with the other and
     only the midpoint maximises the smaller. Both `Section.build` and `Section.check` know this.
@@ -141,11 +163,11 @@ touching `dressFork`, `onReadInscription`, or anything in `Config.Fork`.
 
 ## Next, roughly in order
 
-0. **Read REVIEW-3.md's "Still open" list first.** Items 2 and 3 are CLOSED (the fourth pass). What
-   is left besides "nobody has played it" is item 4: **`PromptButtonHoldBegan` reaching the server
-   is an unmeasured engine assumption.** If it does not replicate, a full hold costs ~2.2 s instead
-   of 1.1 — a feel regression that fails in the safe direction. Time a full LES hold the minute the
-   place opens in Studio, and do NOT repair it by trusting the client's own hold.
+0. **Read STUDIO.md first, then REVIEW-3.md's "Still open" list.** REVIEW-3 items 2, 3 and 4 are all
+   CLOSED. What is still open from item 1: **no human has summited** (Studio played floors 1–2,
+   both branches) and **no phone has seen it** (the viewport was 2889x1201 throughout). STUDIO.md
+   §9 also carries four polish items, the top one being that on the first frame three billboards
+   draw on top of each other because `MaxDistance = 220` reaches from a tower to the waiting pad.
 1. **Point `hudcheck` at it.** `robloxemu/emu/hudcheck.luau` measures every panel across six
    viewports from 414x800 to 1920x1080. The HUD follows the Responsive rules but has never been
    measured, and the reveal card is a big centred frame — exactly the shape that fails a phone.
@@ -175,6 +197,12 @@ cd D:/Claude/Roblox/robloxemu
 py -3 wrap.py --game ../fork-tower --out build/fork-tower.luau
 luau check_forktower.luau
 cd D:/Claude/Roblox/fork-tower && luau tests/world.check.luau
+
+# open it in Roblox Studio and play it (see STUDIO.md §"What I ran")
+cd D:/Claude/Roblox/fork-tower && rojo build -o ForkTower.rbxlx
+# tools/studio_open.ps1's $places table has no "fork-tower" key yet — one line, someone who owns
+# tools/ should add:  "fork-tower" = "ForkTower.rbxlx"
+py -3 D:/Claude/Roblox/tools/studio_mcp.py studios   # the only honest test of the MCP toggle
 
 # static
 luau-compile --binary <file>

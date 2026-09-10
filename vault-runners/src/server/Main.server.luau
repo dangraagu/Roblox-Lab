@@ -27,6 +27,7 @@ local Progression = require(ReplicatedStorage:WaitForChild("Progression"))
 local RunState = require(ReplicatedStorage:WaitForChild("RunState"))
 local Pets = require(ReplicatedStorage:WaitForChild("Pets"))
 local Trace = require(ReplicatedStorage:WaitForChild("Trace"))
+local Ascent = require(ReplicatedStorage:WaitForChild("Ascent"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
 
 -- Visuals are part of the first build, not a later pass (docs/new-game-checklist.md §2).
@@ -564,8 +565,14 @@ local function buildVault(plr, tierIndex, floor)
 	folder.Parent = vaultsFolder
 
 	local plane, seal
+	-- THE SHAFT'S PADS, indexed the way src/shared/Ascent.luau indexes them, so the crumble loop
+	-- can turn one change into one part write. The name is the join: VaultFloor builds
+	-- "Step_<storey>_<index>" and nothing else in the vault is called that.
+	local padParts = {}
+	for s = 0, model.storeys - 2 do padParts[s] = {} end
 	for _, def in ipairs(model.parts) do
 		local part = instantiate(def, origin, folder)
+		if def.group == "step" then padParts[def.storey][tonumber(string.match(def.name, "_(%d+)$"))] = part end
 		if def.group == "killplane" then plane = part end
 		if def.group == "seal" then seal = part end
 		if def.group == "exitpad" then
@@ -631,7 +638,7 @@ local function buildVault(plr, tierIndex, floor)
 	assert(landed >= wanted, string.format(
 		"[Vault] %s built %d BaseParts, wanted at least %d", folder.Name, landed, wanted))
 
-	return model, folder, origin, gemParts, plane, seal, spec
+	return model, folder, origin, gemParts, plane, seal, spec, padParts
 end
 
 local finishRun
@@ -681,6 +688,15 @@ local function tickRun(plr, a, dt)
 			end
 		end
 
+		-- THE CLIMB SHAFT. Standing on a pad starts its crumble; the pad is gone a beat later and
+		-- back a few seconds after that. This reads `local_` — the TRUSTED position — like every
+		-- other rule in this loop: a crumble driven by the client's claim would let one player
+		-- dissolve the shaft by lying about where they are, and would let a teleporting client
+		-- pre-crumble a whole vault on the way past.
+		local onStorey, onPad = Ascent.padUnder(Config, model,
+			{ x = local_.X, y = local_.Y, z = local_.Z }, a.ascent, now)
+		if onPad ~= nil then Ascent.touch(Config, a.ascent, onStorey, onPad, now) end
+
 		if (local_ - vec(model.exit.position)).Magnitude <= RUN.ExitRadius then
 			finishRun(plr, "exit")
 			return
@@ -692,6 +708,21 @@ local function tickRun(plr, a, dt)
 		if RunState.caught(run, model, local_.Y, now) then
 			finishRun(plr, "collapse")
 			return
+		end
+	end
+
+	-- ...and draw whatever the shaft did this tick. Only the FLIPS: writing CanCollide on every
+	-- pad of a five-storey vault every tick is 24 replicated property writes at 5Hz for nothing.
+	-- This runs outside the `if hrp` above on purpose — a pad that has crumbled must come back
+	-- even while the player has no character, or a respawn mid-climb finds a shaft with holes in
+	-- it that never fill.
+	for _, ch in ipairs(Ascent.update(Config, a.ascent, now)) do
+		local part = a.padParts[ch.storey] and a.padParts[ch.storey][ch.index]
+		if part then
+			part.CanCollide = ch.solid
+			part.CanQuery = ch.solid
+			part.Transparency = ch.solid and 0 or 1
+			part.CastShadow = ch.solid
 		end
 	end
 
@@ -799,7 +830,7 @@ local function beginRun(plr, tierIndex)
 	end
 
 	local floor = math.max(1, p.floors[tierIndex] or 1)
-	local model, folder, origin, gemParts, plane, seal, spec = buildVault(plr, tierIndex, floor)
+	local model, folder, origin, gemParts, plane, seal, spec, padParts = buildVault(plr, tierIndex, floor)
 
 	local gemById = {}
 	for _, g in ipairs(model.gems) do gemById[g.id] = g end
@@ -809,6 +840,10 @@ local function beginRun(plr, tierIndex)
 		model = model, folder = folder, origin = origin,
 		gemParts = gemParts, gemById = gemById,
 		plane = plane, seal = seal,
+		padParts = padParts,
+		-- THE OBBY'S STATE, one per run. The pads of the climb shaft crumble under the runner and
+		-- come back; Ascent owns when, this file owns the Roblox writes.
+		ascent = Ascent.new(Config, model),
 		tierIndex = tierIndex, floor = floor,
 		elapsed = 0, sinceTick = 0,
 		-- Seeded from the drop-in the SERVER is about to write, never from anything the client

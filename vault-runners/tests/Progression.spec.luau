@@ -125,12 +125,22 @@ do -- the SLACK tightens, and that is the whole difficulty curve now
 	-- because a countdown decided here cannot know how big the maze it is timing is. What the
 	-- curve controls now is how much room over the BFS-optimal route the runner is owed;
 	-- tests/Collapse.spec.luau is what checks the resulting run is survivable.
-	near(Progression.difficulty(C, 1, 2).slack, C.Collapse.Slack - C.Collapse.TightenPerFloor,
-		1e-9, "floor 2 sheds one step of slack")
-	near(Progression.difficulty(C, 1, 11).slack, C.Collapse.Slack - 10 * C.Collapse.TightenPerFloor,
-		1e-9, "floor 11 has shed ten")
-	near(Progression.difficulty(C, 1, 900).slack, C.Collapse.MinSlack, 1e-9,
-		"and it bottoms out at MinSlack rather than running to zero")
+	-- The schedule used to shed a flat 0.02 a floor and STOP at MinSlack, and this block used to
+	-- assert exactly that arithmetic. It hit its floor at floor 26 — the same floor the maze stops
+	-- growing at — so Gold floor 26 and Gold floor 2000 were the identical difficulty spec and the
+	-- entire late game was one floor with different seeds. So the assertions here are about the
+	-- SHAPE a schedule has to have, not about a formula: it decays toward MinSlack and never
+	-- arrives, which is the only way there is no depth at which the game stops getting harder.
+	truthy(Progression.difficulty(C, 1, 2).slack < Progression.difficulty(C, 1, 1).slack,
+		"floor 2 is tighter than floor 1")
+	truthy(Progression.difficulty(C, 1, 11).slack < Progression.difficulty(C, 1, 2).slack,
+		"floor 11 is tighter than floor 2")
+	truthy(Progression.difficulty(C, 1, 20000).slack < Progression.difficulty(C, 1, 900).slack,
+		"and floor 20000 is STILL tighter than floor 900 — the curve never bottoms out")
+	truthy(Progression.difficulty(C, 1, 900).slack > C.Collapse.MinSlack,
+		"deep floors approach MinSlack from above...")
+	truthy(Progression.difficulty(C, 1, 900).slack - C.Collapse.MinSlack < 0.06,
+		"...and are close to it by floor 900, rather than running away to zero")
 
 	local prev = math.huge
 	local shrinking = true

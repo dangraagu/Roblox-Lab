@@ -32,7 +32,12 @@ Config.Save = {
 	-- before it errors, and flush() pcalls its failure — so an unthrottled save path does not
 	-- crash, it silently stops saving. Every rejected Buy and Equip used to write: tapping down
 	-- the eight-pet list to compare multipliers was eight UpdateAsyncs.
-	FlushTickSeconds = 5,
+	-- SEVEN, not five, and not six. Five was UNDER the cadence this comment cites: measured
+	-- against the real server, forty real profile changes spaced one flush tick apart cost forty
+	-- UpdateAsyncs over 220 seconds — one write per 5.5s, sustainable indefinitely by a client
+	-- alternating Equip between two owned pets. Six sits exactly ON the documented boundary, and
+	-- this file already has one boundary it refuses to sit on (RunState's `now >= sealAt`).
+	FlushTickSeconds = 7,
 	LockSeconds = 120,          -- soft session lock TTL, renewed by every write
 }
 
@@ -45,8 +50,18 @@ Config.Vault = {
 	CellSize = 12,          -- studs per fine-grid cell (corridor width AND wall thickness)
 	StoreyHeight = 18,      -- floor top to floor top
 	FloorThickness = 2,
-	StepRise = 3,           -- one step of the climb shaft; 6 steps span a storey
-	StepSize = 5,           -- step tread is StepSize x 1 x StepSize
+	StepRise = 3,           -- one pad of the climb shaft; 6 pads span a storey
+	-- THE PAD IS SMALL AND THE GAP IS REAL. v1 had StepSize 5 at a 6-stud reach, which left ONE
+	-- stud of open air between consecutive treads in a 12-stud cell: a 2-stud-wide runner cannot
+	-- fall through a 1-stud slot, so there was no jump in the game that could be missed. Three
+	-- studs of pad at an eight-stud reach leaves FIVE studs of air, and asks for 76% of what the
+	-- jump can actually carry at a 3-stud rise (VaultPath.jumpReach = 10.6 studs).
+	-- tests/VaultFloor.spec.luau's `climbIsFailable` holds both ends of that.
+	StepSize = 3,           -- pad is StepSize x 1 x StepSize
+	-- Centre-to-centre between consecutive pads. StepReach/2 + StepSize/2 must stay inside
+	-- CellSize/2 — the shaft lives in ONE maze cell, because the hole in the floor above it is
+	-- one maze cell — and VaultFloor asserts exactly that rather than trusting this comment.
+	StepReach = 8,
 	GemHeight = 3,          -- gem centre above the storey floor
 	ExitHeight = 3,
 	-- WHERE THE COLLAPSE STARTS, in STOREYS below the height at which it kills a runner standing
@@ -145,10 +160,22 @@ Config.Run = {
 -- on. Roblox's default is 16, which is a walk; a vault runner outrunning a collapse runs.
 Config.Movement = {
 	WalkSpeed = 24,             -- studs/second, written onto every character that spawns
-	-- One 3-stud step of the climb shaft, jumped. A default jump is ~1.0s in the air; landing
-	-- on the next tread and setting up the following jump is costed a little under that, and
+	-- One 3-stud pad of the climb shaft, jumped. A default jump is ~1.0s in the air; landing
+	-- on the next pad and setting up the following jump is costed a little under that, and
 	-- the spec's slack requirement is what absorbs the difference. NOT affected by WalkSpeed.
 	ClimbSecondsPerStep = 0.9,
+	-- ROBLOX'S OWN NUMBERS, and the game does NOT set either of them — Workspace.Gravity and
+	-- Humanoid.JumpPower are left at their defaults, so these are recorded here as FACTS the
+	-- climb's geometry is derived from, not as tunables. VaultPath.jumpReach solves the
+	-- projectile for how far a runner moving at WalkSpeed carries while gaining `rise` studs,
+	-- and tests/VaultFloor.spec.luau's `climbIsFailable` holds every hop in the shaft inside it.
+	-- Change either number and the shaft has to be re-measured, not re-typed.
+	Gravity = 196.2,            -- studs/s^2, Workspace.Gravity's default
+	JumpPower = 50,             -- studs/s of upward launch, Humanoid.JumpPower's default
+	-- How wide the thing doing the jumping is. R15's HumanoidRootPart is 2 x 2 x 1, and this is
+	-- the number that decides whether a GAP IS A GAP: a hole narrower than the runner is a seam
+	-- they walk over, not a hop they can miss.
+	RunnerWidth = 2,
 }
 
 --============================================================================ the collapse
@@ -162,15 +189,38 @@ Config.Movement = {
 -- measured, and the countdown follows from that. The only thing left to tune is how much slack
 -- the runner is owed — which is what these numbers are.
 Config.Collapse = {
-	-- Multiplier on the optimal route. Everything a real player does that a BFS solver does not
-	-- — detouring for gems, reading the maze, missing a jump, backtracking a dead end — comes
-	-- out of this.
-	Slack = 2.0,
-	-- ...shaved as you go deeper into a tier. THIS is the difficulty curve now: the same maze,
-	-- less room for error. It can never take the run below MinSlack, which is the point at which
-	-- a perfect route with one gem per storey stops fitting.
-	TightenPerFloor = 0.02,
-	MinSlack = 1.5,
+	-- HOW MUCH OF THE MAZE'S DEAD-END MASS THE BUDGET PAYS FOR. The demand is
+	--     shortest route  +  WasteWeight * (cells sitting in branches off that route)
+	-- in cell-steps, per storey (VaultPath.wastedCells). 0 prices the vault as if the runner
+	-- could see the maze from above; 1 prices the whole expected walk of one who cannot.
+	--
+	-- MEASURED, not chosen by feel. A blind-explorer simulation over 300 mazes x 20 runs at the
+	-- 6x5 cap, swept over beta in {0, 0.25, 0.5, 0.75, 1}: 0.25 is the only value that beats the
+	-- shipped 0 on BOTH axes at once — the curve gets WIDER (65 completion points from floor 1 to
+	-- the asymptote, against 59) and the run-to-run spread inside a single floor gets SMALLER
+	-- (per-maze difficulty CV 8.8% against 12.1%). Everything past 0.25 buys less jitter by
+	-- spending curve: at 1.0 the deepest floor the safety bounds allow still completes 71% of
+	-- modelled runs, so the endgame stops being an endgame.
+	WasteWeight = 0.25,
+
+	-- SLACK IS THE DIFFICULTY CURVE. The size caps are a pacing budget and Gold starts at both
+	-- of them, so from floor 26 the maze cannot grow — what has to change with depth is how much
+	-- room over the demand the runner is owed.
+	--
+	--     slack(f) = MinSlack + (Slack - MinSlack) * (1 + (f-1)/TightenFloors) ^ -TightenExponent
+	--
+	-- v1 shed a flat 0.02 per floor to a hard floor of 1.5, which hit its floor at floor 26 and
+	-- was FLAT FOR EVER AFTER — the 6000-gem Gold unlock bought 25 floors of curve and then the
+	-- same run repeated. A power-law decay never reaches its asymptote, so there is no floor at
+	-- which the game stops getting harder; it is still shedding 0.037 of slack between floors 400
+	-- and 1000, where the old schedule shed nothing between floor 26 and floor 20000.
+	--
+	-- Both ends come off a measured run-completion model, not taste. See REVIEW-3.md.
+	Slack = 1.85,          -- floor 1: 98% of modelled runs escape. A first vault you cannot fail.
+	MinSlack = 1.21,       -- the asymptote, and the LOWEST that clears every bound in
+	                       -- tests/Collapse.spec.luau with 25% headroom over 2400 measured floors.
+	TightenFloors = 25,    -- the scale of the decay, in floors
+	TightenExponent = 0.75,
 	-- A vault so small the derivation asks for twelve seconds is not a run, it is a corridor.
 	MinSeconds = 30,
 	-- ...and the other end. This is a PACING promise, not a safety clamp: nothing clamps the
@@ -178,6 +228,63 @@ Config.Collapse = {
 	-- exact bug this section exists to prevent. It is the bound Config.Curve's caps are chosen
 	-- to satisfy, and tests/Collapse.spec.luau fails if a generated floor ever exceeds it.
 	MaxSeconds = 300,
+}
+
+--============================================================================ the climb (the obby)
+
+-- THE ONE PLACE IN THIS GAME A JUMP CAN BE MISSED.
+--
+-- v1's climb was six 5x5 treads packed into a 12-stud cell at 3-stud rises, one stud apart. It
+-- was not an obby; it was a staircase you had to press Space on. The store copy, the thumbnail
+-- and the genre line all lead with "ROBLOX RAGE OBBY", and REVIEW.md's finding 7 held publishing
+-- because of the gap between those two sentences.
+--
+-- So the shaft is now six 3x3 pads at the four corners of the stairwell cell, Vault.StepReach
+-- apart, with FIVE STUDS OF OPEN AIR between consecutive pads — wider than the runner
+-- (Movement.RunnerWidth), so a missed hop is a fall and not a stumble — and every pad CRUMBLES
+-- shortly after it is first stood on, so there is no lining the jump up at leisure.
+--
+-- WHAT A MISS COSTS IS SECONDS, and the collapse is what turns seconds into a lost run. There is
+-- no new death rule, no lost gems, no reset to the hub: you fall to the floor you came from and
+-- you climb again, while the plane keeps rising. That is the whole failure model, and it is why
+-- the obby composes with the countdown instead of competing with it.
+Config.Ascent = {
+	-- From the first moment the runner is standing on a pad to the pad falling away. A hop is
+	-- costed at Movement.ClimbSecondsPerStep (0.9s), so this is a little over one hop of grace:
+	-- keep moving and you never see it, stop to think and the floor goes.
+	CrumbleSeconds = 1.1,
+	-- ...and back, so the shaft can never be permanently destroyed. A rage obby that eats its own
+	-- route is an unwinnable vault, which is exactly what tests/Collapse.spec.luau exists to stop.
+	-- Longer than a fall plus a re-approach, so a runner who drops off pad 2 genuinely waits.
+	RespawnSeconds = 3,
+	-- How the SERVER decides a runner is standing on a pad, in studs, against the TRUSTED
+	-- position (src/shared/Trace.luau) — never against the client's claim. Horizontal is measured
+	-- to the pad's centre and is generous by half a pad, because a runner standing on the lip of
+	-- a 3-stud pad is standing on it.
+	--
+	-- StandHeight is how far the runner's FEET may be above the pad's top surface, NOT how far
+	-- their root may be. Measured from the root it is impossible to tell standing on pad 1 from
+	-- walking across the floor underneath it — the pad's top is exactly StepRise up and a standing
+	-- root is Run.RunnerRootHeight up, and those are the same number of studs above the floor.
+	-- That made pad 1 crumble while the runner was still walking towards it.
+	StandRadius = 3,
+	StandHeight = 2,
+
+	--------------------------------------------------------------------- the MODEL, not the game
+	-- Neither of the next two numbers is read by the running game. They exist so the COUNTDOWN
+	-- can pay for the obby: VaultPath.climbSeconds prices a storey transition as the expected
+	-- number of hops plus the expected number of falls, and these are what "expected" means.
+	--
+	-- ModelMissChance is an ASSUMPTION, in the same way measure_curve.luau's blind explorer is an
+	-- assumption. Nobody has played this game, so there is no measured miss rate to put here;
+	-- REVIEW-4 sweeps it from 0 to 0.12 and reports what the curve does at each, instead of
+	-- defending one number. Six hops at 0.04 is a 22% chance of falling at least once per storey
+	-- and 0.94 expected falls per storey transition — about 3.7 falls in a five-storey Gold run.
+	ModelMissChance = 0.04,
+	-- Seconds from landing on the storey floor after a miss to being back under pad 1, including
+	-- the wait when the pad you fell off has not respawned yet. The fall itself is NOT in here —
+	-- VaultPath.fallSeconds solves that from Gravity.
+	ModelReapproachSeconds = 0.8,
 }
 
 --============================================================================ pets

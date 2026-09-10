@@ -74,10 +74,18 @@ Config.Fork = {
 		crack = "SPREKKEN",
 		eye = "ØYET",
 	},
+	-- HVER GLYF MÅ FINNES I ROBLOX-FONTEN. `crack` var 🪨 (U+1FAA8, Emoji 13.0) og ble tegnet som
+	-- en TOM RUTE i spillet: ett av fire tegn i vokabularet innskripsjonen navngir var uleselig på
+	-- døra, på platået og i HUD-en. Målt i Studio 2026-09-10 (se STUDIO.md og
+	-- studio-shots/05-glyph-block-test.png): U+1FA79 (Emoji 12.0) tegnes, U+1FA9F / U+1FAA8 /
+	-- U+1FAB0 (Emoji 13.0) og U+1FAE0 (Emoji 14.0) tegnes ikke. find_mojibake.py ser ikke dette —
+	-- bytene er korrekt UTF-8, det er fonten som mangler bildet.
+	-- 🗿 (U+1F5FF) er målt tegnet, er grå som SignColors.crack, og er stein slik SPREKKEN er stein.
+	-- check_forktower.luau har lista over hver glyf noen faktisk har sett tegnet i Studio.
 	SignEmoji = {
 		flame = "🔥",
 		frost = "❄️",
-		crack = "🪨",
+		crack = "🗿",
 		eye = "👁️",
 	},
 	SignsPerDoor = 2,

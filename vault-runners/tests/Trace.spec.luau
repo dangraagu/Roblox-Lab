@@ -158,6 +158,84 @@ do
 	near(t.x, 5, 1e-9, "nor a dt that is not a number at all")
 end
 
+--============================================================================ the tolerance is TIGHT
+
+-- REVIEW-2: "The anti-cheat's own tuning constants have NO test floor. Three mutations to
+-- Config.Run's trusted-movement block survive the entire suite." TrustedSpeedFactor 1.35 -> 3.0,
+-- TrustedClimbFactor 2.5 -> 10 and TrustedBurstSeconds 3 -> 60 were all green everywhere.
+--
+-- Everything above this line proves the throttle EXISTS. This block is what makes it TIGHT, and
+-- it does so in the units the VAULT is built in — one maze cell step, one storey, one vault
+-- footprint — rather than by restating the constants, so a legitimate re-tune inside these bounds
+-- is free and a re-tune that hands the vault away is not.
+do
+	local CELL_STEP = C.Vault.CellSize * 2                       -- one maze move, wall to wall
+	local STOREY = C.Vault.StoreyHeight
+	local FOOTPRINT = (2 * C.Curve.MaxCells + 1) * C.Vault.CellSize
+
+	-- How long the TRUSTED position takes to cross one cell step, when the claim is already
+	-- there. Driven through Trace.step, so this measures the throttle rather than Trace.speeds.
+	local t = Trace.new(C, at(0, 0, 0))
+	local elapsed = 0
+	while t.x < CELL_STEP and elapsed < 10 do
+		Trace.step(t, at(CELL_STEP, 0, 0), 0.05)
+		elapsed += 0.05
+	end
+	ok(elapsed >= 0.65, string.format(
+		"a teleport claim crosses a maze cell in %.2fs of trusted time — a corridor is meant to "
+			.. "cost about %.2fs at WalkSpeed, and the tolerance may not hand back a third of it",
+		elapsed, CELL_STEP / C.Movement.WalkSpeed))
+
+	-- ...and one storey of height. The honest climb is the spiral: 6 treads at ClimbSecondsPerStep.
+	local u = Trace.new(C, at(0, 0, 0))
+	local upTime = 0
+	while u.y < STOREY and upTime < 20 do
+		Trace.step(u, at(0, STOREY, 0), 0.05)
+		upTime += 0.05
+	end
+	ok(upTime >= 1.8, string.format(
+		"a teleport claim gains a whole storey in %.2fs of trusted time, against an honest climb "
+			.. "of %.1fs — at that rate the collapse cannot catch anybody",
+		upTime, math.floor(STOREY / C.Vault.StepRise) * C.Movement.ClimbSecondsPerStep))
+
+	-- THE BANKED BURST IS THE ONE THAT IS SPENT ALL AT ONCE. A runner who stands still banks
+	-- allowance, and the first claim after that is paid out of savings in a single tick. That is
+	-- deliberate — it is what stops a replication stall reading as a teleport — but it is also the
+	-- largest instant displacement anybody can buy, so it is bounded against the vault it happens
+	-- inside rather than left to whatever TrustedBurstSeconds happens to be.
+	local b = Trace.new(C, at(0, 0, 0))
+	for _ = 1, 200 do Trace.step(b, at(0, 0, 0), 1) end       -- stand still, bank the lot
+	Trace.step(b, at(100000, 0, 0), 0.05)
+	ok(b.x <= 0.75 * FOOTPRINT, string.format(
+		"standing still and then teleporting moves the TRUSTED position %.0f studs in one tick — "
+			.. "%.0f%% of a %d-stud vault, bought without walking", b.x, 100 * b.x / FOOTPRINT, FOOTPRINT))
+
+	local bu = Trace.new(C, at(0, 0, 0))
+	for _ = 1, 200 do Trace.step(bu, at(0, 0, 0), 1) end
+	Trace.step(bu, at(0, 100000, 0), 0.05)
+	ok(bu.y <= 2 * STOREY, string.format(
+		"...and %.0f studs upward, which is %.1f storeys of the climb skipped in one tick",
+		bu.y, bu.y / STOREY))
+
+	-- ...AND IN THE UNITS THE OBBY IS BUILT IN, because that is where somebody will reach for this
+	-- module next. The climb shaft is one storey of crumbling pads; the banked burst above is
+	-- MORE than one whole shaft of height, bought by standing still. So a client that lies about
+	-- its position can skip a shaft, and the obby's difficulty must never have been resting on
+	-- this file — it rests on the geometry (five studs of open air per hop) and on physics the
+	-- server does not own. What is bounded here is only how much a liar gains, and the bound that
+	-- matters is that they cannot buy the WHOLE climb in one go: they still have to keep lying,
+	-- at a rate, for the length of the vault.
+	local shaft = C.Vault.StoreyHeight
+	local wholeVault = (C.Curve.MaxStoreys - 1) * shaft
+	ok(bu.y < wholeVault, string.format(
+		"one banked burst gains %.0f studs, the entire %.0f-stud climb of a full-size vault — the "
+			.. "collapse would never see a cheating runner at all", bu.y, wholeVault))
+	print(string.format("  tolerance: cell step %.2fs, storey %.2fs, banked burst %.0f studs flat / %.0f up",
+		elapsed, upTime, b.x, bu.y))
+	print(string.format("  DISCLOSED: that burst is %.2f climb shafts. A lying client skips one; an "
+		.. "honest one hops six crumbling pads.", bu.y / shaft))
+end
+
 --============================================================================ CONTROL
 
 -- A change the module must NOT notice. The trusted position is about distance and time; nothing
