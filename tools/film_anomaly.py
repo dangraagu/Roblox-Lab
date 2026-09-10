@@ -14,9 +14,12 @@ the hall from scratch every pass and rolls clean-or-anomalous privately, so the 
 pair are two different passes minutes apart. Three things have to be pinned down or the pair is a
 lie - the viewer would "spot" the wrong thing:
 
-  * WHICH HALL IS ON SCREEN. `beginPass` publishes the roll on the zone model as the attributes
-    `Clean`, `AnomalyId` and `Serial` (added for exactly this, and asserted in
-    robloxemu/check_anomaly_attrs.luau). This tool reads them. It never guesses from pixels.
+  * WHICH HALL IS ON SCREEN. `beginPass` publishes the roll in `ServerStorage.PassInfo.<userId>`
+    as the attributes `Clean`, `AnomalyId`, `Serial` and `Zone` (added for exactly this, and
+    asserted in robloxemu/check_anomaly_attrs.luau). This tool reads them from the SERVER
+    datamodel. It never guesses from pixels. They are in ServerStorage rather than on the zone
+    model because the zone is in workspace and replicates: `Clean = true` would hand every
+    client the answer, and on a clean pass that is the one thing the world does not contain.
   * THE CAMERA. Derived from the zone's own Floor part - never from a bounding box of the whole
     zone, because an anomaly ADDS AND REMOVES PARTS and a bbox-derived camera would therefore
     move between the two halves. It is computed once and then re-verified every pass; if it ever
@@ -78,9 +81,19 @@ if not (floor and floor:IsA("BasePart")) then return "NOFLOOR" end
 local adv = zone:FindFirstChild("AdvancePad")
 local back = zone:FindFirstChild("BackPad")
 if not (adv and back) then return "NOPADS" end
-local clean = zone:GetAttribute("Clean")
-local id = zone:GetAttribute("AnomalyId")
-local serial = zone:GetAttribute("Serial")
+-- The roll lives in ServerStorage, which does not replicate: an attribute in workspace would
+-- hand every client `Clean = true`, and on a clean pass that is the one answer the world does
+-- not contain. This probe runs in the SERVER datamodel, so it costs nothing to read it here.
+local root = game:GetService("ServerStorage"):FindFirstChild("PassInfo")
+if not root then return "NOPASSINFO" end
+local info = nil
+for _, c in root:GetChildren() do
+    if c:GetAttribute("Zone") == zone.Name then info = c end
+end
+if not info then return "NOINFO" end
+local clean = info:GetAttribute("Clean")
+local id = info:GetAttribute("AnomalyId")
+local serial = info:GetAttribute("Serial")
 if clean == nil then return "NOATTRS" end
 return table.concat({
     "OK", zone.Name,
@@ -512,8 +525,8 @@ def main():
         "source": "capture",
         "what": ("Real Roblox Studio captures of the running game. The pair for each anomaly is "
                  "the SAME camera on the SAME hall: the clean half is one pass, the anomalous "
-                 "half another, matched by the Clean/AnomalyId attributes beginPass writes on "
-                 "the zone."),
+                 "half another, matched by the Clean/AnomalyId attributes beginPass writes into "
+                 "ServerStorage.PassInfo, which does not replicate to players."),
         "staging": ["the player HUD was switched off for the shot (it shows a day counter that "
                     "changes every pass, which would read as the difference)",
                     "the avatar was parked behind the camera for the same reason",

@@ -53,10 +53,13 @@ seconds.
 ## How a pair is kept honest
 
 * **Which hall is on screen** comes from the game, not from the pixels. `beginPass` writes
-  `Clean`, `AnomalyId` and `Serial` onto the zone model as attributes; the tool reads them.
-  `robloxemu/check_anomaly_attrs.luau` is the check that those attributes are true — it
-  identifies the clean hall from the world alone and asserts the attributes agree with it, pass
-  after pass.
+  `Clean`, `AnomalyId`, `Serial` and `Zone` into `ServerStorage.PassInfo.<userId>`; the tool reads
+  them from the server datamodel. They are in ServerStorage rather than on the zone model because
+  the zone lives in `workspace` and replicates — `Clean = true` would hand every player the one
+  answer a clean hall does not contain. `robloxemu/check_anomaly_attrs.luau` is the check that
+  those attributes are true — it identifies the clean hall from the world alone and asserts the
+  attributes agree with it, pass after pass — and it also sweeps everything a client can see and
+  fails if the roll is anywhere in it.
 * **The camera** is derived from the zone's `Floor` part, never from a bounding box of the zone.
   An anomaly adds and removes parts, so a bbox-derived camera would move between the two halves
   of the pair. It is computed once and re-checked every pass; the run stops if it ever drifts.

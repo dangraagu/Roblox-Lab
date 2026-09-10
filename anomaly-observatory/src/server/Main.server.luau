@@ -11,6 +11,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 
@@ -908,6 +909,32 @@ local function retryClaim(plr: Player)
 	pushState(plr)
 end
 
+-- Where the server says out loud what it just rolled, for tools that need to know: the marketing
+-- capture rig, which has to shoot a MATCHED pair of the same hall clean and anomalous, and the
+-- headless check. `passState` is a table local to this script, so without this there is no way
+-- from outside to tell whether the hall standing in the workspace is clean or which anomaly is
+-- in it, and both were left inferring it from pixels or from geometry they had to re-derive.
+--
+-- ServerStorage, deliberately. See the note at the write site in beginPass.
+local passInfoRoot = ServerStorage:FindFirstChild("PassInfo")
+if not passInfoRoot then
+	passInfoRoot = Instance.new("Folder")
+	passInfoRoot.Name = "PassInfo"
+	passInfoRoot.Parent = ServerStorage
+end
+
+local function passInfoFor(plr: Player): Folder
+	local key = tostring(plr.UserId)
+	local existing = passInfoRoot:FindFirstChild(key)
+	if existing then
+		return existing
+	end
+	local f = Instance.new("Folder")
+	f.Name = key
+	f.Parent = passInfoRoot
+	return f
+end
+
 -- Rebuild the hall and roll the next pass for this player.
 beginPass = function(plr: Player)
 	local prof = profiles[plr]
@@ -956,17 +983,28 @@ beginPass = function(plr: Player)
 	-- decided, and they cost nothing to keep honest because they are written in the one place
 	-- the decision is made.
 	--
-	-- This gives away nothing that was hidden. Per the R12 note above, the anomaly is a real
-	-- Instance replicated into the player's own zone, so a client that wanted to cheat could
-	-- already read the answer off the hall; the Best-Day board is explicitly not a trustworthy
-	-- ranking for that reason. An attribute on the same replicated model is the same information
-	-- in a more readable form, not a new leak.
+	-- These live in ServerStorage, which does NOT replicate. They were briefly written onto the
+	-- zone model instead, which is parented to workspace, on the argument that it gave away
+	-- nothing hidden: per R12 the anomaly is a real Instance in the player's own zone, so a
+	-- client that wanted to cheat could already read the answer off the hall.
+	--
+	-- That argument is wrong, in one decisive place. On a CLEAN pass there is nothing in the
+	-- hall to read. Finding the anomaly by inspecting the world means proving a NEGATIVE against
+	-- a reference build you do not have; `Clean = true` hands that answer over as a labelled
+	-- boolean, and `AnomalyId` names the object so you need not look at all. "A determined
+	-- exploiter could derive it" and "every client is told it" are different costs, and the
+	-- whole game is the looking.
+	--
+	-- The capture rig and the headless check read these through the SERVER datamodel, so
+	-- ServerStorage costs them nothing.
 	--
 	-- Written AFTER the applier block on purpose: the missing-applier fallback demotes the pass
 	-- to clean, and a pass demoted to clean must not still advertise an anomaly id.
-	zone:SetAttribute("Clean", ps.clean)
-	zone:SetAttribute("AnomalyId", ps.anomalyId) -- nil removes the attribute
-	zone:SetAttribute("Serial", ps.serial)
+	local info = passInfoFor(plr)
+	info:SetAttribute("Clean", ps.clean)
+	info:SetAttribute("AnomalyId", ps.anomalyId) -- nil removes the attribute
+	info:SetAttribute("Serial", ps.serial)
+	info:SetAttribute("Zone", zone.Name)
 
 	-- decision prompts on the end wall
 	local endWall = findPart(zone, "EndWall")
@@ -1327,6 +1365,10 @@ Players.PlayerRemoving:Connect(function(plr)
 	if zone then
 		releaseZoneIndex(tonumber(zone:GetAttribute("Index")) or 0)
 		zone:Destroy()
+	end
+	local info = passInfoRoot:FindFirstChild(tostring(plr.UserId))
+	if info then
+		info:Destroy()
 	end
 	profiles[plr] = nil
 	zones[plr] = nil

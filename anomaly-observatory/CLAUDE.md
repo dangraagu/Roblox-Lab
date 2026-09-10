@@ -46,14 +46,26 @@ Hint (H at start pad) spends a token to reveal clean/anomaly.
 - **Leaderboard**: OrderedDataStore by best Day (`publishBest`).
 
 ## The pass is now visible from outside the server script (2026-09-10)
-`beginPass` publishes the roll on the zone model: `zone:SetAttribute("Clean", ...)`,
-`"AnomalyId"` (nil when clean) and `"Serial"`, written AFTER the applier block so the
-missing-applier fallback is reflected. This leaks nothing — the R12 note in the same file already
-records that the anomaly is a real replicated Instance a client can read, which is why the
-Best-Day board is explicitly not a trustworthy ranking. What it buys is a deterministic capture
-rig: `tools/film_anomaly.py` shoots matched clean/anomaly pairs keyed by those attributes into
+`beginPass` publishes the roll into **`ServerStorage.PassInfo.<userId>`** as the attributes
+`Clean`, `AnomalyId` (nil when clean), `Serial` and `Zone`, written AFTER the applier block so the
+missing-applier fallback is reflected. What it buys is a deterministic capture rig:
+`tools/film_anomaly.py` shoots matched clean/anomaly pairs keyed by those attributes into
 `marketing/pairs/`, and `robloxemu/check_anomaly_attrs.luau` asserts the attributes are true by
 comparing them with the world rather than with the server's own table.
+
+**ServerStorage, not the zone.** They were first written onto the zone model, which is parented to
+`workspace` and therefore replicates, on the argument that it leaked nothing: the R12 note in the
+same file records that the anomaly is a real replicated Instance a client can read, which is why
+the Best-Day board is explicitly not a trustworthy ranking.
+
+That argument is wrong in one decisive place, and it was caught before the build went live. **On a
+clean pass there is nothing in the hall to read.** Finding the anomaly by inspecting the world
+means proving a *negative* against a reference build you do not have; `Clean = true` hands that
+answer over as a labelled boolean, and `AnomalyId` names the object so you need not look at all.
+"A determined exploiter could derive it" and "every client is told it" are different costs, and
+the looking *is* the game. `check_anomaly_attrs.luau` now sweeps `workspace` and
+`ReplicatedStorage` for those attribute names and fails if any survive; restoring the old write
+site turns up 149 of them across 60 halls.
 
 ## Files
 Server `src/server/Main.server.luau` (buildClean + APPLIERS table + loop + DataStore);

@@ -7,8 +7,10 @@
 -- (`passState[plr].clean` / `.anomalyId`). Nothing outside that script could read it, so anything
 -- that needed to know which hall was on screen — the marketing capture rig, which has to shoot
 -- the SAME hall clean and anomalous as a matched pair — was reduced to guessing from pixels.
--- `beginPass` now publishes the roll on the zone model as attributes `Clean`, `AnomalyId` and
--- `Serial`. That is only useful if the attributes are true, and an attribute that quietly lies
+-- `beginPass` now publishes the roll in ServerStorage.PassInfo.<userId> as attributes `Clean`,
+-- `AnomalyId` and `Serial`. ServerStorage, not the zone model in workspace: an attribute in
+-- workspace replicates, and `Clean = true` would hand every client the one answer the world does
+-- not contain. That is only useful if the attributes are true, and an attribute that quietly lies
 -- fails in the worst possible way: the rig ships a "spot the difference" pair whose two halves
 -- are the same hall, or whose anomaly is labelled as the wrong one, and nothing errors.
 --
@@ -90,8 +92,21 @@ local function zoneOf(plr)
 	return h.workspace:FindFirstChild("Concourse_" .. plr.UserId)
 end
 
-local function attrsOf(zone)
-	return zone:GetAttribute("Clean"), zone:GetAttribute("AnomalyId"), zone:GetAttribute("Serial")
+-- The roll is published in ServerStorage, which does not replicate. It was briefly written onto
+-- the zone model in workspace, and that hands every client the answer as a labelled boolean:
+-- finding the anomaly by inspecting the world means proving a NEGATIVE on a clean pass, which
+-- `Clean = true` removes entirely.
+local function infoOf(plr)
+	local root = h.game:GetService("ServerStorage"):FindFirstChild("PassInfo")
+	return root and root:FindFirstChild(tostring(plr.UserId))
+end
+
+local function attrsOf(plr)
+	local info = infoOf(plr)
+	if not info then
+		return nil, nil, nil
+	end
+	return info:GetAttribute("Clean"), info:GetAttribute("AnomalyId"), info:GetAttribute("Serial")
 end
 
 assert(h:tryRun("server/Main.server"))
@@ -108,7 +123,7 @@ for i = 1, SAMPLES do
 	h:advance(0.05)
 	local zone = zoneOf(plr)
 	assert(zone ~= nil, "player " .. i .. " got no concourse")
-	local clean, id, serial = attrsOf(zone)
+	local clean, id, serial = attrsOf(plr)
 	local fp = fingerprint(zone)
 	counts[fp] = (counts[fp] or 0) + 1
 	table.insert(samples, { zone = zone, fp = fp, clean = clean, id = id, serial = serial })
@@ -129,6 +144,48 @@ print(string.format("phase 1: %d first passes, %d distinct halls, the commonest 
 truthy(refCount >= SAMPLES / 3,
 	string.format("the commonest hall is a clear plurality (%d of %d) so it is the clean one", refCount, SAMPLES))
 truthy(distinct > 1, "the sample contains more than one distinct hall (the roll is not stuck)")
+
+--============================================================ the answer must not replicate
+-- The whole game is looking at a hall and deciding. Anything a client can read that says which
+-- way to decide is not a leak of degree, it is the game. This sweeps every container a client
+-- receives - workspace and ReplicatedStorage - for the three attribute names and for anything
+-- else whose name gives the roll away, on the 60 halls already standing.
+do
+	local BANNED = { Clean = true, AnomalyId = true, Serial = true }
+	local offenders, scanned = {}, 0
+	local function sweep(root, label)
+		for _, d in root:GetDescendants() do
+			scanned += 1
+			local attrs = d.GetAttributes and d:GetAttributes() or {}
+			for name in attrs do
+				if BANNED[name] then
+					table.insert(offenders, label .. "." .. d.Name .. " carries " .. name)
+				end
+			end
+		end
+	end
+	sweep(h.workspace, "workspace")
+	sweep(h.ReplicatedStorage, "ReplicatedStorage")
+	print(string.format("leak sweep: %d replicated instances scanned, %d carrying the roll",
+		scanned, #offenders))
+	eq(#offenders, 0, "nothing a client can see carries the roll: " .. table.concat(offenders, "; "))
+
+	-- CONTROL for the sweep itself. If this does not find a planted attribute, the clean result
+	-- above measured nothing - which is exactly how the leak got written in the first place.
+	local canary = h.workspace:FindFirstChildWhichIsA("Model")
+	if canary then
+		canary:SetAttribute("Clean", true)
+		local found = 0
+		for _, d in h.workspace:GetDescendants() do
+			local attrs = d.GetAttributes and d:GetAttributes() or {}
+			for name in attrs do
+				if BANNED[name] then found += 1 end
+			end
+		end
+		canary:SetAttribute("Clean", nil)
+		eq(found, 1, "CONTROL: the sweep finds a planted Clean attribute in workspace")
+	end
+end
 
 -- Does this hall differ from the clean one at ANY moment in a short window?
 --
@@ -219,7 +276,7 @@ end
 
 local lastSerial, tracked = 0, {}
 for p = 1, PASSES do
-	local clean, id, serial = attrsOf(zone)
+	local clean, id, serial = attrsOf(me)
 	local matchesClean = not hallDiffers(zone) -- a window, not an instant; see above
 
 	eq(clean, matchesClean, string.format(
