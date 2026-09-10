@@ -353,29 +353,27 @@ for _, up in Config.Upgrades.Catalog do
 end
 
 -- A fourth guard, and the one that would have caught the worst defect this game shipped with.
--- The Nightwatcher's speeds are bounded against Config.Player.WalkSpeed inside Watcher.speed;
--- if a retune ever drives the curve up to the player anyway, being seen becomes being caught on
--- every night forever, with no counterplay and nothing on screen to explain it. That is a
--- BALANCE regression, which is exactly the class a unit test cannot see — so it is a boot
--- failure instead, loud, once, in the F9 console.
+-- The Nightwatcher's speeds are bounded against Config.Player.WalkSpeed inside Watcher.speed; if
+-- a retune ever drives the CEILING itself up to the player, being seen becomes being caught on
+-- every night forever, with no counterplay and nothing on screen to explain it. That is a BALANCE
+-- regression, which is exactly the class a unit test cannot see — so it is a boot failure
+-- instead, loud, once, in the F9 console.
+--
+-- The audit itself lives in Watcher (pure, and tested from the CLI in tests/Watcher.spec.luau).
+-- The first version of this guard was written here and swept `Watcher.speed`, which has already
+-- been clamped by the time it returns — so it could only ever catch a MaxSpeedFraction >= 1,
+-- while its own error text told the reader to lower three constants it could not see. The second
+-- half of the audit is that ceiling BINDING: the game is still playable, but the knobs underneath
+-- have stopped meaning anything, so it warns rather than raising. The headless gate asserts the
+-- server boots with zero warnings, so it is still caught by something.
 do
-	local walk = Config.Player and Config.Player.WalkSpeed
-	if type(walk) ~= "number" or walk <= 0 then
-		error("[Nightwatch] Config.Player.WalkSpeed must be a positive number — the whole chase is "
-			.. "balanced against it, and the server assigns it onto every Humanoid.", 0)
+	local ok, why = Watcher.speedAudit(Config)
+	if not ok then
+		error(why, 0)
 	end
-	local worst, worstAt = -1, 0
-	for i = 0, 100 do
-		local s = Watcher.speed(Config, i / 100, 0, true)
-		if s > worst then
-			worst, worstAt = s, i / 100
-		end
-	end
-	if worst >= walk then
-		error(string.format(
-			"[Nightwatch] the Nightwatcher reaches %.2f studs/s at dread %.2f against a player who walks "
-				.. "at %.2f. Being seen would be being caught, always. Lower BaseSpeed / SpeedPerDread / "
-				.. "HuntSpeedMul, or lower Config.Watcher.MaxSpeedFraction.", worst, worstAt, walk), 0)
+	local binds, note = Watcher.ceilingBinds(Config)
+	if binds then
+		warn(note)
 	end
 end
 
@@ -849,9 +847,19 @@ local function buildManor(plr: Player, zone: Model, plan: any, index: number)
 	if exitRoom then
 		local cx, cz = Manor.roomCenter(Config, exitRoom)
 		local centre = origin + Vector3.new(cx, 0, cz)
+		-- WHICH WALL. The slab is exactly DoorWidth wide and stands six studs inside a face, so a
+		-- face that has a doorway in it gets the slab planted squarely in the gap — which is the only
+		-- way into the room the player has to reach. It used to be hard-coded to +Z and landed in a
+		-- live doorway on 249 of nights 1-500. `Manor.exitFace` picks an OUTER face instead.
+		local fx, fz = Manor.exitFace(Config, plan)
+		fx, fz = fx or 0, fz or 1
+		local inset = M.RoomSize / 2 - 6
+		local size = if fx ~= 0
+			then Vector3.new(1.2, 12, M.DoorWidth)
+			else Vector3.new(M.DoorWidth, 12, 1.2)
 		local door = newPart({
-			Name = "ExitDoor", Size = Vector3.new(10, 12, 1.2),
-			CFrame = CFrame.new(centre + Vector3.new(0, 6.5, 14)),
+			Name = "ExitDoor", Size = size,
+			CFrame = CFrame.new(centre + Vector3.new(fx * inset, 6.5, fz * inset)),
 			Color = Color3.fromRGB(40, 90, 60), Material = Enum.Material.Neon, Transparency = 0.15,
 			Parent = manor,
 		})
@@ -1029,16 +1037,19 @@ local function stepNight(plr: Player, dt: number)
 		spotted = Watcher.spots(Config, run.watcher.x, run.watcher.z, run.watcher.fx, run.watcher.fz, pos.X, pos.Z, roomOk)
 
 		if spotted and playerRoom and watcherRoom then
-			-- Chase by walking the ROOM GRAPH, so it comes through doorways. Same room: straight
-			-- at you. Otherwise: at the centre of the next room on the shortest path.
+			-- Chase by walking the ROOM GRAPH, so it comes through doorways. Same room: straight at
+			-- you. Otherwise `Manor.chaseStep`, which steers at the DOORWAY and only then at the room
+			-- beyond. This used to aim straight at the next room's CENTRE, and that line crosses the
+			-- wall from anywhere except the centre it starts at — which, one hunt tick in, is
+			-- everywhere. The player cannot walk that line (the wall is a real Brick part with a
+			-- DoorWidth hole in the middle of it), so the two of you were racing on different maps.
 			if playerRoom == watcherRoom then
 				target = { x = pos.X, z = pos.Z }
 			else
-				local path = Manor.pathBetween(plan, watcherRoom, playerRoom)
-				local nextRoom = path and path[2] and Manor.roomById(plan, path[2])
-				if nextRoom then
-					local nx, nz = Manor.roomCenter(Config, nextRoom)
-					target = { x = origin.X + nx, z = origin.Z + nz }
+				local nx, nz = Manor.chaseStep(Config, plan, watcherRoom,
+					run.watcher.x - origin.X, run.watcher.z - origin.Z, playerRoom)
+				if nx then
+					target = { x = origin.X + nx, z = origin.Z + (nz :: number) }
 				else
 					target = { x = pos.X, z = pos.Z }
 				end

@@ -171,6 +171,71 @@ function Watcher.speed(cfg: any, dread: number, watcherSlow: number, hunting: bo
 	return s
 end
 
+-- ------------------------------------------------------------- the two boot audits
+-- Both are pure, so the server's only job is to raise or warn what they return, and both halves
+-- are testable with no engine present. They are separate because they are different severities
+-- and because the first version conflated them: it swept `Watcher.speed`, which has ALREADY been
+-- clamped by the time it returns, so "worst >= walk" was unreachable for any MaxSpeedFraction
+-- below 1 however hot the curve got — while its own error text told the reader to lower
+-- BaseSpeed / SpeedPerDread / HuntSpeedMul, three things it could not possibly be complaining
+-- about. An error message has to name a cause the check can actually have.
+
+-- FATAL. The game is unplayable below this line: a Nightwatcher at or above the player's speed
+-- turns "it saw me" into "I am dead" with no counterplay, and makes the game's own advice
+-- ("break line of sight and keep moving") a lie — you cannot break sight with something that
+-- closes distance on you. Returns true, or false plus the line to raise.
+function Watcher.speedAudit(cfg: any): (boolean, string?)
+	local P = cfg and cfg.Player
+	local walk = P and P.WalkSpeed
+	if type(walk) ~= "number" or walk <= 0 then
+		return false, "[Nightwatch] Config.Player.WalkSpeed must be a positive number — the whole chase is "
+			.. "balanced against it, and the server assigns it onto every Humanoid."
+	end
+	local W = cfg.Watcher
+	local frac = W and W.MaxSpeedFraction
+	if type(frac) ~= "number" or frac <= 0 then
+		return false, "[Nightwatch] Config.Watcher.MaxSpeedFraction must be a positive number — it is the "
+			.. "only thing bounding the Nightwatcher against the player."
+	end
+	if frac * walk >= walk then
+		return false, string.format(
+			"[Nightwatch] Config.Watcher.MaxSpeedFraction is %.2f, so the Nightwatcher may reach %.2f "
+				.. "studs/s against a player who walks at %.2f. Being seen would be being caught, always, "
+				.. "on every night, forever. MaxSpeedFraction must be below 1.", frac, frac * walk, walk)
+	end
+	return true, nil
+end
+
+-- NOT fatal, but it must never be silent. When the raw curve reaches the ceiling the clamp stops
+-- being a guard rail and becomes the operating point: the watcher sits at exactly
+-- MaxSpeedFraction * WalkSpeed for most of the night, and BaseSpeed / SpeedPerDread /
+-- HuntSpeedMul stop changing anything at all. A review drove SpeedPerDread from 2.4 to 12 — a
+-- large difficulty swing that pinned the watcher at 13 studs/s essentially all night — and
+-- nothing in the repo noticed, because the only check ran on the far side of the clamp.
+--
+-- The game is still playable in that state, which is exactly why it is a warning and not an
+-- error; the headless gate asserts the server boots with ZERO warnings, so it is still caught.
+-- Returns whether the ceiling binds, plus the line to warn.
+function Watcher.ceilingBinds(cfg: any): (boolean, string?)
+	local ok = Watcher.speedAudit(cfg)
+	if not ok then
+		return false, nil -- the fatal audit owns this config
+	end
+	local W, walk = cfg.Watcher, cfg.Player.WalkSpeed
+	local ceiling = walk * W.MaxSpeedFraction
+	local raw = (W.BaseSpeed + W.SpeedPerDread) * W.HuntSpeedMul -- full dread, hunting, no Bear Traps
+	if raw < ceiling then
+		return false, nil
+	end
+	return true, string.format(
+		"[Nightwatch] the Nightwatcher's speed curve reaches %.2f studs/s at full dread while hunting, "
+			.. "which is at or past its own ceiling of %.2f (MaxSpeedFraction %.2f x WalkSpeed %.2f). The "
+			.. "clamp will hold the chase together, but it will hold it AT the ceiling and BaseSpeed "
+			.. "(%.2f), SpeedPerDread (%.2f) and HuntSpeedMul (%.2f) will stop changing anything. Lower "
+			.. "one of them, or raise MaxSpeedFraction — but never to 1 or above.",
+		raw, ceiling, W.MaxSpeedFraction, walk, W.BaseSpeed, W.SpeedPerDread, W.HuntSpeedMul)
+end
+
 -- ------------------------------------------------------------------ sight
 
 -- Inside the view cone and inside SightRange. Point blank is always seen; a zero facing vector

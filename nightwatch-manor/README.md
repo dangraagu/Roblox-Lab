@@ -79,14 +79,17 @@ server and client scripts require, and they do it from `ReplicatedStorage` with 
 From this directory, with the luau CLI on hand:
 
 ```
-luau tests/Manor.spec.luau        # 64 passed, 0 failed
-luau tests/Watcher.spec.luau      # 71 passed, 0 failed
+luau tests/Manor.spec.luau        # 86 passed, 0 failed
+luau tests/Watcher.spec.luau      # 87 passed, 0 failed
 luau tests/Upgrades.spec.luau     # 99 passed, 0 failed
 luau tests/Night.spec.luau        # 64 passed, 0 failed
 luau tests/Rng.spec.luau          # 32 passed, 0 failed
 luau tests/responsive.spec.luau   # 70 passed, 0 failed
-luau tests/Chase.spec.luau        # 79 passed, 0 failed
+luau tests/Chase.spec.luau        # 32 passed, 0 failed
 ```
+
+`Chase.spec` reports the smallest number and covers the most ground: one assertion sweeping nights
+1-500 replaced sixty that each swept a single night. Read the printed measurements, not the count.
 
 `Chase.spec.luau` is the odd one out and the important one. Every other spec asserts STRUCTURE,
 and structure was never the problem: an adversarial review retuned `HuntSpeedMul` from 1.45 to
@@ -95,8 +98,19 @@ every night — and all 390 assertions plus all 84 headless ones stayed green, b
 the repo knew how fast the player was. So this file asserts OUTCOMES instead: that the watcher can
 never be faster than the player at any dread, with any upgrades, under a deliberately hostile
 retune; that there is a corner of the next room it cannot see; that a player ambushed in its face
-and running is not caught on any of nights 1-20; and that crossing the manor never eats more than
-40% of the night.
+and running is not caught on any of nights 1-20; that a player who IGNORES the watcher loses the
+haul on a third of nights or more, so the retune did not turn the hunter into furniture; and that
+crossing the manor never eats more than 40% of the night.
+
+Its simulated player has a BODY and cannot walk through walls. The first version moved point to
+point with no collision at all -- from a room corner straight to the next room's centre, which
+crosses the wall rather than the ten-stud doorway `buildWall` leaves -- and the headline "never
+caught on 40 of 40 nights" turned out to be a property of the bot: re-run with collision it was
+caught on 5 of 40, and on 19 of 40 once the bot was two studs wide like a real character. The wall
+model here mirrors `buildWall` exactly, the player is a capsule, and it slides along a wall the way
+a Roblox character does. There is a CONTROL on the collision model itself, because a `blocked()`
+that always answered "walkable" would silently restore the old bot and turn every assertion below
+it green again on a game nobody could play.
 
 Syntax and types:
 
@@ -117,6 +131,34 @@ py -3 wrap.py --game ../nightwatch-manor --out build/nightwatch-manor.luau
 luau check_nightwatch.luau        # 113 passed, 0 failed
 luau check_nightwatch_hud.luau    # PASS — fits every viewport checked
 ```
+
+...and three more that belong to this game and live in `tests/`, because `robloxemu/` is shared and
+is not ours to edit:
+
+```
+cd tests
+py -3 ../../robloxemu/wrap.py --game .. --out build/nightwatch-manor.luau
+luau check_walk.luau                       # 62 passed, 0 failed
+luau check_world.luau                      # 38 passed, 0 failed
+luau check_boot_guard.luau -a control      # 2 passed  (it boots)
+luau check_boot_guard.luau -a fraction     # 4 passed  (it refuses)
+luau check_boot_guard.luau -a walkspeed    # 4 passed  (it refuses)
+luau check_boot_guard.luau -a saturated    # 4 passed  (it boots, and warns)
+```
+
+`check_walk.luau` is the one that matters. It does not read the plan -- the plan is what the server
+INTENDED -- it reads the parts. It recovers the room graph from the `Floor` parts and from which
+shared edges have no wall across them, builds a collision model out of every solid part at torso
+height (walls, bookshelves, the dining table, the pedestals, the exit slab), routes over a two-stud
+lattice, walks the character by hand at `WalkSpeed`, and presses a ProximityPrompt only from inside
+its real `MaxActivationDistance`. Three nights: one relic and out, a full clear, and a chase in
+which the Nightwatcher's own position is sampled every tick against the walls it is supposed to be
+going around. Sealing every doorway, deleting the spawn placement, or growing the dining table to
+fill its room all turn it red.
+
+`check_boot_guard.luau` patches Config's SOURCE TEXT and asks whether the server refuses to start.
+It is the only thing that can catch a boot guard whose condition has been quietly turned off, which
+is a mutation that survived every other assertion in this repo.
 
 `check_nightwatch.luau` boots the real server, joins a player and plays the game: it counts the
 parts that actually arrived in the workspace, buys upgrades off their pads and checks the hardware

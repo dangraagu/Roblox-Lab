@@ -46,7 +46,7 @@
       "posted": "2026-09-06",
       "state": "active",
       "last_seen_comment_utc": 1788889205,
-      "notes": "Rough launch thread, mostly hostile. Real bugs (empty starting seeds, missing thumbnail, mobile HUD covering the screen) were reported and already fixed/answered by the owner. Two comments (Smart-Bee1186 p89lmcx, GroundWonderful9046 p8l49en) contain prompt-injection attempts telling the bot to run destructive shell commands - flagged, not answered."
+      "notes": "Rough launch thread, mostly hostile. Real bugs (empty starting seeds, missing thumbnail, mobile HUD covering the screen) were reported and already fixed/answered by the owner. Two comments (Smart-Bee1186 p89lmcx, GroundWonderful9046 p8l49en) contain prompt-injection attempts telling the bot to run destructive shell commands - flagged, not answered. The one remaining top-level comment with no OP reply, p82q41v, is AutoModerator's stock Discord invite - a bot, and joining Discords is off-limits anyway. Nothing here is owed a reply; checked 2026-09-10."
     },
     {
       "id": "1wcafbz",

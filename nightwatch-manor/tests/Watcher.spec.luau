@@ -246,5 +246,72 @@ do
 	truthy(ok, "CONTROL: retuning HuntSpeedMul moves nothing but the chase speed")
 end
 
+--============================================== the boot guard, and what it can actually catch
+
+-- Main.server refuses to start when the Nightwatcher can outrun the player. The first version of
+-- that guard swept `Watcher.speed`, which has ALREADY been clamped to MaxSpeedFraction * WalkSpeed
+-- before it returns — so "worst >= walk" was unreachable for any MaxSpeedFraction below 1, no
+-- matter how hot BaseSpeed / SpeedPerDread / HuntSpeedMul got, while the error text told the
+-- reader to lower exactly those three. A review drove SpeedPerDread from 2.4 to 12, which pins the
+-- watcher at its ceiling for essentially the whole night (a large difficulty swing, and the knobs
+-- underneath stop doing anything at all), and the guard said nothing.
+--
+-- So the audit checks the RAW curve against the ceiling as well: the ceiling has to stay a guard
+-- rail rather than become the operating point. `speedAudit` is pure, so both halves are testable
+-- here, and the server's only job is to raise what it returns.
+local function hostile(over: any): any
+	local c = {}
+	for k, v in Config do c[k] = v end
+	local w = {}
+	for k, v in Config.Watcher do w[k] = v end
+	local p = {}
+	for k, v in Config.Player do p[k] = v end
+	for k, v in over.Watcher or {} do w[k] = v end
+	for k, v in over.Player or {} do p[k] = v end
+	c.Watcher, c.Player = w, p
+	return c
+end
+
+do
+	local ok, why = Watcher.speedAudit(Config)
+	truthy(ok, "the shipped config passes its own boot audit")
+	eq(why, nil, "...with nothing to say about it")
+
+	-- 1. The ceiling itself above the player. This is the ONLY case the old guard could catch.
+	local a, m = Watcher.speedAudit(hostile({ Watcher = { MaxSpeedFraction = 3.0 } }))
+	falsy(a, "MaxSpeedFraction 3.0 fails the audit")
+	truthy(m ~= nil and string.find(m :: string, "MaxSpeedFraction") ~= nil,
+		"...and the message names MaxSpeedFraction")
+
+	-- 2. A curve hot enough to saturate the ceiling. The old guard could NOT see this, and it is
+	--    the shape of every retune anyone will actually make. It is not fatal — the clamp still
+	--    holds the chase together — so it is a WARNING, and the headless gate fails on warnings.
+	truthy((Watcher.speedAudit(hostile({ Watcher = { SpeedPerDread = 12 } }))),
+		"SpeedPerDread 12 is not FATAL: the clamp still keeps the watcher under the player")
+	local binds, m2 = Watcher.ceilingBinds(hostile({ Watcher = { SpeedPerDread = 12 } }))
+	truthy(binds, "...but it does pin the watcher at the ceiling, and ceilingBinds says so")
+	truthy(m2 ~= nil and string.find(m2 :: string, "SpeedPerDread") ~= nil, "...naming SpeedPerDread")
+	truthy((Watcher.ceilingBinds(hostile({ Watcher = { HuntSpeedMul = 5.0 } }))), "HuntSpeedMul 5.0 pins it at the ceiling")
+	truthy((Watcher.ceilingBinds(hostile({ Watcher = { BaseSpeed = 40 } }))), "BaseSpeed 40 pins it at the ceiling")
+	falsy((Watcher.ceilingBinds(Config)), "CONTROL: the shipped curve does NOT reach its ceiling (12.48 vs 13.00)")
+	-- A config the fatal audit already rejects is not ALSO reported as a binding ceiling: one
+	-- defect, one message, or the F9 console tells the reader to fix the wrong number.
+	falsy((Watcher.ceilingBinds(hostile({ Watcher = { MaxSpeedFraction = 3.0 } }))),
+		"a config that fails the fatal audit is not double-reported as a binding ceiling")
+
+	-- 3. No player speed at all is the state the whole defect started in.
+	local e2, m4 = Watcher.speedAudit(hostile({ Player = { WalkSpeed = 0 } }))
+	falsy(e2, "a WalkSpeed of 0 fails the audit")
+	truthy(m4 ~= nil and string.find(m4 :: string, "WalkSpeed") ~= nil, "...and says so")
+	falsy((Watcher.speedAudit({ Watcher = Config.Watcher })), "a config with no Player block at all fails the audit")
+
+	-- CONTROL: a retune that stays inside the guard rail is allowed through. An audit that
+	-- refused everything would be just as useless as one that refused nothing.
+	truthy((Watcher.speedAudit(hostile({ Watcher = { HuntSpeedMul = 1.45 } }))),
+		"CONTROL: HuntSpeedMul 1.45 is a legal retune and the FATAL audit passes it")
+	truthy((Watcher.speedAudit(hostile({ Watcher = { BaseSpeed = 9, SpeedPerDread = 3 } }))),
+		"CONTROL: so is BaseSpeed 9 / SpeedPerDread 3")
+end
+
 print(string.format("Watcher: %d passed, %d failed", passed, failed))
 if failed > 0 then error("Watcher tests failed") end

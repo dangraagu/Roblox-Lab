@@ -42,6 +42,12 @@ Config.Manor = {
 	-- player's hub level: night N has to be the same manor for everybody or the best-night number
 	-- compares nothing, and with the exit always in the deepest room, sizing the manor off the
 	-- safehouse made every upgrade quietly lengthen the walk out.
+	-- MaxRooms is the cap on the TOTAL, repair rooms included, so `Manor.roomCount` stops the
+	-- GROWTH TARGET MaxRepairRooms short of it and the repair pass spends the difference. It used
+	-- to clamp the target AT this number and let repair append on top, which put 468 of nights
+	-- 1-500 over the config's own limit (largest manor 23 against a MaxRooms of 18) with nothing
+	-- asserting otherwise. Keep MaxRooms >= MaxRepairRooms + 2 — Manor.spec asserts it — or
+	-- roomCount's floor at 2 out-votes the cap and the number here stops being a maximum again.
 	BaseRooms = 6,
 	RoomsPerNight = 0.5,
 	MaxRooms = 18,
@@ -111,11 +117,20 @@ Config.Player = {
 -- and it "sees" you when you are inside its view cone AND in its room or a linked one.
 --
 -- THE SPEEDS BELOW ARE BOUNDED BY THE PLAYER'S, NOT BY THEMSELVES. `MaxSpeedFraction` is a hard
--- ceiling applied inside Watcher.speed, and Main.server refuses to boot if the curve below ever
--- reaches the player. Retune BaseSpeed / SpeedPerDread / HuntSpeedMul freely: the one thing that
--- cannot happen is a Nightwatcher the player cannot outrun, because that turns "it saw me" into
--- "I am dead" with no counterplay, and makes the game's own advice ("break line of sight and keep
--- moving") a lie — you cannot break sight with something that closes distance on you.
+-- ceiling applied inside Watcher.speed, and TWO boot audits sit on top of it (see
+-- Watcher.speedAudit / Watcher.ceilingBinds, and the block that calls them in Main.server):
+--   * Main.server REFUSES TO BOOT if MaxSpeedFraction reaches 1, or if WalkSpeed is not a
+--     positive number. That state is a Nightwatcher nobody can outrun, which turns "it saw me"
+--     into "I am dead" with no counterplay and makes the game's own advice ("break line of sight
+--     and keep moving") a lie — you cannot break sight with something that closes on you.
+--   * It WARNS if the raw curve below reaches the ceiling, because at that point the clamp has
+--     stopped being a guard rail and become the operating point: the watcher sits at exactly
+--     MaxSpeedFraction * WalkSpeed for most of the night and the three constants underneath stop
+--     changing anything at all. The game is still playable, which is why it is not fatal — but
+--     every headless gate asserts the server boots with ZERO warnings, so a build still fails.
+-- Retune BaseSpeed / SpeedPerDread / HuntSpeedMul freely inside that: (8 + 2.4) * 1.2 = 12.48
+-- against a ceiling of 13.00, so there is a little room and the F9 console will say when it runs
+-- out.
 Config.Watcher = {
 	BaseSpeed = 8, -- studs/second at dread 0
 	SpeedPerDread = 2.4, -- + this much at dread 1

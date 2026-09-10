@@ -58,19 +58,36 @@ h:advance(1)
 -- the shipped build, the workspace held 0 BaseParts and 0 SpawnLocations before anyone joined,
 -- so a joining character was dropped into empty air and fell — past FallenPartsDestroyHeight in
 -- about 2.3 seconds, at which point it is destroyed and the player dies without seeing the game.
+-- "ANY BasePart within 500 studs" and "ANY SpawnLocation anywhere" were what this pair used to
+-- ask, and each covered for the other's absence: a plate at y = -4000 and a spawn at y = -4000
+-- both passed, and a character still fell out of the world. What has to be true is that the
+-- engine's own default spawn point is standing ON the plate, and that it is enabled.
 do
-	local nearOrigin, spawns = 0, 0
+	local plate, spawn
 	for _, d in h.workspace:GetDescendants() do
-		if d:IsA("BasePart") then
-			local p = d.Position
-			if math.abs(p.X) < 500 and math.abs(p.Y) < 500 and math.abs(p.Z) < 500 then
-				nearOrigin += 1
-			end
-		end
-		if d.ClassName == "SpawnLocation" then spawns += 1 end
+		if d.Name == "OriginPlate" then plate = d end
+		if d.ClassName == "SpawnLocation" and d.Name == "OriginSpawn" then spawn = d end
 	end
-	truthy(nearOrigin > 0, "before ANY player joins there is something solid at the world origin to land on")
-	truthy(spawns > 0, "and a SpawnLocation, so the engine has somewhere to put a character it spawns itself")
+	truthy(plate ~= nil, "before ANY player joins there is an OriginPlate to land on")
+	truthy(spawn ~= nil, "...and an OriginSpawn, so the engine has somewhere to put a character")
+
+	if plate and spawn then
+		local p, s = plate.Position, spawn.Position
+		truthy(math.abs(p.X) < 30 and math.abs(p.Y) < 30 and math.abs(p.Z) < 30,
+			string.format("the plate is AT the origin, not merely near it (%.1f, %.1f, %.1f)", p.X, p.Y, p.Z))
+		truthy(math.abs(s.X) < 30 and math.abs(s.Y) < 30 and math.abs(s.Z) < 30,
+			string.format("the spawn point is AT the origin (%.1f, %.1f, %.1f)", s.X, s.Y, s.Z))
+		truthy(math.abs(s.X - p.X) <= plate.Size.X / 2 and math.abs(s.Z - p.Z) <= plate.Size.Z / 2,
+			"the spawn point stands inside the plate's footprint, not beside it")
+
+		local plateTop = p.Y + plate.Size.Y / 2
+		local spawnBottom = s.Y - spawn.Size.Y / 2
+		truthy(spawnBottom >= plateTop - 1.01 and spawnBottom <= plateTop + 2.01, string.format(
+			"the spawn point rests ON the plate (spawn bottom %.2f vs plate top %.2f)", spawnBottom, plateTop))
+
+		eq(spawn.Enabled, true,
+			"the origin spawn is ENABLED — the engine ignores a disabled one and picks somewhere else")
+	end
 end
 
 local me = h:join("Nightwatchman", ME)

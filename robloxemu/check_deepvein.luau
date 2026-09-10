@@ -175,7 +175,12 @@ do
 		eq(deck:FindFirstChildOfClass("ClickDetector"), nil, "…and it is not something you can mine")
 		eq(deck.Anchored, true, "…and it is anchored, so nothing can drop it down the shaft")
 		eq(deck.CanCollide, true, "…and you can stand on it")
-		eq(deck.Position.Y + deck.Size.Y / 2, 0, "…with its top flush with the mouth floor")
+		-- NOT flush. A deck whose top sits exactly on the mouth floor is coplanar with the rock it
+		-- is buried in, which is the z-fighting defect REVIEW-2 found and REVIEW-3 fixed. This
+		-- assertion used to demand `== 0` and so pinned the defect in place: restoring the
+		-- coplanar deck turned this file green and the game's own gate red.
+		truthy(deck.Position.Y + deck.Size.Y / 2 < 0,
+			"…with its top BELOW the mouth floor, not in the same plane as the rock around it")
 	end
 end
 
@@ -656,7 +661,16 @@ do
 	h:advance(0.5)
 	local spawnAt = hrp.CFrame.Position
 
-	local broke = digColumn(surfer, SURF, 5, 2, 24)
+	-- Which column the player lands on is the SERVER's to decide, and it publishes it. This used
+	-- to hard-code x=5, z=2; the next person to move the spawn would have found this check
+	-- happily digging an untouched column somewhere else and still passing.
+	local surfDeck = surfShaft and surfShaft:FindFirstChild("SurfaceDeck_" .. SURF, true)
+	truthy(surfDeck ~= nil, "the surfacer's mouth has a deck to read the landing cell off")
+	local landing = surfDeck and surfDeck:GetAttribute("LandingCell")
+	truthy(typeof(landing) == "string", "the deck publishes LandingCell, so nothing here guesses it")
+	local lx, lz = string.match(tostring(landing), "^(%-?%d+):%-?%d+:(%-?%d+)$")
+	truthy(lx ~= nil, "LandingCell reads as x:y:z (got " .. tostring(landing) .. ")")
+	local broke = digColumn(surfer, SURF, tonumber(lx) or 5, tonumber(lz) or 2, 24)
 	h:advance(2)
 	gt(broke, 8, "CONTROL: the spawn column really was dug out (" .. broke .. " cells broken)")
 

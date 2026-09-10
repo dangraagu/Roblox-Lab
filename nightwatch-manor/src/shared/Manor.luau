@@ -86,10 +86,17 @@ end
 -- best-night numbers were comparable; and because the exit is always the DEEPEST room, it meant
 -- every upgrade anybody bought lengthened their own walk out — a silent anti-synergy in a tycoon,
 -- with nothing on screen to explain it. The size of a night is a property of the night.
+-- This returns the GROWTH TARGET, not the size of the finished manor: the dead-end repair pass in
+-- `plan` may add up to `MaxRepairRooms` more on top. `MaxRooms` is the cap on the TOTAL, so the
+-- target has to stop that far short of it — otherwise the number in the config is not a maximum of
+-- anything, and worse, on any night where the target reaches MaxRooms the repair pass is left with
+-- a budget of zero and the dead ends it exists to close come straight back. It used to clamp AT
+-- MaxRooms, which put 468 of nights 1-500 over the config's own limit (largest manor 23 against a
+-- MaxRooms of 18).
 function Manor.roomCount(cfg: any, night: number): number
 	local M = cfg.Manor
 	local n = M.BaseRooms + math.floor((math.max(night, 1) - 1) * M.RoomsPerNight)
-	return clamp(n, 2, M.MaxRooms) -- never below entrance + exit
+	return clamp(n, 2, math.max(M.MaxRooms - M.MaxRepairRooms, 2)) -- never below entrance + exit
 end
 
 -- How many relics are placed. IMPORTANT: this must stay <= (roomCount - 1) * MaxPerRoom for
@@ -230,6 +237,99 @@ function Manor.pathBetween(plan: Plan, from: number, to: number): { number }?
 	return nil
 end
 
+-- Where the doorway between two rooms IS, in the manor's own studs. `buildWall` splits a shared
+-- wall into two jambs of `(RoomSize - DoorWidth) / 2` with the gap in the MIDDLE, so the middle
+-- of the shared edge is the middle of the hole. Nil when the two rooms do not share a wall.
+function Manor.doorwayBetween(cfg: any, plan: Plan, a: number, b: number): (number?, number?)
+	local ra, rb = Manor.roomById(plan, a), Manor.roomById(plan, b)
+	if not ra or not rb then
+		return nil, nil
+	end
+	if math.abs(ra.gx - rb.gx) + math.abs(ra.gz - rb.gz) ~= 1 then
+		return nil, nil
+	end
+	local s = cfg.Manor.RoomSize
+	return (ra.gx + rb.gx) / 2 * s, (ra.gz + rb.gz) / 2 * s
+end
+
+-- Which face of the exit room the way OUT should be built on, as a unit grid step. Nil when the
+-- plan has no exit room.
+--
+-- The server hangs a 10-wide, 12-tall slab six studs inside this face. `DoorWidth` is also 10 and
+-- a doorway is the middle ten studs of a shared wall, so a face that HAS a doorway gets the slab
+-- planted squarely in the gap — on 61 of 120 nights with the shipped generator, and on one of
+-- them in the exit room's only doorway. So: prefer a face with nothing behind it at all (the
+-- outside of the manor, which is where a servants' exit belongs anyway); then a face shared with
+-- a room the exit is NOT linked to, which is still solid wall; and only if the exit room is
+-- somehow doored on all four sides, the last face, so the server always has somewhere to build.
+-- Deterministic: DIRS is walked in its fixed order and the first match wins.
+function Manor.exitFace(cfg: any, plan: Plan): (number?, number?)
+	local exit = Manor.roomById(plan, plan.exitId)
+	if not exit then
+		return nil, nil
+	end
+	local occupied: { [string]: number } = {}
+	for _, r in plan.rooms do
+		occupied[cellKey(r.gx, r.gz)] = r.id
+	end
+	local fallback: { number }? = nil
+	for _, d in DIRS do
+		local nb = occupied[cellKey(exit.gx + d[1], exit.gz + d[2])]
+		if nb == nil then
+			return d[1], d[2] -- the outside of the manor: nothing to block, nothing to be blocked by
+		end
+		if fallback == nil and not Manor.linked(plan, exit.id, nb) then
+			fallback = d -- a shared wall with no hole in it
+		end
+	end
+	if fallback then
+		return fallback[1], fallback[2]
+	end
+	local last = DIRS[#DIRS]
+	return last[1], last[2]
+end
+
+-- Where something standing at (x, z) in room `fromId` should walk NEXT in order to reach room
+-- `toId`. Nil when it is already there (the caller then aims at the quarry itself) or when
+-- nothing connects the two.
+--
+-- This exists because "aim at the centre of the next room on the path" is only wall-safe from a
+-- room CENTRE, and the Nightwatcher is never at a centre once a hunt has started — it has been
+-- walking at a player. From a corner, the line to the next centre crosses the wall, and the
+-- player cannot follow it: walls are real parts with a DoorWidth hole in the middle. The chase
+-- was being run on two different maps, and the one the hunter used was the shorter one. So it
+-- steers at the DOORWAY until it is standing in the gap, and only then at the room beyond.
+--
+-- The clearance is a quarter of DoorWidth rather than a bare constant so a retune of the doorway
+-- carries it. Without it the walk DEADLOCKS: `roomAtWorld` resolves a point exactly on a shared
+-- plane to the higher cell, so a hunter that arrives at a doorway heading toward the LOWER cell
+-- is still "in" the room it came from, still targeting the doorway it is standing on, zero studs
+-- away, and never moves again.
+function Manor.chaseStep(cfg: any, plan: Plan, fromId: number, x: number, z: number, toId: number): (number?, number?)
+	if fromId == toId then
+		return nil, nil
+	end
+	local path = Manor.pathBetween(plan, fromId, toId)
+	local nextId = path and path[2]
+	if not nextId then
+		return nil, nil
+	end
+	local nextRoom = Manor.roomById(plan, nextId)
+	if not nextRoom then
+		return nil, nil
+	end
+	local cx, cz = Manor.roomCenter(cfg, nextRoom)
+	local dx, dz = Manor.doorwayBetween(cfg, plan, fromId, nextId)
+	if dx == nil then
+		return cx, cz
+	end
+	local clear = cfg.Manor.DoorWidth * 0.25
+	if (x - (dx :: number)) ^ 2 + (z - (dz :: number)) ^ 2 <= clear * clear then
+		return cx, cz
+	end
+	return dx, dz
+end
+
 -- ------------------------------------------------------------------ generation
 
 -- Build one night's manor. Deterministic in (rng seed, cfg, night) and NOTHING else — no
@@ -324,6 +424,14 @@ function Manor.plan(rng: RngLike, cfg: any, night: number): Plan
 	-- everything), so the layout downstream of it is unchanged. It stops when no such cell exists
 	-- — some shapes genuinely cannot be closed — or when the repair budget runs out.
 	do
+		-- ...and the total stays inside MaxRooms by construction, because `roomCount` above stops
+		-- the growth target MaxRepairRooms short of it. That is the whole cap: one clamp, in one
+		-- place, that a test can actually kill. There WAS a second `math.min(..., M.MaxRooms)`
+		-- here; with the target already clamped it was arithmetically unreachable for every legal
+		-- config, and an unreachable guard is the thing this review keeps finding. What it was
+		-- standing in for is a config invariant, and Manor.spec asserts that instead:
+		--     MaxRooms >= MaxRepairRooms + 2
+		-- (below which `roomCount`'s floor at 2 could out-vote the cap).
 		local budget = target + M.MaxRepairRooms
 		while #rooms < budget do
 			local deg: { [number]: number } = {}

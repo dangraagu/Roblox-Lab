@@ -16,7 +16,7 @@ local function eq(a, b, msg)
 end
 local function truthy(c, msg) if c then passed += 1 else failed += 1; print("FAIL:", msg) end end
 local function falsy(c, msg) if not c then passed += 1 else failed += 1; print("FAIL:", msg) end end
-local function approx(a, b, tol, msg)
+local function _approx(a, b, tol, msg)
 	if type(a) == "number" and math.abs(a - b) <= tol then passed += 1 else
 		failed += 1; print("FAIL:", msg, "-> got", tostring(a), "want", tostring(b))
 	end
