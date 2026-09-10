@@ -1,10 +1,13 @@
 # Fork Tower — Would You Rather Obby
 
 Two doors on every floor. Both give you the trait behind them. **One of them is a trap** — it
-builds a longer, busier climb instead of a normal one. An inscription on the fork platform names
-the sign that marks the trap, so the choice is never a guess: it is "do I want *that* trait
-enough to pay for it?" Ten floors up, your picks become a **Build Reveal** card — a title, a
-rarity and a score. Rebirth rerolls the seed and the whole choice tree.
+builds a longer, busier climb instead of a normal one. **An unread door tells you nothing at all**:
+not what it gives, not how good it is, not even its colour. The only thing in the world that says
+anything is the inscription on the fork platform, and reading it takes 1.1 seconds you are standing
+still for. Read it and you know both halves — which door carries which trait, and which one is the
+trap — and then it is "do I want *that* trait enough to pay for it?" Skip it and every fork is a
+coin flip. Ten floors up, your picks become a **Build Reveal** card — a title, a rarity and a
+score. Rebirth rerolls the seed and the whole choice tree.
 
 Concept brief: `../docs/game-radar/2026-09-09-roblox-game-radar.md`, section "4. Fork Tower".
 
@@ -43,6 +46,25 @@ inscription says outright whether that marks the trap or — from floor 4, when 
 lying — the safe door. Read it and you never eat a trap. Flip a coin and you eat one half the
 time. That gap *is* the game.
 
+**2b. The inscription is the ONLY information, and it costs time.** This is the fix for the
+finding that ended the second review: the star count used to be printed on every door, on a
+billboard larger than the inscription, so "take the door with more stars" beat "read and dodge the
+trap" on **95.1% of 3000 seeds** and the best way to play was to never read anything. An unread
+door now shows `🚪 DØR` — no trait, no stars, no theme colour, and nothing on the wire to the HUD
+either. Reading is a hold on the fork pad, and the server times it with its own clock so that
+firing the prompt directly buys nothing.
+
+`Config.Fork.ReadSeconds = 1.1` is **measured, not chosen**. `tests/readcost.measure.luau` plays
+5000 real run seeds two ways — read every fork and take the safe door, versus never read and pick
+by a coin — and prices the read in the currency the trap is priced in, which is time. A guesser
+eats 4.94 traps of ten and pays **11.10 s** more climbing; ten reads at 1.110 s each is exactly
+that. At the shipping 1.10 s a reader finishes a ten-floor run **0.2% faster** than a guesser who
+never touches a hazard, and 4.5% faster than one who walks into half of them.
+
+> `tests/world.check.luau` — the world-level half: an unread fork carries no trait, no stars, no
+> theme colour and no `rule` payload; a read cannot be rushed by firing the prompt fifty times in
+> one frame; and it survives a rejoin, because paying twice for one fork is a bug.
+
 > `tests/Fork.spec.luau` — 40 000 forks. A reader hits **zero** traps; a blind left-door climber
 > hits 50%; a climber who knows the signs but ignores the liar line is wrong on exactly the
 > inverted floors. Plus everything that could become a *second* tell: door position, sign
@@ -61,11 +83,13 @@ time. That gap *is* the game.
 ```
 cd D:/Claude/Roblox/fork-tower
 luau tests/Fork.spec.luau          # 53 passed, 0 failed
-luau tests/Section.spec.luau       # 47 passed, 0 failed
+luau tests/Section.spec.luau       # 50 passed, 0 failed
 luau tests/Build.spec.luau         # 31 passed, 0 failed
 luau tests/Codes.spec.luau         # 19 passed, 0 failed
 luau tests/Rng.spec.luau           # 32 passed, 0 failed
 luau tests/responsive.spec.luau    # 70 passed, 0 failed
+
+luau tests/readcost.measure.luau   # a MEASUREMENT, not a suite: where ReadSeconds comes from
 ```
 
 `luau` is the CLI at
@@ -88,8 +112,19 @@ A game that has never been booted headless is not finished.
 ```
 cd D:/Claude/Roblox/robloxemu
 py -3 wrap.py --game ../fork-tower --out build/fork-tower.luau
-luau check_forktower.luau          # 82 passed, 0 failed
+luau check_forktower.luau          # 85 passed, 0 failed
+
+cd D:/Claude/Roblox/fork-tower
+luau tests/world.check.luau        # 70 passed, 0 failed   (needs the bundle above)
 ```
+
+There are TWO headless runs and they are not the same run. `check_forktower.luau` lives in
+`robloxemu/` and is the reader / naive / liar end-to-end play. `tests/world.check.luau` lives here
+and covers everything the second review left open — the unread fork, the timed read, the saved
+skip, the lane pool, the freed lane, the per-hazard debounce — plus, deliberately, the two
+assertions REVIEW-2 proved were wrong. It boots its own server with `Players.MaxPlayers = 40`,
+which is the only way to measure "MaxLanes is a floor" at all: the emulator's default 12 is *below*
+MaxLanes, so `max` and `min` give the same answer and the mutation walks straight through.
 
 `check_forktower.luau` runs the real server script against the emulator and then *plays the game*:
 a reader walks all ten floors following the inscription (and must build zero penalty sections), a
@@ -118,6 +153,8 @@ src/shared/FxClient.luau  camera/HUD juice (verbatim)
 src/server/Main.server.luau  authoritative: lanes, doors, sections, saving
 src/client/Hud.client.luau   display only
 tests/*.spec.luau         one per pure module
+tests/world.check.luau    the BUILT world: the read, the lane pool, the saved skip (needs the emu)
+tests/readcost.measure.luau  where Config.Fork.ReadSeconds comes from
 ```
 
 **Shared modules take their dependencies as ARGUMENTS.** A bare `require("./Rng")` resolves in the
@@ -138,6 +175,7 @@ Everything lives in `src/shared/Config.luau`. The numbers that are *not* free to
 | `Traits[].jump` / `.speed` | must never be negative, or the traitless clearability proof stops covering the build that took it — asserted |
 | `Build.Rarities[].threshold` | every tier must be earnable by a real ten-floor run — asserted by *playing* 400 seeds three ways |
 | `Fairness.*` | these are the thresholds `Fork.spec` measures against; loosening one is loosening the game's promise |
+| `Fork.ReadSeconds` | the break-even against never reading; re-run `tests/readcost.measure.luau` after ANY change to `PenaltyExtraPlatforms`, `PenaltyExtraHazards`, the platform curve, `WalkSpeed`, or a trait's `speed` — all six move it |
 
 There is deliberately **no** "max identical trap sides in a row" setting. The first draft had one,
 capped at three, and the cap leaks: after three left-traps you know the fourth is on the right,
@@ -174,6 +212,12 @@ the code.
   which does not exist.
 
 **Known thin spots**
+- **The inscription's own data still replicates.** `ForkPad.TellKind`, `ForkPad.RuleInverted` and
+  `Door.Marked` are set at build time, so a client running a script can resolve a fork without
+  paying the 1.1 s. A player without one cannot: the billboards, the door colours and the `rule`
+  payload are all gated on the read. Closing it means moving those three attributes behind the
+  read — which breaks `robloxemu/check_forktower.luau`'s `readFork` helper, and that file was
+  read-only to the pass that found this. See REVIEW-3.md.
 - **The HUD has never been measured by `hudcheck`.** The layout follows the same Responsive rules
   as the sibling games and the panels are authored the same way, but `robloxemu/emu/hudcheck.luau`
   has not been pointed at it across the six viewports, so "it fits a phone" is an argument here,

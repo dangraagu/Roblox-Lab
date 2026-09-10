@@ -228,15 +228,35 @@ function Section.build(cfg, runSeed: number, level: number, theme: string, penal
 		-- WHERE IT IS SAFE TO STAND. The checkpoint used to be the platform's centre, and a hazard
 		-- sits `offset` studs from that centre with its near face only TileSize/2 - HazardBite =
 		-- 1.50 studs away — closer than a character is wide. So touching a hazard returned the
-		-- player onto the hazard, which fired it again. The clear band is on the far side; put the
-		-- character's CENTRE as far into it as it can go while staying wholly on the platform, and
-		-- let Section.check prove the clearance rather than assume it.
-		local inner = p.size / 2 - cfg.World.CharacterHalfWidth
+		-- player onto the hazard, which fired it again.
+		--
+		-- The clear band is on the far side, and it is an INTERVAL, not a point. Retreating `t`
+		-- studs from the centre, away from a hazard whose centre is `d` studs off it:
+		--     t <= p.size/2 - ch            (the whole character stays on the platform)
+		--     t >= ch + hz.size/2 - |d|     (the whole character clears the hazard)
+		-- and hazard clearance + platform-edge margin equals the WIDTH of that interval for every
+		-- t inside it — one stud of clearance costs exactly one stud of edge. So the point that
+		-- maximises the smaller of the two is the MIDDLE, and nothing else is.
+		--
+		-- The first fix took t = p.size/2 - ch, the far END: 2.00 studs from the hazard and 0.00
+		-- from the drop, sitting exactly on Section.check's own boundary, with the player dropped
+		-- onto it from RespawnLift studs up. The midpoint buys 1.00 and 1.00. Section.spec asserts
+		-- the midpoint over every hazard it sweeps and Section.check refuses a section that leaves
+		-- it, so neither end of the band can come back by a tuning change.
+		local ch = cfg.World.CharacterHalfWidth
 		local h = hazards[n]
+		local d: number = if axis == "x" then h.dx - p.dx else h.dz - p.dz
+		local tMin = ch + h.size / 2 - math.abs(d)
+		local tMax = p.size / 2 - ch
+		local t = (tMin + tMax) / 2
+		-- Away from the hazard, always. A hazard sitting exactly on the centre line cannot happen
+		-- for any config Section.check accepts, but retreating in a defined direction beats a
+		-- coin flip if one ever did.
+		local away = if d >= 0 then -1 else 1
 		if axis == "x" then
-			p.safeDx = p.dx + (if h.dx >= p.dx then -inner else inner)
+			p.safeDx = p.dx + away * t
 		else
-			p.safeDz = p.dz + (if h.dz >= p.dz then -inner else inner)
+			p.safeDz = p.dz + away * t
 		end
 	end
 
@@ -367,6 +387,30 @@ function Section.check(section, cfg): (boolean, { string })
 					or math.abs(rp.dz - p.dz) + ch > p.size / 2 + 1e-9 then
 					problems[#problems + 1] = string.format(
 						"platform %d's checkpoint hangs the player off the edge", hz.platform)
+				end
+
+				-- AND IT MUST NOT SIT AT EITHER END OF THE BAND. Non-overlap alone is satisfied by
+				-- 0.001 studs of clearance, which is how REVIEW-2's mutation M2 (the respawn offset
+				-- halved) left all 337 assertions in this repo green while the real clearance fell
+				-- from 2.00 studs to 0.75 — under the CharacterHalfWidth the whole model is built
+				-- on. Hazard clearance and edge margin always sum to the width of the feasible
+				-- band, so the midpoint is the only point where the smaller of the two is as large
+				-- as it can be; anything else has spent one to buy the other.
+				local hazOff: number = if hz.axis == "x" then hz.dx - p.dx else hz.dz - p.dz
+				local rpOff: number = if hz.axis == "x" then rp.dx - p.dx else rp.dz - p.dz
+				-- Named `clearBand` rather than `band`: the LANDING band above is a different
+				-- measurement of a different thing, and shadowing it here would put two meanings
+				-- of one word inside one loop body.
+				local clearBand = (p.size / 2 - ch) - (ch + hz.size / 2 - math.abs(hazOff))
+				if clearBand > 1e-9 then
+					local clear = math.abs(hazOff - rpOff) - (hz.size / 2 + ch)
+					local edge = p.size / 2 - (math.abs(rpOff) + ch)
+					if math.min(clear, edge) < clearBand / 2 - 1e-6 then
+						problems[#problems + 1] = string.format(
+							"platform %d's checkpoint sits at the end of its clear band "
+								.. "(%.2f studs of hazard clearance, %.2f of edge, band %.2f)",
+							hz.platform, clear, edge, clearBand)
+					end
 				end
 			end
 		end

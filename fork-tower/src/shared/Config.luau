@@ -90,6 +90,29 @@ Config.Fork = {
 
 	LiarFromFloor = 4, -- før denne etasjen lyver innskripsjonen aldri
 	LiarChance = 0.3, -- ... og etterpå lyver den (åpenlyst) så ofte
+
+	-- ── Å LESE KOSTER TID ────────────────────────────────────────────────────
+	-- Innskripsjonen er det ENESTE som sier noe. En ulest dør viser bare at den er en dør: ingen
+	-- trait, ingen stjerner, ingen tema-farge. Det er hele fiksen på den dominerte kjernesløyfa —
+	-- stjernene sto skrevet på dørene, og det gjorde «ta den sterkeste, aldri les» til den beste
+	-- måten å spille på (målt: 95.1 % av frøene).
+	--
+	-- Men gratis informasjon er ikke et valg. Å lese er derfor en HANDLING som tar tid: du holder
+	-- inne LES på fork-platået, og serveren måler tiden selv (se onReadInscription i
+	-- Main.server.luau — en klient som fyrer prompten direkte får ingen rabatt).
+	--
+	-- TALLET ER MÅLT, IKKE SMAKT. tests/readcost.measure.luau spiller 5000 ekte frø to veier:
+	-- «les hver fork og ta den trygge døra» mot «gjett, aldri les». Fella koster bare TID
+	-- (PenaltyExtraPlatforms lengre, aldri brattere), en gjetter går i fella halvparten av
+	-- etasjene, og de to strategiene bruker like lang tid på ti etasjer nøyaktig når en lesning
+	-- koster break-even-tallet den fila regner ut. Se REVIEW-3.md for målingen.
+	ReadSeconds = 1.1,
+
+	-- Hva en ulest dør og et ulest platå viser i stedet.
+	UnreadDoor = "🚪 DØR",
+	UnreadInscription = "🔒 INNSKRIPSJONEN ER ULEST",
+	UnreadColor = { 74, 70, 96 },
+	UnreadAccent = { 150, 145, 175 },
 }
 
 -- ── Rettferdighet: tallene testene måler mot ────────────────────────────────

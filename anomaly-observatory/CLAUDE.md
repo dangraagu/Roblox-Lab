@@ -45,6 +45,16 @@ Hint (H at start pad) spends a token to reveal clean/anomaly.
   STRINGS or scalars (caught/redeemed are string sets) → no integer-key JSON round-trip trap.
 - **Leaderboard**: OrderedDataStore by best Day (`publishBest`).
 
+## The pass is now visible from outside the server script (2026-09-10)
+`beginPass` publishes the roll on the zone model: `zone:SetAttribute("Clean", ...)`,
+`"AnomalyId"` (nil when clean) and `"Serial"`, written AFTER the applier block so the
+missing-applier fallback is reflected. This leaks nothing — the R12 note in the same file already
+records that the anomaly is a real replicated Instance a client can read, which is why the
+Best-Day board is explicitly not a trustworthy ranking. What it buys is a deterministic capture
+rig: `tools/film_anomaly.py` shoots matched clean/anomaly pairs keyed by those attributes into
+`marketing/pairs/`, and `robloxemu/check_anomaly_attrs.luau` asserts the attributes are true by
+comparing them with the world rather than with the server's own table.
+
 ## Files
 Server `src/server/Main.server.luau` (buildClean + APPLIERS table + loop + DataStore);
 client `src/client/Hud.client.luau`; shared `Config/Rng/Anomaly/Progression/Codex/Codes.luau`;

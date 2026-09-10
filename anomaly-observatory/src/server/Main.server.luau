@@ -946,6 +946,28 @@ beginPass = function(plr: Player)
 		end
 	end
 
+	-- Publish the roll on the zone itself.
+	--
+	-- `passState` is a table local to this script, so from outside it there is no way to tell
+	-- whether the hall standing in the workspace is clean or which anomaly is in it. Anything
+	-- that needs to know - the marketing capture rig, which has to shoot a MATCHED pair of the
+	-- same hall clean and anomalous, or a headless check - was left inferring it from pixels or
+	-- from geometry it had to re-derive. These two attributes say out loud what the server just
+	-- decided, and they cost nothing to keep honest because they are written in the one place
+	-- the decision is made.
+	--
+	-- This gives away nothing that was hidden. Per the R12 note above, the anomaly is a real
+	-- Instance replicated into the player's own zone, so a client that wanted to cheat could
+	-- already read the answer off the hall; the Best-Day board is explicitly not a trustworthy
+	-- ranking for that reason. An attribute on the same replicated model is the same information
+	-- in a more readable form, not a new leak.
+	--
+	-- Written AFTER the applier block on purpose: the missing-applier fallback demotes the pass
+	-- to clean, and a pass demoted to clean must not still advertise an anomaly id.
+	zone:SetAttribute("Clean", ps.clean)
+	zone:SetAttribute("AnomalyId", ps.anomalyId) -- nil removes the attribute
+	zone:SetAttribute("Serial", ps.serial)
+
 	-- decision prompts on the end wall
 	local endWall = findPart(zone, "EndWall")
 	if endWall then

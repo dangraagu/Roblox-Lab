@@ -53,6 +53,9 @@ local LIAR_FLOORS = { [4] = true, [6] = true, [8] = true }
 local READER, NAIVE, LATE = 5150, 6161, 7171
 local HAZARD_COOLDOWN = 1 -- Config.Limits.HazardCooldown
 local Config_SaveMinInterval = 6 -- Config.Limits.SaveMinInterval
+local READ_SECONDS = 1.1 -- Config.Fork.ReadSeconds
+local SIGNS_PER_DOOR = 2 -- Config.Fork.SignsPerDoor
+local MAX_LANES = 24 -- Config.World.MaxLanes
 
 --============================================================================ seeded profiles
 
@@ -126,14 +129,37 @@ local function exitOf(section)
 	return nil
 end
 
--- Read a fork exactly the way a player standing on the pad reads it: which door carries the
--- sign the inscription names, and whether the inscription says that marks the trap or the safe
--- door. Nothing hidden is consulted — no attribute here is anything but what is carved in front
--- of the player, which is the whole point.
-local function readFork(lane, level)
+-- PAY FOR THE READ, the honest way: begin the hold, hold it for Config.Fork.ReadSeconds, release.
+--
+-- This used to be free. `TellKind`, `RuleInverted` and `Marked` were written in buildFork, and
+-- attributes REPLICATE, so this helper — and any exploiter's script — could resolve a fork
+-- without standing still for a second. They are written in dressFork now, which runs only once
+-- the server's own clock says the read is bought, so the helper has to buy one too.
+--
+-- Idempotent: a fork already read (a rejoin, or a floor this file read earlier) has its prompt
+-- switched off, and paying again would be a second 1.1 s of sim time for nothing.
+local function payRead(plr, lane, level)
+	local pad = padOf(lane, level)
+	local prompt = pad and pad:FindFirstChildOfClass("ProximityPrompt")
+	if prompt == nil then return false end
+	local fork = forkOf(lane, level)
+	if fork and fork:GetAttribute("Read") == true then return true end
+	prompt.PromptButtonHoldBegan:Fire(plr)
+	h:advance(READ_SECONDS)
+	prompt.Triggered:Fire(plr)
+	h:advance(0.1)
+	return true
+end
+
+-- Read a fork exactly the way a player standing on the pad reads it: pay the 1.1 s, then look at
+-- which door carries the sign the inscription names and whether the inscription says that marks
+-- the trap or the safe door. Nothing hidden is consulted — after the read, every attribute here
+-- is also carved on the parts in front of the player, which is the whole point.
+local function readFork(plr, lane, level)
 	local pad = padOf(lane, level)
 	local d1, d2 = doorOf(lane, level, 1), doorOf(lane, level, 2)
 	if pad == nil or d1 == nil or d2 == nil then return nil end
+	if not payRead(plr, lane, level) then return nil end
 	local m1 = d1:GetAttribute("Marked") == true
 	local m2 = d2:GetAttribute("Marked") == true
 	if m1 == m2 then return nil end -- both or neither marked: the fork is unreadable
@@ -144,6 +170,93 @@ local function readFork(lane, level)
 		inverted = inverted,
 		trap = if inverted then 3 - marked else marked,
 	}
+end
+
+--============================================================================ the wire dump
+--
+-- WHAT A CLIENT CAN ACTUALLY READ OFF A FORK. Everything in a Roblox workspace replicates:
+-- every Instance, its class, its properties and its Attributes. So "hidden" means "not in this
+-- subtree", and the only honest way to check it is to walk the subtree and enumerate.
+--
+-- `normPath` folds the level and slot numbers out of a name, so a fork on floor 7 produces the
+-- same inventory string as a fork on floor 1 and the two doors produce the same line.
+
+local function normPath(node, root)
+	local parts = {}
+	local x = node
+	while x ~= nil and x ~= root do
+		local n = tostring(x.Name)
+		n = string.gsub(n, "_%d+_%d+$", "_L_S")
+		n = string.gsub(n, "_%d+$", "_L")
+		n = string.gsub(n, "^Sign_.+$", "Sign_*")
+		table.insert(parts, 1, n)
+		x = x.Parent
+	end
+	return table.concat(parts, "/")
+end
+
+-- Every ATTRIBUTE NAME on every Instance in the subtree, deduplicated and sorted. This is the
+-- assertion that survives a rename or a relocation: a `TellKind` renamed to `Tk` is a name that
+-- is not on the list, and one moved from the pad onto a door or a sign nub is a name on a path
+-- that is not on the list. Values are pinned separately, below.
+local function inventory(root)
+	local lines, seen = {}, {}
+	local function record(c, path)
+		local names = {}
+		for k in c:GetAttributes() do names[#names + 1] = k end
+		table.sort(names)
+		local line = path .. " [" .. tostring(c.ClassName) .. "] :: " .. table.concat(names, ",")
+		if not seen[line] then
+			seen[line] = true
+			lines[#lines + 1] = line
+		end
+	end
+	record(root, ".")
+	local function walk(x)
+		for _, c in x:GetChildren() do
+			record(c, normPath(c, root))
+			walk(c)
+		end
+	end
+	walk(root)
+	table.sort(lines)
+	return table.concat(lines, "\n")
+end
+
+-- Every RENDERED field a client can see on a part and its descendants. Position and CFrame are
+-- left out on purpose (door 1 and door 2 are mirrored across the pad, and floor 7 is higher than
+-- floor 1); nothing else is.
+local RENDERED = {
+	"Size", "Color", "Material", "Transparency", "Anchored", "CanCollide", "CanQuery", "CanTouch",
+	"Brightness", "Range",
+	"StudsOffset", "AlwaysOnTop", "MaxDistance",
+	"Text", "TextColor3", "TextScaled", "Font", "TextStrokeTransparency", "BackgroundTransparency",
+	"ActionText", "ObjectText", "HoldDuration", "MaxActivationDistance", "Enabled",
+	"RequiresLineOfSight", "KeyboardKeyCode", "GamepadKeyCode",
+}
+
+local function renderedRecord(root, skipSigns)
+	local lines = {}
+	local function record(c, path)
+		local out = { path .. " [" .. tostring(c.ClassName) .. "]" }
+		for _, f in RENDERED do
+			local v = (c :: any)[f]
+			if v ~= nil then out[#out + 1] = f .. "=" .. tostring(v) end
+		end
+		lines[#lines + 1] = table.concat(out, " ")
+	end
+	record(root, ".")
+	local function walk(x)
+		for _, c in x:GetChildren() do
+			if not (skipSigns and string.match(tostring(c.Name), "^Sign_")) then
+				record(c, normPath(c, root))
+				walk(c)
+			end
+		end
+	end
+	walk(root)
+	table.sort(lines)
+	return table.concat(lines, "\n")
 end
 
 local function choose(plr, lane, level, slot)
@@ -222,8 +335,182 @@ do
 	local signs2 = tostring(d2:GetAttribute("Signs"))
 	truthy(signs1 ~= "" and signs2 ~= "", "both doors carry their signs")
 	truthy(signs1 ~= signs2, "the two doors never show the same pair of signs")
-	local fork = readFork(readerLane, 1)
-	truthy(fork ~= nil, "floor 1's fork is READABLE: exactly one door bears the named sign")
+end
+
+--============================================================================ nothing crosses the wire
+--
+-- REVIEW-3, open finding 3: `ForkPad.TellKind`, `ForkPad.RuleInverted` and `Door.Marked` were
+-- written in buildFork, and Attributes REPLICATE. A player running a script resolved any fork
+-- instantly; a player without one paid Config.Fork.ReadSeconds. The 5000-seed break-even that
+-- prices the read then describes a game only honest players are playing.
+--
+-- The test is WHAT CROSSES THE WIRE, not what it is called, so it is in two halves that together
+-- close every hiding place inside the fork's subtree:
+--
+--   1. the INVENTORY — every attribute name on every Instance under Fork_<n>, against an exact
+--      expected list. A renamed attribute is a name that is not on it; one moved to another part
+--      (or to a sign nub, or to a BillboardGui) is a name on a path that is not on it;
+--   2. the VALUES — each surviving attribute is pinned to something the player can already see,
+--      so none of the five can be a smuggler's pocket; and every RENDERED field of every unread
+--      door in the whole run collapses to ONE distinct record, so no colour, label, prompt or
+--      light varies with the fork either.
+--
+-- What is left varying between the two doors is the SIGNS, and that is the point: they are the
+-- vocabulary the inscription is about to use. Fork.luau draws the ordered pair of distinct sign
+-- sets BEFORE anything consults the trap, and Fork.spec measures it over 40 000 forks — sign
+-- count, single signs and whole arrangements are all uninformative. So the client's whole view of
+-- an unread fork is a function of (level, sign arrangement) and of nothing else, and the sign
+-- arrangement is independent of the trap.
+
+local UNREAD_INVENTORY = table.concat({
+	". [Folder] :: Read",
+	"Door_L_S [Part] :: Level,Signs,Slot",
+	"Door_L_S/Choose [ProximityPrompt] :: ",
+	"Door_L_S/DoorGlow [PointLight] :: ",
+	"Door_L_S/Sign_* [Part] :: Sign",
+	"Door_L_S/Sign_*/SignGlow [PointLight] :: ",
+	"Door_L_S/Sign_*/SignLabel [BillboardGui] :: ",
+	"Door_L_S/Sign_*/SignLabel/Text [TextLabel] :: ",
+	"Door_L_S/TraitLabel [BillboardGui] :: ",
+	"Door_L_S/TraitLabel/Text [TextLabel] :: ",
+	"ForkPad_L [Part] :: Level",
+	"ForkPad_L/Inscription [BillboardGui] :: ",
+	"ForkPad_L/Inscription/Text [TextLabel] :: ",
+	"ForkPad_L/PadGlow [PointLight] :: ",
+	"ForkPad_L/Read [ProximityPrompt] :: ",
+	"FxDustVolume [Part] :: ",
+	"FxDustVolume/FxDust [ParticleEmitter] :: ",
+}, "\n")
+
+-- The same list with the three the read BUYS put back. Asserted too, because "nothing replicates"
+-- is satisfied just as well by a server that never writes them at all, and that would be a game
+-- with no inscription rather than a secret one.
+local READ_INVENTORY = table.concat({
+	". [Folder] :: Read",
+	"Door_L_S [Part] :: Level,Marked,Signs,Slot",
+	"Door_L_S/Choose [ProximityPrompt] :: ",
+	"Door_L_S/DoorGlow [PointLight] :: ",
+	"Door_L_S/Sign_* [Part] :: Sign",
+	"Door_L_S/Sign_*/SignGlow [PointLight] :: ",
+	"Door_L_S/Sign_*/SignLabel [BillboardGui] :: ",
+	"Door_L_S/Sign_*/SignLabel/Text [TextLabel] :: ",
+	"Door_L_S/TraitLabel [BillboardGui] :: ",
+	"Door_L_S/TraitLabel/Text [TextLabel] :: ",
+	"ForkPad_L [Part] :: Level,RuleInverted,TellKind",
+	"ForkPad_L/Inscription [BillboardGui] :: ",
+	"ForkPad_L/Inscription/Text [TextLabel] :: ",
+	"ForkPad_L/PadGlow [PointLight] :: ",
+	"ForkPad_L/Read [ProximityPrompt] :: ",
+	"FxDustVolume [Part] :: ",
+	"FxDustVolume/FxDust [ParticleEmitter] :: ",
+}, "\n")
+
+-- Compares an inventory and prints only the lines that DIFFER, so a failure names the attribute
+-- that crossed the wire rather than reprinting the whole subtree twice.
+local function inventoryIs(fork, want)
+	local got = inventory(fork)
+	if got == want then return true end
+	local wantSet = {}
+	for line in string.gmatch(want, "[^\n]+") do wantSet[line] = true end
+	local gotSet = {}
+	for line in string.gmatch(got, "[^\n]+") do gotSet[line] = true end
+	for line in string.gmatch(got, "[^\n]+") do
+		if not wantSet[line] then print("    ON THE WIRE, unexpected: " .. line) end
+	end
+	for line in string.gmatch(want, "[^\n]+") do
+		if not gotSet[line] then print("    MISSING from the wire: " .. line) end
+	end
+	return false
+end
+
+-- Every unread door seen anywhere in this file, by rendered record. One distinct record over all
+-- of them is the whole claim; the counter is checked once, at the end of the runs.
+local unreadDoorSeen, unreadDoorRecords, unreadDoorsMeasured = {}, {}, 0
+local unreadPadSeen, unreadPadRecords, unreadPadsMeasured = {}, {}, 0
+
+local function noteUnreadFork(lane, level)
+	local fork = forkOf(lane, level)
+	if fork == nil or fork:GetAttribute("Read") == true then return end
+	for slot = 1, 2 do
+		local door = doorOf(lane, level, slot)
+		if door then
+			local rec = renderedRecord(door, true)
+			unreadDoorsMeasured += 1
+			if not unreadDoorSeen[rec] then
+				unreadDoorSeen[rec] = true
+				unreadDoorRecords[#unreadDoorRecords + 1] = rec
+			end
+		end
+	end
+	local pad = padOf(lane, level)
+	if pad then
+		-- The level number is genuinely on the pad ("ETASJE 7/10") and the player can read it off
+		-- their own leaderstats, so it is normalised out rather than counted as a leak.
+		local rec = string.gsub(renderedRecord(pad, false), "%d+", "#")
+		unreadPadsMeasured += 1
+		if not unreadPadSeen[rec] then
+			unreadPadSeen[rec] = true
+			unreadPadRecords[#unreadPadRecords + 1] = rec
+		end
+	end
+end
+
+do
+	local fork = forkOf(readerLane, 1)
+	eq(fork:GetAttribute("Read"), false, "floor 1 has not been read yet (the measurement below is of an UNREAD fork)")
+
+	truthy(inventoryIs(fork, UNREAD_INVENTORY),
+		"an unread fork puts NOTHING on the wire that names the tell, the rule or the marked door")
+
+	-- Every attribute the inventory does allow, pinned to a value the player can already see, so
+	-- that none of the five can carry the answer under a permitted name.
+	local pad = padOf(readerLane, 1)
+	eq(pad:GetAttribute("Level"), 1, "...the pad's only attribute is the floor number it is printed with")
+	for slot = 1, 2 do
+		local door = doorOf(readerLane, 1, slot)
+		eq(door:GetAttribute("Level"), 1, "...door " .. slot .. "'s Level is the floor number")
+		eq(door:GetAttribute("Slot"), slot, "...its Slot is its own index")
+		-- Signs is the string the sign NUBS are made from: every kind in it has a nub bearing it,
+		-- and there are exactly SignsPerDoor of both. A boolean smuggled in here would not survive.
+		local listed, nubbed = {}, {}
+		for kind in string.gmatch(tostring(door:GetAttribute("Signs")), "[^,]+") do
+			listed[#listed + 1] = kind
+		end
+		for _, c in door:GetChildren() do
+			local k = c:GetAttribute("Sign")
+			if k ~= nil then nubbed[tostring(k)] = true end
+		end
+		eq(#listed, SIGNS_PER_DOOR, "...and its Signs attribute lists exactly its own signs")
+		local allNubbed = true
+		for _, kind in listed do
+			if not nubbed[kind] then allNubbed = false end
+		end
+		truthy(allNubbed, "...every one of which is rendered on a nub the player can see")
+	end
+
+	-- The pad's own carving says there IS an inscription and not what it says.
+	local bb = pad:FindFirstChild("Inscription")
+	local text = bb and bb:FindFirstChild("Text")
+	local said = text and tostring(text.Text) or ""
+	truthy(string.find(said, "ULEST", 1, true) ~= nil, "an unread pad says the inscription is unread")
+	truthy(string.find(said, "MERKER", 1, true) == nil, "...and does not carry the rule text")
+end
+
+-- Read floor 1, honestly, and re-enumerate. This half is the control on the half above: an
+-- enumeration that cannot see the difference would report "nothing crosses the wire" for a game
+-- whose inscription never crossed it either.
+do
+	local d1 = doorOf(readerLane, 1, 1)
+	local before = renderedRecord(d1, true)
+	noteUnreadFork(readerLane, 1)
+
+	local fork = readFork(reader, readerLane, 1)
+	truthy(fork ~= nil, "floor 1's fork is READABLE once the 1.1 s is paid: one door bears the named sign")
+	eq(forkOf(readerLane, 1):GetAttribute("Read"), true, "...and the fork is marked read")
+	truthy(inventoryIs(forkOf(readerLane, 1), READ_INVENTORY),
+		"a READ fork carries the tell, the rule and the marked door — the read really does buy them")
+	truthy(renderedRecord(d1, true) ~= before,
+		"...and the door itself now renders differently (the enumeration above is not blind)")
 end
 
 --============================================================================ a door is not public
@@ -270,7 +557,8 @@ end
 -- a lie in the built world however green the pure spec is.
 local readerOk = true
 for level = 1, FLOORS do
-	local fork = readFork(readerLane, level)
+	noteUnreadFork(readerLane, level)
+	local fork = readFork(reader, readerLane, level)
 	if fork == nil then
 		failed += 1
 		print("FAIL: floor " .. level .. " could not be read from the world")
@@ -338,7 +626,8 @@ end
 -- says the warden is lying. They must be punished on exactly floors 4, 6 and 8.
 if naiveLane ~= nil then
 	for level = 1, FLOORS do
-		local fork = readFork(naiveLane, level)
+		noteUnreadFork(naiveLane, level)
+		local fork = readFork(naive, naiveLane, level)
 		if fork == nil then break end
 		-- Believes the marked door is always the trap.
 		choose(naive, naiveLane, level, 3 - fork.marked)
@@ -447,7 +736,7 @@ do
 	if after then
 		eq(sectionOf(after, 1), nil, "the new run has climbed nothing yet")
 		truthy(forkOf(after, 1) ~= nil, "...and floor 1's fork is waiting")
-		truthy(readFork(after, 1) ~= nil, "...and it is readable")
+		truthy(readFork(reader, after, 1) ~= nil, "...and it is readable")
 	end
 	local ls = reader:FindFirstChild("leaderstats")
 	local floorVal = ls and ls:FindFirstChild("Floor")
@@ -548,9 +837,11 @@ do
 
 	-- Same seed, opposite strategies: the two ways a run's X can walk.
 	for level = 1, FLOORS do
-		local f1 = readFork(safeLane, level)
+		noteUnreadFork(safeLane, level)
+		local f1 = readFork(safe, safeLane, level)
 		if f1 then choose(safe, safeLane, level, 3 - f1.trap); climb(safe, safeLane, level) end
-		local f2 = readFork(greedyLane, level)
+		noteUnreadFork(greedyLane, level)
+		local f2 = readFork(greedy, greedyLane, level)
 		if f2 then choose(greedy, greedyLane, level, f2.trap); climb(greedy, greedyLane, level) end
 	end
 	truthy(safeLane:FindFirstChild("Summit") ~= nil, "the safe drift player summited")
@@ -599,7 +890,23 @@ do
 	local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
 	local notice = h.ReplicatedStorage:FindFirstChild("ForkRemotes"):FindFirstChild("Notice")
 
-	local measured, pinned, worstGap = 0, 0, math.huge
+	-- WEAK ASSERTION, FIXED. This block used to count only `gap < 0` — checkpoints INSIDE their
+	-- hazard — and report `worst clearance`. Any clearance above zero satisfied that, so REVIEW-2's
+	-- mutation M2 (the respawn offset halved) dropped the real clearance from 2.00 studs to 0.75,
+	-- below the CharacterHalfWidth = 2 the whole model is built on, and this file stayed at 85/0.
+	-- Non-overlap is not the claim; the claim is that the checkpoint is in the MIDDLE of its band.
+	--
+	-- The band is re-derived here from the real Parts — the platform's own size, the hazard's own
+	-- size and offset — and not read out of Section.luau, so a section that satisfies its own
+	-- generator and nothing else still fails. Retreating `t` studs from the platform centre away
+	-- from a hazard whose centre is `d` studs off it:
+	--     t <= plat/2 - ch            the whole character stays on the platform
+	--     t >= ch + hz/2 - |d|        the whole character clears the hazard
+	-- and hazard clearance + edge margin equals the WIDTH of that interval for every t inside it,
+	-- so one stud of clearance is bought with one stud of edge and only the midpoint maximises the
+	-- smaller of the two. `min(clear, edge) >= band/2` pins it uniquely.
+	local measured, pinned, offCentre = 0, 0, 0
+	local worstGap, worstClear, worstEdge, worstShort = math.huge, math.huge, math.huge, math.huge
 	for level = 2, FLOORS do
 		local sec = sectionOf(lane, level)
 		if sec and hrp then
@@ -619,6 +926,30 @@ do
 					local gap = math.max(gx, gz)
 					if gap < worstGap then worstGap = gap end
 					if gap < 0 then pinned += 1 end
+
+					-- The hazard is offset from its platform's centre on ONE axis; the other offset
+					-- is zero. Whichever is larger IS that axis, read off the world rather than
+					-- from an attribute the generator would have to be trusted to write.
+					local hOffX = hz.Position.X - plat.Position.X
+					local hOffZ = hz.Position.Z - plat.Position.Z
+					local onX = math.abs(hOffX) >= math.abs(hOffZ)
+					-- Annotated: without the types luau-analyze reads each of these as a union of two
+					-- subtractions and refuses them to math.abs.
+					local hazOff: number = if onX then hOffX else hOffZ
+					local rpOff: number = if onX then (hrp.Position.X - plat.Position.X)
+						else (hrp.Position.Z - plat.Position.Z)
+					local pSize: number = if onX then plat.Size.X else plat.Size.Z
+					local hSize: number = if onX then hz.Size.X else hz.Size.Z
+					local band = (pSize / 2 - CHAR_HALF) - (CHAR_HALF + hSize / 2 - math.abs(hazOff))
+					local clear = math.abs(hazOff - rpOff) - (hSize / 2 + CHAR_HALF)
+					local edge = pSize / 2 - (math.abs(rpOff) + CHAR_HALF)
+					worstClear = math.min(worstClear, clear)
+					worstEdge = math.min(worstEdge, edge)
+					if band > 1e-9 then
+						local short = math.min(clear, edge) - band / 2
+						worstShort = math.min(worstShort, short)
+						if short < -1e-6 then offCentre += 1 end
+					end
 					h:advance(HAZARD_COOLDOWN)
 				end
 			end
@@ -628,6 +959,13 @@ do
 	eq(pinned, 0, string.format(
 		"touching a hazard never returns the player INTO it (%d of %d, worst clearance %.2f studs)",
 		pinned, measured, worstGap))
+	eq(offCentre, 0, string.format(
+		"...and lands the player in the MIDDLE of the clear band, not at either end (%d of %d "
+			.. "off-centre; worst is %.2f studs short of half its band; worst hazard clearance "
+			.. "%.2f, worst platform-edge margin %.2f)",
+		offCentre, measured, -math.min(worstShort, 0), worstClear, worstEdge))
+	print(string.format("  checkpoints: %d hazards, worst clearance %.2f, worst edge margin %.2f",
+		measured, worstClear, worstEdge))
 
 	-- Touched fires many times per contact. Without a cooldown every one of them is another
 	-- teleport mid-teleport and another Notice down the wire.
@@ -664,7 +1002,8 @@ do
 	truthy(lane ~= nil, "a character-less player still gets a lane")
 	truthy(ghost.Character == nil, "...and really has no character (the check is not vacuous)")
 
-	local fork = readFork(lane, 1)
+	noteUnreadFork(lane, 1)
+	local fork = readFork(ghost, lane, 1)
 	choose(ghost, lane, 1, 3 - fork.trap)
 	local sec = sectionOf(lane, 1)
 	truthy(sec ~= nil, "the fork was answered")
@@ -752,7 +1091,8 @@ do
 
 	local before = store.__calls
 	for level = 1, FLOORS do
-		local f = readFork(lane, level)
+		noteUnreadFork(lane, level)
+		local f = readFork(plr, lane, level)
 		if f then
 			choose(plr, lane, level, 3 - f.trap)
 			climb(plr, lane, level)
@@ -794,6 +1134,32 @@ do
 		"...and the coalesced run came back whole after leaving and rejoining")
 	h:leave(back)
 	h:advance(1)
+end
+
+--============================================================================ one door, one record
+
+-- The second half of "nothing crosses the wire", gathered from every unread fork this file walked
+-- past: six players, six run seeds, ten floors each. The inventory above proves no attribute
+-- names the answer; this proves no RENDERED field carries it either — every unread door in the
+-- whole run collapses to ONE record and every unread pad to one more, so the client's view of an
+-- unread fork is a constant plus the sign arrangement, and the trapped door renders exactly what
+-- the safe one does.
+
+do
+	truthy(unreadDoorsMeasured >= 40, string.format(
+		"there were unread doors to measure: %d of them (the claim is not vacuous)", unreadDoorsMeasured))
+	eq(#unreadDoorRecords, 1, string.format(
+		"every one of the %d unread doors renders the SAME record — no colour, label, prompt or "
+			.. "light distinguishes the trapped door from the safe one", unreadDoorsMeasured))
+	eq(#unreadPadRecords, 1, string.format(
+		"...and every one of the %d unread pads too, once its floor number is normalised out",
+		unreadPadsMeasured))
+	if #unreadDoorRecords > 1 then
+		print("  --- door record 1 ---\n" .. unreadDoorRecords[1])
+		print("  --- door record 2 ---\n" .. unreadDoorRecords[2])
+	end
+	print(string.format("  wire: %d unread doors -> %d distinct records; %d unread pads -> %d",
+		unreadDoorsMeasured, #unreadDoorRecords, unreadPadsMeasured, #unreadPadRecords))
 end
 
 --============================================================================ normal play warned nothing
@@ -895,7 +1261,32 @@ do
 			if wasTold then told += 1 end
 		end
 	end
-	print(string.format("  crowd: %d players seated, %d unseated", seated, unseated))
+	-- WEAK ASSERTION, FIXED. `seated > 0` was the whole of it, so REVIEW-2's mutation M5 —
+	-- `math.max(Config.World.MaxLanes, Players.MaxPlayers)` flipped to `math.min` — printed
+	-- "12 players seated, 21 unseated" where the baseline printed "24 seated, 9 unseated", and
+	-- this file still said 85/0. The seated COUNT was never compared to the lane pool.
+	--
+	-- The pool is computed HERE, from the two inputs: MaxLanes spelled out at the top of this file,
+	-- and the Players.MaxPlayers this server actually booted with. It is never read back out of the
+	-- server, so a server that got its own arithmetic wrong cannot agree with it.
+	local maxPlayers = tonumber(h.Players.MaxPlayers) or 0
+	local pool = math.max(MAX_LANES, maxPlayers)
+	local present = seated + unseated
+	print(string.format(
+		"  crowd: %d players present, %d seated, %d unseated (pool = max(MaxLanes %d, MaxPlayers %d) = %d)",
+		present, seated, unseated, MAX_LANES, maxPlayers, pool))
+	eq(seated, math.min(present, pool), string.format(
+		"the lane pool is max(MaxLanes %d, MaxPlayers %d) = %d, so %d of the %d players present are seated",
+		MAX_LANES, maxPlayers, pool, math.min(present, pool), present))
+	truthy(present > pool,
+		"...and this server really is over its pool, so that number is a ceiling and not a headcount")
+	-- The claim in its own words. It is trivially satisfied at this server's MaxPlayers — 12, the
+	-- emulator's default, which is BELOW MaxLanes — so `min` would satisfy it here too. The
+	-- direction that separates the two, a slider set ABOVE MaxLanes, is measured in
+	-- fork-tower/tests/world.check.luau, which boots at MaxPlayers = 40. The line above is what
+	-- kills M5 in this file; this one says what the line is for.
+	truthy(pool >= maxPlayers,
+		"...which is the claim: the lane pool is never smaller than the place's max-player count")
 	eq(told, unseated, "every player the server had no lane for was told so")
 	truthy(seated > 0, "...and the ones it did have room for are playing")
 

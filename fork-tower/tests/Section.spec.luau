@@ -338,6 +338,30 @@ do
 	-- band, and Section.check enforces the clearance.
 	local ch = Config.World.CharacterHalfWidth
 	local inHazard, offPlatform, checked = 0, 0, 0
+	-- THE NUMBERS, not just the signs. REVIEW-2's mutation M2 halved the respawn offset and every
+	-- one of the 337 assertions in this repo stayed green, because this block only asked whether
+	-- the two boxes overlap AT ALL: `if ox > 1e-9 and oz > 1e-9`. Any clearance above zero
+	-- satisfies that, so the 2.00-stud number finding 3's fix rested on was defended by nothing,
+	-- and a future tune of CharacterHalfWidth / HazardBite / HazardSize / TileSize could have taken
+	-- it to 0.001 with the suite green.
+	--
+	-- What is asserted instead is the whole geometry, re-derived here from the section's own
+	-- numbers rather than read out of Section.luau:
+	--
+	--   the hazard sits `d` studs from the platform centre on its own axis, and the character
+	--   stands `t` studs the other way. Two constraints bound t:
+	--     t <= p.size/2 - ch                (the whole character stays on the platform)
+	--     t >= ch + hz.size/2 - |d|         (the character clears the hazard)
+	--   so the feasible interval has width `band` = (p.size/2 - ch) - (ch + hz.size/2 - |d|),
+	--   and — this is the part that makes it a real assertion — hazard clearance + edge margin
+	--   equals `band` for EVERY t. Spending one buys the other, one stud for one stud. The only
+	--   point that maximises the smaller of the two is the MIDPOINT, where both are band/2.
+	--
+	-- That single inequality kills two findings at once: M2 (clearance 0.75, edge 1.75 -> min 0.75
+	-- < 1.00) and REVIEW-2's "the respawn point is FLUSH with the platform edge" (clearance 2.00,
+	-- edge 0.00 -> min 0.00 < 1.00).
+	local worstMin, worstBand, worstClear, worstEdge = math.huge, math.huge, math.huge, math.huge
+	local offCentre = 0
 	eachSection(function(sec)
 		for _, hz in ipairs(sec.hazards) do
 			local rp = Section.respawn(sec, hz.platform)
@@ -357,11 +381,36 @@ do
 			if rp.dy ~= p.dy then
 				offPlatform += 1
 			end
+
+			local d = if hz.axis == "x" then hz.dx - p.dx else hz.dz - p.dz
+			local r = if hz.axis == "x" then rp.dx - p.dx else rp.dz - p.dz
+			local clear = math.abs(d - r) - (hz.size / 2 + ch)
+			local edge = p.size / 2 - (math.abs(r) + ch)
+			local band = (p.size / 2 - ch) - (ch + hz.size / 2 - math.abs(d))
+			-- The character must retreat AWAY from the hazard, never past the platform centre
+			-- toward it: r and d have to have opposite signs (or r is 0 on a hazard-free axis).
+			if d * r > 1e-9 then
+				offCentre += 1
+			end
+			worstMin = math.min(worstMin, math.min(clear, edge) - band / 2)
+			worstBand = math.min(worstBand, band)
+			worstClear = math.min(worstClear, clear)
+			worstEdge = math.min(worstEdge, edge)
 		end
 	end)
 	eq(inHazard, 0, "no platform's checkpoint puts the player inside the hazard standing on it")
 	eq(offPlatform, 0, "...and every checkpoint keeps the whole character on its own platform")
+	eq(offCentre, 0, "...and every checkpoint retreats AWAY from its hazard, never past the centre")
 	truthy(checked > 0, "...and there were hazards to measure (the check is not vacuous)")
+	truthy(worstBand > 0, string.format(
+		"there is room to stand at all: the clear band is %.2f studs wide", worstBand))
+	truthy(worstMin >= -1e-6, string.format(
+		"the checkpoint sits at the MIDDLE of its clear band, not at either end "
+			.. "(worst side is %.2f studs short of the %.2f-stud half-band; "
+			.. "worst hazard clearance %.2f, worst platform-edge margin %.2f)",
+		-worstMin, worstBand / 2, worstClear, worstEdge))
+	print(string.format("  respawn band: %.2f studs wide, worst clearance %.2f, worst edge %.2f",
+		worstBand, worstClear, worstEdge))
 
 	-- A hazard-free platform hands back its own centre, so nothing moves where nothing is wrong.
 	local plain = Section.build(Config, 12, 1, "fire", false, Rng, 0)

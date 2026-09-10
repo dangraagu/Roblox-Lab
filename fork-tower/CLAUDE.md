@@ -5,24 +5,32 @@ in, what must stay true, and what bit us building it.
 
 ---
 
-## State (2026-09-10)
+## State (2026-09-10, after REVIEW-3's fourth pass)
 
 **Built and green, never published.** No Roblox experience exists, nothing is committed, nothing
 is pushed — deliberately, per the build instruction. The tree is dirty.
 
 ```
-Fork.spec        47 passed, 0 failed
-Section.spec     32 passed, 0 failed
+Fork.spec        53 passed, 0 failed
+Section.spec     50 passed, 0 failed
 Build.spec       31 passed, 0 failed
 Codes.spec       19 passed, 0 failed
 Rng.spec         32 passed, 0 failed
 responsive.spec  70 passed, 0 failed
-check_forktower  50 passed, 0 failed   (robloxemu, boots the real server and plays ten floors)
+check_forktower 108 passed, 0 failed   (robloxemu: reader/naive/liar, plus the wire enumeration)
+world.check      71 passed, 0 failed   (fork-tower's own: the read, the lane pool, the saved skip)
 ```
 
 `luau-analyze` is clean on every source after filtering Roblox-global noise. `find_mojibake.py`
-reports nothing. A mutation sweep of 21 deliberate defects killed 21; 4 cosmetic controls were
+reports nothing. REVIEW-3's mutation sweeps applied 11 then 12 deliberate defects to the shipping
+source and killed every one; the controls (a door light's Brightness, and `RespawnLift`) were
 correctly ignored.
+
+**The core loop changed.** REVIEW-2's headline was that the game was dominated: the star count was
+printed on every door, so never reading was optimal. A door now shows only that it is a door, and
+reading the inscription costs `Config.Fork.ReadSeconds` on the SERVER's clock. That number is
+measured, not chosen — see `tests/readcost.measure.luau` and REVIEW-3.md. Read REVIEW-3.md before
+touching `dressFork`, `onReadInscription`, or anything in `Config.Fork`.
 
 ---
 
@@ -60,6 +68,32 @@ correctly ignored.
    resolves a fork.
 
 8. **The trap is longer, never steeper.** `penalty` adds platforms and hazards and nothing else.
+
+9. **An unread door shows NOTHING, and the read is timed by the server.** One function,
+   `dressFork`, owns both states of a fork, and every placeholder in `buildFork` is the UNREAD one
+   so that a fork which somehow escapes dressing fails closed. The `rule` payload in `pushState` is
+   gated on the same `p.readFloors` set the world is, so the two cannot drift. The hold on the
+   prompt is client-side feel; `onReadInscription` charges the time itself, which is why an
+   exploiter firing the prompt gets no discount.
+
+   **That includes the ATTRIBUTES.** `ForkPad.TellKind`, `ForkPad.RuleInverted` and `Door.Marked`
+   replicate, and between them they ARE the fork — so `dressFork` writes them and removes them
+   (`SetAttribute(name, nil)`) while the floor is unread. Never set a fork's own data in
+   `buildFork`. What an unread fork puts on the wire is enumerated and asserted line for line in
+   `robloxemu/check_forktower.luau`; adding an attribute anywhere under `Fork_<n>` turns that
+   assertion red on purpose, including if you rename it or move it onto a child.
+
+10. **A cost the player already paid is SAVED.** `profile.readFloors` and `profile.skipped`, both
+    written as dense lists of level numbers because a JSON round-trip turns numeric keys into
+    strings and `saved.readFloors[3]` comes back nil. A skip spent on a floor that is not recorded
+    means `buildLane` re-derives `Fork.isTrap` on rejoin and rebuilds the penalty section — the
+    player loses the skip AND gets the trap.
+
+11. **The checkpoint sits at the MIDDLE of its clear band.** Hazard clearance and platform-edge
+    margin always sum to the width of the feasible interval, so one is bought with the other and
+    only the midpoint maximises the smaller. Both `Section.build` and `Section.check` know this.
+    Neither end of the band is safe: the far end is 0.00 studs from the drop, the near end is
+    inside the hazard.
 
 ---
 
@@ -107,6 +141,11 @@ correctly ignored.
 
 ## Next, roughly in order
 
+0. **Read REVIEW-3.md's "Still open" list first.** Items 2 and 3 are CLOSED (the fourth pass). What
+   is left besides "nobody has played it" is item 4: **`PromptButtonHoldBegan` reaching the server
+   is an unmeasured engine assumption.** If it does not replicate, a full hold costs ~2.2 s instead
+   of 1.1 — a feel regression that fails in the safe direction. Time a full LES hold the minute the
+   place opens in Studio, and do NOT repair it by trusting the client's own hold.
 1. **Point `hudcheck` at it.** `robloxemu/emu/hudcheck.luau` measures every panel across six
    viewports from 414x800 to 1920x1080. The HUD follows the Responsive rules but has never been
    measured, and the reveal card is a big centred frame — exactly the shape that fails a phone.
@@ -128,10 +167,14 @@ correctly ignored.
 # tests
 cd D:/Claude/Roblox/fork-tower && luau tests/<Name>.spec.luau
 
-# headless boot (re-wrap after ANY src change)
+# where Config.Fork.ReadSeconds comes from — re-run after any tuning change
+cd D:/Claude/Roblox/fork-tower && luau tests/readcost.measure.luau
+
+# headless boot (re-wrap after ANY src change) — BOTH runs, they cover different things
 cd D:/Claude/Roblox/robloxemu
 py -3 wrap.py --game ../fork-tower --out build/fork-tower.luau
 luau check_forktower.luau
+cd D:/Claude/Roblox/fork-tower && luau tests/world.check.luau
 
 # static
 luau-compile --binary <file>

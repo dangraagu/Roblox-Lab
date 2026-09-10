@@ -219,6 +219,17 @@ type Profile = {
 	stage: string, -- "fork" | "climb" | "summit"
 	picks: { string }, -- trait ids, in floor order
 	slots: { number }, -- the door taken on each floor, in floor order
+	-- WHICH FLOORS THE PLAYER HAS PAID FOR. Both are saved, and both are saved because losing
+	-- them costs the player something they already spent:
+	--   readFloors — the inscription costs Config.Fork.ReadSeconds to read; a rejoin that made
+	--                you pay again would charge twice for one fork.
+	--   skipped    — a skip spent on a floor turned that floor's trap into a normal section.
+	--                Nothing recorded THAT, so buildLane recomputed `Fork.isTrap` on rejoin and
+	--                rebuilt the penalty section: the player lost the skip AND got the trap, and
+	--                because Section.build mixes PENALTY_MIX into the seed the whole walk changed
+	--                under them mid-climb.
+	readFloors: { [number]: boolean },
+	skipped: { [number]: boolean },
 	skips: number,
 	armedSkip: boolean, -- runtime only; never saved
 	rebirths: number,
@@ -243,6 +254,8 @@ local function defaultProfile(): Profile
 		stage = "fork",
 		picks = {},
 		slots = {},
+		readFloors = {},
+		skipped = {},
 		skips = Config.Skips.StartSkips,
 		armedSkip = false,
 		rebirths = 0,
@@ -270,6 +283,31 @@ local function denseList(v, coerce)
 		end
 		out[i] = coerce(item)
 		i += 1
+	end
+	return out
+end
+
+-- A set of floor numbers, stored as a DENSE LIST of levels rather than as a map. JSON turns a
+-- table with numeric keys into a string-keyed object, so `saved.readFloors[3]` comes back nil and
+-- a player silently pays for every read a second time. A list of levels round-trips through
+-- denseList above, which is already the shape this file trusts.
+local function levelSet(v): { [number]: boolean }
+	local out = {}
+	for _, n in ipairs(denseList(v, tonumber)) do
+		local level = math.floor(tonumber(n) or 0)
+		if level >= 1 and level <= Config.Tower.Floors then
+			out[level] = true
+		end
+	end
+	return out
+end
+
+local function levelList(set: { [number]: boolean }): { number }
+	local out = {}
+	for level = 1, Config.Tower.Floors do
+		if set[level] then
+			out[#out + 1] = level
+		end
 	end
 	return out
 end
@@ -304,6 +342,8 @@ local function loadProfile(plr: Player): Profile
 					local n = tonumber(x) or 1
 					return (n == 2) and 2 or 1
 				end)
+				p.readFloors = levelSet(d.readFloors)
+				p.skipped = levelSet(d.skipped)
 				p.skips = math.clamp(math.floor(tonumber(d.skips) or 0), 0, Config.Skips.MaxSkips)
 				p.rebirths = math.floor(tonumber(d.rebirths) or 0)
 				p.bestScore = math.floor(tonumber(d.bestScore) or 0)
@@ -370,6 +410,7 @@ local function saveProfile(plr: Player, releaseLock: boolean, force: boolean?)
 			old.data = {
 				runSeed = p.runSeed, level = p.level, stage = p.stage,
 				picks = p.picks, slots = p.slots, skips = p.skips,
+				readFloors = levelList(p.readFloors), skipped = levelList(p.skipped),
 				rebirths = p.rebirths, bestScore = p.bestScore, bestTitle = p.bestTitle,
 				redeemed = p.redeemed, passes = p.passes,
 			}
@@ -436,6 +477,15 @@ local function claimLane(): number?
 	return nil
 end
 
+local function hasFreeLane(): boolean
+	for i = 0, laneCount - 1 do
+		if not laneTaken[i] then
+			return true
+		end
+	end
+	return false
+end
+
 -- Alternating around the origin — 0, +1, -1, +2, -2 — rather than marching out along +X, so a
 -- full server's furthest tower is half as far from spawn.
 local function laneOrigin(index: number): Vector3
@@ -497,6 +547,102 @@ local function signStrip(door: BasePart, floorData, slot: number)
 end
 
 local onDoorChosen -- forward declaration; the prompt handler needs it
+local onReadInscription -- ... and so does the inscription's
+
+--------------------------------------------------------------------- read / unread dressing
+
+-- THE INSCRIPTION IS THE ONLY INFORMATION IN THE WORLD.
+--
+-- This function is REVIEW-2's headline finding, made into code. The finding was that the optimal
+-- way to play Fork Tower was to never read an inscription: the door's star count was printed on a
+-- billboard LARGER than the inscription that was supposed to dominate it, so "take the door with
+-- more stars" beat "read and dodge the trap" on 95.1% of 3000 seeds, and the 40 000-fork fairness
+-- spec, the sign-exclusivity proof and the liar mechanic were all defending a decision the reward
+-- curve had already made.
+--
+-- So an UNREAD door shows that it is a door and nothing else: no trait, no stars, no theme colour
+-- (a theme narrows the trait to two of twelve, and gold/void are the strong pair — the colour was
+-- most of the leak on its own), no trait in the prompt's own ObjectText. Everything a player knows
+-- about a fork, they know because they spent Config.Fork.ReadSeconds reading the pad.
+--
+-- Called at build time and again the moment the read completes, so there is exactly one place
+-- that decides what a fork looks like and no way for the two states to drift apart.
+local function dressFork(lane: Lane, level: number)
+	local folder = lane.forkFolder[level]
+	if folder == nil then
+		return
+	end
+	local floorData = lane.plan.floors[level]
+	local read = folder:GetAttribute("Read") == true
+
+	local pad = folder:FindFirstChild("ForkPad_" .. level)
+	-- THE FORK'S OWN DATA IS PART OF WHAT THE READ BUYS.
+	--
+	-- Attributes REPLICATE. `TellKind` and `RuleInverted` used to be written in buildFork, and with
+	-- the doors' signs already carved in the open they resolve any fork between them — so a player
+	-- running a script read every inscription for nothing while an honest player stood still for
+	-- Config.Fork.ReadSeconds. The break-even that prices the read (1.110 s over 5000 seeds) then
+	-- describes a game only honest players are playing.
+	--
+	-- Written HERE instead, in the one function that owns both states of a fork, so the wire and the
+	-- billboards can never disagree about what has been paid for. `SetAttribute(name, nil)` removes
+	-- the attribute outright, which is what an unread fork must look like on a rejoin as well as on
+	-- a fresh build.
+	if pad then
+		pad:SetAttribute("TellKind", if read then floorData.tellKind else nil)
+		pad:SetAttribute("RuleInverted", if read then floorData.ruleInverted else nil)
+	end
+	local inscription = pad and pad:FindFirstChild("Inscription")
+	local inscriptionText = inscription and inscription:FindFirstChild("Text")
+	if inscriptionText then
+		if read then
+			(inscriptionText :: any).Text = string.format("ETASJE %d/%d\n%s %s",
+				level, Config.Tower.Floors, floorData.ruleSign, floorData.ruleText)
+			;(inscriptionText :: any).TextColor3 = if floorData.ruleInverted
+				then Color3.fromRGB(255, 140, 140)
+				else Color3.fromRGB(255, 232, 170)
+		else
+			(inscriptionText :: any).Text = string.format("ETASJE %d/%d\n%s\nHOLD LES — %.1f s",
+				level, Config.Tower.Floors, Config.Fork.UnreadInscription, Config.Fork.ReadSeconds)
+			;(inscriptionText :: any).TextColor3 = c3(Config.Fork.UnreadAccent)
+		end
+	end
+	local readPrompt = pad and pad:FindFirstChildOfClass("ProximityPrompt")
+	if readPrompt then
+		readPrompt.Enabled = not read
+	end
+
+	for slot = 1, 2 do
+		local door = folder:FindFirstChild("Door_" .. level .. "_" .. slot)
+		if door then
+			local doorData = floorData.doors[slot]
+			local trait = traitById[doorData.traitId]
+			local theme = Config.Themes[doorData.theme]
+			-- Which door bears the sign the inscription names. Same reason as TellKind above: it
+			-- replicates, and together with RuleInverted it IS the answer.
+			door:SetAttribute("Marked",
+				if read then (doorData.signSet[floorData.tellKind] == true) else nil)
+			local name = (trait and trait.label) or doorData.traitId
+			local stars = string.rep("★", (trait and trait.power) or 1)
+
+			;(door :: any).Color = if read then c3(theme.color) else c3(Config.Fork.UnreadColor)
+			local glow = door:FindFirstChild("DoorGlow")
+			if glow then
+				(glow :: any).Color = if read then c3(theme.accent) else c3(Config.Fork.UnreadAccent)
+			end
+			local bb = door:FindFirstChild("TraitLabel")
+			local text = bb and bb:FindFirstChild("Text")
+			if text then
+				(text :: any).Text = if read then (name .. "\n" .. stars) else Config.Fork.UnreadDoor
+				;(text :: any).TextColor3 = if read then c3(theme.accent) else c3(Config.Fork.UnreadAccent)
+			end
+			local prompt = door:FindFirstChildOfClass("ProximityPrompt")
+			if prompt then
+				prompt.ObjectText = if read then name else Config.Fork.UnreadDoor
+			end
+		end
+	end
+end
 
 local function buildFork(plr: Player, lane: Lane, level: number)
 	if lane.forkFolder[level] then
@@ -512,18 +658,45 @@ local function buildFork(plr: Player, lane: Lane, level: number)
 	local padSize = Vector3.new(W.ForkPadSize[1], W.ForkPadSize[2], W.ForkPadSize[3])
 	local pad = slab(folder, "ForkPad_" .. level, padSize,
 		top - Vector3.new(0, padSize.Y / 2, 0), Color3.fromRGB(58, 54, 78), Enum.Material.Slate)
-	-- The inscription's own data, on the pad. Every one of these is ALSO carved on the doors in
-	-- front of the player, so replicating them leaks nothing that is not already visible — and it
-	-- is what lets the headless check read a fork the way a player reads it.
+	-- The floor number, and NOTHING else. `TellKind` and `RuleInverted` used to be written here and
+	-- they replicate, so between them and the doors' visible signs an exploiter resolved any fork
+	-- without paying for it. dressFork writes them, and only once the read is bought.
 	pad:SetAttribute("Level", level)
-	pad:SetAttribute("TellKind", floorData.tellKind)
-	pad:SetAttribute("RuleInverted", floorData.ruleInverted)
 
-	billboard(pad, "Inscription",
-		string.format("ETASJE %d/%d\n%s %s", level, Config.Tower.Floors,
-			floorData.ruleSign, floorData.ruleText),
-		6, if floorData.ruleInverted then Color3.fromRGB(255, 140, 140) else Color3.fromRGB(255, 232, 170),
-		Vector2.new(420, 120))
+	-- Written by dressFork below, in both directions. The text here is the placeholder it
+	-- overwrites on the very next line, and it is deliberately the UNREAD one: a fork that somehow
+	-- escaped dressing must fail closed, showing nothing, rather than open.
+	billboard(pad, "Inscription", Config.Fork.UnreadInscription, 6,
+		c3(Config.Fork.UnreadAccent), Vector2.new(420, 120))
+
+	-- READING COSTS TIME. The hold is what the player feels; the server's own clock is what
+	-- actually charges them (see onReadInscription — a client that fires this prompt directly gets
+	-- no discount). Parented to the pad, which already exists, so a fresh lane still holds exactly
+	-- the ten BaseParts and seven PointLights the headless check counts.
+	local readPrompt = make("ProximityPrompt", pad, {
+		Name = "Read",
+		ActionText = "LES",
+		ObjectText = "Innskripsjonen",
+		HoldDuration = Config.Fork.ReadSeconds,
+		MaxActivationDistance = 16,
+		RequiresLineOfSight = false,
+		-- ITS OWN KEY, and not E. ProximityPrompt.Exclusivity defaults to OnePerButton, so two
+		-- prompts bound to the same key and both in range show one at a time — and the doors sit
+		-- eight studs from the middle of a pad that is twenty deep, well inside both radii. On E
+		-- the read prompt would simply vanish whenever the player drifted toward a door, which is
+		-- the one moment they most need it. Nothing in this repo can render a prompt, so this is
+		-- reasoning about a documented engine rule rather than a measurement.
+		KeyboardKeyCode = Enum.KeyCode.R,
+		GamepadKeyCode = Enum.KeyCode.ButtonY,
+	})
+	readPrompt.PromptButtonHoldBegan:Connect(function(who)
+		if who == plr then
+			lane.readHoldAt[level] = clock()
+		end
+	end)
+	readPrompt.Triggered:Connect(function(who)
+		onReadInscription(who, plr, level)
+	end)
 
 	make("PointLight", pad, {
 		Name = "PadGlow",
@@ -539,34 +712,33 @@ local function buildFork(plr: Player, lane: Lane, level: number)
 
 	for slot = 1, 2 do
 		local doorData = floorData.doors[slot]
-		local trait = traitById[doorData.traitId]
-		local theme = Config.Themes[doorData.theme]
 		local sx = (if slot == 1 then -1 else 1) * W.DoorSpread
 		local doorSize = Vector3.new(W.DoorSize[1], W.DoorSize[2], W.DoorSize[3])
 		local door = slab(folder, "Door_" .. level .. "_" .. slot, doorSize,
 			top + Vector3.new(sx, doorSize.Y / 2, W.DoorDepth),
-			c3(theme.color), Enum.Material.SmoothPlastic)
+			c3(Config.Fork.UnreadColor), Enum.Material.SmoothPlastic)
 		door.CanCollide = false -- you walk THROUGH the door you picked
 		door:SetAttribute("Level", level)
 		door:SetAttribute("Slot", slot)
-		door:SetAttribute("Marked", doorData.signSet[floorData.tellKind] == true)
+		-- `Marked` is dressFork's, for the same reason: it replicates. `Signs` stays, because the
+		-- sign nubs above the door render it anyway — it is the vocabulary, not the answer.
 		door:SetAttribute("Signs", table.concat(doorData.signs, ","))
 
 		make("PointLight", door, {
 			Name = "DoorGlow",
-			Color = c3(theme.accent),
+			Color = c3(Config.Fork.UnreadAccent),
 			Brightness = 2.2,
 			Range = 20,
 		})
-		billboard(door, "TraitLabel",
-			(trait and trait.label or doorData.traitId) .. "\n" .. string.rep("★", trait and trait.power or 1),
-			7.5, c3(theme.accent), Vector2.new(280, 90))
+		-- Placeholder text and placeholder colour: dressFork owns both, and both start CLOSED.
+		billboard(door, "TraitLabel", Config.Fork.UnreadDoor, 7.5,
+			c3(Config.Fork.UnreadAccent), Vector2.new(280, 90))
 		signStrip(door, floorData, slot)
 
 		local prompt = make("ProximityPrompt", door, {
 			Name = "Choose",
 			ActionText = "VELG",
-			ObjectText = (trait and trait.label or doorData.traitId),
+			ObjectText = Config.Fork.UnreadDoor,
 			HoldDuration = 0.35,
 			MaxActivationDistance = 14,
 			RequiresLineOfSight = false,
@@ -581,6 +753,12 @@ local function buildFork(plr: Player, lane: Lane, level: number)
 			onDoorChosen(who, plr, level, slot)
 		end)
 	end
+
+	-- A read is a floor's own property and it is SAVED, so a rejoin mid-run comes back to a fork
+	-- the player has already paid for rather than charging them twice.
+	local prof = profiles[plr]
+	folder:SetAttribute("Read", prof ~= nil and prof.readFloors[level] == true)
+	dressFork(lane, level)
 end
 
 --------------------------------------------------------------------- the obby section
@@ -674,21 +852,29 @@ local function buildSection(plr: Player, lane: Lane, level: number, theme: strin
 		})
 		part:SetAttribute("Hazard", hz.kind)
 		part:SetAttribute("Platform", hz.platform)
+		-- ONE DEBOUNCE PER HAZARD, not one per lane. Touched fires many times for one contact — a
+		-- limb per frame while the parts overlap — and without a debounce every one of them was
+		-- another teleport landing on top of the previous one AND another Notice down the wire:
+		-- forty per contact, measured.
+		--
+		-- The first fix kept a single `lane.hazardReadyAt`, which made ONE hit turn every hazard in
+		-- the whole tower inert for a full second. At WalkSpeed 16-22 that second covers 16-22
+		-- studs and adjacent platforms are 11.0-15.5 apart (TileSize + gap), so a player who ate
+		-- one hazard walked through the next one or two for free — and "more hazards" is half of
+		-- what a penalty section IS. An upvalue per hazard costs one number per hazard and is the
+		-- scope the cooldown always meant.
+		local readyAt = 0
 		part.Touched:Connect(function(hit)
 			local char = hit and hit.Parent
 			local who = char and Players:GetPlayerFromCharacter(char)
 			if who ~= plr then
 				return
 			end
-			-- Touched fires many times for one contact — a limb per frame while the parts overlap.
-			-- Without this every one of them was another teleport landing on top of the previous
-			-- one AND another Notice down the wire: forty per contact, measured. One bite per
-			-- HazardCooldown, per lane.
 			local t = clock()
-			if t < lane.hazardReadyAt then
+			if t < readyAt then
 				return
 			end
-			lane.hazardReadyAt = t + Config.Limits.HazardCooldown
+			readyAt = t + Config.Limits.HazardCooldown
 			local hrp = char:FindFirstChild("HumanoidRootPart")
 			if hrp then
 				(hrp :: BasePart).CFrame = CFrame.new(lane.checkpoint)
@@ -775,8 +961,18 @@ local function pushState(plr: Player)
 	end
 
 	local jump, speed = traitTotals(p)
-	local floorData = (p.level <= Config.Tower.Floors) and lanes[plr] and lanes[plr].plan.floors[p.level] or nil
+	-- THE CLIENT IS TOLD NOTHING IT HAS NOT PAID FOR. `rule` carries the tell, the liar line and
+	-- both doors' labels; before REVIEW-2's fix it went out on every state push, which meant a HUD
+	-- panel handed the player the answer the pad was supposed to sell them. It is now gated on the
+	-- same readFloors set the world's own dressing is gated on, so there is one condition and not
+	-- two that can drift.
+	local atFloor = (p.level <= Config.Tower.Floors) and lanes[plr] ~= nil
+	local hasRead = atFloor and p.readFloors[p.level] == true
+	local floorData = (atFloor and hasRead) and lanes[plr].plan.floors[p.level] or nil
 	StateEvent:FireClient(plr, {
+		atFork = atFloor,
+		read = hasRead,
+		readSeconds = Config.Fork.ReadSeconds,
 		level = p.level,
 		floors = Config.Tower.Floors,
 		stage = p.stage,
@@ -844,7 +1040,11 @@ local function buildLane(plr: Player)
 		warn(string.format(
 			"[ForkTower] ingen ledig bane til %s (%d baner, %d spillere). Hev Config.World.MaxLanes eller senk MaxPlayers.",
 			plr.Name, laneCount, #Players:GetPlayers()))
-		notice(plr, "full", "Serveren har ingen ledig bane akkurat nå — prøv en annen server.")
+		-- The pad this player is standing on says "waiting for a free tower", so the toast has to
+		-- say the same thing. It used to say "try another server" while the sign promised a wait,
+		-- and the sign is the one that stays on screen. seatWaiting below is what makes the sign
+		-- true.
+		notice(plr, "full", "Alle tårnene er opptatt akkurat nå — du får det første som blir ledig.")
 		return
 	end
 	local origin = laneOrigin(index)
@@ -860,7 +1060,8 @@ local function buildLane(plr: Player)
 		forkFolder = {},
 		sectionFolder = {},
 		entry = {}, -- level -> the checkpoint at the bottom of that floor's section
-		hazardReadyAt = 0,
+		readHoldAt = {}, -- level -> when the player STARTED holding LES, by the server's clock
+		readPending = {}, -- level -> a server-timed read is already counting down
 		checkpoint = origin + Vector3.new(0, Config.World.RespawnLift, -4),
 	}
 	lanes[plr] = lane
@@ -919,7 +1120,10 @@ local function buildLane(plr: Player)
 		if slot ~= nil then
 			local floorData = lane.plan.floors[level]
 			local doorData = floorData.doors[slot]
-			local trapped = Fork.isTrap(floorData, slot)
+			-- `and not p.skipped[level]`: a skip already spent on this floor is what turned its
+			-- trap into a normal section, and Fork.isTrap knows nothing about it. See the note in
+			-- onDoorChosen.
+			local trapped = Fork.isTrap(floorData, slot) and not p.skipped[level]
 			buildSection(plr, lane, level, doorData.theme, trapped)
 		end
 	end
@@ -947,6 +1151,85 @@ local function buildLane(plr: Player)
 			end
 		end
 	end
+end
+
+--============================================================================ reading the fork
+
+-- READING THE INSCRIPTION IS A DELIBERATE, TIMED ACT — and the server, not the client, is what
+-- times it.
+--
+-- ProximityPrompt.HoldDuration lives on the client: it is what the player sees filling up, and it
+-- is also the first thing an exploiter deletes (`fireproximityprompt` triggers a prompt with no
+-- hold at all). If the hold were the whole mechanic, the one player who cares enough to cheat
+-- would be the one who reads for free, which is exactly backwards.
+--
+-- So the server charges the time itself, and it charges it TWO ways so that neither one can fail
+-- open:
+--
+--   * the honest path — PromptButtonHoldBegan replicates, so the server knows when the hold
+--     started and how long it has run. A full hold is already ReadSeconds old when Triggered
+--     arrives, and the read completes on the spot;
+--   * anything else — a client that fires the prompt directly, or an engine that does not
+--     replicate the hold event — is charged the REMAINDER on the server's own clock, with a
+--     task.delay that re-checks the player is still standing at that unanswered fork before it
+--     hands anything over.
+--
+-- Either way the wall clock spent is ReadSeconds, which is the number tests/readcost.measure.luau
+-- derived (break-even against never reading at all: 1.110 s over 5000 seeds).
+onReadInscription = function(plr: Player, owner: Player, level: number)
+	-- Same ownership question as a door, checked the same way and for the same reason: the pad
+	-- belongs to the tower it stands in, not to whoever reached the prompt.
+	if plr ~= owner then
+		return
+	end
+	local p = profiles[plr]
+	local lane = lanes[plr]
+	if not p or not lane then
+		return
+	end
+	if p.stage ~= "fork" or level ~= p.level then
+		notice(plr, "blocked", "Den innskripsjonen er ikke din nå. Du står på etasje " .. p.level .. ".")
+		return
+	end
+	if p.readFloors[level] then
+		return -- already paid for; the prompt is disabled, but a client can re-arm one
+	end
+
+	local finish = function()
+		lane.readPending[level] = nil
+		local prof = profiles[plr]
+		-- Everything is re-checked here rather than captured: the delay below is a full
+		-- ReadSeconds during which the player can answer the fork, rebirth, or leave.
+		if prof == nil or lanes[plr] ~= lane then
+			return
+		end
+		if prof.stage ~= "fork" or prof.level ~= level or prof.readFloors[level] then
+			return
+		end
+		prof.readFloors[level] = true
+		local folder = lane.forkFolder[level]
+		if folder then
+			folder:SetAttribute("Read", true)
+		end
+		dressFork(lane, level)
+		local floorData = lane.plan.floors[level]
+		notice(plr, "read", floorData.ruleSign .. " " .. floorData.ruleText)
+		pushState(plr)
+		saveProfile(plr, false)
+	end
+
+	local began = lane.readHoldAt[level]
+	local remaining = Config.Fork.ReadSeconds - (if began then clock() - began else 0)
+	if remaining <= 0 then
+		finish()
+		return
+	end
+	if lane.readPending[level] then
+		return -- already counting down; a held button must not become a queue of timers
+	end
+	lane.readPending[level] = true
+	notice(plr, "read", string.format("Leser innskripsjonen … (%.1f s)", remaining))
+	task.delay(remaining, finish)
 end
 
 --============================================================================ choosing a door
@@ -989,6 +1272,13 @@ onDoorChosen = function(plr: Player, owner: Player, level: number, slot: number)
 		p.armedSkip = false
 		trapped = false
 		skipped = true
+		-- RECORDED, because the skip is spent and the floor has to remember it. `trapped` here is
+		-- a local; buildLane re-derives it from Fork.isTrap on every rejoin, so without this the
+		-- player who spent a skip on floor 3 came back to floor 3's PENALTY section — one skip
+		-- poorer and standing in the trap they paid to avoid. Worse, Section.build mixes
+		-- PENALTY_MIX into its seed, so the section was a different walk entirely and the
+		-- checkpoint at the bottom of it moved with it.
+		p.skipped[level] = true
 	end
 
 	p.picks[level] = doorData.traitId
@@ -1092,6 +1382,8 @@ RebirthEvent.OnServerEvent:Connect(function(plr)
 	p.stage = "fork"
 	p.picks = {}
 	p.slots = {}
+	p.readFloors = {}
+	p.skipped = {}
 	p.armedSkip = false
 	buildLane(plr)
 	local char = plr.Character
@@ -1182,7 +1474,7 @@ local function onCharacter(plr: Player, char: Model)
 		-- FireClient sent before the player's own scripts have connected OnClientEvent is simply
 		-- dropped — so the one message that explains why this player has no tower was the one
 		-- message they could not receive. By CharacterAdded the HUD is listening.
-		notice(plr, "full", "Serveren har ingen ledig bane akkurat nå — prøv en annen server.")
+		notice(plr, "full", "Alle tårnene er opptatt akkurat nå — du får det første som blir ledig.")
 	end
 	applyTraits(plr)
 	pushState(plr)
@@ -1231,6 +1523,41 @@ local function onPlayerAdded(plr: Player)
 	pushState(plr)
 end
 
+-- A LANE THAT FREES UP HAS TO GO TO SOMEBODY.
+--
+-- claimLane was only ever called from buildLane, and buildLane only from PlayerAdded and Rebirth,
+-- so when teardownLane freed an index nothing re-ran it: a player the server could not seat waited
+-- on the pad forever, under a sign that promised them a tower, and the only escape was to leave
+-- and rejoin the server themselves. That was NEW — before the overflow fix they got a (broken,
+-- overlapping) tower; after it they got a permanent dead state.
+--
+-- Called from PlayerRemoving and nowhere else, and that placement is deliberate. buildLane tears
+-- its own lane down before re-claiming one, so sweeping from inside teardownLane would let a
+-- WAITING player take the lane out from under a player who is merely rebirthing. A lane only
+-- genuinely frees when its owner leaves.
+local function seatWaiting()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if not hasFreeLane() then
+			return
+		end
+		if profiles[plr] ~= nil and lanes[plr] == nil then
+			buildLane(plr)
+			local lane = lanes[plr]
+			if lane ~= nil then
+				local char = plr.Character
+				local hrp = char and char:FindFirstChild("HumanoidRootPart")
+				if hrp then
+					(hrp :: BasePart).CFrame = CFrame.new(lane.checkpoint)
+					;(hrp :: BasePart).AssemblyLinearVelocity = Vector3.zero
+				end
+				applyTraits(plr)
+				notice(plr, "safe", "Et tårn ble ledig — du er inne. Les innskripsjonen.")
+				pushState(plr)
+			end
+		end
+	end
+end
+
 local function onPlayerRemoving(plr: Player)
 	saveProfile(plr, true) -- release the lock; releaseLock always writes, throttle or no throttle
 	teardownLane(plr)
@@ -1238,6 +1565,7 @@ local function onPlayerRemoving(plr: Player)
 	lastSaveAt[plr] = nil
 	lastBanked[plr] = nil
 	gates[plr] = nil
+	seatWaiting()
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)

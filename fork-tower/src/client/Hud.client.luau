@@ -774,12 +774,23 @@ StateEvent.OnClientEvent:Connect(function(s)
 	skipBtn.Text = if armedSkip then "🎟️ SKIP ARMERT" else "🎟️ ARMER SKIP"
 	skipBtn.BackgroundColor3 = if armedSkip then Color3.fromRGB(66, 140, 92) else Color3.fromRGB(58, 60, 86)
 
+	-- THREE STATES, not two. The server sends `rule` only for a floor the player has actually
+	-- read, because this panel carries the tell, the liar line AND both doors' traits — handing it
+	-- over for free is handing over the whole fork. `atFork` is what separates "you have not read
+	-- this one yet" from "you are standing on the summit", which used to be the same nil.
 	if s.rule then
 		ruleText.Text = s.rule.sign .. " " .. s.rule.text
 		ruleText.TextColor3 = if s.rule.inverted then WARN else GOLD
 		doorsText.Text = string.format("◀ %s  %s      %s  %s ▶",
 			s.rule.doors[1].label, signStrip(s.rule.doors[1].signs),
 			signStrip(s.rule.doors[2].signs), s.rule.doors[2].label)
+		rule.Visible = true
+	elseif s.atFork then
+		ruleText.Text = Config.Fork.UnreadInscription
+		ruleText.TextColor3 = INK
+		doorsText.Text = string.format(
+			"Hold LES på platået i %.1f s — det er det ENESTE som sier hva dørene gir",
+			s.readSeconds or Config.Fork.ReadSeconds)
 		rule.Visible = true
 	else
 		ruleText.Text = "👑 TOPPEN NÅDD"
@@ -798,6 +809,8 @@ NoticeEvent.OnClientEvent:Connect(function(n)
 		FxClient.flash(Color3.fromRGB(255, 90, 90), 0.3, 0.5)
 	elseif n.kind == "safe" or n.kind == "skip" then
 		color = Color3.fromRGB(150, 235, 170)
+	elseif n.kind == "read" then
+		color = GOLD
 	elseif n.kind == "summit" then
 		color = GOLD
 		FxClient.fovPunch(8)

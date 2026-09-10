@@ -221,57 +221,81 @@ def cmd_still(args) -> None:
 def cmd_spot(args) -> None:
     """The 'spot the anomaly' short.
 
-    Structure, tuned for short-form retention: an immediate hook, a countdown that
-    creates a commitment moment, then a payoff. The whole thing is under 10s so it
-    loops, and looping is what the algorithms actually reward.
+    Structure, tuned for short-form retention: a reference shot of the clean hall, an
+    immediate hook, a countdown that creates a commitment moment, then a payoff. The
+    whole thing is under 10s so it loops, and looping is what the algorithms reward.
+
+    The clean frame is not decoration. This command used to take <clean.png> and never
+    read it: both segments rendered the anomaly, so the viewer was asked to spot a
+    difference against nothing and the reveal revealed nothing. Three clips shipped that
+    way. A viewer who has never played cannot know what "normal" is, so the clean hall
+    has to be on screen - once at the start as the reference, and again in the reveal,
+    where alternating the two frames is what actually makes the difference pop. The
+    blink comparator is also the only reveal that needs no screen coordinates for the
+    anomaly, which we do not have and would have to keep in step with the world.
     """
     w, h = FORMATS[args.format]
     hold, reveal = args.hold, args.reveal
+    ref = args.ref
     ff = _tool("ffmpeg")
 
     hook = args.hook or "Can you spot the anomaly?"
     name = args.name or "the anomaly"
 
+    def base(caption: str, at: float = 0.08) -> list:
+        f = [_fit(w, h), _caption_filter(caption, w, h, at)]
+        if args.source == "emulator":
+            f.append(_stamp_filter(w, h))
+        return f
+
+    # Segment 0: the clean hall, so "different" has something to be different from.
+    segs = [(args.clean, ref, base("This hall is clean."))]
+
     # Segment 1: the anomalous hall + hook + a countdown driven by frame time.
-    seg1 = [
-        _fit(w, h),
-        _caption_filter(hook, w, h, 0.08),
-        # countdown numbers, one per second, drawn only in their own window
-    ]
+    seg1 = base(hook)
+    countdown = []
     for i in range(hold, 0, -1):
         t0, t1 = hold - i, hold - i + 1
         size = max(90, w // 7)
-        seg1.append(
+        countdown.append(
             f"drawtext=fontfile='{FONT}':text='{i}':fontcolor=white:fontsize={size}:"
             f"x=(w-text_w)/2:y=(h-text_h)/2:"
             f"box=1:boxcolor=black@0.35:boxborderw={size // 6}:"
             f"enable='between(t,{t0},{t1})'"
         )
-    if args.source == "emulator":
-        seg1.append(_stamp_filter(w, h))
+    # the stamp, when there is one, stays last so nothing draws over it
+    seg1 = seg1[:2] + countdown + seg1[2:]
+    segs.append((args.anomaly, hold, seg1))
 
-    seg2 = [_fit(w, h), _caption_filter(f"It was: {name}", w, h, 0.08)]
-    if args.source == "emulator":
-        seg2.append(_stamp_filter(w, h))
+    # Segment 2: the reveal, alternating the two frames so the one changed thing moves
+    # and everything else stays still. Even blinks land on the anomaly, so the clip
+    # ends on it.
+    blinks = 6
+    span = reveal / blinks
+    for k in range(blinks):
+        img = args.anomaly if k % 2 == 0 else args.clean
+        segs.append((img, span, base(f"It was: {name}")))
 
-    tmp = Path(args.out).with_suffix(".seg1.mp4")
-    tmp2 = Path(args.out).with_suffix(".seg2.mp4")
+    out = Path(args.out)
+    parts = []
     try:
-        _run([ff, "-y", "-loop", "1", "-t", str(hold), "-i", str(args.anomaly),
-              "-vf", ",".join(seg1), "-r", "30",
-              "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", str(tmp)])
-        _run([ff, "-y", "-loop", "1", "-t", str(reveal), "-i", str(args.anomaly),
-              "-vf", ",".join(seg2), "-r", "30",
-              "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", str(tmp2)])
-        lst = Path(args.out).with_suffix(".concat.txt")
-        lst.write_text(f"file '{tmp.name}'\nfile '{tmp2.name}'\n", encoding="utf-8")
+        for n, (img, dur, filters) in enumerate(segs):
+            p = out.with_suffix(f".seg{n}.mp4")
+            parts.append(p)
+            _run([ff, "-y", "-loop", "1", "-t", f"{dur:.3f}", "-i", str(img),
+                  "-vf", ",".join(filters), "-r", "30",
+                  "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", str(p)])
+        lst = out.with_suffix(".concat.txt")
+        lst.write_text("".join(f"file '{p.name}'\n" for p in parts), encoding="utf-8")
         _run([ff, "-y", "-f", "concat", "-safe", "0", "-i", str(lst),
-              "-c", "copy", "-movflags", "+faststart", str(args.out)])
+              "-c", "copy", "-movflags", "+faststart", str(out)])
     finally:
-        for f in (tmp, tmp2, Path(args.out).with_suffix(".concat.txt")):
+        for f in parts + [out.with_suffix(".concat.txt")]:
             if f.exists():
                 f.unlink()
-    print(f"wrote {args.out}  ({hold}s hold + {reveal}s reveal, {w}x{h})")
+    total = ref + hold + reveal
+    print(f"wrote {args.out}  ({ref}s reference + {hold}s hold + {reveal}s reveal "
+          f"= {total:g}s, {w}x{h}, {blinks} blinks)")
     if args.source == "emulator":
         print(f"  NOTE: stamped '{STAMP}' - do not publish this as gameplay.")
 
@@ -305,6 +329,9 @@ def main() -> None:
     sp.add_argument("--name"); sp.add_argument("--hook")
     sp.add_argument("--hold", type=int, default=4)
     sp.add_argument("--reveal", type=int, default=3)
+    sp.add_argument("--ref", type=float, default=1.2,
+                    help="seconds on the CLEAN hall up front, so the viewer knows what "
+                         "normal looks like before being asked to spot a difference")
     sp.set_defaults(fn=cmd_spot)
 
     args = ap.parse_args()
