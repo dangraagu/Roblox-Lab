@@ -965,10 +965,42 @@ local function teleport(plr: Player, pos: Vector3)
 		end
 	end
 	place()
-	-- And again next frame. The engine finishes placing a SPAWNING character after this handler
-	-- returns, and whichever write lands last wins; doing it twice makes that us. (Taken from
-	-- grow-a-crystal, where one write was measurably not enough.)
-	task.defer(function()
+
+	-- ...and again once the character is GENUINELY IN THE WORLD, because the write above can be
+	-- thrown away and the player never sees an error.
+	--
+	-- Measured in Roblox Studio on 2026-09-10 (fork-tower/STUDIO.md, robloxemu/SPAWN-ORDER.md),
+	-- sampling HumanoidRootPart every Heartbeat from inside a server CharacterAdded handler:
+	--
+	--     [0.0000] f01 parent=nil        hrp=0.00,0.00,0.00
+	--     [0.0051] f02 parent=Workspace  hrp=0.00,3.51,-160.00   <- the enabled SpawnLocation
+	--
+	-- CharacterAdded fires while the model is still UNPARENTED with its root at the world origin;
+	-- one frame LATER the engine parents it AND drops it on the SpawnLocation, silently
+	-- discarding anything the handler wrote in between.
+	--
+	-- `task.defer` used to stand here and it is NOT enough: it resumes at the end of the current
+	-- resumption cycle, which is still the frame BEFORE the engine's step, so its
+	-- `char.Parent ~= nil` guard is false and the re-write simply never happens. Measured with a
+	-- hand-rolled replay of that trace (robloxemu/check_nightwatch.luau): a player who reset in
+	-- the middle of a live night ended up at (6000.0, 103.2, 20.0), standing on their safehouse
+	-- SpawnPad 2.6 studs from its centre, when the manor they were robbing spans z -460..-300 —
+	-- outside it, 408 studs from the foyer, with the clock running and no way back in. The 0.2 s
+	-- fallback in onPlayerAdded does not rescue that: it only re-places a character more than 600
+	-- studs from its zone origin, and the SpawnPad is 20.
+	--
+	-- `char.Parent` going non-nil is the signal to write, because the trace shows parent and
+	-- placement landing in the SAME frame: once a poll can see a parent, the engine has finished
+	-- and this write is the last one. Bounded at 300 frames so a character that never arrives
+	-- cannot park a thread for the life of the server. An already-parented character (every
+	-- teleport that is not a spawn — beginNight, goToSafehouse, escaping) never enters the loop
+	-- and just gets the same CFrame written twice, which costs nothing.
+	task.spawn(function()
+		local frames = 0
+		while char.Parent == nil and frames < 300 do
+			task.wait(1 / 60)
+			frames += 1
+		end
 		if char.Parent ~= nil and plr.Character == char then
 			place()
 		end

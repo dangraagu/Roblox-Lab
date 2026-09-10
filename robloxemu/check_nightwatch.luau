@@ -635,6 +635,152 @@ do
 	eq(h.workspace:FindFirstChild("Zone_5150"), nil, "and leaving took the zone with them")
 end
 
+--================================ a RESPAWN in the middle of a live night lands in the MANOR
+-- THE ENGINE PLACES THE CHARACTER **AFTER** CharacterAdded, AND THE ENGINE WINS.
+--
+-- Measured in Roblox Studio on 2026-09-10 (fork-tower/STUDIO.md), from a server-side
+-- Player.CharacterAdded handler sampling HumanoidRootPart every Heartbeat, verbatim:
+--
+--     [0.0000] f01 parent=nil        hrp=0.00,0.00,0.00
+--     [0.0051] f02 parent=Workspace  hrp=0.00,3.51,-160.00      <- the enabled SpawnLocation
+--     [0.0149] f03 parent=Workspace  hrp=0.00,3.51,-160.00
+--
+-- CharacterAdded fires while the model is STILL UNPARENTED with its root at the world origin;
+-- ONE FRAME LATER the engine parents it AND drops it on the SpawnLocation, silently discarding
+-- whatever the handler wrote in between.
+--
+-- For a JOINING Nightwatch player that costs nothing: `plr.RespawnLocation` is the SpawnPad in
+-- their own safehouse, which is exactly where the game wanted them, so both answers agree. The
+-- case where the two answers DISAGREE is the reset button pressed in the middle of a live night.
+-- The game wants the player back in the manor foyer; the engine wants them on their SpawnPad,
+-- 400 studs north, outside the manor, with the night clock still running, the Nightwatcher still
+-- hunting and no way back in. Nothing rescues them: the 0.2 s fallback only re-places a
+-- character more than 600 studs from its zone origin, and the SpawnPad is 20.
+--
+-- This block does NOT use `Players:simulateSpawn`. It replays the RECORDED order by hand, with
+-- `task.defer` resuming where Roblox resumes it — at the end of the current resumption cycle,
+-- which is still the frame BEFORE the engine's step. That ordering is the whole point: a
+-- deferred re-write guarded on `char.Parent ~= nil` has not got a parent to see yet.
+--
+-- The assertion is about the WORLD, not a coordinate: the character has to end up inside the
+-- manor it is supposed to be robbing.
+
+do
+	local RESPAWNER = 9393
+	local respawnStore = h.services.DataStoreService:GetDataStore("NightwatchManor_v1")
+	respawnStore:SetAsync("u_" .. RESPAWNER, { data = { night = 1, stash = 0, best = 0, levels = {} } })
+
+	local rp = h:join("Resetter", RESPAWNER)
+	h:advance(1)
+	local rzone = h.workspace:FindFirstChild("Zone_" .. RESPAWNER)
+	truthy(rzone ~= nil, "the resetting player got a zone")
+	local rhouse = rzone and rzone:FindFirstChild("Safehouse")
+	local rpad = rhouse and rhouse:FindFirstChild("SpawnPad")
+	truthy(rpad ~= nil, "...with the SpawnPad the engine will use as their RespawnLocation")
+
+	-- Their first character, and then into the manor: the night has to be LIVE for the reset to
+	-- mean anything.
+	h.Players:simulateSpawn(rp, h.workspace)
+	h:advance(1)
+	local rdoor = rhouse and rhouse:FindFirstChild("ManorDoor")
+	local rprompt = rdoor and rdoor:FindFirstChildOfClass("ProximityPrompt")
+	truthy(rprompt ~= nil, "...and a manor door to walk through")
+	if rprompt then
+		rprompt.Triggered:Fire(rp)
+	end
+	h:advance(0.5)
+
+	local rmanor = rzone and rzone:FindFirstChild("Manor")
+	truthy(rmanor ~= nil, "CONTROL: a manor is standing, so a night really is running")
+
+	-- The manor's own footprint, read off the parts rather than recomputed from Config.
+	local mnx, mnz, mxx, mxz = math.huge, math.huge, -math.huge, -math.huge
+	if rmanor then
+		for _, d in rmanor:GetDescendants() do
+			if d:IsA("BasePart") then
+				mnx = math.min(mnx, d.Position.X - d.Size.X / 2)
+				mxx = math.max(mxx, d.Position.X + d.Size.X / 2)
+				mnz = math.min(mnz, d.Position.Z - d.Size.Z / 2)
+				mxz = math.max(mxz, d.Position.Z + d.Size.Z / 2)
+			end
+		end
+	end
+	truthy(mxx > mnx and mxz > mnz, "...and the manor has a real footprint to stand inside")
+
+	local firstChar = rp.Character
+	local firstHrp = firstChar and firstChar:FindFirstChild("HumanoidRootPart")
+	truthy(firstHrp ~= nil and firstHrp.Position.X >= mnx and firstHrp.Position.X <= mxx
+		and firstHrp.Position.Z >= mnz and firstHrp.Position.Z <= mxz,
+		"CONTROL: the player who WALKED in is standing inside the manor")
+
+	-- A check that never looks cannot fail, so the skip is an explicit failure rather than a
+	-- quiet one: if the setup above did not produce a pad and a standing manor, the three
+	-- assertions below never run and this file must go red for that reason alone.
+	if rpad == nil or rmanor == nil then
+		failed += 1
+		print("FAIL: the mid-night respawn block never ran — no SpawnPad and/or no manor to test against")
+	end
+
+	if rpad ~= nil and rmanor ~= nil then
+		-- f01: the engine builds the model unparented, root at the world origin.
+		local char2 = Instance.new("Model")
+		char2.Name = "Resetter"
+		local hrp2 = Instance.new("Part")
+		hrp2.Name = "HumanoidRootPart"
+		hrp2.Parent = char2
+		local hum2 = Instance.new("Humanoid")
+		hum2.Parent = char2
+		char2.PrimaryPart = hrp2
+		hrp2.CFrame = CFrame.new(0, 0, 0)
+
+		rp.Character = char2
+		-- Fired on its own thread, with char.Parent == nil, as measured. Roblox runs every event
+		-- handler in a fresh coroutine, so a CharacterAdded handler is allowed to yield — and the
+		-- fix for this has to yield. Firing inline would raise "thread yielded unexpectedly"
+		-- against correct code.
+		task.spawn(function()
+			rp.CharacterAdded:Fire(char2)
+		end)
+
+		-- One frame. `h:advance` drains the deferred queue first, so this is exactly where a
+		-- Roblox `task.defer` scheduled inside the handler resumes — with char2.Parent still nil.
+		h:advance(1 / 60)
+
+		-- f02: the engine finishes the job and overwrites whatever the game wrote. Parent and
+		-- placement land together — that is what the trace shows — and the spot is the player's
+		-- RespawnLocation, top face + 2.51 studs.
+		char2.Parent = h.workspace
+		hrp2.CFrame = CFrame.new(rpad.Position.X, rpad.Position.Y + rpad.Size.Y / 2 + 2.51, rpad.Position.Z)
+
+		h:advance(2) -- well past the game's own 0.2 s fallback
+
+		local at = hrp2.Position
+		local inManor = at.X >= mnx and at.X <= mxx and at.Z >= mnz and at.Z <= mxz
+		truthy(inManor, string.format(
+			"a player who resets in the middle of a live night is put back INSIDE the manor, not "
+				.. "left wherever the engine's spawn placement dropped them (hrp %.1f, %.1f, %.1f; "
+				.. "manor x %.0f..%.0f z %.0f..%.0f; %.1f studs from the SpawnPad)",
+			at.X, at.Y, at.Z, mnx, mxx, mnz, mxz, (at - rpad.Position).Magnitude))
+
+		local onPad = math.abs(at.X - rpad.Position.X) <= rpad.Size.X / 2
+			and math.abs(at.Z - rpad.Position.Z) <= rpad.Size.Z / 2
+		falsy(onPad, "...and specifically not left standing on the safehouse SpawnPad, which is "
+			.. "where the engine's own placement puts them")
+
+		-- The night must still be the night they were in the middle of: a reset is not an escape
+		-- and not a capture, so nothing about the run may have resolved itself.
+		local sent = stateRemote:sentTo(rp)
+		local lastPhase
+		for i = #sent, 1, -1 do
+			if type(sent[i].args[1]) == "table" then lastPhase = sent[i].args[1].phase; break end
+		end
+		eq(lastPhase, "NIGHT", "CONTROL: the night is still running — a reset is not an escape")
+	end
+
+	h:leave(rp)
+	h:advance(1)
+end
+
 --=========================================================================================== done
 
 print("")

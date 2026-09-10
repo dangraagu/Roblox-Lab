@@ -301,6 +301,20 @@ local function buildHub()
 	pad.TopSurface = Enum.SurfaceType.Smooth
 	pad.Parent = hubFolder
 
+	-- THIS IS WHAT PUTS EVERY PLAYER ON THE HUB, and it is load-bearing rather than decorative.
+	-- Measured in Studio 2026-09-10 (robloxemu/SPAWN-ORDER.md): CharacterAdded fires while the
+	-- character is still UNPARENTED at the world origin, and the engine parents AND positions it
+	-- one frame later, on the enabled SpawnLocation, discarding anything a handler wrote in
+	-- between. This game never writes a CFrame from CharacterAdded, so it does not lose that
+	-- race — the engine's own placement is the answer, and this brick is the answer it uses.
+	--
+	-- With no ENABLED SpawnLocation, Roblox instead drops the character above the highest ground
+	-- over the origin. slotOrigin(0) is (0, VaultOriginY, 0), so the first player's vault is a
+	-- sealed shell built directly over this pad: measured, a single `spawnPad.Enabled = false`
+	-- puts a joining player at (0.00, 254.51, 0.00), on the roof of somebody else's vault, out
+	-- of reach of every portal. Do not remove it, do not disable it, and do not add a second
+	-- SpawnLocation anywhere — the engine picks among ALL the eligible ones.
+	-- check_vaultrunners.luau's "WHERE THE ENGINE PUTS YOU" block asserts all three.
 	local spawnPad = Instance.new("SpawnLocation")
 	spawnPad.Name = "HubSpawn"
 	spawnPad.Anchored = true

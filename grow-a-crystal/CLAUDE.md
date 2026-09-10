@@ -38,9 +38,27 @@ Codex. Single shared server, per-player plots.
   sparse integer keys to STRINGS — load normalizes them back to numbers (see loadProfile).
 - **Leaderboard**: OrderedDataStore by `totalDust` (cumulative earned, monotonic, integer).
 
+## Spawn placement — the engine wins, so WAIT for it (2026-09-10)
+`Player.CharacterAdded` fires while the character Model is still **unparented** with its root at
+the world origin; **one frame later** the engine parents it AND places it on the spawn, discarding
+whatever the handler wrote (measured in Studio, `robloxemu/SPAWN-ORDER.md`). `task.defer` does NOT
+outlast that — it resumes at the end of the *current* resumption cycle, still before the engine's
+step. `onPlayerAdded`'s `place()` used to write the CFrame twice, the second time from a
+`task.defer`, and **both writes were thrown away**: the player landed at `0, 3.01, -6` facing
+`0, 0, -1`, turned exactly around with all six sockets 11.9 studs behind their back. It now polls
+`while char.Parent == nil` (bounded, 300 frames) and writes after. The `SpawnLocation` pad +
+`plr.RespawnLocation` stay — they are what keeps an unsteered spawn off the roof (`y = 50.51`
+against a roof top of `48.0`) — but they cannot fix *facing*, because the pad is not rotated.
+Guarded by `robloxemu/check_crystal_spawn.luau`, which replays the recorded engine order by hand:
+`simulateSpawn` alone cannot see this, because the emulator drains `task.defer` **after** its
+engine step and Roblox drains it **before**.
+
 ## Files
 Server `src/server/Main.server.luau`; client `src/client/Hud.client.luau`; shared
 `Config/Rng/Rarity/Growth/Economy/Geode/Codex/Codes.luau`; tests `tests/*.spec.luau`.
+Headless (in `robloxemu/`): `check_crystal.luau` (HUD fit), `check_crystal_sockets.luau`
+(sockets are in the world and clicking plants), `check_crystal_spawn.luau` (where a spawning
+player ends up and which way they face).
 
 ## Next
 1. In-game test in Studio (plant → grow → harvest → refraction; shop; geode; rejoin keeps

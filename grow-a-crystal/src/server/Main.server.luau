@@ -673,15 +673,40 @@ local function onPlayerAdded(plr)
 	spawnPad.Parent = plotFolders[plr]  -- inside the plot, so teardown takes it too
 	plr.RespawnLocation = spawnPad
 
+	-- WAIT FOR THE ENGINE TO FINISH BEFORE WRITING THE CFrame.
+	--
+	-- Measured in Roblox Studio on 2026-09-10 (fork-tower/STUDIO.md, robloxemu/SPAWN-ORDER.md):
+	-- CharacterAdded fires while the model is still UNPARENTED with its root at the world origin,
+	-- and ONE FRAME LATER the engine parents it AND places it on the spawn - discarding, with no
+	-- error and no warning, anything the handler wrote in between.
+	--
+	-- The previous version wrote the CFrame twice, the second time from a `task.defer`, on the
+	-- theory that the engine finishes "after this handler returns" so the last write wins. It does
+	-- finish after the handler returns, but `task.defer` resumes at the end of the CURRENT
+	-- resumption cycle - the same frame - so BOTH writes landed before the engine's step and both
+	-- were thrown away. Measured against this build by replaying the recorded order
+	-- (robloxemu/check_crystal_spawn.luau): the player ended at 0.00, 3.01, -6.00 facing 0, 0, -1
+	-- - a stud low and turned exactly around, staring at the entrance wall with all six sockets,
+	-- 11.9 studs away, behind their back. The RespawnLocation pad below is what stops them landing
+	-- on the roof; it cannot fix which way they face, because the engine spawns them along the
+	-- pad's own axis and the pad is not rotated.
+	--
+	-- `char.Parent` going non-nil is the signal that the engine has finished: the trace shows the
+	-- parent and the placement arriving in the same frame. The loop is bounded so a character that
+	-- never arrives cannot park this handler for the life of the session, and it is a no-op on the
+	-- join path below, where the character is already in the world.
 	local function place(char)
 		local hrp = char:WaitForChild("HumanoidRootPart") :: BasePart
-		local frame = CFrame.new(at, at + Vector3.new(sp.look.x, sp.look.y, sp.look.z))
-		hrp.CFrame = frame
-		-- Again next frame. The engine finishes placing a spawning character after this handler
-		-- returns, and whichever write lands last wins; doing it twice makes that us.
-		task.defer(function()
-			if hrp.Parent then hrp.CFrame = frame end
-		end)
+		local frames = 0
+		while char.Parent == nil and frames < 300 do
+			task.wait(1 / 60)
+			frames += 1
+		end
+		-- No `if hrp.Parent` guard. The player can leave while this is parked, but then their
+		-- character is destroyed and writing a CFrame to a destroyed Part is a no-op - measured,
+		-- and true in Roblox too - so the guard could not be made to fail and was removed rather
+		-- than left as a line no test can kill.
+		hrp.CFrame = CFrame.new(at, at + Vector3.new(sp.look.x, sp.look.y, sp.look.z))
 	end
 	plr.CharacterAdded:Connect(place)
 	if plr.Character then place(plr.Character) end

@@ -17,7 +17,8 @@ Build.spec       31 passed, 0 failed
 Codes.spec       19 passed, 0 failed
 Rng.spec         32 passed, 0 failed
 responsive.spec  70 passed, 0 failed
-check_forktower 119 passed, 0 failed   (robloxemu; was 108 — three new blocks from the Studio pass)
+check_forktower 129 passed, 0 failed   (robloxemu; 108 -> 119 from the Studio pass, -> 129 once
+                                        the emulator learned the engine's spawn order)
 world.check      71 passed, 0 failed   (fork-tower's own: the read, the lane pool, the saved skip)
 ```
 
@@ -110,6 +111,19 @@ touching `dressFork`, `onReadInscription`, or anything in `Config.Fork`.
     unreachable while every suite was green — see STUDIO.md §3. The wait is `task.wait(1 / 60)`,
     a DURATION, because a bare `task.wait()` is a zero-length yield on a virtual clock and the
     headless check cannot express the defect against one.
+
+    **The wait buys a SECOND thing, and it is easy to delete by accident.** The fall-rescue loop
+    at the bottom of `onCharacter` is `while char.Parent ~= nil do`, so starting it while the
+    model is still unparented starts a loop whose condition is already false: it exits on its
+    first test and a player who walks off their tower is never brought back. Measured against the
+    built bundle with the wait removed — a root part dropped to y = -500 was still at
+    `0.00, -500.00, 0.00` a full second later; with the wait it was back on its checkpoint the
+    same second. `robloxemu/check_forktower.luau` "SPAWN ORDER, ORDINARY PATH" now runs that
+    loop; nothing else in the repo does.
+
+    `robloxemu/Players:simulateSpawn` models the engine's order as of 2026-09-10
+    (`robloxemu/SPAWN-ORDER.md`), so an ORDINARY `simulateSpawn` in a check is now a real test of
+    this — it no longer has to be replayed by hand the way STUDIO FINDING 1 does.
 
 11. **The checkpoint sits at the MIDDLE of its clear band.** Hazard clearance and platform-edge
     margin always sum to the width of the feasible interval, so one is bought with the other and

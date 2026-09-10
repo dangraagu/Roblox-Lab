@@ -1270,6 +1270,139 @@ do
 	end
 end
 
+--============================================================================ SPAWN ORDER, ORDINARY PATH
+-- STUDIO FINDING 1 replays the engine's recorded order BY HAND and deliberately does not use the
+-- harness. This block does the opposite: it uses `Players:simulateSpawn`, which now models that
+-- order itself (robloxemu/SPAWN-ORDER.md), and it asks the three questions the hand-rolled replay
+-- cannot reach — a RESPAWN partway up a tower, the fall-rescue loop, and (in the crowd block at
+-- the bottom of this file) the one player the game must NOT move.
+--
+-- Every number below is a MEASUREMENT against the built bundle, taken twice: once as the game
+-- stands, and once with the `while char.Parent == nil` wait deleted out of `onCharacter`, to be
+-- sure each assertion can actually see the defect it is for.
+--
+-- The three positions are PRINTED by this block rather than written down here, so that a number
+-- in a comment cannot rot away from the world it describes. Against the game as it stands they
+-- came out as the fork pad, the floor-2 section entry, and that same entry again after the fall.
+-- With the wait deleted, all three collapsed onto the enabled SpawnLocation at 0.00, 3.51,
+-- -160.00 -- the first spawn 174.0 studs of Z off its own pad, which is the SAME 174 the Studio
+-- session measured, and the respawn 746.0 studs from Plat_2_1 -- and the fall left the root at
+-- 0.00, -500.00, 0.00 for good.
+--
+-- The fall is a SECOND defect the same missing wait causes, and nothing else in this repo runs
+-- the loop that suffers it. The fall rescue is `while char.Parent ~= nil do`, so a handler
+-- that starts it while the model is still unparented starts a loop whose condition is ALREADY
+-- FALSE: it exits on its first test, and a player who walks off their tower is never brought
+-- back. `Config.World.FallGrace = 70` was the accident that made the shipped bug survivable at
+-- all (STUDIO.md §3); without the loop, even that is gone.
+
+do
+	local RESPAWN = 8282
+	seedProfile(RESPAWN)
+	local climber = h:join("Respawner", RESPAWN)
+	h:advance(1)
+	h.Players:simulateSpawn(climber, h.workspace)
+	h:advance(1)
+
+	local lane = laneOf(climber)
+	truthy(lane ~= nil, "the respawn-path player got a lane (control: nothing below is vacuous)")
+
+	local waitFolder = h.workspace:FindFirstChild("Waiting")
+	local waitPad = waitFolder and waitFolder:FindFirstChild("WaitingPad")
+	truthy(waitPad ~= nil, "...and the waiting pad exists to be measured against")
+
+	local function rootOf(p)
+		local c = p.Character
+		return c and c:FindFirstChild("HumanoidRootPart")
+	end
+	local function xzd(a, b)
+		return math.sqrt((a.X - b.X) ^ 2 + (a.Z - b.Z) ^ 2)
+	end
+	local function onWaitingPad(p)
+		if waitPad == nil then
+			return false
+		end
+		return math.abs(p.X - waitPad.Position.X) <= waitPad.Size.X / 2
+			and math.abs(p.Z - waitPad.Position.Z) <= waitPad.Size.Z / 2
+	end
+
+	-- 1. THE FIRST SPAWN, through the ordinary harness path rather than a hand-rolled replay.
+	local pad1 = lane and padOf(lane, 1)
+	local hrp = rootOf(climber)
+	local firstAt = hrp and hrp.Position
+	if hrp and pad1 then
+		local dx = math.abs(hrp.Position.X - pad1.Position.X)
+		local dz = math.abs(hrp.Position.Z - pad1.Position.Z)
+		truthy(dx <= pad1.Size.X / 2 and dz <= pad1.Size.Z / 2 and hrp.Position.Y > pad1.Position.Y,
+			string.format(
+				"an ordinary first spawn puts the player on their own floor-1 fork pad (root "
+					.. "%.1f,%.1f,%.1f; pad %.1f,%.1f,%.1f; off by %.1f x, %.1f z)",
+				hrp.Position.X, hrp.Position.Y, hrp.Position.Z,
+				pad1.Position.X, pad1.Position.Y, pad1.Position.Z, dx, dz))
+		truthy(not onWaitingPad(hrp.Position), string.format(
+			"...and not on the waiting pad, %.1f studs from the tower the HUD is telling them to read",
+			xzd(hrp.Position, pad1.Position)))
+	else
+		failed += 1
+		print("FAIL: the respawn-path player has no character or no floor-1 pad")
+	end
+
+	-- 2. A RESPAWN PARTWAY UP. Floor 2, so that the fork pad, the section entry and the waiting
+	-- pad are three different answers and landing on the wrong one cannot pass by coincidence.
+	payRead(climber, lane, 1)
+	choose(climber, lane, 1, 1)
+	climb(climber, lane, 1)
+	payRead(climber, lane, 2)
+	choose(climber, lane, 2, 1)
+
+	local sec2 = lane and sectionOf(lane, 2)
+	local plat = sec2 and sec2:FindFirstChild("Plat_2_1")
+	truthy(plat ~= nil, "...and floor 2's section got built for them to be put back onto")
+
+	h.Players:simulateSpawn(climber, h.workspace)
+	h:advance(1)
+	local rhrp = rootOf(climber)
+	local respawnAt = rhrp and rhrp.Position
+	if plat and rhrp then
+		local d = xzd(rhrp.Position, plat.Position)
+		truthy(d < 1, string.format(
+			"a climber who dies on floor 2 respawns at their section entry rather than at the "
+				.. "engine's spawn point (%.1f studs from Plat_2_1; root %.1f,%.1f,%.1f)",
+			d, rhrp.Position.X, rhrp.Position.Y, rhrp.Position.Z))
+		truthy(not onWaitingPad(rhrp.Position),
+			"...and specifically not sent back to the waiting pad by the respawn")
+	end
+
+	-- 3. THE FALL-RESCUE LOOP. Driven the way a player falls — no hazard fired, just a root part
+	-- below `checkpoint.Y - FallGrace` and the 0.4 s poll left to notice it.
+	local fhrp = rootOf(climber)
+	if fhrp and plat then
+		local home = fhrp.Position
+		fhrp.CFrame = CFrame.new(0, -500, 0)
+		h:advance(1)
+		local back = fhrp.Position
+		truthy(back.Y > -400, string.format(
+			"a player who walks off their tower is caught by the fall-rescue loop (root "
+				.. "%.1f,%.1f,%.1f a second after being dropped to y = -500)", back.X, back.Y, back.Z))
+		truthy(xzd(back, home) < 1, string.format(
+			"...and is put back on the checkpoint they fell from, not at floor 1 (%.1f studs away)",
+			xzd(back, home)))
+	end
+
+	local fell = rootOf(climber)
+	local fallAt = fell and fell.Position
+	if firstAt and respawnAt and fallAt then
+		print(string.format(
+			"  spawn order: first %.2f,%.2f,%.2f | respawn on floor 2 %.2f,%.2f,%.2f | "
+				.. "after a fall %.2f,%.2f,%.2f",
+			firstAt.X, firstAt.Y, firstAt.Z, respawnAt.X, respawnAt.Y, respawnAt.Z,
+			fallAt.X, fallAt.Y, fallAt.Z))
+	end
+
+	h:leave(climber)
+	h:advance(1)
+end
+
 --============================================================================ STUDIO FINDING 3
 -- THE HOLD REPLICATES — AND IT ARRIVES LATE, SO THE "INSTANT" PATH IS NEVER TAKEN.
 --
@@ -1578,6 +1711,29 @@ do
 		truthy(#notice:sentTo(orphan) > said,
 			"an unseated player is told AGAIN once their character exists, because the first "
 				.. "message went out before their HUD could have connected")
+
+		-- ...and the ENGINE's OWN placement is the right answer for this one player, so the game
+		-- has to leave it alone. The only enabled SpawnLocation stands on the waiting pad, and a
+		-- laneless player belongs on it — measured at 0.00, 3.51, -160.00, dead centre. This is
+		-- the assertion that would catch the over-correction: a handler that answers the spawn
+		-- race by teleporting EVERY character somewhere would put this one in a tower it does not
+		-- own, or at the world origin over open air.
+		local ohrp = orphan.Character and orphan.Character:FindFirstChild("HumanoidRootPart")
+		local wf = h.workspace:FindFirstChild("Waiting")
+		local wp = wf and wf:FindFirstChild("WaitingPad")
+		if ohrp and wp then
+			local onPad = math.abs(ohrp.Position.X - wp.Position.X) <= wp.Size.X / 2
+				and math.abs(ohrp.Position.Z - wp.Position.Z) <= wp.Size.Z / 2
+				and ohrp.Position.Y > wp.Position.Y
+			truthy(onPad, string.format(
+				"...and is left standing on the waiting pad, not moved into a tower that is not "
+					.. "theirs (root %.1f,%.1f,%.1f; pad %.1f,%.1f,%.1f)",
+				ohrp.Position.X, ohrp.Position.Y, ohrp.Position.Z,
+				wp.Position.X, wp.Position.Y, wp.Position.Z))
+		else
+			failed += 1
+			print("FAIL: the unseated player has no character to measure")
+		end
 	end
 
 	-- HOUSE RULE, learned in this repo hours ago: a world whose only spawn points are disabled

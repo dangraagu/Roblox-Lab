@@ -14,8 +14,19 @@ seed. Single shared server, one private shaft per player, no PvP.
 
 ## State — v1 built + tested; REVIEW-3's last blocker closed; NEVER RUN BY A PERSON; NOT published
 - **1866 luau-CLI unit tests pass** (Ore 1272, Mine 173, Economy 131, Prestige 220, Responsive 70).
-- **Two headless gates, both green.** `tests/walk.luau` (ours, 116 passed) and
+- **Two headless gates, both green.** `tests/walk.luau` (ours, 129 passed) and
   `robloxemu/check_deepvein.luau` (the emulator's, 136 passed).
+- **THE SPAWN RACE IS FIXED (2026-09-10).** Measured in Studio on a sibling game and now modelled
+  by `robloxemu`: `Player.CharacterAdded` fires while the character is still UNPARENTED at the
+  world origin, and the engine parents AND places it on the enabled `SpawnLocation` **one frame
+  later**, silently discarding any CFrame written inside the handler. `place` wrote one straight
+  away, so every miner was left standing on `MinersRest` — measured at **-80.00, 2.51, 0.00**,
+  82 studs from shaft 0's own landing at `0.00, 4.00, -18.00` and 240 studs from shaft 1's — and
+  because the engine drops EVERY character on the same pad, **two miners who joined together stood
+  0.0 studs apart**, in nobody's mine, on every join and every respawn. `place` now waits for
+  `char.Parent` (bounded, 300 frames) and re-reads its state across the yield. `WaitForChild` is
+  NOT that wait: on the server both children already exist when the event fires, so it never
+  yields. Measured after the fix: `0.00, 4.00, -18.00` and `160.00, 4.00, -18.00`, exact.
 - **REVIEW-4 closed the unload.** A fully excavated deep shaft was 10 097 Parts rebuilt on every
   join; it is 5. The worst state the game can reach — a lattice dig at rebirth 24, which is what a
   strip mine is and which REVIEW-3's `<= 12000` bound never measured — was 19 115 and is 1 124.
@@ -47,6 +58,10 @@ seed. Single shared server, one private shaft per player, no PvP.
   7. *The build pump runs on a lease, not a latch*, and pcalls each cell. One bad Part costs one
      Part; a pump killed by anything at all is replaced within a second.
   8. *There is a SpawnLocation* (`workspace.MinersRest`), west of shaft 0 and clear of every mine.
+     Not a nicety for a frame nobody sees: after the spawn-race fix above, this pad is where the
+     engine genuinely puts every miner for one frame before the game moves them. `walk.luau` now
+     also asserts it is `Enabled` and that it is the world's ONLY enabled spawn, because the engine
+     ignores disabled ones and picks arbitrarily among several.
 - A 15-mutation sweep killed 13 of 13 real defects; both controls stayed green. Table in REVIEW-3.
 - `luau-compile` clean on all 10 sources; `luau-analyze` clean apart from Roblox global/type noise.
 - **Not published**: no experience, no place ID, no gamepasses, no maturity questionnaire.

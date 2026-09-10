@@ -1290,12 +1290,43 @@ TintRemote.OnServerEvent:Connect(function(plr, tint)
 end)
 
 -- ------------------------------------------------------------------ Lifecycle
+-- SPAWN ORDER. `Player.CharacterAdded` fires while the character Model is still UNPARENTED with
+-- its root at the WORLD ORIGIN; ONE FRAME LATER the engine parents it and places it, silently
+-- discarding any CFrame written in between (measured in Studio 2026-09-10, robloxemu/SPAWN-ORDER.md).
+-- So a handler must not write immediately — and this one used to sleep `task.wait(0.2)` instead,
+-- which is not the same thing. Two problems with a sleep:
+--
+--   * it is a COINCIDENCE, not a rule. It beat the engine by twelve frames on the day it was
+--     written; nothing ties it to the engine's step, and nothing would have noticed if the
+--     number had ever been cut.
+--   * it leaves the player in the WRONG PLACE for all twelve of those frames, on every spawn and
+--     every respawn. This game has no SpawnLocation anywhere, and every concourse is out at
+--     `index * 1000` studs with `index` starting at 1 — so the engine's own answer is the void
+--     over the world origin: no floor under them, 100 studs below and >= 1000 studs west of the
+--     hall they are meant to be reading. Twelve frames of falling through black, then a snap.
+--
+-- Wait for the thing that actually decides it. `char.Parent` becoming non-nil is the signal
+-- because the engine parents and places in the SAME frame: once a parent is visible the engine
+-- has finished and the next write is the last one. Bounded, so a character that never arrives
+-- cannot park this handler for the session.
+local SPAWN_WAIT_FRAMES = 300 -- 5 s at 60 Hz; a character that has not arrived by then never will
+
 local function onCharacter(plr: Player, char: Model)
-	local origin = zones[plr] and zoneOrigin(tonumber(zones[plr]:GetAttribute("Index")) or 0)
-	if origin then
-		task.wait(0.2)
-		teleportToStart(plr, origin)
+	local frames = 0
+	while char.Parent == nil and frames < SPAWN_WAIT_FRAMES do
+		task.wait(1 / 60)
+		frames += 1
 	end
+	if char.Parent == nil then
+		return -- never made it into the world; there is nothing to place
+	end
+	-- Re-read the zone AFTER the wait: the player may have left, and their zone is destroyed on
+	-- PlayerRemoving. Reading it before the yield would have teleported a corpse to a dead index.
+	local zone = zones[plr]
+	if zone == nil then
+		return
+	end
+	teleportToStart(plr, zoneOrigin(tonumber(zone:GetAttribute("Index")) or 0))
 end
 
 Players.PlayerAdded:Connect(function(plr)

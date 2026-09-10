@@ -194,6 +194,182 @@ do
 	Players:simulateLeave(c2)
 end
 
+-- ------------------------------------- simulateSpawn models the ENGINE'S spawn order
+-- Measured in Roblox Studio on 2026-09-10 (fork-tower/STUDIO.md), from a server-side
+-- Player.CharacterAdded handler sampling every Heartbeat, verbatim:
+--
+--     [0.0000] f01 parent=nil        hrp=0.00,0.00,0.00
+--     [0.0051] f02 parent=Workspace  hrp=0.00,3.51,-160.00     <- the enabled SpawnLocation
+--
+-- CharacterAdded fires while the character model is still UNPARENTED with its root part at
+-- the world origin. ONE FRAME LATER the engine parents it AND drops it on the enabled
+-- SpawnLocation, silently discarding whatever the handler wrote. simulateSpawn used to do the
+-- exact opposite (parent first, never place), so every headless check in this repo was blind
+-- to that class of defect in the direction that makes a broken game look fine.
+--
+-- The spawn built below is fork-tower's WaitingSpawn to the stud — Position (0, 0.5, -160),
+-- Size (6, 1, 6) — so the numbers asserted here are the numbers Studio printed.
+do
+	local Scheduler = require("../emu/scheduler")
+	local sched = Scheduler.new()
+	local inst2 = InstanceLib.new({ datatypes = fakeDatatypes })
+	local svc2 = ServicesLib.new({ datatypes = fakeDatatypes, instance = inst2, scheduler = sched })
+	local I2, P2, ws2 = inst2.Instance, svc2.Players, svc2.workspace
+	local task2 = sched:globals().task
+
+	local function xyz(part): string
+		local p = part.Position
+		return string.format("%.2f,%.2f,%.2f", p.X, p.Y, p.Z)
+	end
+
+	-- The player's own pad, far from the spawn: this is "where the game wants you".
+	local pad = I2.new("Part")
+	pad.Name = "OwnPad"
+	pad.Size = V3.new(10, 1, 10)
+	pad.Position = V3.new(440, 10, 14)
+	pad.Parent = ws2
+
+	-- Roblox's own default, and it decides whether the search below can even see a spawn a game
+	-- created and never configured.
+	eq(I2.new("SpawnLocation").Enabled, true, "SpawnLocation.Enabled defaults to true, as in Roblox")
+
+	local sp = I2.new("SpawnLocation")
+	sp.Name = "WaitingSpawn"
+	sp.Size = V3.new(6, 1, 6)
+	sp.Position = V3.new(0, 0.5, -160)
+	sp.Enabled = true
+	sp.Parent = ws2
+
+	------------------------------------------------------------------ the naive handler
+	local sawParent, sawRoot = "unset", "unset"
+	local naive = P2:simulateJoin("Naive", 8181)
+	naive.CharacterAdded:Connect(function(c)
+		sawParent = c.Parent
+		local hrp = c:FindFirstChild("HumanoidRootPart")
+		sawRoot = xyz(hrp)
+		hrp.CFrame = CF.new(440, 13, 14) -- "put me on my own pad" — and the engine will win
+	end)
+	local charA = P2:simulateSpawn(naive, ws2)
+
+	eq(sawParent, nil, "CharacterAdded fires while the character model is still UNPARENTED")
+	eq(sawRoot, "0.00,0.00,0.00", "...and with the root part at the world origin")
+	eq(charA.Parent, ws2, "one frame later the engine has parented the character")
+	eq(
+		xyz(charA:FindFirstChild("HumanoidRootPart")),
+		"0.00,3.51,-160.00",
+		"a CFrame written inside CharacterAdded WITHOUT waiting is discarded: the engine puts "
+			.. "the character on the enabled SpawnLocation instead"
+	)
+
+	------------------------------------------------------------------ the handler that waits
+	local patient = P2:simulateJoin("Patient", 8182)
+	local waitedFrames = -1
+	patient.CharacterAdded:Connect(function(c)
+		local frames = 0
+		while c.Parent == nil and frames < 300 do
+			task2.wait(1 / 60)
+			frames += 1
+		end
+		waitedFrames = frames
+		local hrp = c:FindFirstChild("HumanoidRootPart")
+		hrp.CFrame = CF.new(440, 13, 14)
+	end)
+	-- Asserted with NO further advance on purpose: simulateSpawn owes its callers a fully spawned
+	-- world, so it spends the one frame the waiting handler needs. Fifty-odd call sites across
+	-- this repo do `simulateSpawn(...)` and read the character straight away.
+	local charB = P2:simulateSpawn(patient, ws2)
+	eq(
+		xyz(charB:FindFirstChild("HumanoidRootPart")),
+		"440.00,13.00,14.00",
+		"a handler that polls `char.Parent` until it is non-nil keeps its placement, and has "
+			.. "finished doing so by the time simulateSpawn returns"
+	)
+	truthy(waitedFrames >= 1, "...and it really did yield at least one frame to get there")
+
+	------------------------------------------------------------------ a BARE task.wait() poll
+	-- The same poll written with a bare `task.wait()` must work too. In the real engine a bare
+	-- wait is one frame, so that poll is correct game code; this scheduler's bare wait is a
+	-- ZERO-length yield, and if the engine step were scheduled a frame out instead of ordered
+	-- after the handlers' first yield, this correct code would fail here and nowhere else.
+	local barefoot = P2:simulateJoin("Barefoot", 8185)
+	barefoot.CharacterAdded:Connect(function(c)
+		local frames = 0
+		while c.Parent == nil and frames < 300 do
+			task2.wait()
+			frames += 1
+		end
+		c:FindFirstChild("HumanoidRootPart").CFrame = CF.new(440, 13, 14)
+	end)
+	local charBW = P2:simulateSpawn(barefoot, ws2)
+	eq(
+		xyz(charBW:FindFirstChild("HumanoidRootPart")),
+		"440.00,13.00,14.00",
+		"a poll written with a bare `task.wait()` keeps its placement too (it is correct against "
+			.. "the real engine, so the emulator must not fail it)"
+	)
+
+	------------------------------------------------------------------ RespawnLocation wins
+	local other = I2.new("SpawnLocation")
+	other.Name = "LaneSpawn"
+	other.Size = V3.new(6, 1, 6)
+	other.Position = V3.new(440, 0.5, 10)
+	other.Enabled = true
+	other.Parent = ws2
+
+	local homed = P2:simulateJoin("Homed", 8183)
+	homed.RespawnLocation = other
+	local charC = P2:simulateSpawn(homed, ws2)
+	eq(
+		xyz(charC:FindFirstChild("HumanoidRootPart")),
+		"440.00,3.51,10.00",
+		"Player.RespawnLocation beats any other enabled SpawnLocation"
+	)
+
+	------------------------------------------------------------------ a DISABLED spawn is not one
+	other.Enabled = false
+	sp.Enabled = false
+	local disabled = I2.new("SpawnLocation")
+	disabled.Name = "MarkerOnly"
+	disabled.Size = V3.new(6, 1, 6)
+	disabled.Position = V3.new(-900, 0.5, -900)
+	disabled.Enabled = false
+	disabled.Parent = ws2
+
+	-- ...and with no enabled spawn anywhere the engine drops the character above the highest
+	-- ground over the origin. On a sealed shell that is the ROOF, which is the second trap this
+	-- repo has been bitten by (grow-a-crystal, nightwatch-manor).
+	local floorPart = I2.new("Part")
+	floorPart.Name = "ShellFloor"
+	floorPart.Size = V3.new(200, 2, 200)
+	floorPart.Position = V3.new(0, -1, 0)
+	floorPart.Parent = ws2
+	local roof = I2.new("Part")
+	roof.Name = "ShellRoof"
+	roof.Size = V3.new(200, 2, 200)
+	roof.Position = V3.new(0, 40, 0)
+	roof.Parent = ws2
+
+	-- ...and a decorative part you cannot stand on is NOT ground, however high it hangs.
+	local banner = I2.new("Part")
+	banner.Name = "HangingBanner"
+	banner.Size = V3.new(60, 2, 60)
+	banner.Position = V3.new(0, 300, 0)
+	banner.CanCollide = false
+	banner.Parent = ws2
+
+	local roofed = P2:simulateJoin("Roofed", 8184)
+	roofed.CharacterAdded:Connect(function(c)
+		c:FindFirstChild("HumanoidRootPart").CFrame = CF.new(0, 5, 0) -- inside the shell
+	end)
+	local charD = P2:simulateSpawn(roofed, ws2)
+	eq(
+		xyz(charD:FindFirstChild("HumanoidRootPart")),
+		"0.00,43.51,0.00",
+		"with no ENABLED SpawnLocation the engine drops the character on the highest ground "
+			.. "over the origin — on a sealed shell, the roof"
+	)
+end
+
 -- ---------------------------------------------------------------- DataStoreService basics
 local DSS = svc.DataStoreService
 do

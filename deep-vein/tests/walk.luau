@@ -249,10 +249,43 @@ do
 	end
 end
 
+-- WHERE THE MINER ACTUALLY IS, NOT JUST "ON SOMETHING".
+--
+-- Measured in Roblox Studio (fork-tower/STUDIO.md) and now modelled by the emulator: the engine
+-- builds the character UNPARENTED at the world origin, fires CharacterAdded, and only ONE FRAME
+-- LATER parents it and drops it on the enabled SpawnLocation — silently overwriting any CFrame
+-- the game wrote inside the handler. Deep Vein's `place` wrote one without waiting, so every
+-- miner was left standing on MinersRest instead: measured at -80.00, 2.51, 0.00, which is 80
+-- studs west and 18 south of shaft 0's own landing and 240 studs from shaft 1's.
+--
+-- The assertion above ("has ground under it") caught that, but only by accident — MinersRest is
+-- not in anybody's shaft folder, so the scan found nothing. These say the thing directly, in the
+-- coordinates the player would read off their own screen, and they read the destination off the
+-- deck the server publishes rather than writing the spawn coordinate out a second time.
 do
-	-- REVIEW-2, still open: "no SpawnLocation anywhere". Roblox picks the spawn for the frame or
-	-- two before CharacterAdded lands, and with none it picks the world origin — which in this
-	-- game is the middle of the first player's mouth.
+	local wDeck = wShaft and wShaft:FindFirstChild("SurfaceDeck_" .. WALKER, true)
+	truthy(wDeck ~= nil, "the walker's mouth has a deck, which is where the game means to put them")
+	if wDeck and wHrp then
+		local at = wHrp.CFrame.Position
+		local d = wDeck.Position
+		truthy(math.abs(at.X - d.X) < 0.01, "a fresh miner stands over their OWN shaft's landing on X ("
+			.. string.format("%.1f", at.X) .. ", want " .. string.format("%.1f", d.X) .. ")")
+		truthy(math.abs(at.Z - d.Z) < 0.01, "…and on Z ("
+			.. string.format("%.1f", at.Z) .. ", want " .. string.format("%.1f", d.Z) .. ")")
+		gt(at.Y, d.Y, "…and above that deck rather than under it")
+		-- spawnCFrame is built with the two-argument CFrame.new so the miner faces SOUTH, across
+		-- the mouth at the SELL pad. An engine placement carries the SpawnLocation's orientation
+		-- instead, which is the identity frame — looking the other way, down -Z.
+		gt(wHrp.CFrame.LookVector.Z, 0.99, "…facing south across their own mouth at the SELL pad ("
+			.. string.format("%.2f", wHrp.CFrame.LookVector.Z) .. ")")
+	end
+end
+
+do
+	-- REVIEW-2: "no SpawnLocation anywhere". With none, Roblox drops the character above the
+	-- highest ground over the world origin — which in this game is the middle of the first
+	-- player's mouth. This pad is where the engine ACTUALLY puts every miner, on every join and
+	-- every respawn, for the one frame before `place` moves them into their own shaft.
 	local pad = h.workspace:FindFirstChild("MinersRest")
 	truthy(pad ~= nil, "the world has a SpawnLocation for the frame before the game takes over")
 	if pad then
@@ -260,6 +293,17 @@ do
 		eq(pad.Anchored, true, "…anchored")
 		eq(pad.CanCollide, true, "…and solid enough to land on")
 		truthy(pad.Parent == h.workspace, "…parented to the workspace, not to a shaft that gets destroyed")
+		-- The engine only considers ENABLED spawns. A disabled one is not a spawn at all, and the
+		-- game would be back to "no SpawnLocation anywhere" without a single line looking wrong.
+		eq(pad.Enabled, true, "…and ENABLED, which is the only thing that makes it count as a spawn")
+		-- Roblox picks among ALL the eligible spawns, so a second enabled one anywhere in the
+		-- world would make the engine's choice a coin toss rather than this pad.
+		local spawns = {}
+		for _, d in h.workspace:GetDescendants() do
+			if d.ClassName == "SpawnLocation" and d.Enabled then spawns[#spawns + 1] = d.Name end
+		end
+		eq(#spawns, 1, "…and it is the ONLY enabled spawn, so the engine has no choice to make ("
+			.. table.concat(spawns, ", ") .. ")")
 		-- and it must not be standing inside anybody's mine
 		local inside = nil
 		for _, f in shafts:GetChildren() do
@@ -1005,6 +1049,62 @@ do
 	local s = stateOf(again)
 	eq(s.rebirths, 1, "…with the rebirth kept")
 	eq(s.depth, 0, "…and no depth carried over from the cave that was thrown away")
+end
+
+--========================== 8. TWO MINERS, AND A RESPAWN: the engine's placement is not a spawn
+
+-- The single-player symptom of the CharacterAdded race is "you are 82 studs from your mine". The
+-- MULTIPLAYER symptom is worse and is the one MinersRest was built to prevent: the engine drops
+-- every character on the SAME enabled SpawnLocation, so if the game's own write is discarded then
+-- every miner in the server is standing inside every other miner, on one 16x16 pad, with nobody
+-- anywhere near the shaft the server built for them.
+--
+-- And it repeats on every death, not just on join: CharacterAdded fires again for the new
+-- character, and `place` races the engine again.
+do
+	local pA = h:join("PairA", 4101)
+	h:advance(1)
+	h.Players:simulateSpawn(pA, h.workspace)
+	h:advance(2)
+	local pB = h:join("PairB", 4102)
+	h:advance(1)
+	h.Players:simulateSpawn(pB, h.workspace)
+	h:advance(2)
+
+	local aHrp = pA.Character and pA.Character:FindFirstChild("HumanoidRootPart")
+	local bHrp = pB.Character and pB.Character:FindFirstChild("HumanoidRootPart")
+	truthy(aHrp ~= nil and bHrp ~= nil, "both miners of the pair have a root part")
+
+	local aDeck = shaftOf(4101) and shaftOf(4101):FindFirstChild("SurfaceDeck_4101", true)
+	local bDeck = shaftOf(4102) and shaftOf(4102):FindFirstChild("SurfaceDeck_4102", true)
+	truthy(aDeck ~= nil and bDeck ~= nil, "…and each got their own shaft with its own deck")
+
+	if aHrp and bHrp and aDeck and bDeck then
+		local gap = (aHrp.CFrame.Position - bHrp.CFrame.Position).Magnitude
+		gt(gap, 100, "two miners who joined together are in DIFFERENT shafts ("
+			.. string.format("%.1f", gap) .. " studs apart)")
+		truthy(math.abs(bHrp.CFrame.Position.X - bDeck.Position.X) < 0.01,
+			"the second miner is over their own landing, not the first one's ("
+			.. string.format("%.1f", bHrp.CFrame.Position.X) .. ", want "
+			.. string.format("%.1f", bDeck.Position.X) .. ")")
+
+		-- Now kill and re-spawn A the way the engine does, and check it survives the second race.
+		h.Players:simulateSpawn(pA, h.workspace)
+		h:advance(2)
+		local a2 = pA.Character and pA.Character:FindFirstChild("HumanoidRootPart")
+		truthy(a2 ~= nil, "the respawned miner has a root part")
+		if a2 then
+			truthy(math.abs(a2.CFrame.Position.X - aDeck.Position.X) < 0.01
+				and math.abs(a2.CFrame.Position.Z - aDeck.Position.Z) < 0.01,
+				"…and a RESPAWN lands back in their own shaft too ("
+				.. string.format("%.1f, %.1f", a2.CFrame.Position.X, a2.CFrame.Position.Z)
+				.. ", want " .. string.format("%.1f, %.1f", aDeck.Position.X, aDeck.Position.Z) .. ")")
+		end
+	end
+
+	h:leave(pA)
+	h:leave(pB)
+	h:advance(1)
 end
 
 --============================================================================ done

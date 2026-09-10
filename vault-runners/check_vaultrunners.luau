@@ -710,6 +710,214 @@ do
 	local _ = callsBefore
 end
 
+--============================================================================ WHERE THE ENGINE PUTS YOU
+
+-- MEASURED IN ROBLOX STUDIO, 2026-09-10 (fork-tower/STUDIO.md, robloxemu/SPAWN-ORDER.md):
+-- `Player.CharacterAdded` fires while the character model is STILL UNPARENTED with its root part
+-- at the world origin, and ONE FRAME LATER the engine parents it AND places it on the enabled
+-- SpawnLocation — silently discarding anything the game wrote in between. Fork Tower spawned
+-- every player 174 studs from their own tower that way, past eight green suites.
+--
+-- Vault Runners never writes a CFrame from inside CharacterAdded, so it does not lose that race.
+-- It is correct for a REASON, and the reason is a property of the world that nothing in this file
+-- was looking at: an ENABLED SpawnLocation sitting on the hub pad, which is what makes the
+-- engine's own placement land somewhere the game wants a player to be.
+--
+-- Why that reason needs a guard rather than a comment. `slotOrigin(0)` is (0, VaultOriginY, 0),
+-- so THE FIRST PLAYER'S VAULT IS BUILT DIRECTLY ABOVE THE HUB — a sealed shell whose roof is
+-- ~252 studs up over the world origin. With no eligible SpawnLocation Roblox drops a character
+-- above the HIGHEST ground at the origin, which here is that roof. Measured: adding one line,
+-- `spawnPad.Enabled = false`, puts a joining player at (0.00, 254.51, 0.00) — on top of another
+-- player's vault, out of reach of every portal in the game — and this file still printed
+-- "115 passed, 0 failed". A check that never looks cannot fail, so this one looks.
+do
+	-- 1. THE MECHANISM. Exactly one SpawnLocation, enabled, flush with the hub floor.
+	local spawns = {}
+	local function walkSpawns(node)
+		for _, d in ipairs(node:GetChildren()) do
+			if d.ClassName == "SpawnLocation" then spawns[#spawns + 1] = d end
+			walkSpawns(d)
+		end
+	end
+	walkSpawns(h.workspace)
+	-- The engine picks among ALL eligible spawns, so two of them is a coin toss, not a design.
+	eq(#spawns, 1, "the world holds exactly one SpawnLocation, so the engine's choice is not a toss-up")
+	local hubSpawn = spawns[1]
+	eq(hubSpawn and hubSpawn.Name, "HubSpawn", "and it is the hub's")
+	-- Enabled is the whole eligibility test, and it is not the same question as "does it exist":
+	-- the assertion 500 lines up (`FindFirstChild("HubSpawn") ~= nil`) stays green on a spawn the
+	-- engine will not use.
+	truthy(hubSpawn ~= nil and hubSpawn.Enabled ~= false,
+		"and it is ENABLED — a disabled spawn is invisible to the engine, not just unused")
+	local hubPad = hub and hub:FindFirstChild("HubPad")
+	truthy(hubPad ~= nil, "the hub pad is there to stand on")
+	local padTop = hubPad and (hubPad.Position.Y + hubPad.Size.Y / 2)
+	local spawnBottom = hubSpawn and (hubSpawn.Position.Y - hubSpawn.Size.Y / 2)
+	truthy(padTop ~= nil and spawnBottom ~= nil and math.abs(spawnBottom - padTop) < 0.05,
+		"the spawn rests ON the hub floor (spawn bottom " .. tostring(spawnBottom)
+			.. " vs pad top " .. tostring(padTop) .. ") — not sunk into it, not hanging over it")
+	local spawnTop = hubSpawn and (hubSpawn.Position.Y + hubSpawn.Size.Y / 2) or 0
+
+	-- Standing on the hub spawn: inside its footprint in XZ, and above its top face without
+	-- being thrown clear of it. Deliberately a BAND and not a number. The engine's own placement
+	-- and the game's teleportToHub disagree by 2.49 studs (3.51 vs 6.00), both are on the pad,
+	-- and the one recorded Studio sample cannot tell three parameterisations of that stand-off
+	-- apart (SPAWN-ORDER.md §7). Assert the XZ and "above the spawn", never the Y to the
+	-- centimetre.
+	local function onTheHubSpawn(pos)
+		if pos == nil or hubSpawn == nil then return false end
+		return math.abs(pos.X - hubSpawn.Position.X) <= hubSpawn.Size.X / 2
+			and math.abs(pos.Z - hubSpawn.Position.Z) <= hubSpawn.Size.Z / 2
+			and pos.Y >= spawnTop - 0.01 and pos.Y <= spawnTop + 8
+	end
+	local function rootOf(plr)
+		local c = plr.Character
+		local r = c and c:FindFirstChild("HumanoidRootPart")
+		return r and r.Position or nil
+	end
+	local function say(pos)
+		if pos == nil then return "<no root part>" end
+		return string.format("%.2f, %.2f, %.2f", pos.X, pos.Y, pos.Z)
+	end
+
+	-- 2. A LIVE VAULT OVER THE HUB. This is what makes the trap reachable rather than theoretical
+	-- — and what makes the assertions below able to fail. With nothing built above the origin the
+	-- no-spawn fallback finds the hub pad anyway and a disabled spawn looks harmless.
+	local A, B = 5150, 5151
+	for _, uid in ipairs({ A, B }) do
+		store:SetAsync("u_" .. uid, { data = { gems = 0, totalBanked = 0, pets = {},
+			equipped = nil, floors = { 1, 1, 1 }, escapes = 0, wipes = 0 } })
+	end
+
+	local runner = h:join("SlotZero", A)
+	h:advance(1)
+	h.Players:simulateSpawn(runner, h.workspace)
+	h:advance(1)
+	truthy(onTheHubSpawn(rootOf(runner)),
+		"a player who just joined is standing on the hub spawn (" .. say(rootOf(runner)) .. ")")
+
+	Enter:simulateFireServer(runner, 1)   -- Bronze floor 1, unlockGems = 0, no prerequisite
+	h:advance(1)
+	local slotZero = vaults:FindFirstChild("Vault_" .. A)
+	truthy(slotZero ~= nil, "and they are in a vault")
+
+	-- Where the drop-in actually landed, and what is under it. This is the shape that broke
+	-- deep-vein: a CFrame written onto a root part with no floor beneath the destination.
+	local dropIn = rootOf(runner)
+	local function groundUnder(pos, root)
+		local best = nil
+		local function walk(node)
+			for _, d in ipairs(node:GetChildren()) do
+				if d:IsA("BasePart") and d.CanCollide ~= false
+					and math.abs(pos.X - d.Position.X) <= d.Size.X / 2
+					and math.abs(pos.Z - d.Position.Z) <= d.Size.Z / 2 then
+					local top = d.Position.Y + d.Size.Y / 2
+					if top <= pos.Y + 0.01 and (best == nil or top > best) then best = top end
+				end
+				walk(d)
+			end
+		end
+		walk(root)
+		return best
+	end
+	local floorUnder = (slotZero ~= nil and dropIn ~= nil) and groundUnder(dropIn, slotZero) or nil
+	truthy(floorUnder ~= nil, "THE RUN'S DROP-IN HAS FLOOR UNDER IT (" .. say(dropIn) .. ")")
+	truthy(floorUnder ~= nil and (dropIn.Y - floorUnder) <= Config.Run.RunnerRootHeight + 2,
+		"...and it is a step, not a fall: " .. (floorUnder ~= nil
+			and string.format("%.2f", dropIn.Y - floorUnder) or "?") .. " studs above it")
+
+	-- The vault really is over the world origin — the premise of everything below.
+	local vaultX, vaultZ = math.huge, math.huge
+	if slotZero ~= nil then
+		local f = slotZero:FindFirstChild("Floor_0")
+		if f then vaultX, vaultZ = math.abs(f.Position.X), math.abs(f.Position.Z) end
+	end
+	truthy(vaultX < 1 and vaultZ < 1,
+		"slot 0's vault is built OVER THE WORLD ORIGIN (Floor_0 at x=" .. tostring(vaultX)
+			.. ", z=" .. tostring(vaultZ) .. ") — the same column the engine falls back to")
+
+	local roof, roofName = nil, nil
+	local function scanRoof(node)
+		for _, d in ipairs(node:GetChildren()) do
+			if d:IsA("BasePart") and d.CanCollide ~= false
+				and math.abs(d.Position.X) <= d.Size.X / 2
+				and math.abs(d.Position.Z) <= d.Size.Z / 2 then
+				local top = d.Position.Y + d.Size.Y / 2
+				if roof == nil or top > roof then roof, roofName = top, tostring(d.Name) end
+			end
+			scanRoof(d)
+		end
+	end
+	scanRoof(hub)
+	scanRoof(vaults)
+	truthy(roof ~= nil and roof > spawnTop + 100,
+		"THE TRAP IS ARMED: the highest ground over the origin is now " .. tostring(roof)
+			.. " (" .. tostring(roofName) .. "), " .. tostring(roof and roof - spawnTop)
+			.. " studs above the hub — that is where an ineligible spawn sends people")
+
+	-- 3. THE PLACEMENT. A second player joins while that roof is overhead.
+	local joiner = h:join("Joiner", B)
+	h:advance(1)
+	h.Players:simulateSpawn(joiner, h.workspace)
+	local landed = rootOf(joiner)
+	truthy(onTheHubSpawn(landed),
+		"A PLAYER JOINING MID-RUN LANDS ON THE HUB, not on the roof of somebody else's vault ("
+			.. say(landed) .. ")")
+	h:advance(1)
+	local settled = rootOf(joiner)
+	truthy(onTheHubSpawn(settled),
+		"...and is still there a second later — the engine's step does not move them afterwards ("
+			.. say(settled) .. ")")
+	-- The engine's placement is not "wherever they happened to be": an unparented character
+	-- starts at the world ORIGIN, which is a stud INSIDE the hub pad, so "above the spawn's top
+	-- face" is a real distinction and not a tautology.
+	truthy(settled ~= nil and settled.Y > spawnTop,
+		"...standing ON the spawn rather than left at the world origin inside the hub pad")
+
+	-- 4. THE RESET. The one path in this game that ends a run from inside CharacterAdded:
+	-- onCharacter defers finishRun, finishRun calls teleportToHub, and whether that write
+	-- survives the engine step depends on scheduling this game does not control. It does not
+	-- have to: both orders end on the hub, which is what this asserts. What must NOT happen is
+	-- the player coming back inside a vault that is being destroyed around them.
+	truthy(vaults:FindFirstChild("Vault_" .. A) ~= nil, "the runner is still mid-run before resetting")
+	h.Players:simulateSpawn(runner, h.workspace)
+	h:advance(1)
+	local afterReset = rootOf(runner)
+	truthy(onTheHubSpawn(afterReset),
+		"RESETTING MID-RUN PUTS YOU BACK ON THE HUB (" .. say(afterReset) .. ")")
+	eq(vaults:FindFirstChild("Vault_" .. A), nil, "...and the vault they abandoned is torn down")
+	h:advance(2)
+	truthy(onTheHubSpawn(rootOf(runner)),
+		"...and nothing drags them back out of it two seconds later (" .. say(rootOf(runner)) .. ")")
+
+
+	-- 5. AND WHEN THE RUN ENDS THE ORDINARY WAY. `finishRun` teleports the player out of the
+	-- vault and THEN destroys the vault folder under them — in that order, because the other
+	-- order leaves a live character standing on a floor that no longer exists. Nothing in this
+	-- file was looking at that teleport: deleting the `teleportToHub(plr)` call from finishRun
+	-- left the whole gate green at 133/0, while in a real game it drops the player from 200
+	-- studs at the vault's own XZ — which for slot 0 is (-36, -36), off the end of an 80 x 60
+	-- hub pad, so they fall past the hub and out of the world.
+	Enter:simulateFireServer(runner, 1)
+	h:advance(1)
+	truthy(vaults:FindFirstChild("Vault_" .. A) ~= nil, "the runner starts a second run")
+	local started = lastRunEvent("start")
+	local countdown = started and tonumber(started.collapseSeconds) or 0
+	truthy(countdown > 0, "with a countdown to run out (" .. tostring(countdown) .. "s)")
+	-- Stand still and let the collapse take them. No walking, no escape: the point is the exit
+	-- path every losing run takes, which is the one that has to move the body.
+	h:advance(countdown + 2)
+	local lostIt = lastRunEvent("end")
+	truthy(lostIt ~= nil and lostIt.ok == false, "the collapse ends the run")
+	eq(vaults:FindFirstChild("Vault_" .. A), nil, "and the vault is destroyed")
+	truthy(onTheHubSpawn(rootOf(runner)),
+		"A RUN THAT ENDS PUTS THE PLAYER BACK ON THE HUB, not on a floor that was just deleted ("
+			.. say(rootOf(runner)) .. ")")
+	h:leave(joiner)
+	h:leave(runner)
+	h:advance(1)
+end
+
 --============================================================================ done
 
 print("")

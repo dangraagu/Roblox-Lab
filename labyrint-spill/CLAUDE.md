@@ -207,6 +207,34 @@ Ren logikk testes med luau-CLI (ikke Roblox-avhengige biter):
 MERK: `luau-analyze` melder pre-eksisterende TypeErrors i `MazeGen.luau` og
 `Medals.luau` (utypede tabeller) og en ubrukt `LOBBY_FOG` — de er ikke nye.
 
+Headless-sjekkene i `robloxemu/` (bygg bunten først:
+`cd ../robloxemu && py -3 wrap.py --game ../labyrint-spill --out build/labyrint-spill.luau`):
+`check_labyrint` (HUD-passform), `check_lighting`, `check_secretdoors`, `check_themes`
+og `check_labyrint_spawn` (hvor figuren FAKTISK havner).
+
+### ALDRI skriv en CFrame inne i `CharacterAdded`
+Målt i Studio 10.09.2026 (`fork-tower/STUDIO.md`, `robloxemu/SPAWN-ORDER.md`):
+`Player.CharacterAdded` fyrer mens modellen ennå er **uforelder**, med rot-delen i
+verdens origo. **Én frame senere** forelder motoren modellen OG plasserer den på den
+aktiverte `SpawnLocation` — og kaster stille alt spillet skrev i mellomtiden. Ingen
+feilmelding; tilordningen lyktes og ble forkastet. `char:WaitForChild("HumanoidRootPart")`
+redder deg ikke: på serveren finnes barnet allerede, så kallet venter ikke.
+
+Målt i dette spillet med en midlertidig naiv skriving lagt inn i `onCharacterAdded`:
+handleren skrev `4321, 654, 4321` mens `char.Parent == nil`, og figuren endte likevel
+på `0.00, 3.51, 0.00` — lobby-platen. Motoren vant.
+
+Labyrint gjør det riktige i dag og skal fortsette med det:
+- `onCharacterAdded` rører **ikke** posisjon (bare fakkel, perks, HUD, lobby-state).
+- Alle spawn skjer på **`Workspace.Lobby.LobbySpawn`**, den ENESTE `SpawnLocation` i
+  verden. `buildInstance` merker labyrint-starten med en **vanlig Part** (`MazeSpawn`,
+  `CanCollide = false`) nettopp derfor — en ekte `SpawnLocation` til ville gjort at
+  Roblox respawner døde spillere tilfeldig inne i en fremmed labyrint 6000 studs unna.
+- Flyttinger som ikke er spawn (`placeInInstance`, `returnToLobby`, `endInstance`,
+  `advanceInstance`) skjer på prompt/remote lenge etter spawn, og er trygge.
+Trenger du noen gang å plassere en figur ved spawn: vent på `char.Parent ~= nil` først
+(bundet løkke), eller sett `plr.RespawnLocation` til en ekte `SpawnLocation`.
+
 ## Kjente grovheter å polere
 - Monster-riggen er én del med Humanoid; kan skli/rykke. Vurder ordentlig
   R15-rigg eller AlignPosition hvis det ser rart ut.

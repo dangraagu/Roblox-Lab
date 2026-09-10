@@ -218,12 +218,16 @@ local SHAFT_SPACING = 160 -- studs between two players' shafts along +X
 
 -- SOMEWHERE TO STAND FOR THE FRAME BEFORE THE GAME TAKES OVER.
 --
--- Every player is CFramed into their own shaft by `place` on CharacterAdded, but Roblox picks the
--- spawn point for the frame or two BEFORE that runs, and with no SpawnLocation anywhere it picks
--- one itself — around the world origin, which in this game is the middle of the FIRST player's
--- mouth, six studs above a hole. Two players joining at once therefore land in one shaft, and a
--- slow CharacterAdded lands somebody inside a stranger's dig. One anchored pad, in the clear west
--- of shaft 0 and outside every shaft's 54-stud footprint, makes that frame boring instead.
+-- Every player is CFramed into their own shaft by `place`, but that write can only land AFTER the
+-- engine's own placement — measured in Studio, the engine parents and positions the character one
+-- frame after CharacterAdded fires, so `place` waits for it (see the long note there). Which means
+-- this pad is not a nicety for a frame nobody sees: it is where the engine actually puts every
+-- miner, every join and every respawn, for the one frame before the game moves them.
+--
+-- With no SpawnLocation at all Roblox picks the spot itself — above the highest ground over the
+-- world origin, which in this game is the middle of the FIRST player's mouth, six studs above a
+-- hole. One anchored pad, in the clear west of shaft 0 and outside every shaft's 54-stud
+-- footprint, makes that frame boring instead of a fall down a stranger's dig.
 --
 -- It is parented to the workspace and NOT to Shafts, deliberately: everything under Shafts is
 -- per-player and is destroyed when its owner leaves, and this is the one piece of world that
@@ -1306,14 +1310,49 @@ local function onPlayerAdded(plr: Player)
 	claimShaft(plr)
 	buildShaft(plr)
 
+	-- THE ENGINE PLACES THE CHARACTER **AFTER** CharacterAdded, AND THE ENGINE WINS.
+	--
+	-- Measured in Roblox Studio: CharacterAdded fires while the model is still UNPARENTED with its
+	-- root part at the world origin, and ONE FRAME LATER the engine parents it AND drops it on the
+	-- enabled SpawnLocation — silently discarding whatever CFrame the handler wrote in between. No
+	-- error, no warning: the assignment succeeds and is thrown away.
+	--
+	-- This function used to write the CFrame straight away, so every miner in the server was left
+	-- standing on MinersRest instead of in their own shaft: -80.00, 2.51, 0.00, which is 82 studs
+	-- from shaft 0's landing and 240 studs from shaft 1's — and since the engine drops EVERY
+	-- character on the SAME pad, two miners who joined together stood 0.0 studs apart.
+	--
+	-- So: wait until the character is genuinely in the world, then write. `char.Parent` becoming
+	-- non-nil is the signal, because the recording shows parent and placement landing in the same
+	-- frame — by the time a poll sees a parent, the engine has already finished. WaitForChild is
+	-- NOT that signal: on the server both children already exist when the event fires, so neither
+	-- call yields and neither buys the frame this needs.
 	local function place(char: Model)
 		local hrp = char:WaitForChild("HumanoidRootPart", 10)
-		if hrp then
-			-- ground under the landing before the landing, every time
-			streamTo(plr, 1, Mine.center(Config), SPAWN_CELL_Z)
-			;(hrp :: BasePart).CFrame = spawnCFrame(plr)
-		end
+		if hrp == nil then return end
+		-- The lamp does not race anything, so hang it before yielding: a miner who somehow never
+		-- gets parented is still better off lit than in a black box.
 		attachLamp(plr, char)
+
+		-- Bounded: a character that never arrives must not park this handler for the session.
+		local frames = 0
+		while char.Parent == nil and frames < 300 do
+			task.wait(1 / 60)
+			frames += 1
+		end
+		if char.Parent == nil then return end
+
+		-- RE-READ ACROSS THE YIELD. Up to five seconds is long enough to leave, to rebirth (which
+		-- tears the shaft down and builds a new one) or to die and be handed a different
+		-- character; `shaftFolders` is cleared by teardownShaft, so its being nil covers both a
+		-- departure and the gap inside a rebirth. Placing without this would CFrame a body the
+		-- player no longer owns, and a spawnCFrame taken with no shaft index reads silently as
+		-- shaft 0 — a stranger's mine. Defensive: nothing in the suite can reach it.
+		if plr.Character ~= char or shaftFolders[plr] == nil then return end
+
+		-- ground under the landing before the landing, every time
+		streamTo(plr, 1, Mine.center(Config), SPAWN_CELL_Z)
+		;(hrp :: BasePart).CFrame = spawnCFrame(plr)
 	end
 	plr.CharacterAdded:Connect(place)
 	if plr.Character then place(plr.Character) end
