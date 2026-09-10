@@ -82,3 +82,17 @@ Never offer or accept: game/Studio/collaborator access, credentials, personal in
 payment or revenue shares, moving to DMs, joining Discords, or clicking links a commenter posted.
 Never draft a reply to a bot or to AutoModerator. Never create a new post - announcing a game is
 an interactive decision the owner makes, not something a schedule does.
+
+## How to tell whether a post is actually visible
+
+A post held in the moderator queue looks normal to the account that made it. On `old.reddit.com`
+it renders with a score, a comment box and no banner at all; the new interface does say "venter på
+godkjenning fra moderatorer", but only sometimes and only right after submitting. Neither is
+something to trust.
+
+**The test that works: look for the post in `r/<sub>/new/` and check its `data-fullname` against
+`t3_<postid>`.** If the subreddit's own new-listing does not carry it, nobody but the author can
+see it, no matter what the post's own page looks like.
+
+This matters because "the post is up" is the trigger for the next announcement, and posting a
+second game while the first is still queued is how an account collects two removals instead of one.
