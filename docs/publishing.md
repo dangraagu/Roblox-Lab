@@ -23,7 +23,10 @@ commit one. `labyrint-spill/deploy_to_roblox.bat` and `publish_now.bat` are trac
 they read a key from a file that is not present, so they do not currently work. Either supply
 `roblox_api_key.txt` or ignore them.
 
-Roblox Studio must be closed, or `rojo build` hits a file lock.
+Studio must not have **this game's** place file open, or `rojo build` hits a file lock. It does not
+have to be closed: Anomaly was published as version 10 on 2026-09-10 while Studio sat with
+`fork-tower/ForkTower.rbxlx` open and a play session running, and the build wrote `Anomaly.rbxl`
+without complaint. The lock is per file, not per process.
 
 ## Reading the result
 
@@ -105,3 +108,29 @@ Three things it will refuse:
 APPLIED only when what Roblox serves is identical to what was sent. It reports NOT APPLIED
 otherwise, which is how the silent Open Cloud no-op was caught at all - the first run of it
 claimed success on the strength of the status code.
+
+## Is the live place actually running what the repo says?
+
+`git push` does not publish, and the gap is invisible from the repo. Audited 2026-09-10:
+
+| Game | Live version | Published | Newest commit touching `src/` | Verdict |
+|---|---|---|---|---|
+| Labyrinth Mariozo | 24 | 09-09 17:57 | 09-09 17:56 `5201105` | in sync |
+| Grow a Crystal | 10 | 09-09 23:55 | 09-09 23:54 `b92c316` | in sync |
+| +1 Jump Every Step | 6 | 09-09 23:12 | 09-09 23:12 `254aebd` | in sync |
+| Anomaly: Night Shift | 9 | 09-09 20:08 | 09-09 23:48 `7853998` | **BEHIND** — published as 10 on 09-10 09:15 |
+
+Anomaly had been live on a build missing `Exclusivity = AlwaysShow` on the decision prompts, so a
+player standing between ADVANCE and TURN BACK saw one of their two choices — in a game whose whole
+interface is those two keys. Nobody would have noticed from the repo, and the Reddit announcement
+for that game was already queued.
+
+**Where to look.** The dashboard page is
+`https://create.roblox.com/dashboard/creations/experiences/{universeId}/places/{placeId}/version-history`
+— note `version-history`, not `versions`, which 404s. The table's top row is the live version and
+is the only one without a **Restore** button. `develop.roblox.com/v2/places/{placeId}/versions`
+answers the browser with a CORS failure, so read the page rather than that endpoint.
+
+Compare the timestamp against `git log --date=format:'%Y-%m-%d %H:%M' --pretty='%ad %h %s' -- <game>/src`.
+A publish lands within a minute or two of the commit it was built from, so a commit newer than the
+live timestamp is a change players cannot see. Do this before announcing a game anywhere.
