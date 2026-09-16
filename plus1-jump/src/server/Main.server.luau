@@ -66,8 +66,22 @@ local RedeemFunc = mkRemote("RemoteFunction", "Redeem")   -- klient -> server: l
 local LeaderboardEvent = mkRemote("RemoteEvent", "Leaderboard") -- server -> klient: topp 10
 
 -- ── Data ────────────────────────────────────────────────────────────────────
-local store = Config.Save.Enabled and DataStoreService:GetDataStore(Config.Save.Store) or nil
-local orderedLB = Config.Save.Enabled and DataStoreService:GetOrderedDataStore(Config.Save.Leaderboard) or nil
+-- GetDataStore RAISES in a place that has not been published to the web, and again when
+-- "Enable Studio Access to API Services" is off. Unwrapped, that error killed this whole server
+-- script at load - no tower, no remotes, no game - which is why this one could not be opened in
+-- Studio at all without publishing first. Saving is what should degrade, not the game; every
+-- write path already checks `store`.
+local function tryStore(fn, what)
+	if not Config.Save.Enabled then return nil end
+	local ok, ds = pcall(fn)
+	if ok then return ds end
+	warn("[Plus1] " .. what .. " datastore unavailable (" .. tostring(ds)
+		.. ") - the game runs, progress will NOT be saved this session.")
+	return nil
+end
+
+local store = tryStore(function() return DataStoreService:GetDataStore(Config.Save.Store) end, "profiles")
+local orderedLB = tryStore(function() return DataStoreService:GetOrderedDataStore(Config.Save.Leaderboard) end, "leaderboard")
 
 -- Per-spiller runtime-tilstand (i minne). `saved` = det som skrives til DataStore.
 type Profile = {
@@ -243,6 +257,25 @@ basePad.Color = Color3.fromRGB(120, 120, 140)
 basePad.Name = "BasePad"
 basePad.Parent = towerFolder
 
+-- SPAWN-PUNKT — vi PEKER motoren, den skal ikke gjette.
+-- Uten en enabled SpawnLocation slipper Roblox karakteren over det HØYESTE kolliderbare
+-- underlaget over verdens-origo. I dag er det sokkelen, så spillet så riktig ut — men det var
+-- FLAKS, ikke konstruksjon: målt over 5000 WorldSeed-verdier legger TowerGen en etasje-1-
+-- plattform rett over origo i 410 av dem (8,2 %). Og siden `isBeyondFrontier` er monoton, ville
+-- en spiller som ble sluppet på plattform 2 ALDRI kunne tjene +1 for plattform 1 — for resten av
+-- lagringen. Ett tall i Config skal ikke kunne gjøre det, så vi bygger et ekte spawn-punkt.
+-- Topp-flaten flukter med sokkelens topp (y = 8), så ingen spawner inni eller over sokkelen.
+local spawnPad = Instance.new("SpawnLocation")
+spawnPad.Name = "TempleSpawn"
+spawnPad.Anchored = true
+spawnPad.Size = Vector3.new(12, 1, 12)
+spawnPad.Position = BASE_POS - Vector3.new(0, 0.5, 0)
+spawnPad.Neutral = true
+spawnPad.Duration = 0 -- ingen forcefield: obby-en har ingen kamp å beskytte mot
+spawnPad.Material = Enum.Material.Neon
+spawnPad.Color = Color3.fromRGB(160, 210, 255)
+spawnPad.Parent = towerFolder
+
 buildTier(1)
 
 -- ── Spiller-tilstand -> Humanoid + HUD ──────────────────────────────────────
@@ -376,10 +409,40 @@ end
 -- ── Spiller inn/ut ──────────────────────────────────────────────────────────
 local function onCharacter(plr: Player, char: Model)
 	local hum = char:WaitForChild("Humanoid") :: Humanoid
+	local hrp = char:WaitForChild("HumanoidRootPart") :: BasePart
 	applyJump(plr)
+
+	-- ── VENT TIL MOTOREN ER FERDIG MED KARAKTEREN ────────────────────────────────────────────
+	-- Målt i Roblox Studio 2026-09-10 (robloxemu/SPAWN-ORDER.md): CharacterAdded fyrer mens
+	-- modellen fortsatt er UPARENTET, med HumanoidRootPart i verdens-origo. ÉN FRAME SENERE
+	-- parenter motoren modellen OG plasserer den på spawn-punktet — og motoren vinner: CFrame-en
+	-- vi skrev i mellomtiden blir kastet, uten feil og uten advarsel.
+	--
+	-- To ting var faktisk ødelagt her, begge målt mot den nye emulator-rekkefølgen:
+	--   1) plasseringen ble forkastet. En tier-12-klatrer som joinet en server som ALT KJØRTE
+	--      havnet på sokkelen (0.00, 10.51, 0.00) — 1352,17 studs fra sin egen plattform
+	--      (-40.55, 1264.50, 504.20).
+	--   2) fall-redningen under startet ALDRI. `while char.Parent and ...` blir evaluert i det
+	--      task.spawn kjører den, og inne i CharacterAdded er char.Parent nil — så løkka gikk ut
+	--      før første iterasjon, og INGEN karakter i en live server hadde fall-redning i det hele
+	--      tatt. Redningen ble beskrevet som masken som gjorde (1) til «bare et rykk». Målt
+	--      finnes ikke masken: en spiller dyttet i tomrommet ble liggende der.
+	--
+	-- char.Parent er signalet: opptaket viser at parenting og plassering skjer i SAMME frame, så
+	-- ser vi en parent, er motoren ferdig. Løkka er bounded (5 s ved 60 fps) — en karakter som
+	-- aldri kommer fram skal ikke parkere denne handleren resten av økta.
+	-- `char:WaitForChild(...)` over kjøper oss INGENTING her: på serveren finnes begge barna alt
+	-- når CharacterAdded fyrer, så ingen av dem yielder. Fork Tower prøvde nettopp det og tapte.
+	local frames = 0
+	while char.Parent == nil and frames < 300 do
+		task.wait(1 / 60)
+		frames += 1
+	end
+	if char.Parent == nil then return end
+
+	-- Les alt på nytt etter ventingen: tårnet kan ha blitt bygget videre, og profilen byttet ut.
 	-- Spawn på frontier-plattformen (gjenoppta klatringen), ellers på sokkelen
 	local p = profiles[plr]
-	local hrp = char:WaitForChild("HumanoidRootPart") :: BasePart
 	if p and p.frontierTier >= 1 and builtTiers[p.frontierTier] then
 		local b = builtTiers[p.frontierTier]
 		local pt = b.parts[math.min(p.frontierIdx, #b.parts)] or b.parts[#b.parts]
@@ -401,7 +464,11 @@ local function onCharacter(plr: Player, char: Model)
 			if hrp.Position.Y < floorY - 60 then
 				-- Tilbake til NØYAKTIG frontier-plattformen (ikke toppen), så spilleren ikke
 				-- hopper over plattformer og mister opptjening.
-				local target = BASE_POS + Vector3.new(0, 4, 0)
+				-- `target` er UNDERLAGET; +4 legges på ÉN gang under. Sokkel-grenen la på +4
+				-- her også, så en fersk spiller ble reddet til y=16 og falt de siste 4 studs
+				-- ned på sokkelen hen alt sto på ved spawn (y=12). Det var usynlig fordi
+				-- løkka aldri kjørte: char.Parent var nil da task.spawn evaluerte den.
+				local target = BASE_POS
 				if pp and pp.frontierTier >= 1 and builtTiers[pp.frontierTier] then
 					local b = builtTiers[pp.frontierTier]
 					local pt = b.parts[math.min(pp.frontierIdx, #b.parts)] or b.parts[#b.parts]
@@ -416,6 +483,13 @@ local function onCharacter(plr: Player, char: Model)
 end
 
 local function onPlayerAdded(plr: Player)
+	-- FØRSTE linje, FØR loadProfile: `loadProfile` yielder på DataStore:UpdateAsync, og med
+	-- CharacterAutoLoads kan karakteren rekke å laste i den yielden. Settes RespawnLocation
+	-- etterpå, kommer den for sent for akkurat den karakteren. (Motoren ville uansett falle
+	-- tilbake på det eneste enabled spawn-punktet i Workspace — dette er belte OG bukseseler,
+	-- og det koster ingenting å ta det først.)
+	plr.RespawnLocation = spawnPad
+
 	local p = loadProfile(plr)
 	profiles[plr] = p
 
@@ -428,13 +502,20 @@ local function onPlayerAdded(plr: Player)
 	end
 	ls.Parent = plr
 
-	plr.CharacterAdded:Connect(function(char) onCharacter(plr, char) end)
-	if plr.Character then onCharacter(plr, plr.Character) end
-
-	-- Bygg nok tårn til spillerens frontier
+	-- Bygg tårnet FØR karakteren plasseres. onCharacter setter deg på frontier-plattformen din,
+	-- men bare hvis etasjen finnes: `builtTiers[p.frontierTier]` er nil ellers, og da faller
+	-- den tilbake til sokkelen. Ved oppstart er kun etasje 1 bygd, så alle over etasje 1 landet
+	-- på bakken. Fall-redningen napper deg opp igjen innen ~0,5 s, så klatringen gikk aldri
+	-- tapt — men du så et teleport-rykk hver gang du kom tilbake.
+	-- Rekkefølgen er hele fiksen. check_plus1_rejoin.luau måler plasseringen i selve øyeblikket,
+	-- ikke etter en frame, nettopp fordi redningen ellers skjuler feilen.
 	if p.frontierTier + Config.Tower.StreamAhead > highestBuilt then
 		for tt = highestBuilt + 1, p.frontierTier + Config.Tower.StreamAhead do buildTier(tt) end
 	end
+
+	plr.CharacterAdded:Connect(function(char) onCharacter(plr, char) end)
+	if plr.Character then onCharacter(plr, plr.Character) end
+
 	pushState(plr)
 end
 

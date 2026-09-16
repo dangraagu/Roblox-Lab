@@ -32,6 +32,7 @@ local player = Players.LocalPlayer
 
 -- Delt tema-liste (ren data, samme som serveren bruker).
 local Themes = require(ReplicatedStorage:WaitForChild("Themes"))
+local MazeRef = require(ReplicatedStorage:WaitForChild("MazeRef"))
 
 -- Shared sizing rules so this HUD survives a phone. Note the require form: a bare string
 -- require like `require("./Responsive")` resolves in the luau CLI but is invalid in Roblox.
@@ -96,10 +97,12 @@ local function recolorPart(part, theme)
 	end
 end
 
--- Mal ALLE veggene/gulvet i labyrinten om til et gitt tema. Tåler at
--- MazeGame ikke finnes ennå (returnerer bare stille).
+-- Mal ALLE veggene/gulvet i MIN labyrint om til et gitt tema. Tåler at den ikke finnes ennå
+-- (returnerer bare stille).
+-- MazeRef, ikke workspace.MazeGame: live-byggeren kaller mappa `Maze_<id>`, én pr spiller, så
+-- dette oppslaget returnerte alltid nil og temaene malte ingenting i det hele tatt.
 local function recolorAll(themeId)
-	local folder = workspace:FindFirstChild("MazeGame")
+	local folder = MazeRef.folder(workspace, player)
 	if not folder then return end
 	local theme = Themes.byId(themeId)
 	if not theme then return end
@@ -127,22 +130,28 @@ workspace.DescendantAdded:Connect(function(inst)
 	if currentTheme == Themes.default then return end
 	if not inst:IsA("BasePart") then return end
 	if not PART_FIELD[inst.Name] then return end
-	local folder = workspace:FindFirstChild("MazeGame")
-	if not folder or not inst:IsDescendantOf(folder) then return end
+	-- Bare deler i MIN instans. Uten eierskaps-sjekken ville dette malt naboens labyrint
+	-- etter hvert som serveren bygger den.
+	if not MazeRef.isMine(workspace, player, inst) then return end
 	local theme = Themes.byId(currentTheme)
 	if theme then
 		recolorPart(inst, theme)
 	end
 end)
 
--- Når en helt ny MazeGame-mappe dukker opp (nytt nivå), ta en full runde.
+-- Når MIN nye labyrint-mappe dukker opp (nytt nivå), ta en full runde.
 -- Mappa er som regel tom i akkurat dette øyeblikket — DescendantAdded over
 -- tar delene etter hvert — men dette er beltet i tillegg til bukseselene.
 workspace.ChildAdded:Connect(function(child)
-	if child.Name == "MazeGame" then
+	if MazeRef.matchesName(player, child.Name) then
 		applyTheme()
 	end
 end)
+
+-- Serveren merker spilleren med sin instans-mappe idet han plasseres i den. Mappa finnes ofte
+-- FØR merkelappen, så ChildAdded alene ville sett feil navn og hoppet over; dette er den andre
+-- halvparten av oppslaget.
+player:GetAttributeChangedSignal(MazeRef.ATTRIBUTE):Connect(applyTheme)
 
 -- Hvis labyrinten allerede står der når skriptet starter, mal den nå.
 applyTheme()

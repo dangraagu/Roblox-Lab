@@ -185,6 +185,28 @@ function Signal:Fire(...)
 	end
 end
 
+-- Fire every handler on its OWN fresh coroutine, the way the real engine dispatches an event.
+--
+-- `Fire` calls handlers straight off the calling thread, so a handler that yields either raises
+-- "attempt to yield across a C-call boundary" or blocks every later handler. Roblox does not
+-- work that way: each connection gets a fresh thread, so a handler MAY yield and one handler's
+-- yield never delays the next. That distinction is load-bearing for Player.CharacterAdded — the
+-- correct fix for the spawn-order defect (SPAWN-ORDER.md) has to yield inside the handler — so
+-- the caller passes in a spawner (`task.spawn`, i.e. emu/scheduler.luau) and gets engine
+-- threading rather than a workaround.
+function Signal:FireOnThreads(spawner, ...)
+	if type(spawner) ~= "function" then
+		error("Signal:FireOnThreads expects a spawner function", 2)
+	end
+	local snapshot = table.clone(self.__conns)
+	local args = table.pack(...)
+	for _, conn in snapshot do
+		if conn.Connected then
+			spawner(conn._fn, table.unpack(args, 1, args.n))
+		end
+	end
+end
+
 -- Emulator-only introspection. A long headless run reconnects prompt handlers every pass;
 -- if Disconnect only flipped a flag without dropping the connection, the list would grow
 -- without bound and Fire would get slower for the whole run.
@@ -415,6 +437,35 @@ function InstanceLib.new(deps)
 				guard += 1
 			end
 		end
+		-- DescendantAdded / DescendantRemoving fire on EVERY ancestor, once per descendant --
+		-- not just on the immediate parent. Leaving them unfired was not a harmless gap: a HUD
+		-- that repaints parts as the server streams a level in listens on exactly this signal,
+		-- so a theme measured as painting 0 of 95 walls here while working in game, and every
+		-- future client test would have inherited the same blind spot.
+		local function everyDescendant(node, visit)
+			for _, child in stateOf(node).children do
+				visit(child)
+				everyDescendant(child, visit)
+			end
+		end
+		local function fireUpTree(from, event, subject)
+			local node, guard = from, 0
+			while node ~= nil and guard < 512 do
+				fireIfExists(node, event, subject)
+				node = stateOf(node).parent
+				guard += 1
+			end
+		end
+
+		-- Roblox reports the removal while the instance is STILL attached, so a handler can read
+		-- its parent one last time. Fire before touching the tree.
+		if old ~= nil then
+			fireUpTree(old, "DescendantRemoving", inst)
+			everyDescendant(inst, function(d)
+				fireUpTree(old, "DescendantRemoving", d)
+			end)
+		end
+
 		if old ~= nil then
 			removeChild(old, inst)
 		end
@@ -427,6 +478,12 @@ function InstanceLib.new(deps)
 		end
 		if newParent ~= nil then
 			fireIfExists(newParent, "ChildAdded", inst)
+			fireUpTree(newParent, "DescendantAdded", inst)
+			-- A subtree arriving reports each of its own descendants too, so a listener sees the
+			-- parts inside a folder that was assembled before being parented.
+			everyDescendant(inst, function(d)
+				fireUpTree(newParent, "DescendantAdded", d)
+			end)
 		end
 		fireIfExists(inst, "AncestryChanged", inst, newParent)
 	end
@@ -935,7 +992,14 @@ function InstanceLib.new(deps)
 	})
 
 	defineClass("Part", { parent = "BasePart" })
-	defineClass("SpawnLocation", { parent = "Part" })
+	-- Roblox's own defaults matter here: `SpawnLocation.Enabled` and `.Neutral` are TRUE unless a
+	-- game turns them off, and `Players:simulateSpawn` picks the spawn the engine would pick. With
+	-- these left nil an `Instance.new("SpawnLocation")` the game never configured would have been
+	-- invisible to that search, which is the opposite of what the engine does with it.
+	defineClass("SpawnLocation", {
+		parent = "Part",
+		defaults = { Enabled = true, Neutral = true, Duration = 10, AllowTeamChangeOnTouch = false },
+	})
 
 	defineClass("ProximityPrompt", {
 		parent = "Instance",
@@ -976,7 +1040,16 @@ function InstanceLib.new(deps)
 	defineClass("Player", {
 		parent = "Instance",
 		events = { "CharacterAdded", "CharacterRemoving", "CharacterAppearanceLoaded", "Idled", "Chatted" },
-		defaults = { UserId = 0, Character = nil, AccountAge = 0, MembershipType = "None" },
+		-- RespawnLocation is deliberately listed: it is how a game tells the ENGINE where to put a
+		-- character, and `Players:simulateSpawn` honours it exactly as the engine does. Left off the
+		-- defaults it would still store, but nobody reading this class would know it was modelled.
+		defaults = {
+			UserId = 0,
+			Character = nil,
+			RespawnLocation = nil,
+			AccountAge = 0,
+			MembershipType = "None",
+		},
 		methods = {
 			IsFriendsWith = function()
 				return false

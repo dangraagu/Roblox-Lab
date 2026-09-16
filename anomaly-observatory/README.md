@@ -46,6 +46,21 @@ luau tests/Codex.spec.luau
 luau tests/Codes.spec.luau
 ```
 
+Headless, with the real server script running in the emulator (`robloxemu/`, regenerate the
+bundle first):
+```
+luau check_anomaly.luau           the HUD fits every viewport
+luau check_anomaly_attrs.luau     the zone's Clean / AnomalyId / Serial attributes are TRUE
+```
+The second one identifies the clean hall from the world alone and asserts the attributes agree
+with it, pass after pass. It also answers each pass by reading the hall rather than the
+attribute and requires the day to climb — which is the game's deepest invariant: the hall
+differs from clean exactly when the server scores the pass as anomalous.
+
+## Marketing
+`marketing/pairs/` holds matched clean/anomaly stills and the spot-the-difference shorts cut
+from them. `py -3 tools/film_anomaly.py` makes more; see `marketing/pairs/README.md`.
+
 ## Codes (edit in `Config.Codes`)
 `WELCOME` +3 hints · `OBSERVE` +5 hints · `MIDNIGHT` +10 hints · `ECLIPSE` gold flashlight tint.
 

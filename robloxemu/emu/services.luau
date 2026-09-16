@@ -469,6 +469,11 @@ function ServicesLib.new(deps)
 	local sched = deps.scheduler
 	local inst = deps.instance or (require("./instance") :: any).new(deps)
 
+	-- Forward-declared: the Workspace instance is built further down (it needs `defineClass`
+	-- to have run), but Players:simulateSpawn has to reach it to find the SpawnLocation the
+	-- engine would use. Declaring it here is what puts it in that closure's scope.
+	local ws
+
 	local Instance = inst.Instance
 	local create = inst.create
 	local defineClass = inst.defineClass
@@ -482,6 +487,136 @@ function ServicesLib.new(deps)
 			return v
 		end
 		return nil
+	end
+
+	-- ------------------------------------------------- the engine's own spawn placement
+	-- Everything below serves ONE function, Players:simulateSpawn, whose comment carries the
+	-- Studio trace this is modelled on. Read that first; SPAWN-ORDER.md has the long version.
+
+	-- One rendered frame at 60 Hz. The measured gap between CharacterAdded and the engine's
+	-- parent-and-place step was 5.1 ms — under one frame — so one frame is the coarsest honest
+	-- unit this virtual clock can express it in.
+	local ENGINE_FRAME = 1 / 60
+
+	-- How far above a SpawnLocation's TOP FACE the engine puts the HumanoidRootPart.
+	--
+	-- Provenance, because this is the one number here that is fitted rather than derived: the
+	-- single recorded placement is fork-tower's WaitingSpawn — Position (0, 0.5, -160), Size
+	-- (6, 1, 6), so a top face at y = 1.0 — and the root part read y = 3.51 the frame the engine
+	-- placed it. 3.51 - 1.0 = 2.51. ONE sample fits three parameterisations equally well (top
+	-- face + 2.51, centre + 3.01, bottom face + 3.51) and this file cannot tell them apart; the
+	-- top-face form is chosen because it is the one that degrades sensibly for a spawn brick of
+	-- a different thickness. There is no physics here, so nothing settles afterwards: assert on
+	-- the XZ and on "above the spawn", not on this Y to the centimetre.
+	local ENGINE_STAND_OFFSET = 2.51
+
+	local function eachDescendant(root, fn)
+		for _, c in stateOf(root).children do
+			fn(c)
+			eachDescendant(c, fn)
+		end
+	end
+
+	local function partTopY(part): number?
+		local ok, y = pcall(function()
+			return part.Position.Y + part.Size.Y / 2
+		end)
+		if ok and type(y) == "number" then
+			return y
+		end
+		return nil
+	end
+
+	-- Roblox will not respawn anybody at a disabled SpawnLocation. `Enabled` defaults to true on
+	-- the class (see emu/instance.luau), so a spawn a game never configured counts, exactly as
+	-- it would in the engine.
+	local function isEnabledSpawn(x): boolean
+		return isA(x, "SpawnLocation") and stateOf(x).props.Enabled ~= false
+	end
+
+	-- The spawn the engine would use for this player.
+	--   1. Player.RespawnLocation, when it is an enabled SpawnLocation still in the Workspace.
+	--      A RespawnLocation that is disabled or has been destroyed is ignored, as in Roblox.
+	--   2. otherwise the FIRST enabled SpawnLocation in a depth-first walk of the Workspace.
+	--      Roblox picks at random among the eligible ones; a headless check needs a repeatable
+	--      answer, so this takes the first in tree order and says so. A game that leaves two
+	--      enabled spawns in the world therefore gets ONE of the engine's possible answers here,
+	--      not all of them — see "what this does not model" in SPAWN-ORDER.md.
+	-- Team/TeamColor spawn matching is NOT modelled at all.
+	local function findEngineSpawn(plr)
+		local rl = stateOf(plr).props.RespawnLocation
+		if rl ~= nil and inst.isInstance(rl) and isEnabledSpawn(rl) then
+			local ok, inWorld = pcall(function()
+				return rl:IsDescendantOf(ws)
+			end)
+			if ok and inWorld then
+				return rl
+			end
+		end
+		local found = nil
+		eachDescendant(ws, function(c)
+			if found == nil and isEnabledSpawn(c) then
+				found = c
+			end
+		end)
+		return found
+	end
+
+	-- With no enabled SpawnLocation anywhere, Roblox drops the character above the ground at the
+	-- world origin. The trap this repo has already been bitten by twice is that "the ground at
+	-- the origin" means the HIGHEST collidable surface over (0, 0) — on a sealed shell that is
+	-- the ROOF, not the floor inside it (grow-a-crystal), and over a hollow tower it is nothing
+	-- at all and the player falls (fork-tower's own comment says so).
+	--
+	-- Approximation, stated plainly: axis-aligned boxes only (rotation is ignored), the exact
+	-- origin only rather than Roblox's small spawn area, and CanCollide = false parts are not
+	-- ground. It is enough to answer "roof or floor"; it is not a physics engine.
+	local function groundTopOverOrigin(): number?
+		local best = nil
+		eachDescendant(ws, function(c)
+			if not isA(c, "BasePart") then
+				return
+			end
+			if stateOf(c).props.CanCollide == false then
+				return
+			end
+			local ok, over, top = pcall(function()
+				local p, size = c.Position, c.Size
+				return math.abs(p.X) <= size.X / 2 and math.abs(p.Z) <= size.Z / 2, p.Y + size.Y / 2
+			end)
+			if ok and over and type(top) == "number" and (best == nil or top > best) then
+				best = top
+			end
+		end)
+		return best
+	end
+
+	-- The engine's step: parent the character AND place it, together, one frame after
+	-- CharacterAdded fired. Whatever the game wrote in between is overwritten here — that IS the
+	-- defect this models, so it must not be conditional on the game having left the root alone.
+	local function engineFinishSpawn(plr, char, dest)
+		char.Parent = dest
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if hrp == nil or dt.CFrame == nil or dt.CFrame.new == nil then
+			return
+		end
+		local x, y, z = 0, ENGINE_STAND_OFFSET, 0
+		local sp = findEngineSpawn(plr)
+		if sp ~= nil then
+			local ok, p = pcall(function()
+				return sp.Position
+			end)
+			if ok and p ~= nil then
+				x, z = p.X, p.Z
+				y = (partTopY(sp) or p.Y) + ENGINE_STAND_OFFSET
+			end
+		else
+			y = (groundTopOverOrigin() or 0) + ENGINE_STAND_OFFSET
+		end
+		local cf = try(dt.CFrame.new, x, y, z)
+		if cf ~= nil then
+			hrp.CFrame = cf
+		end
 	end
 
 	-- ------------------------------------------------------------ Players
@@ -564,9 +699,42 @@ function ServicesLib.new(deps)
 				plr.Parent = nil
 			end,
 
-			-- TEST HOOK: give a player a minimal character (Humanoid + HumanoidRootPart) and
-			-- fire CharacterAdded, so server code that teleports the root part has something
-			-- real to move.
+			-- TEST HOOK: give a player a character and spawn it THE WAY THE ENGINE DOES.
+			--
+			-- ============================ THE ORDER, AND WHY IT IS THIS ORDER ============================
+			-- Measured in Roblox Studio on 2026-09-10 (fork-tower/STUDIO.md), from a server-side
+			-- Player.CharacterAdded handler sampling HumanoidRootPart every Heartbeat, verbatim:
+			--
+			--     [0.0000] f01 parent=nil        hrp=0.00,0.00,0.00
+			--     [0.0051] f02 parent=Workspace  hrp=0.00,3.51,-160.00     <- the enabled SpawnLocation
+			--     [0.0149] f03 parent=Workspace  hrp=0.00,3.51,-160.00
+			--
+			-- CharacterAdded fires while the model is STILL UNPARENTED with the root part at the
+			-- world origin. ONE FRAME LATER the engine parents it AND places it on the spawn — and
+			-- the engine wins: anything the handler wrote to HumanoidRootPart.CFrame in between is
+			-- discarded, with no error and no warning.
+			--
+			-- This hook used to do the exact opposite (parent first, fire second, never place), so
+			-- every headless check in this repo was blind to that class of defect IN THE DIRECTION
+			-- THAT MAKES A BROKEN GAME LOOK FINE. Fork Tower shipped past eight green suites, this
+			-- emulator and two adversarial reviews with every player spawning 174 studs from their
+			-- own tower over empty sky. Two already-fixed bugs have the same root cause
+			-- (grow-a-crystal's "spawned on the cavern roof", plus1-jump's returning climber).
+			--
+			-- The pattern a game must use to survive this — and it is a REAL Roblox pattern, not an
+			-- emulator affordance — is one of:
+			--   1. point `plr.RespawnLocation` at a real enabled SpawnLocation and let the engine
+			--      place the character (no waiting needed at all); or
+			--   2. yield inside the handler until the character is genuinely in the world, then
+			--      write the CFrame:
+			--          local frames = 0
+			--          while char.Parent == nil and frames < 300 do task.wait(1/60); frames += 1 end
+			--      Bound the loop — a character that never arrives must not leave a handler parked
+			--      for the session. A bare `task.wait()` works here too; see the note on ordering
+			--      below for why that costs nothing. Full reasoning in SPAWN-ORDER.md.
+			--
+			-- Cost: one virtual frame (1/60 s) of clock per call, spent inside this function so the
+			-- world a caller gets back is a spawned world — every existing caller keeps working.
 			simulateSpawn = function(self, plr, parent)
 				local char = create("Model")
 				char.Name = stateOf(plr).props.Name
@@ -576,11 +744,60 @@ function ServicesLib.new(deps)
 				local hum = create("Humanoid")
 				hum.Parent = char
 				char.PrimaryPart = hrp
-				if parent ~= nil then
-					char.Parent = parent
+				-- f01: unparented, root at the origin. Written explicitly rather than left to the
+				-- Part default, because it is a MEASUREMENT, not an incidental zero.
+				local originCF = try(dt.CFrame.new, 0, 0, 0)
+				if originCF ~= nil then
+					hrp.CFrame = originCF
 				end
+
+				-- Roblox sets Player.Character before CharacterAdded fires.
 				plr.Character = char
-				fireIfExists(plr, "CharacterAdded", char)
+
+				-- The engine always parents the character to the Workspace; `parent` stays an
+				-- argument only because every caller in this repo passes one.
+				local dest = parent
+				if dest == nil then
+					dest = ws
+				end
+
+				if sched == nil then
+					-- No virtual clock injected (emu/services.spec builds one that way). Without a
+					-- scheduler a handler cannot yield, so there is no frame to model: fire, then
+					-- finish, in that order — which still gets the ORDER right even though it
+					-- cannot get the timing right.
+					fireIfExists(plr, "CharacterAdded", char)
+					engineFinishSpawn(plr, char, dest)
+					return char
+				end
+
+				-- Fire on fresh threads, because Roblox does: a CharacterAdded handler is allowed
+				-- to yield, and the correct fix for this defect HAS to. Firing inline would raise
+				-- "attempt to yield" against correct game code. `sched:spawn` runs each handler
+				-- synchronously up to its first yield, so when this returns every handler has
+				-- either finished (and written its CFrame — and it is about to lose it) or parked.
+				local sig = stateOf(plr).signals["CharacterAdded"]
+				if sig ~= nil then
+					sig:FireOnThreads(function(fn, ...)
+						return sched:spawn(fn, ...)
+					end, char)
+				end
+
+				-- The engine's step. Ordered AFTER every handler's first yield point rather than
+				-- scheduled a frame out on the clock, and that is a deliberate choice:
+				--   * ordering is the property the trace actually pins down — the handler sees
+				--     unparented-at-the-origin, and by its next look the engine has finished — and
+				--     ordering is what decides whether a game's CFrame survives;
+				--   * a frame-out `task.delay` would ALSO make a bare `task.wait()` poll fail,
+				--     because this scheduler's bare wait is zero-length. That poll is correct
+				--     against the real engine, so failing it would be a false alarm, and "write
+				--     `task.wait(1/60)` instead" would be an emulator-only affordance.
+				engineFinishSpawn(plr, char, dest)
+
+				-- One frame of clock, so a handler that DID wait finishes its placement before
+				-- this call returns and the fifty-odd existing callers keep seeing a fully spawned
+				-- world. This is the only side effect simulateSpawn has on unrelated timers.
+				sched:advance(ENGINE_FRAME)
 				return char
 			end,
 		},
@@ -1021,7 +1238,7 @@ function ServicesLib.new(deps)
 	Players.Name = "Players"
 	registry.Players = Players
 
-	local ws = create("Workspace")
+	ws = create("Workspace")
 	ws.Name = "Workspace"
 	registry.Workspace = ws
 

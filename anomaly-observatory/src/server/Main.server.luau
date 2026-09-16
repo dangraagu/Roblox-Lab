@@ -11,6 +11,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 
@@ -472,7 +473,27 @@ local function buildClean(zone: Model, origin: Vector3)
 	-- fixtures the anomalies mutate
 	newPart({ Name = "Telescope", Size = Vector3.new(2, 6, 2), CFrame = at(-6, 3.5, -20) * CFrame.Angles(0.4, 0, 0), Color = Color3.fromRGB(120, 130, 150), Material = Enum.Material.Metal, Parent = zone })
 	newPart({ Name = "ChartWall", Size = Vector3.new(0.3, 8, 10), CFrame = at(9.5, 8, -40), Color = Color3.fromRGB(40, 60, 110), Material = Enum.Material.Neon, Parent = zone })
-	newPart({ Name = "Clock", Size = Vector3.new(0.3, 3, 3), CFrame = at(-9.5, 11, -30), Color = WHITE, Material = Enum.Material.SmoothPlastic, Parent = zone })
+	-- The clock needs a FACE. It used to be a blank white slab, so "the wall clock reads the
+	-- wrong time" was unreadable by construction - there was no time on it to read. The old
+	-- applier rotated the whole slab 140 degrees, which drove its corner through WallL and
+	-- looked like a build glitch rather than a stopped clock. Face plus two hands; the anomaly
+	-- moves a hand.
+	local clock = newPart({ Name = "Clock", Size = Vector3.new(0.3, 3, 3), CFrame = at(-9.5, 11, -30), Color = WHITE, Material = Enum.Material.SmoothPlastic, Parent = zone })
+	-- Hands stand just proud of the face (the face's outward normal is +X, into the hall).
+	-- Each is positioned by rotating about the clock's local X and then pushing out along its
+	-- local Y, so the pivot is the clock's centre and a hand sweeps like a hand.
+	local function clockHand(name: string, len: number, thick: number, angle: number)
+		newPart({
+			Name = name,
+			Size = Vector3.new(0.12, len, thick),
+			CFrame = clock.CFrame * CFrame.new(0.21, 0, 0) * CFrame.Angles(angle, 0, 0) * CFrame.new(0, len / 2, 0),
+			Color = Color3.fromRGB(25, 25, 30),
+			Material = Enum.Material.SmoothPlastic,
+			Parent = zone,
+		})
+	end
+	clockHand("ClockHandHour", 0.8, 0.16, math.rad(60))   -- pointing to 2
+	clockHand("ClockHandMinute", 1.25, 0.11, math.rad(0)) -- pointing to 12
 	newPart({ Name = "Plant", Size = Vector3.new(2, 4, 2), CFrame = at(7, 2.5, -10), Color = Color3.fromRGB(60, 120, 70), Material = Enum.Material.Grass, Parent = zone })
 	newPart({ Name = "Monitor", Size = Vector3.new(0.3, 3, 5), CFrame = at(-9.5, 6, -50), Color = Color3.fromRGB(20, 30, 40), Material = Enum.Material.Glass, Parent = zone })
 	newPart({ Name = "Window", Size = Vector3.new(8, 8, 0.3), CFrame = at(0, 9, -HALL_LEN - 5.4), Color = Color3.fromRGB(180, 200, 230), Transparency = 0.4, Material = Enum.Material.Glass, Parent = zone })
@@ -482,6 +503,12 @@ local function buildClean(zone: Model, origin: Vector3)
 	-- -(HALL_LEN+5.5)). At -5.9 the sign was buried inside the wall and invisible, which made
 	-- the `sign_swap` anomaly unspottable (a guaranteed unfair Day reset).
 	newPart({ Name = "ExitSign", Size = Vector3.new(4, 1.5, 0.3), CFrame = at(0, 13, -HALL_LEN - 5.0), Color = Color3.fromRGB(40, 200, 90), Material = Enum.Material.Neon, Parent = zone })
+	-- The sign needs something DIRECTIONAL on it. `sign_swap` used to yaw the sign 180 degrees,
+	-- and a uniform-coloured box maps onto itself under that rotation - geometrically a no-op,
+	-- exactly the failure the chart_flip comment already documents. The only thing the player
+	-- could actually see was the colour change, while the hint said "pointing the wrong way".
+	-- This arrow block sits on the right half of the sign; the anomaly moves it to the left.
+	newPart({ Name = "ExitArrow", Size = Vector3.new(1.1, 0.7, 0.34), CFrame = at(1.3, 13, -HALL_LEN - 4.98), Color = Color3.fromRGB(240, 255, 240), Material = Enum.Material.Neon, Parent = zone })
 	newPart({ Name = "DoorMain", Size = Vector3.new(5, 12, 0.5), CFrame = at(0, 6, -HALL_LEN - 5.6), Color = Color3.fromRGB(70, 55, 45), Material = Enum.Material.Wood, Parent = zone })
 	-- four chairs (count_off / chair_moved touch these)
 	for i = 1, 4 do
@@ -566,7 +593,16 @@ local APPLIERS: { [string]: (Model, Vector3) -> () } = {
 		local p = findPart(zone, "Chair1"); if p then p.CFrame = p.CFrame * CFrame.new(4, 0, 3) end
 	end,
 	clock_stop = function(zone)
-		local p = findPart(zone, "Clock"); if p then p.CFrame = p.CFrame * CFrame.Angles(0, 0, math.rad(140)) end
+		-- Move the MINUTE HAND, not the clock. Rotating the whole slab pushed its corner through
+		-- WallL and read as a build glitch; and with no hands on the face there was no time to
+		-- read in the first place. Swinging the minute hand to roughly 20-past against an hour
+		-- hand still on 2 is a clock that says something wrong.
+		local clock = findPart(zone, "Clock")
+		local hand = findPart(zone, "ClockHandMinute")
+		if clock and hand then
+			local len = hand.Size.Y
+			hand.CFrame = clock.CFrame * CFrame.new(0.21, 0, 0) * CFrame.Angles(math.rad(125), 0, 0) * CFrame.new(0, len / 2, 0)
+		end
 	end,
 	twin_scope = function(zone)
 		local p = findPart(zone, "Telescope"); if p then local c = p:Clone(); c.Name = "TelescopeTwin"; c.CFrame = p.CFrame * CFrame.new(4, 0, 0); c.Parent = zone end
@@ -575,17 +611,38 @@ local APPLIERS: { [string]: (Model, Vector3) -> () } = {
 		local p = findPart(zone, "Mirror"); if p then p.Reflectance = 0; p.Color = Color3.fromRGB(20, 20, 30); p.Transparency = 0.1 end
 	end,
 	flicker_hall = function(zone)
+		-- It has to actually flicker. This used to recolour fixture L3 green and stop, so the
+		-- anomaly named "The Flicker", whose hint promises "a light strobing that shouldn't",
+		-- was a steady green lamp. A player who missed it was then told to look for a strobe
+		-- that the game had never once produced - which in a spot-the-difference game teaches
+		-- the wrong lesson and costs the run after that one too.
 		local lights = zone:FindFirstChild("Lights")
 		if not lights then return end
 		local ref = lights:FindFirstChild("L3")
-		if ref and ref:IsA("ObjectValue") and ref.Value then
-			local fix = ref.Value :: Part
-			fix.Color = Color3.fromRGB(90, 255, 120)
-			local pl = fix:FindFirstChild("PL")
-			if pl and pl:IsA("PointLight") then
-				pl.Color = Color3.fromRGB(90, 255, 120)
+		if not (ref and ref:IsA("ObjectValue") and ref.Value) then return end
+		local fix = ref.Value :: Part
+		local pl = fix:FindFirstChild("PL")
+		local litColor, litMaterial = fix.Color, fix.Material
+
+		-- The loop dies on its own: beginPass calls zone:ClearAllChildren() before every pass,
+		-- which unparents the fixture, so `fix.Parent == nil` ends it. No bookkeeping, and no
+		-- way for a stale strobe to survive into the next hall.
+		task.spawn(function()
+			-- Irregular on purpose. A metronome reads as an effect; an unsteady lamp reads as a
+			-- fault, which is the thing the player is meant to notice.
+			local gaps = { 0.06, 0.09, 0.05, 0.42, 0.07, 0.05, 0.28, 0.11 }
+			local i = 0
+			while fix.Parent ~= nil do
+				i += 1
+				local on = (i % 2) == 1
+				fix.Material = on and litMaterial or Enum.Material.SmoothPlastic
+				fix.Color = on and litColor or Color3.fromRGB(45, 45, 55)
+				if pl and pl:IsA("PointLight") then
+					pl.Enabled = on
+				end
+				task.wait(gaps[(i % #gaps) + 1])
 			end
-		end
+		end)
 	end,
 	scale_bench = function(zone)
 		-- Scaling IN PLACE drove the bench out of the world: 6x2x2 at (6, 1.5) becomes
@@ -614,7 +671,16 @@ local APPLIERS: { [string]: (Model, Vector3) -> () } = {
 		local p = findPart(zone, "Plant"); if p then p:Destroy() end
 	end,
 	sign_swap = function(zone)
-		local p = findPart(zone, "ExitSign"); if p then p.CFrame = p.CFrame * CFrame.Angles(0, math.pi, 0); p.Color = Color3.fromRGB(200, 120, 30) end
+		-- Mirror the arrow to the other half of the sign. Yawing the sign itself did nothing
+		-- visible: a uniform box is symmetric under 180 degrees, so the only tell was the
+		-- colour, and the hint promised a direction.
+		local sign = findPart(zone, "ExitSign")
+		local arrow = findPart(zone, "ExitArrow")
+		if arrow and sign then
+			local d = arrow.Position - sign.Position
+			arrow.Position = sign.Position + Vector3.new(-d.X, d.Y, d.Z)
+		end
+		if sign then sign.Color = Color3.fromRGB(200, 120, 30) end
 	end,
 	floor_tilt = function(zone)
 		local p = findPart(zone, "Floor"); if p then p.CFrame = p.CFrame * CFrame.Angles(0, 0, math.rad(4)) end
@@ -645,6 +711,24 @@ local APPLIERS: { [string]: (Model, Vector3) -> () } = {
 	end,
 }
 
+-- Refuse to start if any catalog entry has no applier. An id without one is not a missing
+-- feature the player never sees - it is an UNWINNABLE ROUND. beginPass sets ps.clean = false
+-- and ps.anomalyId, then finds no applier and mutates nothing, so the player walks a pristine
+-- hall the game believes is wrong: ADVANCE is scored as a miss and resets them to Day 1, and
+-- TURN BACK is scored correct on no evidence at all. Nothing about that is visible from
+-- inside the game, and the existing spec only checks that ids are unique.
+--
+-- Failing here is loud, happens once at boot, and is impossible to miss in the F9 console.
+for _, entry in Config.Anomaly.Catalog do
+	if APPLIERS[entry.id] == nil then
+		error(string.format(
+			"[Anomaly] catalog entry '%s' (%s) has no APPLIERS handler. Every anomaly must "
+				.. "change the hall, or the round it is drawn for cannot be won by looking.",
+			tostring(entry.id), tostring(entry.name)
+		), 0)
+	end
+end
+
 -- ------------------------------------------------------------------ Prompts
 local function makePrompt(parent: Part, text: string, key: Enum.KeyCode?): ProximityPrompt
 	local pp = Instance.new("ProximityPrompt")
@@ -653,6 +737,17 @@ local function makePrompt(parent: Part, text: string, key: Enum.KeyCode?): Proxi
 	pp.HoldDuration = 0
 	pp.MaxActivationDistance = 12
 	pp.RequiresLineOfSight = false
+	-- Show BOTH decision prompts at once. ProximityPrompt defaults to Exclusivity = OneGlobally,
+	-- which shows only the closest one; ADVANCE and TURN BACK sit 8 studs apart on the same wall,
+	-- so a player between them sees one of the two choices rather than both. For a game whose
+	-- entire interface is "press one of these two keys", showing both is plainly right.
+	--
+	-- Being careful about what this does NOT claim: presses were also being lost during
+	-- automated playtesting, and this was briefly blamed for that. It was not the cause. The
+	-- cause was in the test harness - it walked to the pad while the player was still being
+	-- teleported back to the start, and pressed from out of range. This setting is a UI
+	-- improvement, not a bug fix, and no dropped input has been demonstrated in real play.
+	pp.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
 	if key then
 		pp.KeyboardKeyCode = key
 	end
@@ -814,6 +909,32 @@ local function retryClaim(plr: Player)
 	pushState(plr)
 end
 
+-- Where the server says out loud what it just rolled, for tools that need to know: the marketing
+-- capture rig, which has to shoot a MATCHED pair of the same hall clean and anomalous, and the
+-- headless check. `passState` is a table local to this script, so without this there is no way
+-- from outside to tell whether the hall standing in the workspace is clean or which anomaly is
+-- in it, and both were left inferring it from pixels or from geometry they had to re-derive.
+--
+-- ServerStorage, deliberately. See the note at the write site in beginPass.
+local passInfoRoot = ServerStorage:FindFirstChild("PassInfo")
+if not passInfoRoot then
+	passInfoRoot = Instance.new("Folder")
+	passInfoRoot.Name = "PassInfo"
+	passInfoRoot.Parent = ServerStorage
+end
+
+local function passInfoFor(plr: Player): Folder
+	local key = tostring(plr.UserId)
+	local existing = passInfoRoot:FindFirstChild(key)
+	if existing then
+		return existing
+	end
+	local f = Instance.new("Folder")
+	f.Name = key
+	f.Parent = passInfoRoot
+	return f
+end
+
 -- Rebuild the hall and roll the next pass for this player.
 beginPass = function(plr: Player)
 	local prof = profiles[plr]
@@ -841,8 +962,49 @@ beginPass = function(plr: Player)
 		local applier = APPLIERS[pass.anomalyId]
 		if applier then
 			applier(zone, origin)
+		else
+			-- The startup guard above makes this unreachable. It stays as the second net,
+			-- because the failure it catches is silent and expensive: the alternative to a
+			-- warning here is a player being reset to Day 1 for correctly reading a hall that
+			-- nothing had changed.
+			warn("[Anomaly] no applier for '" .. tostring(pass.anomalyId) .. "'; treating this pass as CLEAN")
+			ps.clean = true
+			ps.anomalyId = nil
 		end
 	end
+
+	-- Publish the roll on the zone itself.
+	--
+	-- `passState` is a table local to this script, so from outside it there is no way to tell
+	-- whether the hall standing in the workspace is clean or which anomaly is in it. Anything
+	-- that needs to know - the marketing capture rig, which has to shoot a MATCHED pair of the
+	-- same hall clean and anomalous, or a headless check - was left inferring it from pixels or
+	-- from geometry it had to re-derive. These two attributes say out loud what the server just
+	-- decided, and they cost nothing to keep honest because they are written in the one place
+	-- the decision is made.
+	--
+	-- These live in ServerStorage, which does NOT replicate. They were briefly written onto the
+	-- zone model instead, which is parented to workspace, on the argument that it gave away
+	-- nothing hidden: per R12 the anomaly is a real Instance in the player's own zone, so a
+	-- client that wanted to cheat could already read the answer off the hall.
+	--
+	-- That argument is wrong, in one decisive place. On a CLEAN pass there is nothing in the
+	-- hall to read. Finding the anomaly by inspecting the world means proving a NEGATIVE against
+	-- a reference build you do not have; `Clean = true` hands that answer over as a labelled
+	-- boolean, and `AnomalyId` names the object so you need not look at all. "A determined
+	-- exploiter could derive it" and "every client is told it" are different costs, and the
+	-- whole game is the looking.
+	--
+	-- The capture rig and the headless check read these through the SERVER datamodel, so
+	-- ServerStorage costs them nothing.
+	--
+	-- Written AFTER the applier block on purpose: the missing-applier fallback demotes the pass
+	-- to clean, and a pass demoted to clean must not still advertise an anomaly id.
+	local info = passInfoFor(plr)
+	info:SetAttribute("Clean", ps.clean)
+	info:SetAttribute("AnomalyId", ps.anomalyId) -- nil removes the attribute
+	info:SetAttribute("Serial", ps.serial)
+	info:SetAttribute("Zone", zone.Name)
 
 	-- decision prompts on the end wall
 	local endWall = findPart(zone, "EndWall")
@@ -1128,12 +1290,43 @@ TintRemote.OnServerEvent:Connect(function(plr, tint)
 end)
 
 -- ------------------------------------------------------------------ Lifecycle
+-- SPAWN ORDER. `Player.CharacterAdded` fires while the character Model is still UNPARENTED with
+-- its root at the WORLD ORIGIN; ONE FRAME LATER the engine parents it and places it, silently
+-- discarding any CFrame written in between (measured in Studio 2026-09-10, robloxemu/SPAWN-ORDER.md).
+-- So a handler must not write immediately — and this one used to sleep `task.wait(0.2)` instead,
+-- which is not the same thing. Two problems with a sleep:
+--
+--   * it is a COINCIDENCE, not a rule. It beat the engine by twelve frames on the day it was
+--     written; nothing ties it to the engine's step, and nothing would have noticed if the
+--     number had ever been cut.
+--   * it leaves the player in the WRONG PLACE for all twelve of those frames, on every spawn and
+--     every respawn. This game has no SpawnLocation anywhere, and every concourse is out at
+--     `index * 1000` studs with `index` starting at 1 — so the engine's own answer is the void
+--     over the world origin: no floor under them, 100 studs below and >= 1000 studs west of the
+--     hall they are meant to be reading. Twelve frames of falling through black, then a snap.
+--
+-- Wait for the thing that actually decides it. `char.Parent` becoming non-nil is the signal
+-- because the engine parents and places in the SAME frame: once a parent is visible the engine
+-- has finished and the next write is the last one. Bounded, so a character that never arrives
+-- cannot park this handler for the session.
+local SPAWN_WAIT_FRAMES = 300 -- 5 s at 60 Hz; a character that has not arrived by then never will
+
 local function onCharacter(plr: Player, char: Model)
-	local origin = zones[plr] and zoneOrigin(tonumber(zones[plr]:GetAttribute("Index")) or 0)
-	if origin then
-		task.wait(0.2)
-		teleportToStart(plr, origin)
+	local frames = 0
+	while char.Parent == nil and frames < SPAWN_WAIT_FRAMES do
+		task.wait(1 / 60)
+		frames += 1
 	end
+	if char.Parent == nil then
+		return -- never made it into the world; there is nothing to place
+	end
+	-- Re-read the zone AFTER the wait: the player may have left, and their zone is destroyed on
+	-- PlayerRemoving. Reading it before the yield would have teleported a corpse to a dead index.
+	local zone = zones[plr]
+	if zone == nil then
+		return
+	end
+	teleportToStart(plr, zoneOrigin(tonumber(zone:GetAttribute("Index")) or 0))
 end
 
 Players.PlayerAdded:Connect(function(plr)
@@ -1203,6 +1396,10 @@ Players.PlayerRemoving:Connect(function(plr)
 	if zone then
 		releaseZoneIndex(tonumber(zone:GetAttribute("Index")) or 0)
 		zone:Destroy()
+	end
+	local info = passInfoRoot:FindFirstChild(tostring(plr.UserId))
+	if info then
+		info:Destroy()
 	end
 	profiles[plr] = nil
 	zones[plr] = nil

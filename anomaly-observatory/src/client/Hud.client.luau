@@ -642,8 +642,29 @@ local function ensureLight(char: Model): SpotLight?
 end
 
 -- yields (WaitForChild) — always call via task.spawn.
+--
+-- `if not char.Parent then return end` used to be the first line here, and it silently threw
+-- away every fresh character. `Player.CharacterAdded` fires while the model is still UNPARENTED
+-- (robloxemu/SPAWN-ORDER.md, measured in Studio 2026-09-10) and the CharacterAdded handler below
+-- calls this through `task.spawn`, which resumes the new thread IMMEDIATELY — so the guard read
+-- `Parent == nil` and returned before `ensureLight` ever ran. Nothing retried: the third caller,
+-- the State handler, only re-applies when the tint CHANGES, and a fresh player's tint equals the
+-- client's own starting `currentTint` (both `Config.DefaultTint`), so that branch never fired
+-- either. Net effect: the game's only cosmetic — and ECLIPSE's only reward — never appeared.
+--
+-- Wait for the character to be in the world instead of rejecting it for not being there yet. A
+-- parent that is still nil after the bound really is a destroyed or abandoned character, which is
+-- what the original guard was for, so that case still returns.
+local SPAWN_WAIT_FRAMES = 300 -- 5 s at 60 Hz
+
 local function applyTintLight(char: Model?)
-	if not char or not char.Parent then return end
+	if not char then return end
+	local frames = 0
+	while char.Parent == nil and frames < SPAWN_WAIT_FRAMES do
+		task.wait(1 / 60)
+		frames += 1
+	end
+	if not char.Parent then return end
 	local light = ensureLight(char)
 	if light then
 		light.Color = tintColor(currentTint)

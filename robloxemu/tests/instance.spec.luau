@@ -524,6 +524,77 @@ do
 	eq(#gui:GetDescendants(), 2, "GUI classes nest like any other Instance")
 end
 
+
+--============================================================ DescendantAdded / DescendantRemoving
+-- These were DECLARED as events but never fired, and that quietly blinded every client test that
+-- depends on parts streaming in. Roblox fires DescendantAdded on every ancestor, once per
+-- descendant; a Roblox HUD that repaints walls as the server builds a level therefore sees two
+-- signals per part, and the shim delivered none. A theme that repaints on rebuild measured as
+-- painting 0 of 95 walls here while working fine in game.
+do
+	local root = Instance.new("Folder")
+	local mid = Instance.new("Folder")
+	mid.Parent = root
+
+	local seenOnRoot, seenOnMid = {}, {}
+	root.DescendantAdded:Connect(function(d) table.insert(seenOnRoot, d.Name) end)
+	mid.DescendantAdded:Connect(function(d) table.insert(seenOnMid, d.Name) end)
+
+	local leaf = Instance.new("Part")
+	leaf.Name = "Leaf"
+	leaf.Parent = mid
+
+	eq(#seenOnRoot, 1, "DescendantAdded reaches the GRANDparent, not just the parent")
+	eq(seenOnRoot[1], "Leaf", "the grandparent is told which descendant arrived")
+	eq(#seenOnMid, 1, "DescendantAdded fires on the direct parent too")
+end
+
+do -- a whole subtree arriving fires once per descendant, not once for the root of it
+	local root = Instance.new("Folder")
+	local seen = {}
+	root.DescendantAdded:Connect(function(d) table.insert(seen, d.Name) end)
+
+	local branch = Instance.new("Folder")
+	branch.Name = "Branch"
+	local a = Instance.new("Part"); a.Name = "A"; a.Parent = branch
+	local b = Instance.new("Part"); b.Name = "B"; b.Parent = branch
+	-- nothing has reached `root` yet
+	eq(#seen, 0, "building a subtree elsewhere does not notify the future parent")
+
+	branch.Parent = root
+	eq(#seen, 3, "attaching a subtree reports the branch AND both of its parts")
+end
+
+do -- DescendantRemoving fires while the instance is still in the tree, as Roblox does
+	local root = Instance.new("Folder")
+	local leaf = Instance.new("Part")
+	leaf.Name = "Doomed"
+	leaf.Parent = root
+
+	local parentAtFireTime = "never fired"
+	root.DescendantRemoving:Connect(function(d)
+		parentAtFireTime = if d.Parent == nil then "already detached" else d.Parent.ClassName
+	end)
+	leaf.Parent = nil
+	eq(parentAtFireTime, "Folder", "DescendantRemoving fires BEFORE the child is detached")
+end
+
+do -- reparenting notifies the old tree and the new one, and never the unchanged case
+	local from, to = Instance.new("Folder"), Instance.new("Folder")
+	local added, removing = 0, 0
+	to.DescendantAdded:Connect(function() added += 1 end)
+	from.DescendantRemoving:Connect(function() removing += 1 end)
+
+	local p = Instance.new("Part")
+	p.Parent = from
+	p.Parent = to
+	eq(added, 1, "the new tree is told once")
+	eq(removing, 1, "the old tree is told once")
+
+	p.Parent = to -- same parent: Roblox does nothing at all
+	eq(added, 1, "setting the same parent again fires nothing")
+end
+
 print(string.format("instance: %d passed, %d failed", passed, failed))
 if failed > 0 then
 	error("instance tests failed")

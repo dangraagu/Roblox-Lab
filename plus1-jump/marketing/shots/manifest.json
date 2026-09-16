@@ -1,0 +1,50 @@
+[
+  {
+    "name": "climb",
+    "file": "plus1-jump/marketing/shots/gameplay/climb.png",
+    "camera": [
+      18.5249995,
+      22.0,
+      136.399994
+    ],
+    "look_at": [
+      -15.4750005,
+      96.0,
+      102.399994
+    ],
+    "fog_lifted": false,
+    "note": "As the game actually looks."
+  },
+  {
+    "name": "tower_iso",
+    "file": "plus1-jump/marketing/shots/gameplay/tower_iso.png",
+    "camera": [
+      -105.4750005,
+      209.75,
+      12.399994000000007
+    ],
+    "look_at": [
+      -15.4750005,
+      209.75,
+      102.399994
+    ],
+    "fog_lifted": false,
+    "note": "As the game actually looks."
+  },
+  {
+    "name": "from_top",
+    "file": "plus1-jump/marketing/shots/gameplay/from_top.png",
+    "camera": [
+      4.5249995,
+      393.5,
+      122.399994
+    ],
+    "look_at": [
+      -15.4750005,
+      26.0,
+      102.399994
+    ],
+    "fog_lifted": false,
+    "note": "As the game actually looks."
+  }
+]

@@ -23,7 +23,10 @@ commit one. `labyrint-spill/deploy_to_roblox.bat` and `publish_now.bat` are trac
 they read a key from a file that is not present, so they do not currently work. Either supply
 `roblox_api_key.txt` or ignore them.
 
-Roblox Studio must be closed, or `rojo build` hits a file lock.
+Studio must not have **this game's** place file open, or `rojo build` hits a file lock. It does not
+have to be closed: Anomaly was published as version 10 on 2026-09-10 while Studio sat with
+`fork-tower/ForkTower.rbxlx` open and a play session running, and the build wrote `Anomaly.rbxl`
+without complaint. The lock is per file, not per process.
 
 ## Reading the result
 
@@ -47,6 +50,9 @@ like a successful one — an expired key would have been indistinguishable from 
    `[Plus1] +1 Jump Every Step lastet.`, `[Anomaly] Night Shift at the Observatory loaded.`
    Its absence is the only signal for a class of failure that raises no error — a `WaitForChild`
    on a module that did not reach ReplicatedStorage yields forever and logs a warning, not a fault.
+3. **The thumbnail is a separate upload again.** Publishing a place does not touch it, and the
+   dashboard's upload control cannot be automated the obvious way. The call that works, and the
+   four routes that do not, are in [thumbnails.md](thumbnails.md).
 
 ## Rolling back
 
@@ -67,3 +73,64 @@ It renders nothing, runs no `UIListLayout` positioning, and cannot measure a pan
 at boot. It prints what it did not check rather than implying full coverage. The luau CLI it runs
 on is not pinned by any manifest in this repo, so its counts cannot be reproduced from a clean
 checkout — a `rokit.toml` is the fix and has not been written.
+
+## Changing the store text (name, description)
+
+Not through Open Cloud. `PATCH /cloud/v2/universes/{id}?updateMask=description` answers **200**
+and stores nothing. Measured on 2026-09-09 across eight lengths from 200 to 1600 characters:
+every one returned 200, and a fresh GET after each returned the unchanged original. The GET on
+the same endpoint works and is the reliable way to read what is actually live, which is what
+`tools/store_text.py` uses.
+
+The endpoint that works is the one the Creator Dashboard itself calls:
+
+```
+PATCH https://develop.roblox.com/v2/universes/{universeId}/configuration
+{"description": "..."}
+```
+
+It needs the logged-in session cookie and an `x-csrf-token`, so it runs from the browser, not
+from a script with an API key. Get the token by sending the same PATCH with an empty body and
+reading `x-csrf-token` off the 403 response.
+
+Three things it will refuse:
+
+- **Over 1000 characters.** That is the dashboard field's limit. The reviewed drafts ran 1522
+  to 2005 and had to be cut.
+- **Moderation.** A rejection is `400 {"code":7,"message":"New universe name or description has
+  been rejected."}` and it names nothing. Bisect line by line against the endpoint - a rejected
+  write changes nothing, so it is safe to probe.
+- **Coloured square emoji.** Both 🟦 and 🟩 were rejected on their own, twice each, in a line
+  that passed the moment the square was removed. 🔥 👹 🏁 🛒 🎨 🎁 💎 🏆 🔦 ⚠ ⬇ ♻ 🏛 🔓 all
+  passed. This is worth knowing before spending an hour on the wording, which is what happened.
+
+**A 200 is not proof.** `store_text.py` reads the description back after every write and reports
+APPLIED only when what Roblox serves is identical to what was sent. It reports NOT APPLIED
+otherwise, which is how the silent Open Cloud no-op was caught at all - the first run of it
+claimed success on the strength of the status code.
+
+## Is the live place actually running what the repo says?
+
+`git push` does not publish, and the gap is invisible from the repo. Audited 2026-09-10:
+
+| Game | Live version | Published | Newest commit touching `src/` | Verdict |
+|---|---|---|---|---|
+| Labyrinth Mariozo | 24 | 09-09 17:57 | 09-09 17:56 `5201105` | in sync |
+| Grow a Crystal | 10 | 09-09 23:55 | 09-09 23:54 `b92c316` | in sync |
+| +1 Jump Every Step | 6 | 09-09 23:12 | 09-09 23:12 `254aebd` | in sync |
+| Anomaly: Night Shift | 9 | 09-09 20:08 | 09-09 23:48 `7853998` | **BEHIND** — published as 10 on 09-10 09:15 |
+
+Anomaly had been live on a build missing `Exclusivity = AlwaysShow` on the decision prompts, so a
+player standing between ADVANCE and TURN BACK saw one of their two choices — in a game whose whole
+interface is those two keys. Nobody would have noticed from the repo, and the Reddit announcement
+for that game was already queued.
+
+**Where to look.** The dashboard page is
+`https://create.roblox.com/dashboard/creations/experiences/{universeId}/places/{placeId}/version-history`
+— note `version-history`, not `versions`, which 404s. The table's top row is the live version and
+is the only one without a **Restore** button. `develop.roblox.com/v2/places/{placeId}/versions`
+answers the browser with a CORS failure, so read the page rather than that endpoint.
+
+Compare the timestamp against `git log --date=format:'%Y-%m-%d %H:%M' --pretty='%ad %h %s' -- <game>/src`.
+A publish lands within a minute or two of the commit it was built from, so a commit newer than the
+live timestamp is a change players cannot see. Do this before announcing a game anywhere.

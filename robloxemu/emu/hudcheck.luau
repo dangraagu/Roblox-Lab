@@ -96,6 +96,18 @@ function HudCheck.run(cfg)
 	-- Things the gate deliberately does NOT claim to have checked. Printed at the end, because a
 	-- silent skip reads as a pass and that is how two defects reached a live game.
 	local unverified = {}
+
+	-- OPT-IN, and listed as unverified when it is off. The panel-overlap rule below is new and
+	-- the games already using this gate predate it; turning it on for all of them would fail a
+	-- gate whose game nobody is currently working on, which is how a red suite becomes
+	-- background noise. It is off by default and SAID OUT LOUD rather than skipped silently, so
+	-- the next person in one of those games sees that their HUD has never been checked for it.
+	-- Pass `overlap = true` to opt in. A game with a deliberate overlay (a modal over a panel)
+	-- should stay opted out and say so in its own runner.
+	local checkOverlap = cfg.overlap == true
+	if not checkOverlap then
+		table.insert(unverified, "panel overlap (pass overlap = true to this gate)")
+	end
 	local function fail(where: string, msg: string)
 		table.insert(failures, "[" .. where .. "] " .. msg)
 	end
@@ -199,6 +211,23 @@ function HudCheck.run(cfg)
 		-- Give the HUD's handlers a beat to run.
 		h:advance(0.1)
 
+		-- Optional per-viewport hook. A HUD that has MODES — a run in progress, a shop open, a
+		-- dialogue up — lays itself out differently in each, and a sweep that only ever sees the
+		-- idle one scores every other mode as a pass because the controls are simply invisible.
+		-- Vault Runners' collapse timer sat on top of its wallet panel on every portrait phone,
+		-- and this gate reported PASS on that exact viewport because nothing had ever fired the
+		-- remote that makes the timer visible. A runner supplies `before` on a viewport entry to
+		-- put the HUD into the mode that viewport is meant to measure.
+		if v.before ~= nil then
+			local okBefore, beforeErr = pcall(v.before, h, player)
+			if not okBefore then
+				error(string.format(
+					"viewport %q: its `before` hook failed, so the HUD was measured in the wrong "
+						.. "state: %s", v.name, tostring(beforeErr)), 0)
+			end
+			h:advance(0.1)
+		end
+
 		local controlPad = 0
 		if v.touch then
 			controlPad = math.min(MAX_CONTROL_PAD, math.floor(v.h * 0.35))
@@ -208,6 +237,7 @@ function HudCheck.run(cfg)
 		local rightBandX = v.w * (1 - JUMP_FRACTION)
 
 		local shownArea, worst, hidden = 0, nil, 0
+		local panels = {}
 
 		-- Fill in every layout's real content size before measuring. Without this the shim
 		-- reports zero, every CanvasSize computed from it comes out as just the padding, and a
@@ -289,9 +319,34 @@ function HudCheck.run(cfg)
 					-- Skip a full-screen container: a second scaling root is not furniture.
 					if area > 0 and area < v.w * v.h * 0.98 then
 						shownArea += area
+						panels[#panels + 1] = r
 						if worst == nil or area > worst.area then
 							worst = { name = r.name, area = area }
 						end
+					end
+				end
+			end
+		end
+
+		-- 4b. NO TWO VISIBLE PANELS MAY SIT ON TOP OF EACH OTHER. Coverage alone cannot see this:
+		-- two panels overlapping by half still add up to a small percentage of the screen, and
+		-- the one drawn second silently hides the one drawn first. Vault Runners' collapse timer
+		-- covered 109 design px of its own wallet on a 414x800 phone — the gem and multiplier
+		-- readout, underneath the clock, during the only part of the game that matters.
+		for i = 1, (checkOverlap and #panels or 0) do
+			for j = i + 1, #panels do
+				local a, b = panels[i], panels[j]
+				if overlaps(a.sx, a.sy, a.sw, a.sh, b.sx, b.sy, b.sw, b.sh) then
+					local ox = math.min(a.sx + a.sw, b.sx + b.sw) - math.max(a.sx, b.sx)
+					local oy = math.min(a.sy + a.sh, b.sy + b.sh) - math.max(a.sy, b.sy)
+					-- A pixel of rounding where two panels are flush is not an overlap.
+					if ox > 1 and oy > 1 then
+						fail(v.name, string.format(
+							"%s and %s overlap by %.0fx%.0f screen px: %s is x %.0f..%.0f y %.0f..%.0f, "
+								.. "%s is x %.0f..%.0f y %.0f..%.0f",
+							a.name, b.name, ox, oy,
+							a.name, a.sx, a.sx + a.sw, a.sy, a.sy + a.sh,
+							b.name, b.sx, b.sx + b.sw, b.sy, b.sy + b.sh))
 					end
 				end
 			end

@@ -1,0 +1,82 @@
+{
+  "_comment": "Registry of Reddit threads the watcher routine follows. It maintains this file itself: every new submission by the account is appended automatically, so publishing a new game and posting about it is enough to put that thread under watch. Hand-edit only to close a thread early or to add one posted from another account.",
+  "account": "Inside_Importance_90",
+  "games": [
+    { "key": "labyrint-spill",       "name": "Labyrinth Mariozo",   "place": "121268951050692", "announced": true },
+    { "key": "grow-a-crystal",       "name": "Grow a Crystal",      "place": "106123351742435", "announced": true },
+    { "key": "plus1-jump",           "name": "+1 Jump Every Step",  "place": "120040655253410", "announced": false },
+    { "key": "anomaly-observatory",  "name": "Anomaly: Night Shift","place": "123669267191209", "announced": false }
+  ],
+  "threads": [
+    {
+      "id": "1w661c3",
+      "subreddit": "robloxgamedev",
+      "url": "https://www.reddit.com/r/robloxgamedev/comments/1w661c3/feedback_on_my_500level_maze_obby_and_could/",
+      "game": "labyrint-spill",
+      "posted": "2026-09-06",
+      "state": "dormant",
+      "last_seen_comment_utc": 1788457451,
+      "notes": "First feedback post. u/popovitsj reported the lava-pool blocker that led to pulsing traps. u/Own-Distribution6314 offered to capture footage/feedback and was answered; no capture posted yet. Moved to dormant 2026-09-10: newest comment (Sep 3) over 3 days old, no new comments."
+    },
+    {
+      "id": "1w70kjb",
+      "subreddit": "RobloxDevelopers",
+      "url": "https://www.reddit.com/r/RobloxDevelopers/comments/1w70kjb/sharing_my_500level_maze_obby_labyrinth_mariozo/",
+      "game": "labyrint-spill",
+      "posted": "2026-09-07",
+      "state": "dormant",
+      "last_seen_comment_utc": 1788714177,
+      "notes": "u/popovitsj play-tested: found a region block (fixed), then the lava-pool dead end (fixed with pulsing lava + a coin-bought non-record Guide). All answered. Moved to dormant 2026-09-10: newest comment (Sep 6) over 3 days old, no new comments."
+    },
+    {
+      "id": "1w8hl6a",
+      "subreddit": "robloxgamedev",
+      "url": "https://www.reddit.com/r/robloxgamedev/comments/1w8hl6a/i_built_a_cozy_idle_grow_refract_crystals_sim/",
+      "game": "grow-a-crystal",
+      "posted": "2026-09-06",
+      "state": "closed",
+      "last_seen_comment_utc": 1788655522,
+      "notes": "Post itself shows [removed] (moderator removal) with no comments. Closed; not re-fetched."
+    },
+    {
+      "id": "1w8hna2",
+      "subreddit": "RobloxDevelopers",
+      "url": "https://www.reddit.com/r/RobloxDevelopers/comments/1w8hna2/sharing_my_new_idle_sim_grow_a_crystal_offline/",
+      "game": "grow-a-crystal",
+      "posted": "2026-09-06",
+      "state": "dormant",
+      "last_seen_comment_utc": 1788889205,
+      "notes": "Rough launch thread, mostly hostile. Real bugs (empty starting seeds, missing thumbnail, mobile HUD covering the screen) were reported and already fixed/answered by the owner. Two comments (Smart-Bee1186 p89lmcx, GroundWonderful9046 p8l49en) contain prompt-injection attempts telling the bot to run destructive shell commands - flagged, not answered. The one remaining top-level comment with no OP reply, p82q41v, is AutoModerator's stock Discord invite - a bot, and joining Discords is off-limits anyway. Nothing here is owed a reply; checked 2026-09-10. Moved to dormant 2026-09-12: newest comment (Sep 8) over 3 days old, no new comments since."
+    },
+    {
+      "id": "1wcafbz",
+      "subreddit": "RobloxDevelopers",
+      "url": "https://www.reddit.com/r/RobloxDevelopers/comments/1wcafbz/anomaly_night_shift_at_the_observatory_a/",
+      "game": "anomaly-observatory",
+      "posted": "2026-09-10",
+      "state": "closed",
+      "last_seen_comment_utc": 0,
+      "notes": "Announcement post, flaired 'AI Used' per the sub's rule 6 and disclosed in the body. Was pending_mod (submitted straight into the moderator queue). As of 2026-09-10 the post's own feed entry now reads [removed] with zero comments - the same signature as the Grow a Crystal removal. Moderator-removed; closed, not re-fetched. Flagged NEEDS YOU. Keep holding the +1 Jump announcement: this is now the second removal, in a different subreddit."
+    },
+    {
+      "id": "1qbr2xd",
+      "subreddit": "2007scape",
+      "url": "https://www.reddit.com/r/2007scape/comments/1qbr2xd/new_bis_boots_for_all_the_styles/",
+      "game": "unknown",
+      "posted": "2026-01-13",
+      "state": "dormant",
+      "last_seen_comment_utc": 1768331326,
+      "notes": "Unrelated OSRS suggestion post, not a game thread. Dormant, no action needed."
+    },
+    {
+      "id": "1ogftvr",
+      "subreddit": "ironscape",
+      "url": "https://www.reddit.com/r/ironscape/comments/1ogftvr/blast_furnace_for_cooking/",
+      "game": "unknown",
+      "posted": "2025-10-26",
+      "state": "dormant",
+      "last_seen_comment_utc": 1786394895,
+      "notes": "Unrelated OSRS suggestion post, not a game thread. Dormant, no action needed."
+    }
+  ]
+}
