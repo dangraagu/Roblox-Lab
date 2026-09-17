@@ -33,6 +33,9 @@ $places = @{
   "nightwatch-manor"    = "NightwatchManor.rbxlx"
   "deep-vein"           = "DeepVein.rbxlx"
   "vault-runners"       = "VaultRunners.rbxlx"
+  "lost-found-depot"    = "LostFoundDepot.rbxlx"
+  "steal-a-cryptid"     = "StealACryptid.rbxlx"
+  "facility-nightmare"  = "FacilityNightmare.rbxlx"
 }
 if (-not $places.ContainsKey($Game)) {
   Write-Output "Unknown game '$Game'. Known: $($places.Keys -join ', ')"
