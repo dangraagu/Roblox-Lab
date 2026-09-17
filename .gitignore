@@ -22,3 +22,8 @@ __pycache__/
 
 # TikTok Content Posting API access token (see docs/tiktok-api.md). Never commit it.
 tiktok_token.txt
+
+# generated TikTok hand-post queue (copies of committed clips)
+tiktok-queue/
+# raw screen recordings behind the clips
+*/marketing/clips/raw/

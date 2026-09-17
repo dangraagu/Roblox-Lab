@@ -1,0 +1,101 @@
+{
+  "grow_timelapse": {
+    "file": "grow-a-crystal/marketing/clips/grow_timelapse.mp4",
+    "source": "capture",
+    "what": "a crystal growing through all four stages - 68 s of real time at 6.5x",
+    "speed": 6.5,
+    "from_raw": [
+      "grow_cycle",
+      0.5,
+      68.0
+    ],
+    "staging": [
+      "new Play session (fresh profile)",
+      "fixed scripted camera on the three middle sockets",
+      "character parked behind the camera",
+      "grow_timelapse is sped up, and says so"
+    ],
+    "log": [
+      "click 2 @2001,717",
+      "click 3 @1413,717",
+      "click 4 @969,717",
+      "click 2 @2001,717",
+      "click 3 @1413,717",
+      "click 4 @969,717",
+      "hud"
+    ],
+    "recorded": "2026-09-17 10:09"
+  },
+  "plant_seed": {
+    "file": "grow-a-crystal/marketing/clips/plant_seed.mp4",
+    "source": "capture",
+    "what": "a Shard seed planted with a real click; the crystal appears in the socket",
+    "speed": 1.0,
+    "from_raw": [
+      "grow_cycle",
+      0.5,
+      5.0
+    ],
+    "staging": [
+      "new Play session (fresh profile)",
+      "fixed scripted camera on the three middle sockets",
+      "character parked behind the camera",
+      "grow_timelapse is sped up, and says so"
+    ],
+    "recorded": "2026-09-17 10:09"
+  },
+  "harvest": {
+    "file": "grow-a-crystal/marketing/clips/harvest.mp4",
+    "source": "capture",
+    "what": "a fully grown crystal is harvested with a click and the Gem Dust counter goes up",
+    "speed": 1.0,
+    "from_raw": [
+      "grow_cycle",
+      69.4,
+      6.0
+    ],
+    "staging": [
+      "new Play session (fresh profile)",
+      "fixed scripted camera on the three middle sockets",
+      "character parked behind the camera",
+      "grow_timelapse is sped up, and says so"
+    ],
+    "recorded": "2026-09-17 10:09"
+  },
+  "cavern_climb": {
+    "file": "grow-a-crystal/marketing/clips/cavern_climb.mp4",
+    "source": "capture",
+    "what": "the camera climbs the cavern's eight terraces, locked chambers and all, up to the basin",
+    "speed": 1.0,
+    "from_raw": [
+      "cavern_climb",
+      1.0,
+      7.5
+    ],
+    "staging": [
+      "scripted camera path in the running game"
+    ],
+    "log": [
+      "pathcam 6"
+    ],
+    "recorded": "2026-09-17 10:10"
+  },
+  "cavern_descend": {
+    "file": "grow-a-crystal/marketing/clips/cavern_descend.mp4",
+    "source": "capture",
+    "what": "from the basin at the top of the cavern back down to the planting sockets",
+    "speed": 1.0,
+    "from_raw": [
+      "cavern_descend",
+      3.1,
+      6.1
+    ],
+    "staging": [
+      "scripted camera path in the running game"
+    ],
+    "log": [
+      "pathcam 6"
+    ],
+    "recorded": "2026-09-17 10:10"
+  }
+}

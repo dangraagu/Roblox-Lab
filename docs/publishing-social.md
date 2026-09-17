@@ -76,3 +76,31 @@ and the login wants a password.
 So TikTok is one of two things: the owner drags each file in once (files and captions staged in
 `anomaly-observatory/marketing/tiktok/`), or somebody registers the developer app. Until then,
 **do not report TikTok as pending work each session** — it is blocked on a decision, not on effort.
+
+## Gameplay clips for every game, and the schedule (2026-09-17)
+
+Owner's rules: one Short every 3 hours all day, two clips per game per day, republish when a game's
+unique clips run out, and TikTok staged for hand-posting as `tiktok-queue/<date>/7am|7pm/N.mp4` next
+to `N.txt` (git-ignored copies; rebuild with `py -3 tools/content_schedule.py tiktok --from .. --to ..`).
+
+* **Recording.** `tools/record_studio.py` finds the Studio viewport by putting up a full-screen
+  magenta ScreenGui for one grab, then records only the centred 9:16 strip with ffmpeg `gdigrab`
+  (the whole 2890x1200 viewport only managed 18 fps; the strip holds 30). Studio must be maximised
+  and in front. `tools/film_game.py <plus1|crystal|laby> <scenario>` plays each scenario and writes
+  `<game>/marketing/clips/<name>.mp4` plus a manifest with every piece of staging (camera distance,
+  teleports, public codes, scripted camera paths, speed-ups).
+* **Driving a character in Studio over MCP** - measured, all 2026-09-17:
+  `character_navigation` plans with the default 7.2-stud jump and answers "Can not find a route" for
+  anything taller; `Humanoid:MoveTo` from `execute_luau` does not move a player character; holding
+  W and tapping Space with `user_keyboard_input` does, once the camera is turned toward the target
+  (W is camera-relative). A world part cannot be clicked by `instance_path` (GuiObjects only): project
+  it with `WorldToViewportPoint` and click those pixels. A GUI button can be clicked by path.
+* **Upload size.** The browser bridge refuses files over 10 MB; dark footage at crf 18 reached 27 MB.
+  Re-encode at crf 24-27 with `-maxrate 3M`.
+* **YouTube Studio automation.** A tab that is not the active one in its Chrome window is
+  `visibilityState: hidden`, its timers are throttled, and long `javascript_tool` calls time out.
+  Start the work unawaited and poll a window variable. The schedule time field is a dropdown of
+  15-minute steps: click the input, then click the `tp-yt-paper-item` whose text is the time.
+  Typing into it does nothing.
+* **Daily upload cap.** The 14th upload inside 24 hours was refused: *"Daglig opplastingsgrense er
+  nådd"*. A one-time account verification lifts it; that is the owner's step, not an automation one.
