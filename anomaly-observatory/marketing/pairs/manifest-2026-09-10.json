@@ -1,0 +1,422 @@
+{
+  "game": "anomaly-observatory",
+  "source": "capture",
+  "what": "Real Roblox Studio captures of the running game. The pair for each anomaly is the SAME camera on the SAME hall: the clean half is one pass, the anomalous half another, matched by the Clean/AnomalyId attributes beginPass writes on the zone.",
+  "staging": [
+    "the player HUD was switched off for the shot (it shows a day counter that changes every pass, which would read as the difference)",
+    "the avatar was parked behind the camera for the same reason",
+    "nothing in the hall itself was touched, and the lighting was not lifted"
+  ],
+  "camera": [
+    1000.0,
+    107.5,
+    4.0
+  ],
+  "look_at": [
+    1000.0,
+    107.5,
+    -86.0
+  ],
+  "zone_origin": [
+    1000.0,
+    100.0,
+    0.0
+  ],
+  "capture_size": [
+    1920,
+    798
+  ],
+  "gate": "a pair ships only if the difference inside the crop the clip actually shows is at least twice what two CLEAN passes differ by in the same crop, and at least 0.15% of it. Both numbers are per pair, in `measured`.",
+  "clean_frames": [
+    {
+      "file": "anomaly-observatory/marketing/pairs/_raw/clean_s4.png",
+      "serial": 4
+    },
+    {
+      "file": "anomaly-observatory/marketing/pairs/_raw/clean_s10.png",
+      "serial": 10
+    },
+    {
+      "file": "anomaly-observatory/marketing/pairs/_raw/clean_s13.png",
+      "serial": 13
+    },
+    {
+      "file": "anomaly-observatory/marketing/pairs/_raw/clean_s16.png",
+      "serial": 16
+    }
+  ],
+  "passes": [
+    {
+      "pass": 1,
+      "serial": 1,
+      "clean": false,
+      "anomaly_id": "clock_stop",
+      "captured": false
+    },
+    {
+      "pass": 2,
+      "serial": 2,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 3,
+      "serial": 3,
+      "clean": false,
+      "anomaly_id": "scope_gone",
+      "captured": true
+    },
+    {
+      "pass": 4,
+      "serial": 4,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": true
+    },
+    {
+      "pass": 5,
+      "serial": 5,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 6,
+      "serial": 6,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 7,
+      "serial": 7,
+      "clean": false,
+      "anomaly_id": "flicker_hall",
+      "captured": false
+    },
+    {
+      "pass": 8,
+      "serial": 8,
+      "clean": false,
+      "anomaly_id": "twin_scope",
+      "captured": true
+    },
+    {
+      "pass": 9,
+      "serial": 9,
+      "clean": false,
+      "anomaly_id": "figure_end",
+      "captured": true
+    },
+    {
+      "pass": 10,
+      "serial": 10,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": true
+    },
+    {
+      "pass": 11,
+      "serial": 11,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 12,
+      "serial": 12,
+      "clean": false,
+      "anomaly_id": "figure_window",
+      "captured": true
+    },
+    {
+      "pass": 13,
+      "serial": 13,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": true
+    },
+    {
+      "pass": 14,
+      "serial": 14,
+      "clean": false,
+      "anomaly_id": "figure_window",
+      "captured": false
+    },
+    {
+      "pass": 15,
+      "serial": 15,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 16,
+      "serial": 16,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": true
+    },
+    {
+      "pass": 17,
+      "serial": 17,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 18,
+      "serial": 18,
+      "clean": false,
+      "anomaly_id": "flicker_hall",
+      "captured": false
+    },
+    {
+      "pass": 19,
+      "serial": 19,
+      "clean": false,
+      "anomaly_id": "lights_out",
+      "captured": true
+    }
+  ],
+  "pairs": [
+    {
+      "anomaly_id": "figure_end",
+      "name": "The Watcher",
+      "clean": "anomaly-observatory/marketing/pairs/figure_end/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/figure_end/anomaly.png",
+      "clean_serial": 10,
+      "anomaly_serial": 9,
+      "noise_floor_from_serials": [
+        10,
+        13
+      ],
+      "camera": [
+        1000.0,
+        107.5,
+        4.0
+      ],
+      "look_at": [
+        1000.0,
+        107.5,
+        -86.0
+      ],
+      "zone_origin": [
+        1000.0,
+        100.0,
+        0.0
+      ],
+      "capture_size": [
+        1920,
+        798
+      ],
+      "crop_window": null,
+      "changed_fraction_in_crop": 0.0,
+      "noise_floor_in_crop": 0.0,
+      "diff_bbox": null,
+      "format": null,
+      "measured": [
+        "vertical 0.007% vs 0.007% floor",
+        "square 0.875% vs 0.878% floor",
+        "wide 0.492% vs 0.494% floor"
+      ],
+      "verdict": "not clearly visible in any crop"
+    },
+    {
+      "anomaly_id": "figure_window",
+      "name": "The Onlooker",
+      "clean": "anomaly-observatory/marketing/pairs/figure_window/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/figure_window/anomaly.png",
+      "clean_serial": 13,
+      "anomaly_serial": 12,
+      "noise_floor_from_serials": [
+        13,
+        10
+      ],
+      "camera": [
+        1000.0,
+        107.5,
+        4.0
+      ],
+      "look_at": [
+        1000.0,
+        107.5,
+        -86.0
+      ],
+      "zone_origin": [
+        1000.0,
+        100.0,
+        0.0
+      ],
+      "capture_size": [
+        1920,
+        798
+      ],
+      "crop_window": null,
+      "changed_fraction_in_crop": 0.0,
+      "noise_floor_in_crop": 0.0,
+      "diff_bbox": null,
+      "format": null,
+      "measured": [
+        "vertical 0.053% vs 0.007% floor",
+        "square 0.903% vs 0.878% floor",
+        "wide 0.508% vs 0.494% floor"
+      ],
+      "verdict": "not clearly visible in any crop"
+    },
+    {
+      "anomaly_id": "lights_out",
+      "name": "Blackout",
+      "clean": "anomaly-observatory/marketing/pairs/lights_out/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/lights_out/anomaly.png",
+      "clean_serial": 16,
+      "anomaly_serial": 19,
+      "noise_floor_from_serials": [
+        16,
+        13
+      ],
+      "camera": [
+        1000.0,
+        107.5,
+        4.0
+      ],
+      "look_at": [
+        1000.0,
+        107.5,
+        -86.0
+      ],
+      "zone_origin": [
+        1000.0,
+        100.0,
+        0.0
+      ],
+      "capture_size": [
+        1920,
+        798
+      ],
+      "crop_window": [
+        735,
+        0,
+        1184,
+        798
+      ],
+      "changed_fraction_in_crop": 0.881801,
+      "noise_floor_in_crop": 7.3e-05,
+      "diff_bbox": [
+        735,
+        0,
+        1184,
+        798
+      ],
+      "format": "vertical",
+      "measured": [
+        "vertical 88.180% vs 0.007% floor"
+      ],
+      "verdict": "ok",
+      "clip": "anomaly-observatory/marketing/pairs/lights_out/spot.mp4"
+    },
+    {
+      "anomaly_id": "scope_gone",
+      "name": "Missing Telescope",
+      "clean": "anomaly-observatory/marketing/pairs/scope_gone/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/scope_gone/anomaly.png",
+      "clean_serial": 4,
+      "anomaly_serial": 3,
+      "noise_floor_from_serials": [
+        4,
+        10
+      ],
+      "camera": [
+        1000.0,
+        107.5,
+        4.0
+      ],
+      "look_at": [
+        1000.0,
+        107.5,
+        -86.0
+      ],
+      "zone_origin": [
+        1000.0,
+        100.0,
+        0.0
+      ],
+      "capture_size": [
+        1920,
+        798
+      ],
+      "crop_window": [
+        735,
+        0,
+        1184,
+        798
+      ],
+      "changed_fraction_in_crop": 0.030899,
+      "noise_floor_in_crop": 0.000201,
+      "diff_bbox": [
+        750,
+        34,
+        1041,
+        564
+      ],
+      "format": "vertical",
+      "measured": [
+        "vertical 3.090% vs 0.020% floor"
+      ],
+      "verdict": "ok",
+      "clip": "anomaly-observatory/marketing/pairs/scope_gone/spot.mp4"
+    },
+    {
+      "anomaly_id": "twin_scope",
+      "name": "The Twin",
+      "clean": "anomaly-observatory/marketing/pairs/twin_scope/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/twin_scope/anomaly.png",
+      "clean_serial": 10,
+      "anomaly_serial": 8,
+      "noise_floor_from_serials": [
+        10,
+        4
+      ],
+      "camera": [
+        1000.0,
+        107.5,
+        4.0
+      ],
+      "look_at": [
+        1000.0,
+        107.5,
+        -86.0
+      ],
+      "zone_origin": [
+        1000.0,
+        100.0,
+        0.0
+      ],
+      "capture_size": [
+        1920,
+        798
+      ],
+      "crop_window": [
+        735,
+        0,
+        1184,
+        798
+      ],
+      "changed_fraction_in_crop": 0.019615,
+      "noise_floor_in_crop": 0.000201,
+      "diff_bbox": [
+        738,
+        419,
+        1081,
+        564
+      ],
+      "format": "vertical",
+      "measured": [
+        "vertical 1.961% vs 0.020% floor"
+      ],
+      "verdict": "ok",
+      "clip": "anomaly-observatory/marketing/pairs/twin_scope/spot.mp4"
+    }
+  ]
+}

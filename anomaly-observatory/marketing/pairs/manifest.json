@@ -1,7 +1,7 @@
 {
   "game": "anomaly-observatory",
   "source": "capture",
-  "what": "Real Roblox Studio captures of the running game. The pair for each anomaly is the SAME camera on the SAME hall: the clean half is one pass, the anomalous half another, matched by the Clean/AnomalyId attributes beginPass writes on the zone.",
+  "what": "Real Roblox Studio captures of the running game. The pair for each anomaly is the SAME camera on the SAME hall: the clean half is one pass, the anomalous half another, matched by the Clean/AnomalyId attributes beginPass writes into ServerStorage.PassInfo, which does not replicate to players.",
   "staging": [
     "the player HUD was switched off for the shot (it shows a day counter that changes every pass, which would read as the difference)",
     "the avatar was parked behind the camera for the same reason",
@@ -29,8 +29,12 @@
   "gate": "a pair ships only if the difference inside the crop the clip actually shows is at least twice what two CLEAN passes differ by in the same crop, and at least 0.15% of it. Both numbers are per pair, in `measured`.",
   "clean_frames": [
     {
-      "file": "anomaly-observatory/marketing/pairs/_raw/clean_s4.png",
-      "serial": 4
+      "file": "anomaly-observatory/marketing/pairs/_raw/clean_s3.png",
+      "serial": 3
+    },
+    {
+      "file": "anomaly-observatory/marketing/pairs/_raw/clean_s6.png",
+      "serial": 6
     },
     {
       "file": "anomaly-observatory/marketing/pairs/_raw/clean_s10.png",
@@ -41,8 +45,8 @@
       "serial": 13
     },
     {
-      "file": "anomaly-observatory/marketing/pairs/_raw/clean_s16.png",
-      "serial": 16
+      "file": "anomaly-observatory/marketing/pairs/_raw/clean_s17.png",
+      "serial": 17
     }
   ],
   "passes": [
@@ -50,35 +54,35 @@
       "pass": 1,
       "serial": 1,
       "clean": false,
-      "anomaly_id": "clock_stop",
+      "anomaly_id": "poster_red",
       "captured": false
     },
     {
       "pass": 2,
       "serial": 2,
-      "clean": true,
-      "anomaly_id": null,
+      "clean": false,
+      "anomaly_id": "lights_out",
       "captured": false
     },
     {
       "pass": 3,
       "serial": 3,
-      "clean": false,
-      "anomaly_id": "scope_gone",
+      "clean": true,
+      "anomaly_id": null,
       "captured": true
     },
     {
       "pass": 4,
       "serial": 4,
-      "clean": true,
-      "anomaly_id": null,
-      "captured": true
+      "clean": false,
+      "anomaly_id": "scope_gone",
+      "captured": false
     },
     {
       "pass": 5,
       "serial": 5,
-      "clean": true,
-      "anomaly_id": null,
+      "clean": false,
+      "anomaly_id": "figure_end",
       "captured": false
     },
     {
@@ -86,13 +90,13 @@
       "serial": 6,
       "clean": true,
       "anomaly_id": null,
-      "captured": false
+      "captured": true
     },
     {
       "pass": 7,
       "serial": 7,
       "clean": false,
-      "anomaly_id": "flicker_hall",
+      "anomaly_id": "twin_scope",
       "captured": false
     },
     {
@@ -100,14 +104,14 @@
       "serial": 8,
       "clean": false,
       "anomaly_id": "twin_scope",
-      "captured": true
+      "captured": false
     },
     {
       "pass": 9,
       "serial": 9,
       "clean": false,
-      "anomaly_id": "figure_end",
-      "captured": true
+      "anomaly_id": "reflection_off",
+      "captured": false
     },
     {
       "pass": 10,
@@ -119,16 +123,16 @@
     {
       "pass": 11,
       "serial": 11,
-      "clean": true,
-      "anomaly_id": null,
-      "captured": false
+      "clean": false,
+      "anomaly_id": "poster_red",
+      "captured": true
     },
     {
       "pass": 12,
       "serial": 12,
-      "clean": false,
-      "anomaly_id": "figure_window",
-      "captured": true
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
     },
     {
       "pass": 13,
@@ -140,8 +144,8 @@
     {
       "pass": 14,
       "serial": 14,
-      "clean": false,
-      "anomaly_id": "figure_window",
+      "clean": true,
+      "anomaly_id": null,
       "captured": false
     },
     {
@@ -154,40 +158,791 @@
     {
       "pass": 16,
       "serial": 16,
-      "clean": true,
-      "anomaly_id": null,
-      "captured": true
+      "clean": false,
+      "anomaly_id": "figure_end",
+      "captured": false
     },
     {
       "pass": 17,
       "serial": 17,
       "clean": true,
       "anomaly_id": null,
-      "captured": false
+      "captured": true
     },
     {
       "pass": 18,
       "serial": 18,
-      "clean": false,
-      "anomaly_id": "flicker_hall",
+      "clean": true,
+      "anomaly_id": null,
       "captured": false
     },
     {
       "pass": 19,
       "serial": 19,
       "clean": false,
-      "anomaly_id": "lights_out",
+      "anomaly_id": "scale_bench",
       "captured": true
+    },
+    {
+      "pass": 20,
+      "serial": 20,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 21,
+      "serial": 21,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 22,
+      "serial": 22,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 23,
+      "serial": 23,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 24,
+      "serial": 24,
+      "clean": false,
+      "anomaly_id": "figure_window",
+      "captured": false
+    },
+    {
+      "pass": 25,
+      "serial": 25,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 26,
+      "serial": 26,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 27,
+      "serial": 27,
+      "clean": false,
+      "anomaly_id": "dupe_door",
+      "captured": false
+    },
+    {
+      "pass": 28,
+      "serial": 28,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 29,
+      "serial": 29,
+      "clean": false,
+      "anomaly_id": "clock_stop",
+      "captured": false
+    },
+    {
+      "pass": 30,
+      "serial": 30,
+      "clean": false,
+      "anomaly_id": "figure_end",
+      "captured": false
+    },
+    {
+      "pass": 31,
+      "serial": 31,
+      "clean": false,
+      "anomaly_id": "flicker_hall",
+      "captured": false
+    },
+    {
+      "pass": 32,
+      "serial": 32,
+      "clean": false,
+      "anomaly_id": "sign_swap",
+      "captured": false
+    },
+    {
+      "pass": 33,
+      "serial": 33,
+      "clean": false,
+      "anomaly_id": "lights_out",
+      "captured": false
+    },
+    {
+      "pass": 34,
+      "serial": 34,
+      "clean": false,
+      "anomaly_id": "figure_window",
+      "captured": false
+    },
+    {
+      "pass": 35,
+      "serial": 35,
+      "clean": false,
+      "anomaly_id": "flicker_hall",
+      "captured": false
+    },
+    {
+      "pass": 36,
+      "serial": 36,
+      "clean": false,
+      "anomaly_id": "lights_out",
+      "captured": false
+    },
+    {
+      "pass": 37,
+      "serial": 37,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 38,
+      "serial": 38,
+      "clean": false,
+      "anomaly_id": "figure_end",
+      "captured": false
+    },
+    {
+      "pass": 39,
+      "serial": 39,
+      "clean": false,
+      "anomaly_id": "reflection_off",
+      "captured": false
+    },
+    {
+      "pass": 40,
+      "serial": 40,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 41,
+      "serial": 41,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 42,
+      "serial": 42,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 43,
+      "serial": 43,
+      "clean": false,
+      "anomaly_id": "clock_stop",
+      "captured": false
+    },
+    {
+      "pass": 44,
+      "serial": 44,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 45,
+      "serial": 45,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 46,
+      "serial": 46,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 47,
+      "serial": 47,
+      "clean": false,
+      "anomaly_id": "sign_swap",
+      "captured": false
+    },
+    {
+      "pass": 48,
+      "serial": 48,
+      "clean": false,
+      "anomaly_id": "twin_scope",
+      "captured": false
+    },
+    {
+      "pass": 49,
+      "serial": 49,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 50,
+      "serial": 50,
+      "clean": false,
+      "anomaly_id": "count_off",
+      "captured": false
+    },
+    {
+      "pass": 51,
+      "serial": 51,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 52,
+      "serial": 52,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 53,
+      "serial": 53,
+      "clean": false,
+      "anomaly_id": "twin_scope",
+      "captured": false
+    },
+    {
+      "pass": 54,
+      "serial": 54,
+      "clean": false,
+      "anomaly_id": "door_extra",
+      "captured": true
+    },
+    {
+      "pass": 55,
+      "serial": 55,
+      "clean": false,
+      "anomaly_id": "plant_gone",
+      "captured": true
+    },
+    {
+      "pass": 56,
+      "serial": 56,
+      "clean": false,
+      "anomaly_id": "clock_stop",
+      "captured": false
+    },
+    {
+      "pass": 57,
+      "serial": 57,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 58,
+      "serial": 58,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 59,
+      "serial": 59,
+      "clean": false,
+      "anomaly_id": "figure_ceiling",
+      "captured": true
+    },
+    {
+      "pass": 60,
+      "serial": 60,
+      "clean": false,
+      "anomaly_id": "door_extra",
+      "captured": false
+    },
+    {
+      "pass": 61,
+      "serial": 61,
+      "clean": false,
+      "anomaly_id": "twin_scope",
+      "captured": false
+    },
+    {
+      "pass": 62,
+      "serial": 62,
+      "clean": false,
+      "anomaly_id": "sign_swap",
+      "captured": false
+    },
+    {
+      "pass": 63,
+      "serial": 63,
+      "clean": false,
+      "anomaly_id": "dupe_door",
+      "captured": false
+    },
+    {
+      "pass": 64,
+      "serial": 64,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 65,
+      "serial": 65,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 66,
+      "serial": 66,
+      "clean": false,
+      "anomaly_id": "figure_ceiling",
+      "captured": false
+    },
+    {
+      "pass": 67,
+      "serial": 67,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 68,
+      "serial": 68,
+      "clean": false,
+      "anomaly_id": "mirror_extra",
+      "captured": true
+    },
+    {
+      "pass": 69,
+      "serial": 69,
+      "clean": false,
+      "anomaly_id": "static_screen",
+      "captured": true
+    },
+    {
+      "pass": 70,
+      "serial": 70,
+      "clean": false,
+      "anomaly_id": "twin_scope",
+      "captured": false
+    },
+    {
+      "pass": 71,
+      "serial": 71,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 72,
+      "serial": 72,
+      "clean": false,
+      "anomaly_id": "static_screen",
+      "captured": false
+    },
+    {
+      "pass": 73,
+      "serial": 73,
+      "clean": false,
+      "anomaly_id": "poster_red",
+      "captured": false
+    },
+    {
+      "pass": 74,
+      "serial": 74,
+      "clean": false,
+      "anomaly_id": "cold_breath",
+      "captured": false
+    },
+    {
+      "pass": 75,
+      "serial": 75,
+      "clean": false,
+      "anomaly_id": "dupe_door",
+      "captured": false
+    },
+    {
+      "pass": 76,
+      "serial": 76,
+      "clean": false,
+      "anomaly_id": "mirror_extra",
+      "captured": false
+    },
+    {
+      "pass": 77,
+      "serial": 77,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 78,
+      "serial": 78,
+      "clean": false,
+      "anomaly_id": "flicker_hall",
+      "captured": false
+    },
+    {
+      "pass": 79,
+      "serial": 79,
+      "clean": false,
+      "anomaly_id": "chair_moved",
+      "captured": true
+    },
+    {
+      "pass": 80,
+      "serial": 80,
+      "clean": false,
+      "anomaly_id": "poster_red",
+      "captured": false
+    },
+    {
+      "pass": 81,
+      "serial": 81,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 82,
+      "serial": 82,
+      "clean": false,
+      "anomaly_id": "scope_tilt",
+      "captured": true
+    },
+    {
+      "pass": 83,
+      "serial": 83,
+      "clean": false,
+      "anomaly_id": "door_extra",
+      "captured": false
+    },
+    {
+      "pass": 84,
+      "serial": 84,
+      "clean": false,
+      "anomaly_id": "lights_out",
+      "captured": false
+    },
+    {
+      "pass": 85,
+      "serial": 85,
+      "clean": false,
+      "anomaly_id": "reflection_off",
+      "captured": false
+    },
+    {
+      "pass": 86,
+      "serial": 86,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 87,
+      "serial": 87,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 88,
+      "serial": 88,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
+    },
+    {
+      "pass": 89,
+      "serial": 89,
+      "clean": false,
+      "anomaly_id": "figure_end",
+      "captured": false
+    },
+    {
+      "pass": 90,
+      "serial": 90,
+      "clean": true,
+      "anomaly_id": null,
+      "captured": false
     }
   ],
   "pairs": [
     {
-      "anomaly_id": "figure_end",
-      "name": "The Watcher",
-      "clean": "anomaly-observatory/marketing/pairs/figure_end/clean.png",
-      "anomaly": "anomaly-observatory/marketing/pairs/figure_end/anomaly.png",
-      "clean_serial": 10,
-      "anomaly_serial": 9,
+      "anomaly_id": "chair_moved",
+      "name": "Displaced",
+      "clean": "anomaly-observatory/marketing/pairs/chair_moved/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/chair_moved/anomaly.png",
+      "clean_serial": 3,
+      "anomaly_serial": 79,
+      "noise_floor_from_serials": [
+        17,
+        13
+      ],
+      "camera": [
+        1000.0,
+        107.5,
+        4.0
+      ],
+      "look_at": [
+        1000.0,
+        107.5,
+        -86.0
+      ],
+      "zone_origin": [
+        1000.0,
+        100.0,
+        0.0
+      ],
+      "capture_size": [
+        1920,
+        798
+      ],
+      "crop_window": [
+        735,
+        0,
+        1184,
+        798
+      ],
+      "changed_fraction_in_crop": 0.004479,
+      "noise_floor_in_crop": 0.000561,
+      "diff_bbox": [
+        804,
+        30,
+        967,
+        484
+      ],
+      "format": "vertical",
+      "measured": [
+        "vertical 3.108% vs 0.003% floor"
+      ],
+      "verdict": "ok",
+      "clip": "anomaly-observatory/marketing/pairs/chair_moved/spot.mp4",
+      "repaired": "2026-09-17: re-paired with the clean frame that matches best outside the anomaly. The hall has two render states (a lit glass panel between the far pads, on or off); the time-nearest clean was in the other state, so the first cut showed that as the difference. Floor = largest diff between two same-state clean frames."
+    },
+    {
+      "anomaly_id": "door_extra",
+      "name": "The Extra Door",
+      "clean": "anomaly-observatory/marketing/pairs/door_extra/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/door_extra/anomaly.png",
+      "clean_serial": 3,
+      "anomaly_serial": 54,
+      "noise_floor_from_serials": [
+        17,
+        13
+      ],
+      "camera": [
+        1000.0,
+        107.5,
+        4.0
+      ],
+      "look_at": [
+        1000.0,
+        107.5,
+        -86.0
+      ],
+      "zone_origin": [
+        1000.0,
+        100.0,
+        0.0
+      ],
+      "capture_size": [
+        1920,
+        798
+      ],
+      "crop_window": [
+        735,
+        0,
+        1184,
+        798
+      ],
+      "changed_fraction_in_crop": 0.00348,
+      "noise_floor_in_crop": 0.000561,
+      "diff_bbox": [
+        801,
+        32,
+        1161,
+        517
+      ],
+      "format": "vertical",
+      "measured": [
+        "vertical 2.878% vs 0.003% floor"
+      ],
+      "verdict": "ok",
+      "clip": "anomaly-observatory/marketing/pairs/door_extra/spot.mp4",
+      "repaired": "2026-09-17: re-paired with the clean frame that matches best outside the anomaly. The hall has two render states (a lit glass panel between the far pads, on or off); the time-nearest clean was in the other state, so the first cut showed that as the difference. Floor = largest diff between two same-state clean frames."
+    },
+    {
+      "anomaly_id": "figure_ceiling",
+      "name": "The Climber",
+      "clean": "anomaly-observatory/marketing/pairs/figure_ceiling/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/figure_ceiling/anomaly.png",
+      "clean_serial": 3,
+      "anomaly_serial": 59,
+      "noise_floor_from_serials": [
+        17,
+        13
+      ],
+      "camera": [
+        1000.0,
+        107.5,
+        4.0
+      ],
+      "look_at": [
+        1000.0,
+        107.5,
+        -86.0
+      ],
+      "zone_origin": [
+        1000.0,
+        100.0,
+        0.0
+      ],
+      "capture_size": [
+        1920,
+        798
+      ],
+      "crop_window": [
+        735,
+        0,
+        1184,
+        798
+      ],
+      "changed_fraction_in_crop": 0.002607,
+      "noise_floor_in_crop": 0.000561,
+      "diff_bbox": [
+        888,
+        31,
+        979,
+        341
+      ],
+      "format": "vertical",
+      "measured": [
+        "vertical 3.228% vs 0.003% floor"
+      ],
+      "verdict": "ok",
+      "clip": "anomaly-observatory/marketing/pairs/figure_ceiling/spot.mp4",
+      "repaired": "2026-09-17: re-paired with the clean frame that matches best outside the anomaly. The hall has two render states (a lit glass panel between the far pads, on or off); the time-nearest clean was in the other state, so the first cut showed that as the difference. Floor = largest diff between two same-state clean frames."
+    },
+    {
+      "anomaly_id": "mirror_extra",
+      "name": "One Too Many",
+      "clean": "anomaly-observatory/marketing/pairs/mirror_extra/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/mirror_extra/anomaly.png",
+      "clean_serial": 17,
+      "anomaly_serial": 68,
+      "noise_floor_from_serials": [
+        17,
+        13
+      ],
+      "camera": [
+        1000.0,
+        107.5,
+        4.0
+      ],
+      "look_at": [
+        1000.0,
+        107.5,
+        -86.0
+      ],
+      "zone_origin": [
+        1000.0,
+        100.0,
+        0.0
+      ],
+      "capture_size": [
+        1920,
+        798
+      ],
+      "crop_window": [
+        735,
+        0,
+        1184,
+        798
+      ],
+      "changed_fraction_in_crop": 0.005984,
+      "noise_floor_in_crop": 0.000561,
+      "diff_bbox": [
+        1024,
+        352,
+        1129,
+        479
+      ],
+      "format": "vertical",
+      "measured": [
+        "vertical 0.598% vs 0.003% floor"
+      ],
+      "verdict": "ok",
+      "clip": "anomaly-observatory/marketing/pairs/mirror_extra/spot.mp4",
+      "repaired": "2026-09-17: re-paired with the clean frame that matches best outside the anomaly. The hall has two render states (a lit glass panel between the far pads, on or off); the time-nearest clean was in the other state, so the first cut showed that as the difference. Floor = largest diff between two same-state clean frames."
+    },
+    {
+      "anomaly_id": "plant_gone",
+      "name": "Barren",
+      "clean": "anomaly-observatory/marketing/pairs/plant_gone/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/plant_gone/anomaly.png",
+      "clean_serial": 3,
+      "anomaly_serial": 55,
+      "noise_floor_from_serials": [
+        17,
+        13
+      ],
+      "camera": [
+        1000.0,
+        107.5,
+        4.0
+      ],
+      "look_at": [
+        1000.0,
+        107.5,
+        -86.0
+      ],
+      "zone_origin": [
+        1000.0,
+        100.0,
+        0.0
+      ],
+      "capture_size": [
+        1920,
+        798
+      ],
+      "crop_window": [
+        735,
+        0,
+        1184,
+        798
+      ],
+      "changed_fraction_in_crop": 0.0,
+      "noise_floor_in_crop": 0.000561,
+      "diff_bbox": null,
+      "format": null,
+      "measured": [
+        "vertical 3.394% vs 0.003% floor"
+      ],
+      "verdict": "not clearly visible in the vertical crop (0.000% vs floor 0.056%)",
+      "repaired": "2026-09-17: re-paired with the clean frame that matches best outside the anomaly. The hall has two render states (a lit glass panel between the far pads, on or off); the time-nearest clean was in the other state, so the first cut showed that as the difference. Floor = largest diff between two same-state clean frames."
+    },
+    {
+      "anomaly_id": "poster_red",
+      "name": "Red Shift",
+      "clean": "anomaly-observatory/marketing/pairs/poster_red/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/poster_red/anomaly.png",
+      "clean_serial": 17,
+      "anomaly_serial": 11,
       "noise_floor_from_serials": [
         10,
         13
@@ -211,69 +966,37 @@
         1920,
         798
       ],
-      "crop_window": null,
-      "changed_fraction_in_crop": 0.0,
-      "noise_floor_in_crop": 0.0,
-      "diff_bbox": null,
-      "format": null,
-      "measured": [
-        "vertical 0.007% vs 0.007% floor",
-        "square 0.875% vs 0.878% floor",
-        "wide 0.492% vs 0.494% floor"
-      ],
-      "verdict": "not clearly visible in any crop"
-    },
-    {
-      "anomaly_id": "figure_window",
-      "name": "The Onlooker",
-      "clean": "anomaly-observatory/marketing/pairs/figure_window/clean.png",
-      "anomaly": "anomaly-observatory/marketing/pairs/figure_window/anomaly.png",
-      "clean_serial": 13,
-      "anomaly_serial": 12,
-      "noise_floor_from_serials": [
-        13,
-        10
-      ],
-      "camera": [
-        1000.0,
-        107.5,
-        4.0
-      ],
-      "look_at": [
-        1000.0,
-        107.5,
-        -86.0
-      ],
-      "zone_origin": [
-        1000.0,
-        100.0,
-        0.0
-      ],
-      "capture_size": [
-        1920,
+      "crop_window": [
+        735,
+        0,
+        1184,
         798
       ],
-      "crop_window": null,
-      "changed_fraction_in_crop": 0.0,
-      "noise_floor_in_crop": 0.0,
-      "diff_bbox": null,
-      "format": null,
-      "measured": [
-        "vertical 0.053% vs 0.007% floor",
-        "square 0.903% vs 0.878% floor",
-        "wide 0.508% vs 0.494% floor"
+      "changed_fraction_in_crop": 0.017376,
+      "noise_floor_in_crop": 0.000561,
+      "diff_bbox": [
+        779,
+        296,
+        1111,
+        591
       ],
-      "verdict": "not clearly visible in any crop"
+      "format": "vertical",
+      "measured": [
+        "vertical 1.750% vs 0.016% floor"
+      ],
+      "verdict": "ok",
+      "clip": "anomaly-observatory/marketing/pairs/poster_red/spot.mp4",
+      "repaired": "2026-09-17: re-paired with the clean frame that matches best outside the anomaly. The hall has two render states (a lit glass panel between the far pads, on or off); the time-nearest clean was in the other state, so the first cut showed that as the difference. Floor = largest diff between two same-state clean frames."
     },
     {
-      "anomaly_id": "lights_out",
-      "name": "Blackout",
-      "clean": "anomaly-observatory/marketing/pairs/lights_out/clean.png",
-      "anomaly": "anomaly-observatory/marketing/pairs/lights_out/anomaly.png",
-      "clean_serial": 16,
+      "anomaly_id": "scale_bench",
+      "name": "Too Big",
+      "clean": "anomaly-observatory/marketing/pairs/scale_bench/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/scale_bench/anomaly.png",
+      "clean_serial": 17,
       "anomaly_serial": 19,
       "noise_floor_from_serials": [
-        16,
+        17,
         13
       ],
       "camera": [
@@ -301,31 +1024,32 @@
         1184,
         798
       ],
-      "changed_fraction_in_crop": 0.881801,
-      "noise_floor_in_crop": 7.3e-05,
+      "changed_fraction_in_crop": 0.00504,
+      "noise_floor_in_crop": 0.000561,
       "diff_bbox": [
-        735,
-        0,
-        1184,
-        798
+        950,
+        430,
+        1048,
+        467
       ],
       "format": "vertical",
       "measured": [
-        "vertical 88.180% vs 0.007% floor"
+        "vertical 0.504% vs 0.003% floor"
       ],
       "verdict": "ok",
-      "clip": "anomaly-observatory/marketing/pairs/lights_out/spot.mp4"
+      "clip": "anomaly-observatory/marketing/pairs/scale_bench/spot.mp4",
+      "repaired": "2026-09-17: re-paired with the clean frame that matches best outside the anomaly. The hall has two render states (a lit glass panel between the far pads, on or off); the time-nearest clean was in the other state, so the first cut showed that as the difference. Floor = largest diff between two same-state clean frames."
     },
     {
-      "anomaly_id": "scope_gone",
-      "name": "Missing Telescope",
-      "clean": "anomaly-observatory/marketing/pairs/scope_gone/clean.png",
-      "anomaly": "anomaly-observatory/marketing/pairs/scope_gone/anomaly.png",
-      "clean_serial": 4,
-      "anomaly_serial": 3,
+      "anomaly_id": "scope_tilt",
+      "name": "Skewed",
+      "clean": "anomaly-observatory/marketing/pairs/scope_tilt/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/scope_tilt/anomaly.png",
+      "clean_serial": 6,
+      "anomaly_serial": 82,
       "noise_floor_from_serials": [
-        4,
-        10
+        17,
+        13
       ],
       "camera": [
         1000.0,
@@ -352,31 +1076,32 @@
         1184,
         798
       ],
-      "changed_fraction_in_crop": 0.030899,
-      "noise_floor_in_crop": 0.000201,
+      "changed_fraction_in_crop": 0.028398,
+      "noise_floor_in_crop": 0.000561,
       "diff_bbox": [
-        750,
-        34,
+        769,
+        150,
         1041,
-        564
+        566
       ],
       "format": "vertical",
       "measured": [
-        "vertical 3.090% vs 0.020% floor"
+        "vertical 2.891% vs 0.003% floor"
       ],
       "verdict": "ok",
-      "clip": "anomaly-observatory/marketing/pairs/scope_gone/spot.mp4"
+      "clip": "anomaly-observatory/marketing/pairs/scope_tilt/spot.mp4",
+      "repaired": "2026-09-17: re-paired with the clean frame that matches best outside the anomaly. The hall has two render states (a lit glass panel between the far pads, on or off); the time-nearest clean was in the other state, so the first cut showed that as the difference. Floor = largest diff between two same-state clean frames."
     },
     {
-      "anomaly_id": "twin_scope",
-      "name": "The Twin",
-      "clean": "anomaly-observatory/marketing/pairs/twin_scope/clean.png",
-      "anomaly": "anomaly-observatory/marketing/pairs/twin_scope/anomaly.png",
-      "clean_serial": 10,
-      "anomaly_serial": 8,
+      "anomaly_id": "static_screen",
+      "name": "Dead Channel",
+      "clean": "anomaly-observatory/marketing/pairs/static_screen/clean.png",
+      "anomaly": "anomaly-observatory/marketing/pairs/static_screen/anomaly.png",
+      "clean_serial": 17,
+      "anomaly_serial": 69,
       "noise_floor_from_serials": [
-        10,
-        4
+        17,
+        13
       ],
       "camera": [
         1000.0,
@@ -403,20 +1128,21 @@
         1184,
         798
       ],
-      "changed_fraction_in_crop": 0.019615,
-      "noise_floor_in_crop": 0.000201,
+      "changed_fraction_in_crop": 0.006134,
+      "noise_floor_in_crop": 0.000561,
       "diff_bbox": [
-        738,
-        419,
-        1081,
-        564
+        821,
+        291,
+        885,
+        445
       ],
       "format": "vertical",
       "measured": [
-        "vertical 1.961% vs 0.020% floor"
+        "vertical 0.613% vs 0.003% floor"
       ],
       "verdict": "ok",
-      "clip": "anomaly-observatory/marketing/pairs/twin_scope/spot.mp4"
+      "clip": "anomaly-observatory/marketing/pairs/static_screen/spot.mp4",
+      "repaired": "2026-09-17: re-paired with the clean frame that matches best outside the anomaly. The hall has two render states (a lit glass panel between the far pads, on or off); the time-nearest clean was in the other state, so the first cut showed that as the difference. Floor = largest diff between two same-state clean frames."
     }
   ]
 }

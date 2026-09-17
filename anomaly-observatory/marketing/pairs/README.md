@@ -127,3 +127,39 @@ compared against both source stills.
 Every clip now opens on the clean hall and holds on the anomalous one. The ~1.8% residual against
 the matching still is the caption drawn over it; the countdown digit inflates both hold columns,
 which is why `scope_gone` and `twin_scope` read closer than they look.
+
+## Second run (2026-09-17): eight more clips, and three things that broke
+
+Eight new clips, all `vertical` 1080x1920, 8.4 s, real Studio captures, each checked frame by
+frame (clean phase shows `clean.png`, the question phase shows `anomaly.png`, the reveal names the
+anomaly): `scope_tilt` Skewed, `poster_red` Red Shift, `mirror_extra` One Too Many,
+`figure_ceiling` The Climber, `scale_bench` Too Big, `static_screen` Dead Channel, `chair_moved`
+Displaced, `door_extra` The Extra Door. All eight are scheduled as Shorts, see
+`docs/marketing/youtube-schedule.md`.
+
+What went wrong on the way, so the next run does not repeat it:
+
+1. **Studio's `execute_luau` lost `_G` and `require`.** Since a September Studio update the
+   snippet runs with `_G == nil` and cannot require game modules ("cannot require 'Config' since
+   'Config' has additional values for the Capabilities property"). `HUD_OFF` errored on every
+   shot, nothing checked the result, and a whole run was captured with the HUD on; every caption
+   said the raw id. Fixed in `tools/film_anomaly.py`: the HUD state is kept as a `FilmHidden`
+   attribute on each ScreenGui, the tool refuses to shoot unless `HUD_OFF` answers `hid N`, and the
+   names are parsed from `src/shared/Config.luau`.
+2. **Render quality `Automatic` drops bloom** when Studio is not the focused window. The first
+   2026-09-17 run was visibly flatter than the 2026-09-10 clips. It was pinned to `Level21` by
+   hand before the good run; the tool now pins it itself before starting Play and stops if that
+   does not take.
+3. **The hall has two render states.** A lit glass panel between the far pads is sometimes on,
+   sometimes off, independent of the anomaly. Pairing each anomaly with the clean pass *nearest in
+   time* put the two states side by side, and the gate passed them on that difference alone
+   (about 3% of the crop, full-height bbox). The pairs were re-made with the clean frame that
+   matches best outside the anomaly, and the noise floor is now the largest difference between two
+   clean frames in the same state (0.056%). `plant_gone` then measured **0.000%**: the plant is
+   outside the vertical crop, so it has stills and no clip. `tools/film_anomaly.py` still pairs
+   by time; change that before the next run.
+
+Rejected by the gate this run (camera at the start of the hall cannot show them): `chart_flip`,
+`clock_stop`, `count_off`, `dupe_door`, `reflection_off`, `sign_swap`, `plant_gone`.
+`_raw/clean_s10.png` and `clean_s13.png` were overwritten by this run; the 2026-09-10 versions
+that `manifest-2026-09-10.json` names are in git history.

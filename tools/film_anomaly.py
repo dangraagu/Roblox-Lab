@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import re
 import json
 import os
 import shutil
@@ -105,14 +106,18 @@ return table.concat({
 }, "|")
 """
 
-# The catalog's display names, straight from the game's own Config so a clip can never be
-# captioned with a name this build does not use.
-NAMES = """
-local C = require(game:GetService("ReplicatedStorage"):WaitForChild("Config"))
-local out = {}
-for _, e in C.Anomaly.Catalog do out[e.id] = e.name end
-return game:GetService("HttpService"):JSONEncode(out)
-"""
+# The catalog's display names, parsed from the game's own Config source so a clip can never be
+# captioned with a name this build does not use. This used to `require` Config inside Studio, but
+# execute_luau can no longer require game modules ("cannot require 'Config' since 'Config' has
+# additional values for the Capabilities property"), and every caption fell back to the raw id.
+CONFIG_SRC = os.path.join(GAME, "src", "shared", "Config.luau")
+
+
+def catalog_names(path=CONFIG_SRC):
+    with io.open(path, encoding="utf-8") as f:
+        src = f.read()
+    return dict(re.findall(r'\{\s*id\s*=\s*"([a-z_]+)"\s*,\s*name\s*=\s*"([^"]+)"', src))
+
 
 # Park the avatar behind the camera. beginPass teleports it to the start pad every pass, which is
 # in front of the lens, so this runs again before every shot.
@@ -154,11 +159,14 @@ HUD_OFF = """
 local plr = game:GetService("Players").LocalPlayer
 local gui = plr and plr:FindFirstChild("PlayerGui")
 if not gui then return "NOGUI" end
-_G.__filmHud = _G.__filmHud or {}
+-- Remembered on the ScreenGui itself, not in _G: since Studio's September update execute_luau
+-- runs without _G or shared, and the old `_G.__filmHud` errored on every call. The error went
+-- unchecked, so a whole run was shot WITH the HUD on (2026-09-17). main() now refuses to shoot
+-- unless this returns "hid N".
 local n = 0
 for _, c in gui:GetDescendants() do
     if c:IsA("ScreenGui") and c.Enabled then
-        if _G.__filmHud[c] == nil then _G.__filmHud[c] = true end
+        c:SetAttribute("FilmHidden", true)
         c.Enabled = false
         n += 1
     end
@@ -174,14 +182,28 @@ return hrp and string.format("%.1f,%.1f,%.1f", hrp.Position.X, hrp.Position.Y, h
 """
 
 HUD_ON = """
-local saved = _G.__filmHud
-if not saved then return "nothing to restore" end
+local plr = game:GetService("Players").LocalPlayer
+local gui = plr and plr:FindFirstChild("PlayerGui")
+if not gui then return "NOGUI" end
 local n = 0
-for gui in saved do
-    if gui and gui.Parent then gui.Enabled = true; n += 1 end
+for _, c in gui:GetDescendants() do
+    if c:IsA("ScreenGui") and c:GetAttribute("FilmHidden") then
+        c:SetAttribute("FilmHidden", nil)
+        c.Enabled = true
+        n += 1
+    end
 end
-_G.__filmHud = nil
 return "restored " .. n
+"""
+
+# Studio's render quality defaults to Automatic, which drops bloom and light glow whenever Studio
+# is not the focused window - and it usually is not while driven over MCP. The 2026-09-17 run came
+# out visibly flatter than the 2026-09-10 clips for that reason. Pin it for the whole run.
+QUALITY = """
+local r = settings().Rendering
+r.QualityLevel = Enum.QualityLevel.Level21
+r.EditQualityLevel = Enum.QualityLevel.Level21
+return tostring(r.QualityLevel)
 """
 
 
@@ -305,15 +327,19 @@ def main():
             raise SystemExit("Studio advertises no tools - the MCP toggle is off. Run "
                              "tools/studio_open.ps1 anomaly-observatory")
 
+        # Pin render quality BEFORE Play: the Edit datamodel does not answer once Play is running.
+        quality = text_of(st.call("execute_luau", {"code": QUALITY, "datamodel_type": "Edit"}))
+        if "Level21" not in quality:
+            raise SystemExit("could not pin render quality (Studio said: %s). Stop Play and run "
+                             "again from Edit mode, or the clips come out without bloom."
+                             % quality[:200])
+        print("quality:", quality.strip())
         print(text_of(st.call("start_stop_play", {"is_start": True})))
         time.sleep(args.settle)
 
-        names = {}
-        try:
-            names = json.loads(text_of(st.call("execute_luau",
-                                               {"code": NAMES, "datamodel_type": "Server"})))
-        except (ValueError, SystemExit):
-            print("  (could not read the anomaly catalog names; captions will use the raw id)")
+        names = catalog_names()
+        if len(names) < 20:
+            raise SystemExit("read only %d anomaly names from %s" % (len(names), CONFIG_SRC))
 
         for p in range(1, args.max_passes + 1):
             raw = text_of(st.call("execute_luau",
@@ -347,8 +373,12 @@ def main():
             if want_this:
                 # HUD off and avatar parked, every time - both come back on their own between
                 # passes (a State push re-enables the HUD; beginPass teleports the avatar).
-                st.call("execute_luau", {"code": HUD_OFF, "datamodel_type": "Client"})
+                hid = text_of(st.call("execute_luau",
+                                      {"code": HUD_OFF, "datamodel_type": "Client"})).strip()
                 hud_hidden = True
+                if not re.fullmatch(r"hid \d+", hid):
+                    raise SystemExit("could not hide the HUD, so this shot would show it: %s"
+                                     % hid[:200])
                 park = PARK.replace("__X__", "%f" % origin[0]) \
                            .replace("__Y__", "%f" % (origin[1] + 4)) \
                            .replace("__Z__", "%f" % (origin[2] + 7))
