@@ -4,7 +4,8 @@
     py -3 tools/content_schedule.py tiktok --from 2026-09-17 --to 2026-09-25
 
 Owner's rules (2026-09-17):
-  * YouTube: one Short every 3 hours, all day. Two clips per game per day.
+  * YouTube: spread evenly through the day; as many a day as the upload cap allows (--per-day),
+    every published game in rotation, newest games weighted up (WEIGHTS).
   * When a game's unique clips run out, republish them (rotating titles), through the year.
   * TikTok is posted by hand: one folder per date, `7am` and `7pm` inside it, and in each one
     video N next to text file N, so it is drag-and-drop plus copy-paste.
@@ -26,7 +27,6 @@ import re
 import shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SLOTS = ["01:00", "04:00", "07:00", "10:00", "13:00", "16:00", "19:00", "22:00"]
 AI_LINE = ("Made by one person with an AI coding assistant: I set the design, pick the numbers and "
            "test the builds.")
 
@@ -181,42 +181,66 @@ def load_existing():
     return out
 
 
-def window(t):
-    """Index of the 3-hour window a time falls in (01-04 is 0, ..., 22-01 is 7)."""
-    return ((t.hour - 1) % 24) // 3
+# Owner, 2026-09-17: YouTube caps uploads (about 13 a day), so post only what the cap can upload,
+# rotate every published game evenly through the day, and give the NEWEST games the most posts.
+# Weight 1 = normal share; a newly published game goes in at 2 until it has a catalogue.
+WEIGHTS = {"anomaly": 1, "plus1": 1, "crystal": 1, "laby": 1}
 
 
-def build(start, end):
+def day_slots(per_day):
+    """`per_day` publish times spread evenly over 24 h, on the 15-minute grid YouTube's time picker
+    offers (it has no other values)."""
+    step = 24 * 60 / per_day
+    out = []
+    for i in range(per_day):
+        m = int(round(i * step / 15.0)) * 15
+        out.append("%02d:%02d" % (m // 60, m % 60))
+    return out
+
+
+def minutes(hhmm):
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def quotas(per_day, games):
+    """Largest-remainder split of the day's posts by weight."""
+    total = sum(WEIGHTS[g] for g in games)
+    raw = {g: per_day * WEIGHTS[g] / total for g in games}
+    q = {g: int(raw[g]) for g in games}
+    for g in sorted(games, key=lambda g: raw[g] - q[g], reverse=True)[:per_day - sum(q.values())]:
+        q[g] += 1
+    return q
+
+
+def build(start, end, per_day=12):
     existing = load_existing()
-    used = {}
-    for g, clips in CLIPS.items():
-        for c in clips:
-            used[c[0]] = sum(1 for _, p, _t in existing if p == c[0])
-    # Rotation: the least-posted clip goes next, ties broken by list order.
+    games = [g for g in WEIGHTS if WEIGHTS[g] > 0]
+    used = {c[0]: 0 for g in games for c in CLIPS[g]}
+    for _, p, _t in existing:
+        used[p] = used.get(p, 0) + 1
+    slots = day_slots(per_day)
     posts = []
-    day = start
-    order = ["plus1", "crystal", "laby", "anomaly"]
-    d_i = 0
+    day, d_i = start, 0
     while day <= end:
-        taken = {window(w) for w, _p, _t in existing if w.date() == day}
-        booked = {g: 0 for g in GAMES}
-        for w, p, _t in existing:
-            if w.date() == day:
-                booked[game_of(p)] += 1
-        free = [i for i in range(8) if i not in taken]
-        # Interleave games so the same game never gets two adjacent free slots when avoidable.
-        rot = order[d_i % 4:] + order[:d_i % 4]
+        today = [(w, p) for w, p, _t in existing if w.date() == day]
+        # A slot is taken if an existing post sits within half a slot of it.
+        half = 24 * 60 / per_day / 2
+        free = [t for t in slots
+                if not any(abs(minutes(w.strftime("%H:%M")) - minutes(t)) < half for w, _ in today)]
+        left = quotas(per_day, games)
+        for _, p in today:
+            left[game_of(p)] -= 1
+        # Deal the free slots out like cards, rotating who goes first each day, so every game is
+        # spread across the whole day rather than bunched.
+        order = games[d_i % len(games):] + games[:d_i % len(games)]
         queue = []
-        while len(queue) < len(free):
-            progressed = False
-            for g in rot:
-                if booked[g] < 2 and len(queue) < len(free):
+        while len(queue) < len(free) and any(left[g] > 0 for g in order):
+            for g in order:
+                if left[g] > 0 and len(queue) < len(free):
                     queue.append(g)
-                    booked[g] += 1
-                    progressed = True
-            if not progressed:
-                break
-        for slot_i, g in zip(free, queue):
+                    left[g] -= 1
+        for t, g in zip(free, queue):
             clips = CLIPS[g]
             k = min(range(len(clips)), key=lambda i: (used[clips[i][0]], i))
             path, what, titles = clips[k]
@@ -226,7 +250,7 @@ def build(start, end):
             info = GAMES[g]
             yt_desc = "%s %s Play it: %s %s" % (info["base"], what, info["link"], AI_LINE)
             posts.append({
-                "date": day.isoformat(), "time": SLOTS[slot_i], "game": g, "clip": path,
+                "date": day.isoformat(), "time": t, "game": g, "clip": path,
                 "title": title + " #shorts #roblox", "description": yt_desc,
                 "republish": n > 0,
                 "tiktok_text": "%s\n\n%s %s Play it: %s\n\n%s" % (title, info["base"], what,
@@ -273,13 +297,15 @@ def main():
     ap.add_argument("cmd", choices=["plan", "tiktok"])
     ap.add_argument("--from", dest="start", required=True)
     ap.add_argument("--to", dest="end", required=True)
+    ap.add_argument("--per-day", type=int, default=12,
+                    help="posts per day; stay under YouTube's upload cap (about 13 a day)")
     a = ap.parse_args()
     start, end = dt.date.fromisoformat(a.start), dt.date.fromisoformat(a.end)
     spath = os.path.join(ROOT, "docs", "marketing", "schedule.json")
     if a.cmd == "plan":
         # Posts already uploaded are in youtube-schedule.md and count as existing; drop them from
         # the new plan instead of planning them twice.
-        posts = build(start, end)
+        posts = build(start, end, a.per_day)
         with io.open(spath, "w", encoding="utf-8", newline="\n") as f:
             json.dump(posts, f, indent=1, ensure_ascii=False)
             f.write("\n")
