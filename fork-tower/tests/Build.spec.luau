@@ -153,10 +153,15 @@ do
 	-- trait, always the weaker, always the left door — and the cards those runs produce are what
 	-- the rarity ladder is measured against. If a tier never appears here, no player can ever get
 	-- it however they play.
+	--
+	-- The plans take Fork.legacySecrets: the server now draws each floor's hidden half at random
+	-- (REVIEW-4), and the rarity thresholds are quintiles MEASURED on these exact 400 plans. The
+	-- legacy secrets reproduce them field for field (Fork.spec), so the measurement stays
+	-- reproducible to the point instead of moving with every run of the suite.
 	local seenTier = {}
 	local best, worst = -1, 1e9
 	for s = 1, 400 do
-		local plan = Fork.plan(Config, s, Rng)
+		local plan = Fork.plan(Config, s, Rng, Fork.legacySecrets(Config, s))
 		local strong, weak, left = {}, {}, {}
 		for _, floor in ipairs(plan.floors) do
 			local a, b = floor.doors[1], floor.doors[2]
@@ -209,7 +214,7 @@ do
 
 	local drift = 0
 	for s = 1, 200 do
-		local plan = Fork.plan(Config, s, Rng)
+		local plan = Fork.plan(Config, s, Rng, Fork.legacySecrets(Config, s))
 		local picks = {}
 		for _, floor in ipairs(plan.floors) do
 			table.insert(picks, floor.doors[1].traitId)

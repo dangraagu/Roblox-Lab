@@ -35,6 +35,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService") -- GenerateGUID only (session tokens); no HTTP
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Rng = require(ReplicatedStorage:WaitForChild("Rng"))
@@ -230,6 +231,11 @@ type Profile = {
 	--                under them mid-climb.
 	readFloors: { [number]: boolean },
 	skipped: { [number]: boolean },
+	-- THE HIDDEN HALF OF THIS RUN: one server-drawn 32-bit secret per floor, 1..Floors. Fork.plan
+	-- decides the trap, the liar line, the tell and both traits from these and from nothing public.
+	-- Saved, because a rejoin must rebuild the same tower; re-drawn on rebirth; and NEVER written to
+	-- an Instance, an attribute, a leaderstat or a remote. See mintSecret below.
+	floorSecrets: { number },
 	skips: number,
 	armedSkip: boolean, -- runtime only; never saved
 	rebirths: number,
@@ -238,6 +244,15 @@ type Profile = {
 	redeemed: { [string]: boolean },
 	passes: { [string]: boolean },
 	canSave: boolean, -- load-success sentinel: never write over data we failed to read
+	-- Runtime only. True once a save that RELEASES the lock has been attempted for this session
+	-- (leaving, or BindToClose while the player is still here). From then on nothing on the hidden
+	-- half may be revealed: see "trusted" at loadProfile.
+	released: boolean,
+	-- Runtime only. The token this session wrote into the record when its load took the lock; nil
+	-- when it did not take it. A write only lands while the record still carries this token, so
+	-- once a later load has taken the record nothing this session wrote late can land over it. See
+	-- "OWNERSHIP" at saveProfile.
+	session: string?,
 }
 
 local profiles: { [Player]: Profile } = {}
@@ -256,6 +271,7 @@ local function defaultProfile(): Profile
 		slots = {},
 		readFloors = {},
 		skipped = {},
+		floorSecrets = {}, -- filled by loadProfile; an empty list makes Fork.plan refuse, not guess
 		skips = Config.Skips.StartSkips,
 		armedSkip = false,
 		rebirths = 0,
@@ -264,6 +280,8 @@ local function defaultProfile(): Profile
 		redeemed = {},
 		passes = {},
 		canSave = false,
+		released = false,
+		session = nil,
 	}
 end
 
@@ -316,22 +334,126 @@ local function key(userId: number): string
 	return "u_" .. userId
 end
 
+--============================================================================ the plan secret
+
+-- EVERY TRAP IN THE GAME IS DRAWN HERE, BY THE SERVER, AND NOWHERE ELSE.
+--
+-- Measured 2026-09-17 (REVIEW-4.md): Fork.luau is in ReplicatedStorage and used to derive the whole
+-- plan from Config.WorldSeed and the run seed, and the run seed is leaderstats.Rebirths + 1. A
+-- client computed 30 of 30 honestly-read traps without reading one. Gating TellKind, RuleInverted
+-- and Marked (REVIEW-3) had closed the attributes and left the generator wide open.
+--
+-- So the hidden half of each floor is a secret: one uniform 32-bit integer per floor per run,
+-- drawn from server randomness, saved in the profile and never replicated. Fork.plan refuses to
+-- plan without them. What a player sees before reading — the carvings — stays public and is not
+-- derived from these, so there is nothing on screen to brute-force a secret against; and each
+-- floor's secret is drawn on its own, so a read that pins one floor buys that floor and no other.
+--
+-- Two generators, XORed, so neither is the whole secret on its own. `secretSource` is created once
+-- when the server starts, so pressing Rebirth at a known moment seeds nothing; the fresh
+-- Random.new() per floor means that even recovering secretSource's internal state would not
+-- predict the next floor. Neither is Fork's mix32 or Rng's LCG, which are public.
+local SECRET_MAX = 4294967295 -- 2^32 - 1
+local secretSource = Random.new()
+
+local function mintSecret(): number
+	return bit32.bxor(secretSource:NextInteger(0, SECRET_MAX), Random.new():NextInteger(0, SECRET_MAX))
+end
+
+local function mintSecrets(): { number }
+	local out = {}
+	for level = 1, Config.Tower.Floors do
+		out[level] = mintSecret()
+	end
+	return out
+end
+
+-- THE SECRETS A LOADED PROFILE PLAYS UNDER — and the migration of a profile saved before they
+-- existed, which is every profile written up to 2026-09-17.
+--
+-- A floor keeps its saved secret when there is a valid one. Otherwise the rule is about what the
+-- player has ALREADY SEEN of that floor's hidden half:
+--   * answered it, read it, or climbed past it -> Fork.legacySecrets, which reproduces the
+--     2026-09-17 plan field for field (Fork.spec asserts it). The section they climbed, the
+--     inscription they paid for and the traits they took stay exactly as they were;
+--   * anything else -> a fresh secret. Nothing visible is derived from a secret, so re-drawing a
+--     floor the player has not read changes nothing on their screen: same carvings, same fork.
+-- So a run already in progress is NOT reshuffled, at any level, and the floors still ahead of it are
+-- no longer computable. The legacy floors ARE computable by a client, and that is harmless for
+-- exactly the reason they were chosen: the player has already seen them.
+--
+-- The result is saved on the next write alongside readFloors and slots, so a migration happens
+-- once. A player whose profile could not be saved (read-only session) is migrated again on the
+-- next load; the floors they had seen come out the same, and the unseen ones are re-drawn unseen.
+--
+-- `trustUnseen` is the second rule, and it exists because the first fix lost to it (REVIEW-4.md §9).
+-- A saved secret for a floor the player has NOT seen is only used by a session that will end up
+-- holding everything it reveals. Otherwise the unseen floors are drawn fresh for this session, and
+-- the saved secrets of those floors are never planned from. Measured before this: a READ-ONLY
+-- session planned the saved secrets, let a script walk through every door and saved nothing, and
+-- the real session afterwards was the same run with 240 of 240 traps known and no read paid.
+-- A floor already SEEN keeps its saved secret whatever the session: the player knows it, so there
+-- is nothing left to learn from it, and changing it would reshuffle what they saw.
+local function resolveSecrets(p: Profile, saved: any, trustUnseen: boolean): { number }
+	local legacy = Fork.legacySecrets(Config, p.runSeed)
+	local out = {}
+	for level = 1, Config.Tower.Floors do
+		local v = if type(saved) == "table" then (saved[level] or saved[tostring(level)]) else nil
+		local seen = level < p.level or p.slots[level] ~= nil or p.readFloors[level] == true
+		if seen then
+			out[level] = if Fork.isSecret(v) then v else legacy[level]
+		elseif trustUnseen and Fork.isSecret(v) then
+			out[level] = v
+		else
+			out[level] = mintSecret()
+		end
+	end
+	return out
+end
+
 -- Load + soft session lock (anti-dupe). We ALWAYS read the real data, even when another live
 -- session holds the lock — we simply play READ-ONLY (canSave = false) rather than clobbering it.
 -- The lock is refreshed by autosave and expires after SessionLockSeconds, so a crashed session
 -- does not lock a player out and a fast rejoin never sees floor 1 again.
+--
+-- WHICH SAVED SECRETS A SESSION MAY PLAN FROM. A session TRUSTS the saved secrets of floors its
+-- player has not seen only when both hold:
+--   * it can save (canSave): it holds the lock and its load landed, so what it reveals is written;
+--   * the record was RELEASED when it loaded (lockUntil == 0): the session before it wrote its
+--     final state on the way out, and that write carries every reveal it made, because every
+--     reveal (a door's slot, a read's readFloors) goes into the profile BEFORE the world shows it,
+--     and nothing is revealed after a releasing save is attempted (see `released`).
+-- Anything else means the record may be missing a reveal the player saw: another server still
+-- holds the lock (read-only), or the last session crashed or lost its writes (lockUntil > 0 from
+-- its own load or autosave). Then every unseen floor is drawn fresh (resolveSecrets), so a door
+-- walked where nothing lands teaches nothing about the run that is saved. The saved secrets of an
+-- unseen floor are only ever used where their reveal will be kept.
+--
+-- "The session before it wrote its final state" also needs that no OLDER write can land after this
+-- load. A shutdown makes two releasing saves per player (BindToClose, then PlayerRemoving), and
+-- queued DataStore writes need not land in order: measured in the third pass (REVIEW-4.md §10), a
+-- late BindToClose write landed after the next session had loaded, trusted and walked every door,
+-- and re-released the record with a state in which no floor was walked — 120 of 120 traps known.
+-- So the load that takes the lock writes a fresh `session` token, and saveProfile writes only while
+-- the record still carries its own (see OWNERSHIP there).
 local function loadProfile(plr: Player): Profile
 	local p = defaultProfile()
+	local savedSecrets = nil
 	if not store then
+		p.floorSecrets = resolveSecrets(p, nil, false)
 		return p
 	end
+	local token = HttpService:GenerateGUID(false)
 	local acquired = false
+	local recordReleased = false
 	local ok, err = pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
 			old = old or {}
 			local now = os.time()
 			local lockedUntil = tonumber(old.lockUntil) or 0
 			local lockedByOther = lockedUntil > now and old.jobId ~= game.JobId
+			-- Read before this transform writes its own lock, and re-read on every invocation.
+			recordReleased = lockedUntil <= 0
 			if type(old.data) == "table" then
 				local d = old.data
 				p.runSeed = tonumber(d.runSeed) or 1
@@ -350,6 +472,9 @@ local function loadProfile(plr: Player): Profile
 				p.bestTitle = tostring(d.bestTitle or "")
 				p.redeemed = (type(d.redeemed) == "table") and d.redeemed or {}
 				p.passes = (type(d.passes) == "table") and d.passes or {}
+				-- Only noted here. The transform may run more than once and must not draw anything;
+				-- resolveSecrets runs once, below, after every field it reads is final.
+				savedSecrets = d.floorSecrets
 			end
 			if lockedByOther then
 				acquired = false
@@ -357,6 +482,7 @@ local function loadProfile(plr: Player): Profile
 			end
 			acquired = true
 			old.jobId = game.JobId
+			old.session = token
 			old.lockUntil = now + Config.Save.SessionLockSeconds
 			return old
 		end)
@@ -366,6 +492,7 @@ local function loadProfile(plr: Player): Profile
 		warn("[ForkTower] load failed for " .. plr.Name .. ": " .. tostring(err))
 	else
 		p.canSave = acquired
+		p.session = if acquired then token else nil
 		if not acquired then
 			warn("[ForkTower] " .. plr.Name
 				.. " lastet READ-ONLY (låst av en annen økt); progresjon denne økta lagres ikke.")
@@ -377,6 +504,8 @@ local function loadProfile(plr: Player): Profile
 		p.level = Config.Tower.Floors + 1
 		p.stage = "summit"
 	end
+	-- After the clamp, because the migration rule reads p.level.
+	p.floorSecrets = resolveSecrets(p, savedSecrets, p.canSave and recordReleased)
 	return p
 end
 
@@ -396,6 +525,12 @@ local lastBanked: { [Player]: number } = {}
 -- UpdateAsync calls and nothing refused them.
 local function saveProfile(plr: Player, releaseLock: boolean, force: boolean?)
 	local p = profiles[plr]
+	if p and releaseLock then
+		-- Set BEFORE the write, so a door pulled while it is in flight is refused too. A released
+		-- record is one the next load trusts; a reveal after it would be lost with the server
+		-- (BindToClose runs while players are still here) and known to the player next session.
+		p.released = true
+	end
 	if not p or not p.canSave or not store then
 		return
 	end
@@ -404,13 +539,29 @@ local function saveProfile(plr: Player, releaseLock: boolean, force: boolean?)
 		return -- the autosave loop below forces a write every AutosaveSeconds, so nothing is lost
 	end
 	lastSaveAt[plr] = t
+	-- OWNERSHIP. The write lands only if the record still carries the token this session's load wrote.
+	-- If another load has taken the record since, this write is cancelled (a nil return), whatever it
+	-- is: an autosave, a leave, or a BindToClose write that sat in the queue. Without this, a late
+	-- releasing write re-released a record a newer session had loaded, trusted and revealed from, and
+	-- it re-released it WITHOUT those reveals. It also stops a session whose lock expired from
+	-- writing over the session that took it. `lost` is set on every invocation: the transform may run
+	-- more than once.
+	local lost = false
 	pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
 			old = old or {}
+			if old.session ~= p.session then
+				lost = true
+				return nil
+			end
+			lost = false
 			old.data = {
 				runSeed = p.runSeed, level = p.level, stage = p.stage,
 				picks = p.picks, slots = p.slots, skips = p.skips,
 				readFloors = levelList(p.readFloors), skipped = levelList(p.skipped),
+				-- In the SAME write as readFloors and slots, so a saved read is never saved without
+				-- the secret it was read under.
+				floorSecrets = p.floorSecrets,
 				rebirths = p.rebirths, bestScore = p.bestScore, bestTitle = p.bestTitle,
 				redeemed = p.redeemed, passes = p.passes,
 			}
@@ -419,6 +570,14 @@ local function saveProfile(plr: Player, releaseLock: boolean, force: boolean?)
 			return old
 		end)
 	end)
+	if lost then
+		-- Another session owns this profile now. Nothing this one does is kept from here on, so it
+		-- stops writing (and Redeem, which refuses without canSave, stops granting).
+		p.canSave = false
+		warn("[ForkTower] " .. plr.Name
+			.. ": en nyere økt har tatt over profilen; progresjon denne økta lagres ikke lenger.")
+		return
+	end
 	-- Only when it has actually MOVED. bestScore changes once per summit, so re-publishing it on
 	-- every autosave was a second write per save buying nothing — the same amplification as above,
 	-- one budget over.
@@ -1055,7 +1214,7 @@ local function buildLane(plr: Player)
 		index = index,
 		folder = folder,
 		origin = origin,
-		plan = Fork.plan(Config, p.runSeed, Rng),
+		plan = Fork.plan(Config, p.runSeed, Rng, p.floorSecrets),
 		forkTop = {},
 		forkFolder = {},
 		sectionFolder = {},
@@ -1194,13 +1353,18 @@ onReadInscription = function(plr: Player, owner: Player, level: number)
 	if p.readFloors[level] then
 		return -- already paid for; the prompt is disabled, but a client can re-arm one
 	end
+	if p.released then
+		notice(plr, "blocked", "Serveren stenger — innskripsjonen kan ikke leses nå. Bli med igjen om litt.")
+		return
+	end
 
 	local finish = function()
 		lane.readPending[level] = nil
 		local prof = profiles[plr]
 		-- Everything is re-checked here rather than captured: the delay below is a full
-		-- ReadSeconds during which the player can answer the fork, rebirth, or leave.
-		if prof == nil or lanes[plr] ~= lane then
+		-- ReadSeconds during which the player can answer the fork, rebirth, or leave — or the
+		-- server can start shutting down and release the lock (see `released`).
+		if prof == nil or lanes[plr] ~= lane or prof.released then
 			return
 		end
 		if prof.stage ~= "fork" or prof.level ~= level or prof.readFloors[level] then
@@ -1271,6 +1435,13 @@ onDoorChosen = function(plr: Player, owner: Player, level: number, slot: number)
 	end
 	if p.stage ~= "fork" then
 		notice(plr, "blocked", "Du har alt valgt på denne etasjen — klatr opp til neste fork.")
+		return
+	end
+	-- The lock is already released (the server is shutting down with the player still in it). A
+	-- section built now would show the trap, and the write that should carry this door may never
+	-- land, while the released record is one the next load trusts. So no door opens.
+	if p.released then
+		notice(plr, "blocked", "Serveren stenger — valget kan ikke lagres nå. Bli med igjen om litt.")
 		return
 	end
 
@@ -1393,6 +1564,7 @@ RebirthEvent.OnServerEvent:Connect(function(plr)
 	end
 	p.rebirths += 1
 	p.runSeed += 1
+	p.floorSecrets = mintSecrets() -- a new run is a new draw; the old run's secrets are never reused
 	p.level = 1
 	p.stage = "fork"
 	p.picks = {}

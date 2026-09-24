@@ -116,7 +116,10 @@ local function sweep(hitRate: number, fixedSpeed: number?)
 	local readerS, guesserS, greedyS = 0, 0, 0
 	local guesserTraps, greedyTraps = 0, 0
 	for seed = 1, SEEDS do
-		local plan = Fork.plan(Config, seed, Rng)
+		-- Fork.legacySecrets: the plans ReadSeconds = 1.1 was measured on, reproduced field for
+		-- field (Fork.spec). The server draws each floor's hidden half at random now (REVIEW-4);
+		-- the distribution is the same, and this keeps the 1.110 s break-even reproducible.
+		local plan = Fork.plan(Config, seed, Rng, Fork.legacySecrets(Config, seed))
 		-- The guesser's coin is its own stream, seeded off the run seed so the sweep is
 		-- reproducible and never borrows Fork's own randomness.
 		local coin = Rng.new(seed * 7919 + 13)
@@ -179,7 +182,7 @@ do
 	local readerWins, guesserWins, ties, worstReader, worstGuesser = 0, 0, 0, 0, 0
 	local trapHist = {}
 	for seed = 1, SEEDS do
-		local plan = Fork.plan(Config, seed, Rng)
+		local plan = Fork.plan(Config, seed, Rng, Fork.legacySecrets(Config, seed))
 		local coin = Rng.new(seed * 7919 + 13)
 		local rt = play(plan, safeSlot, 0) + SHIPPING * FLOORS
 		local gt, _, gtr = play(plan, function()

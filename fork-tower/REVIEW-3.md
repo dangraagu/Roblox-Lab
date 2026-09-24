@@ -597,6 +597,16 @@ in a six-player run renders one identical record. Ten mutations, including the s
 the same leak relocated onto a BillboardGui, are each caught; two controls stayed invisible. Details
 above.
 
+> **2026-09-17: necessary, and NOT sufficient — see REVIEW-4.md.** Closing the attributes did not
+> close the leak, because `Fork.luau` itself replicates and every input it took (WorldSeed, and the
+> run seed = `leaderstats.Rebirths + 1`) replicates too. A probe predicted 30 of 30 honestly-read traps
+> with `Fork.plan(Config, Rebirths + 1, Rng)` on the client; the check written for it measured 800 of
+> 800. The hidden half of each floor is now a per-floor server secret (CLAUDE.md invariant 13).
+> That fix was itself beaten the same day through a READ-ONLY session that planned the saved
+> secrets and saved nothing (240 of 240); REVIEW-4.md §9 has the trust rule that closed it. That
+> rule in turn needed an owner on every write: a late shutdown write re-released a record the next
+> session had trusted (120 of 120 in the emulator); REVIEW-4.md §10.
+
 ### 4. NEW — `PromptButtonHoldBegan` replicating to the server is an engine assumption
 
 **Nothing in this repo has measured it and this pass did not try.** `check_forktower.luau` and

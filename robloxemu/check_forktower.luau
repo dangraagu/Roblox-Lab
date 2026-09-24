@@ -62,12 +62,31 @@ local MAX_LANES = 24 -- Config.World.MaxLanes
 -- The server reads its profile out of `.data` under "u_<uid>". Written the way loadProfile
 -- actually reads it — a mismatch here would silently fall back to defaultProfile() and every
 -- assertion below would really be testing run seed 1.
+--
+-- THE SECRETS ARE CHOSEN HERE TOO. Since REVIEW-4 the hidden half of every floor — trap side, liar
+-- line, tell, traits — is not a function of the run seed at all: the server draws a 32-bit secret
+-- per floor at random, saves it with the profile, and never replicates it (the measurement is
+-- check_forktower_plansecret.luau). So a run seed alone no longer says where the inscription lies.
+-- Every seeded profile in this file therefore carries `floorSecrets = Fork.legacySecrets(runSeed)`,
+-- the secrets that reproduce the 2026-09-17 plan field for field (Fork.spec asserts it on 5000
+-- floors), which keeps "run seed 4 lies on floors 4, 6 and 8" and every other number recorded
+-- below true. A seeded profile WITHOUT them would be migrated on load and handed fresh secrets.
+local function sharedModule(name: string)
+	local entry = require("./build/fork-tower")["shared/" .. name]
+	return assert(loadstring(entry.source, "@check/" .. name))()
+end
+local ForkModule, ConfigModule = sharedModule("Fork"), sharedModule("Config")
+local function legacySecrets(runSeed: number)
+	return ForkModule.legacySecrets(ConfigModule, runSeed)
+end
+
 local store = h.services.DataStoreService:GetDataStore("ForkTower_v1")
 local function seedProfile(uid)
 	store:SetAsync("u_" .. uid, {
 		data = {
 			runSeed = RUN_SEED, level = 1, stage = "fork",
 			picks = {}, slots = {},
+			floorSecrets = legacySecrets(RUN_SEED),
 			skips = 0, rebirths = 0, bestScore = 0, bestTitle = "",
 			redeemed = {}, passes = {},
 		},
@@ -799,6 +818,7 @@ local function seedProfileAt(uid, runSeed)
 	store:SetAsync("u_" .. uid, {
 		data = {
 			runSeed = runSeed, level = 1, stage = "fork", picks = {}, slots = {},
+			floorSecrets = legacySecrets(runSeed), -- see seedProfile at the top of the file
 			skips = 0, rebirths = 0, bestScore = 0, bestTitle = "", redeemed = {}, passes = {},
 		},
 	})

@@ -25,6 +25,10 @@
 local Config = require("../src/shared/Config")
 local Rng = require("../src/shared/Rng")
 local Fork = require("../src/shared/Fork")
+-- The 2026-09-17 Fork.luau, byte-for-byte (sha256 0c840300…5b07). Its whole plan was a function of
+-- WorldSeed and the run seed, both replicated, so every trap was computable on the client. Kept
+-- ONLY as the reference the migration path must reproduce and the leak the witnesses re-create.
+local Legacy = require("./fixtures/Fork_20260917")
 
 local passed, failed = 0, 0
 local function eq(a, b, msg)
@@ -47,9 +51,32 @@ local SWEEP = 4000 -- runs; x FLOORS floors = 40 000 forks measured below
 -- enough for a 0.03 tolerance on a 50/50 split to mean something (a fair coin's standard error
 -- here is 0.0025, so a real bias of 3 points is ~12 sigma and a fair generator practically never
 -- trips it).
+--
+-- SERVER-SHAPED SECRETS. The hidden half of every floor — which door is the trap, the liar line,
+-- the tell, the traits — is decided by a 32-bit secret the SERVER draws per floor per run
+-- (mintSecret in Main.server.luau) and never replicates. The CLI has no Roblox Random, so the sweep
+-- draws the same shape, one uniform 32-bit integer per floor, from Luau's own math.random: a
+-- generator that shares no arithmetic with Fork's mixer or Rng's LCG, so nothing below can pass
+-- because the test's randomness and the module's are secretly the same function. Seeded, so the
+-- numbers this file prints are reproducible.
+math.randomseed(20260917)
+local function draw32(): number
+	return math.random(0, 65535) * 65536 + math.random(0, 65535)
+end
+local function freshSecrets()
+	local out = {}
+	for l = 1, FLOORS do out[l] = draw32() end
+	return out
+end
+local secretsOf = {}
+local function secretsFor(s)
+	if secretsOf[s] == nil then secretsOf[s] = freshSecrets() end
+	return secretsOf[s]
+end
+
 local plans = {}
 for s = 1, SWEEP do
-	plans[s] = Fork.plan(Config, s, Rng)
+	plans[s] = Fork.plan(Config, s, Rng, secretsFor(s))
 end
 
 -- Which door VISIBLY bears the sign the inscription names — read off the door's own sign list,
@@ -87,57 +114,246 @@ end
 
 --============================================================================ determinism
 
+local function signsOf(floor)
+	return table.concat(floor.doors[1].signs, "+") .. "|" .. table.concat(floor.doors[2].signs, "+")
+end
+
+-- The fields a read BUYS, and which nothing a client holds may compute. tellKind is left out on
+-- purpose: it is chosen among the signs the marked door carries alone, and those carvings are
+-- public, so it legitimately moves with them.
+local function hiddenOf(floor)
+	return string.format("%d/%d/%s/%s/%s", floor.trapDoor, floor.markedDoor, tostring(floor.ruleInverted),
+		floor.doors[1].traitId, floor.doors[2].traitId)
+end
+
 do
-	local a = Fork.plan(Config, 12345, Rng)
-	local b = Fork.plan(Config, 12345, Rng)
+	-- A REJOIN IS THE SAME TOWER: the same run seed with the same SAVED secrets rebuilds it exactly.
+	local secrets = secretsFor(12345)
+	local a = Fork.plan(Config, 12345, Rng, secrets)
+	local b = Fork.plan(Config, 12345, Rng, table.clone(secrets))
 	local same = true
 	for l = 1, FLOORS do
 		local x, y = a.floors[l], b.floors[l]
-		if x.trapDoor ~= y.trapDoor or x.markedDoor ~= y.markedDoor
-			or x.tellKind ~= y.tellKind or x.ruleInverted ~= y.ruleInverted
-			or x.doors[1].traitId ~= y.doors[1].traitId
-			or x.doors[2].traitId ~= y.doors[2].traitId then
+		if hiddenOf(x) ~= hiddenOf(y) or x.tellKind ~= y.tellKind or signsOf(x) ~= signsOf(y) then
 			same = false
 		end
 	end
-	truthy(same, "the same runSeed rebuilds a byte-identical plan")
+	truthy(same, "the same runSeed and the same saved secrets rebuild a byte-identical plan (a rejoin is the same tower)")
 
-	-- A leaderboard time only means something if the tower is the same tower for everyone, and a
-	-- rebirth is only worth doing if it is a DIFFERENT tower. Both halves are load-bearing.
+	-- A rebirth is only worth doing if it is a DIFFERENT tower. It is a new run seed AND a fresh
+	-- draw of secrets, which is what the server does.
+	--
+	-- What this file used to claim alongside it — "a leaderboard time only means something if the
+	-- tower is the same tower for everyone" — is given up for the HIDDEN half on purpose, and it is
+	-- the whole fix: a trap that is the same for everyone on a run seed is a trap anyone can compute
+	-- from that run seed. The visible half (signs, and the geometry behind a door) is still shared.
 	local differs = 0
 	for s = 1, 200 do
-		local p, q = Fork.plan(Config, s, Rng), Fork.plan(Config, s + 1, Rng)
+		local p = Fork.plan(Config, s, Rng, secretsFor(s))
+		local q = Fork.plan(Config, s + 1, Rng, secretsFor(s + 1))
 		for l = 1, FLOORS do
-			if p.floors[l].trapDoor ~= q.floors[l].trapDoor
-				or p.floors[l].doors[1].traitId ~= q.floors[l].doors[1].traitId then
+			if hiddenOf(p.floors[l]) ~= hiddenOf(q.floors[l]) then
 				differs += 1
 				break
 			end
 		end
 	end
-	eq(differs, 200, "every neighbouring runSeed produces a different run (rebirth rerolls)")
+	eq(differs, 200, "every rebirth (next run seed, freshly drawn secrets) produces a different run")
 
 	-- Fork.floor is just plan().floors[level]; if the two ever disagree, the server and the
 	-- tests are looking at different games.
-	local plan = Fork.plan(Config, 777, Rng)
+	local plan = Fork.plan(Config, 777, Rng, secretsFor(777))
 	local agree = true
 	for l = 1, FLOORS do
-		local one = Fork.floor(Config, 777, l, Rng)
+		local one = Fork.floor(Config, 777, l, Rng, secretsFor(777))
 		if one.trapDoor ~= plan.floors[l].trapDoor or one.tellKind ~= plan.floors[l].tellKind then
 			agree = false
 		end
 	end
 	truthy(agree, "Fork.floor agrees with Fork.plan on every floor")
 
-	-- The WorldSeed has to reach the fork. Change it and the whole tower must move.
+	-- The WorldSeed still has to reach the tower — the part of it everybody SEES. Change it and the
+	-- carvings move. (It must no longer move the trap; the plan-secret block below asserts that.)
 	local other = {}
 	for k, v in pairs(Config) do other[k] = v end
 	other.WorldSeed = Config.WorldSeed + 1
 	local moved = false
 	for l = 1, FLOORS do
-		if Fork.floor(other, 777, l, Rng).trapDoor ~= plan.floors[l].trapDoor then moved = true end
+		if signsOf(Fork.floor(other, 777, l, Rng, secretsFor(777))) ~= signsOf(plan.floors[l]) then moved = true end
 	end
-	truthy(moved, "changing WorldSeed changes the trap layout")
+	truthy(moved, "changing WorldSeed changes the sign carvings (the visible tower is still the world's)")
+end
+
+--============================================================================ the plan secret
+--
+-- MEASURED 2026-09-17: the whole plan was computable on the client. Fork.luau is in
+-- ReplicatedStorage and derived every floor from Config.WorldSeed and the run seed, and the run seed
+-- is leaderstats.Rebirths + 1. A probe compared 30 honestly-read forks with
+-- Fork.plan(Config, Rebirths + 1, Rng) computed from replicated modules alone: 30 of 30. Every
+-- read an honest player paid for was free to a script.
+--
+-- A salt mixed into that seed would NOT have fixed it, and the claims below are the reasons:
+--
+--   * the seed is 32 bits. If the salted seed still drove anything a client sees before reading —
+--     the sign carvings, the geometry — a script tries all 2^32 seeds offline against floor 1's
+--     carvings and then knows every floor. So the VISIBLE HALF must not depend on the secret.
+--   * every honest read reveals the trap side, the liar line and two traits. If the whole run hung
+--     off one 32-bit secret, a handful of paid reads would pin it and the rest of the run would be
+--     free. So each floor has its OWN secret, drawn independently by the server, and re-drawing one
+--     floor's secret must move nothing on any other floor.
+--   * the HIDDEN HALF must not depend on anything public at all, or it is back to being computable.
+--
+-- And a profile saved before the secret existed must migrate without moving anything its player
+-- already saw: Fork.legacySecrets reproduces the 2026-09-17 plan exactly, and is ONLY for floors
+-- that player has already seen.
+
+-- Each of these takes a generator gen(runSeed, level, secrets) -> floor, so the witnesses at the
+-- bottom of the file can hand them a deliberately broken one.
+local function realGen(s, l, secrets) return Fork.floor(Config, s, l, Rng, secrets) end
+
+-- How many sign carvings move when the secrets are re-drawn and nothing else changes.
+local function signsMovedBySecrets(gen, seeds: number, draws: number): (number, number)
+	local moved, compared = 0, 0
+	for s = 1, seeds do
+		local base = {}
+		for l = 1, FLOORS do base[l] = signsOf(gen(s, l, secretsFor(s))) end
+		for _ = 1, draws do
+			local alt = freshSecrets()
+			for l = 1, FLOORS do
+				compared += 1
+				if signsOf(gen(s, l, alt)) ~= base[l] then moved += 1 end
+			end
+		end
+	end
+	return moved, compared
+end
+
+-- How often the 2026-09-17 derivation — everything a client can compute — names the real trap.
+local legacyPlanOf = {}
+local function publicMatch(gen, seeds: number): number
+	local hit, n = 0, 0
+	for s = 1, seeds do
+		if legacyPlanOf[s] == nil then legacyPlanOf[s] = Legacy.plan(Config, s, Rng) end
+		for l = 1, FLOORS do
+			n += 1
+			if gen(s, l, secretsFor(s)).trapDoor == legacyPlanOf[s].floors[l].trapDoor then hit += 1 end
+		end
+	end
+	return hit / n
+end
+
+do
+	-- FAIL CLOSED. A server that forgot to pass its secrets must not quietly get a public plan.
+	truthy(not pcall(Fork.plan, Config, 1, Rng),
+		"Fork.plan REFUSES to plan without secrets — there is no public fallback to fall back to")
+	truthy(not pcall(Fork.plan, Config, 1, Rng, { 1, 2, 3 }),
+		"...and refuses a secret list that does not cover every floor")
+	local bad = freshSecrets()
+	bad[4] = 4294967296
+	truthy(not pcall(Fork.plan, Config, 1, Rng, bad), "...or holds a value outside 32 bits")
+	bad[4] = 12.5
+	truthy(not pcall(Fork.plan, Config, 1, Rng, bad), "...or holds a value that is not an integer")
+	truthy(Fork.isSecret(0) and Fork.isSecret(4294967295) and not Fork.isSecret(-1)
+		and not Fork.isSecret("7") and not Fork.isSecret(nil),
+		"Fork.isSecret accepts exactly the integers in [0, 2^32)")
+
+	-- THE VISIBLE HALF IS PUBLIC.
+	local moved, compared = signsMovedBySecrets(realGen, 200, 3)
+	eq(moved, 0, string.format(
+		"THE VISIBLE HALF IS PUBLIC: re-drawing the secrets moved %d of %d sign carvings — nothing a client sees before a read is derived from the secret, so there is nothing to brute-force a secret against",
+		moved, compared))
+
+	-- THE HIDDEN HALF IS SECRET, and ONLY secret.
+	local otherWorld = {}
+	for k, v in pairs(Config) do otherWorld[k] = v end
+	otherWorld.WorldSeed = Config.WorldSeed + 104729
+	local hiddenMoved, followed, n = 0, 0, 0
+	for s = 1, 400 do
+		local secrets = secretsFor(s)
+		local a = Fork.plan(Config, s, Rng, secrets)
+		local b = Fork.plan(Config, s + 7919, Rng, secrets)
+		local c = Fork.plan(otherWorld, s, Rng, secrets)
+		local d = Fork.plan(Config, s, Rng, freshSecrets())
+		for l = 1, FLOORS do
+			n += 1
+			if hiddenOf(a.floors[l]) ~= hiddenOf(b.floors[l]) or hiddenOf(a.floors[l]) ~= hiddenOf(c.floors[l]) then
+				hiddenMoved += 1
+			end
+			if a.floors[l].trapDoor ~= d.floors[l].trapDoor then followed += 1 end
+		end
+	end
+	eq(hiddenMoved, 0, string.format(
+		"THE HIDDEN HALF IS SECRET: with the secrets held fixed, a different run seed or WorldSeed moved no trap, no marked door, no liar line and no trait on any of %d floors",
+		n))
+	near(followed / n, 0.5, Config.Fairness.SideBalanceTolerance, string.format(
+		"...and it really is the secret that decides it: a fresh draw moves the trap on %.3f of floors, a coin's half",
+		followed / n))
+
+	-- ONE READ BUYS ONE FLOOR.
+	local crossMoved, crossCompared = 0, 0
+	for s = 1, 150 do
+		local secrets = secretsFor(s)
+		local base = Fork.plan(Config, s, Rng, secrets)
+		for changed = 1, FLOORS do
+			local alt = table.clone(secrets)
+			alt[changed] = draw32()
+			local p = Fork.plan(Config, s, Rng, alt)
+			for l = 1, FLOORS do
+				if l ~= changed then
+					crossCompared += 1
+					local x, y = base.floors[l], p.floors[l]
+					if hiddenOf(x) ~= hiddenOf(y) or x.tellKind ~= y.tellKind or signsOf(x) ~= signsOf(y) then
+						crossMoved += 1
+					end
+				end
+			end
+		end
+	end
+	eq(crossMoved, 0, string.format(
+		"ONE READ BUYS ONE FLOOR: re-drawing one floor's secret moved %d of %d OTHER floors — so a read, even one that pins its floor's 32-bit secret exactly, says nothing about the next floor",
+		crossMoved, crossCompared))
+
+	-- The client's best computation, scored: the 2026-09-17 derivation against the real trap.
+	local match = publicMatch(function(s, l) return plans[s].floors[l] end, SWEEP)
+	near(match, 0.5, Config.Fairness.SideBalanceTolerance, string.format(
+		"everything a client can compute (the 2026-09-17 public derivation) names the trap on %.4f of %d forks — a coin",
+		match, SWEEP * FLOORS))
+
+	-- MIGRATION: the legacy secrets reproduce the 2026-09-17 plan, field for field.
+	local fieldsDiffer, floorsCompared, legacyValid = 0, 0, true
+	for s = 1, 500 do
+		local secrets = Fork.legacySecrets(Config, s)
+		for l = 1, FLOORS do
+			if not Fork.isSecret(secrets[l]) then legacyValid = false end
+		end
+		local new = Fork.plan(Config, s, Rng, secrets)
+		local old = Legacy.plan(Config, s, Rng)
+		for l = 1, FLOORS do
+			floorsCompared += 1
+			local x, y = new.floors[l], old.floors[l]
+			local same = x.level == y.level and x.trapDoor == y.trapDoor and x.markedDoor == y.markedDoor
+				and x.tellKind == y.tellKind and x.ruleInverted == y.ruleInverted
+				and x.ruleText == y.ruleText and x.ruleSign == y.ruleSign
+			for i = 1, 2 do
+				local dx, dy = x.doors[i], y.doors[i]
+				if dx.slot ~= dy.slot or dx.traitId ~= dy.traitId or dx.theme ~= dy.theme or dx.label ~= dy.label
+					or table.concat(dx.signs, ",") ~= table.concat(dy.signs, ",") then
+					same = false
+				end
+			end
+			if not same then fieldsDiffer += 1 end
+		end
+	end
+	truthy(legacyValid, "Fork.legacySecrets returns a valid 32-bit secret for every floor")
+	eq(fieldsDiffer, 0, string.format(
+		"MIGRATION: Fork.plan with Fork.legacySecrets reproduces the 2026-09-17 Fork.plan field for field on %d floors — a floor a player already saw is exactly the floor they saw",
+		floorsCompared))
+
+	print(string.format("  plan secret: carvings moved by a re-draw %d/%d; hidden half moved by run seed or WorldSeed %d/%d;"
+		.. " trap moved by a re-draw %.4f; other floors moved by one floor's re-draw %d/%d;"
+		.. " public derivation names the trap %.4f of %d; legacy migration differs on %d/%d floors",
+		moved, compared, hiddenMoved, n, followed / n, crossMoved, crossCompared,
+		match, SWEEP * FLOORS, fieldsDiffer, floorsCompared))
 end
 
 --============================================================================ structure
@@ -569,12 +785,12 @@ local function powerGap(gen)
 	return math.abs(trapSum / n - safeSum / n)
 end
 
-local real = function(s, l) return Fork.floor(Config, s, l, Rng) end
+local real = function(s, l) return Fork.floor(Config, s, l, Rng, secretsFor(s)) end
 
 -- WITNESS A — a generator that always traps the left door. The reader check cannot see it (the
 -- mark moves with the trap, so reading still works); only the position check can.
 local biased = function(s, l)
-	local f = Fork.floor(Config, s, l, Rng)
+	local f = Fork.floor(Config, s, l, Rng, secretsFor(s))
 	f.trapDoor = 1
 	f.markedDoor = if f.ruleInverted then 2 else 1
 	return f
@@ -587,7 +803,7 @@ eq(readerMisses(biased), 0, "witness A: ...and that generator is still perfectly
 -- WITNESS B — a generator whose mark is drawn independently of the trap. The signs still look
 -- right, the counts still balance, and the inscription is now a lie half the time.
 local silent = function(s, l)
-	local f = Fork.floor(Config, s, l, Rng)
+	local f = Fork.floor(Config, s, l, Rng, secretsFor(s))
 	local coin = Rng.new(s * 7919 + l * 104729)
 	f.markedDoor = if coin:next() < 0.5 then 1 else 2
 	return f
@@ -622,7 +838,7 @@ local function doorMisses(gen)
 end
 
 local ambiguous = function(s, l)
-	local f = Fork.floor(Config, s, l, Rng)
+	local f = Fork.floor(Config, s, l, Rng, secretsFor(s))
 	local other = f.doors[3 - f.markedDoor]
 	if not other.signSet[f.tellKind] then
 		other.signs[#other.signs + 1] = f.tellKind
@@ -639,7 +855,7 @@ eq(readerMisses(ambiguous), 0,
 -- WITNESS C — a generator that hands the trap door the better prize. Perfectly readable,
 -- perfectly balanced, and solvable without ever reading a sign.
 local coupled = function(s, l)
-	local f = Fork.floor(Config, s, l, Rng)
+	local f = Fork.floor(Config, s, l, Rng, secretsFor(s))
 	local power = {}
 	for _, t in ipairs(Config.Traits) do power[t.id] = t.power end
 	local a, b = f.doors[1], f.doors[2]
@@ -668,7 +884,7 @@ local function reSign(door, from, to)
 end
 
 local cracked = function(s, l)
-	local f = Fork.floor(Config, s, l, Rng)
+	local f = Fork.floor(Config, s, l, Rng, secretsFor(s))
 	-- Never touch the floor's own tell, so this stays readable and only the sign check can see it.
 	if f.tellKind == "crack" then return f end
 	local trap, safe = f.doors[f.trapDoor], f.doors[3 - f.trapDoor]
@@ -702,6 +918,53 @@ truthy(crackBias(cracked) > Config.Fairness.SignBalanceTolerance,
 	"witness D: the sign check KILLS a generator that favours the trap door with one sign")
 eq(readerMisses(cracked), 0, "witness D: ...and that generator is still readable and balanced")
 
+-- WITNESS F — the defect measured on 2026-09-17, re-created: the trap side re-derived from the
+-- public seed. Perfectly readable, perfectly balanced, prize-neutral — every fairness check above
+-- this block passed it for months — and every trap is computable by anyone holding Config and
+-- leaderstats.
+local leaky = function(s, l)
+	local f = Fork.floor(Config, s, l, Rng, secretsFor(s))
+	if legacyPlanOf[s] == nil then legacyPlanOf[s] = Legacy.plan(Config, s, Rng) end
+	f.trapDoor = legacyPlanOf[s].floors[l].trapDoor
+	f.markedDoor = if f.ruleInverted then 3 - f.trapDoor else f.trapDoor
+	return f
+end
+truthy(math.abs(publicMatch(function(s, l) return real(s, l) end, 400) - 0.5) <= Config.Fairness.SideBalanceTolerance,
+	"witness F: the real fork's trap is not what the public derivation says")
+truthy(math.abs(publicMatch(function(s, l) return leaky(s, l) end, 400) - 0.5) > Config.Fairness.SideBalanceTolerance,
+	"witness F: the public-predictor check KILLS a generator whose trap is re-derived from the public seed")
+truthy(readerMisses(leaky) == 0 and sideBalanceOff(leaky) <= Config.Fairness.SideBalanceTolerance,
+	"witness F: ...and that generator is still readable and balanced, which is why no fairness check could see the leak")
+
+-- WITNESS G — the NAIVE fix: a server-only salt mixed into the one 32-bit seed that drives the
+-- whole floor, carvings included. The trap is now unpredictable from Config and leaderstats — it
+-- passes the public-predictor check — and it is still broken: the sign carvings a client sees
+-- before reading are a function of the secret, so a script tries all 2^32 values against floor
+-- 1's carvings and reads the rest of the tower for free. Built here by planning the floor with the
+-- secret standing in for the run seed.
+local salted = function(s, l, secrets)
+	local f = Fork.floor(Config, s, l, Rng, secrets)
+	local v = Fork.floor(Config, secrets[l] % 1048576, l, Rng, secrets)
+	for i = 1, 2 do
+		f.doors[i].signs = v.doors[i].signs
+		f.doors[i].signSet = v.doors[i].signSet
+	end
+	return f
+end
+do
+	local realMoved = signsMovedBySecrets(realGen, 40, 2)
+	local saltedMoved, saltedCompared = signsMovedBySecrets(salted, 40, 2)
+	print(string.format("  witness G: salted carvings moved %d of %d under a re-draw (real: %d)",
+		saltedMoved, saltedCompared, realMoved))
+	eq(realMoved, 0, "witness G: the real fork's carvings do not move with the secret")
+	truthy(saltedMoved > saltedCompared / 2, string.format(
+		"witness G: the visible-half check KILLS a generator whose carvings are salted with the secret (%d of %d moved)",
+		saltedMoved, saltedCompared))
+	truthy(math.abs(publicMatch(function(s, l) return salted(s, l, secretsFor(s)) end, 400) - 0.5)
+		<= Config.Fairness.SideBalanceTolerance,
+		"witness G: ...and that generator PASSES the public-predictor check, which is why that check alone is not the fix")
+end
+
 --============================================================================ CONTROL
 -- One change the suite must NOT notice. Every player-visible string in the config — trait
 -- labels, sign names, sign emoji — is rewritten, and not one decision may move. A suite that
@@ -734,8 +997,8 @@ do
 
 	local drift = 0
 	for s = 1, 300 do
-		local a = Fork.plan(Config, s, Rng)
-		local b = Fork.plan(cosmetic, s, Rng)
+		local a = Fork.plan(Config, s, Rng, secretsFor(s))
+		local b = Fork.plan(cosmetic, s, Rng, secretsFor(s))
 		for l = 1, FLOORS do
 			local x, y = a.floors[l], b.floors[l]
 			if x.trapDoor ~= y.trapDoor then drift += 1 end
@@ -754,7 +1017,7 @@ do
 	eq(drift, 0, "CONTROL: renaming every label, sign name and emoji moves no decision at all")
 
 	-- ...and the rewrite really did reach the module, or the control proves nothing.
-	truthy(Fork.floor(cosmetic, 1, 1, Rng).ruleText ~= Fork.floor(Config, 1, 1, Rng).ruleText,
+	truthy(Fork.floor(cosmetic, 1, 1, Rng, secretsFor(1)).ruleText ~= Fork.floor(Config, 1, 1, Rng, secretsFor(1)).ruleText,
 		"CONTROL: the renamed config genuinely reaches the inscription (the control is not a no-op)")
 end
 

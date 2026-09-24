@@ -42,37 +42,6 @@
 -- c) THE PRIZE MUST NOT CORRELATE WITH THE TRAP. Traits are drawn from their own stream and
 --    slotted by their own coin. If the trap door reliably held the better trait, "always take
 --    the boring one" would solve the game without a single sign being read.
---
--- ─────────────────────────────────────────────────────────────────────────────
--- THIS MODULE IS PUBLIC, SO HALF OF EVERY FLOOR IS A SERVER SECRET
---
--- Measured 2026-09-17 (REVIEW-4.md). This file sits in ReplicatedStorage, and it used to derive
--- the WHOLE plan from Config.WorldSeed and the run seed — and the run seed is
--- leaderstats.Rebirths + 1. Both replicate. A probe read 30 forks honestly and compared them with
--- Fork.plan(Config, Rebirths + 1, Rng) computed on the client: 30 of 30. Every read an honest
--- player stood still for was free to a script, however carefully the server gated its attributes.
---
--- So a floor is now two halves with two different owners:
---
---   * the VISIBLE half — the two doors' sign carvings — is still a function of (WorldSeed, run
---     seed, level). Everyone on a run seed sees the same carvings, and a client may compute them;
---   * the HIDDEN half — the trap side, the liar line, which exclusive sign is the tell, both traits
---     and their slots — is a function of `secrets[level]` and of NOTHING public: a uniform 32-bit
---     integer the server draws per floor per run (Main.server.luau, mintSecret), saves with the
---     profile so a rejoin rebuilds the same tower, and never replicates.
---
--- Why not the obvious fix, a server-only salt mixed into the one seed? Because every stream here is
--- 32 bits. (1) If the salted seed still drew the carvings, a script would try all 2^32 seeds
--- offline against floor 1's carvings and know the tower. Nothing a client sees before a read may
--- be derived from the secret, and Fork.spec asserts that the carvings do not move when the secrets
--- are re-drawn. (2) Every honest read reveals the trap side, the liar line and two traits; if one
--- 32-bit secret drove the whole run, a few paid reads would pin it and the rest would be free. So
--- each floor has its OWN independently drawn secret, and Fork.spec asserts that re-drawing one
--- floor's secret moves nothing on any other floor. Brute-forcing a floor's secret from what its
--- read showed buys that floor, which the player already paid for, and nothing else.
---
--- Fork.plan REFUSES to plan without secrets. There is no public fallback for a server that forgot
--- to pass them, because a public fallback is exactly the defect.
 
 local Fork = {}
 
@@ -136,44 +105,11 @@ end
 -- One stream per (floor, purpose). Fresh per floor is safe HERE, and only here, because the seed
 -- is hashed rather than offset — the objection to per-floor seeding is the linear derivation, not
 -- the freshness.
-
--- The PUBLIC base of a floor: everything a client holds. Only the visible half is drawn from it.
-local function publicBase(cfg, runSeed: number, level: number): number
+local function stream(cfg, runSeed: number, level: number, salt: number, Rng)
 	local s = math.floor(runSeed)
 	if s < 0 then s = -s end
-	return cfg.WorldSeed * SEED_MIX + (s % RUN_SPAN) * RUN_MIX + level * LEVEL_MIX
-end
-
-local function publicStream(cfg, runSeed: number, level: number, salt: number, Rng)
-	return Rng.new(mix32(publicBase(cfg, runSeed, level) + salt * SALT_MIX))
-end
-
--- The SECRET streams of a floor, seeded exactly the way the public ones are, with the floor's
--- secret standing where the public base stood. That shape is what makes migration exact: a secret
--- equal to the public base mod 2^32 (Fork.legacySecrets) reproduces the 2026-09-17 plan field for
--- field, because mix32 reduces mod 2^32 before it mixes. For a secret the server drew, the
--- streams are the avalanche hash of a uniform 32-bit value and share nothing with anything public.
-local function secretStream(secret: number, salt: number, Rng)
-	return Rng.new(mix32(secret + salt * SALT_MIX))
-end
-
--- A floor secret is an integer in [0, 2^32). The server validates what it loads with this, and
--- Fork.plan validates what it is handed, so the two cannot disagree about what counts as one.
-function Fork.isSecret(v: any): boolean
-	return type(v) == "number" and v == math.floor(v) and v >= 0 and v < UINT32
-end
-
--- The secrets the 2026-09-17 module effectively used: the public base of each floor, mod 2^32.
---
--- MIGRATION ONLY, and only for a floor whose hidden half the player has ALREADY SEEN — answered,
--- read, or climbed past — so that nothing they saw or paid for moves. On any other floor this is
--- the leak itself: it is computable by every client, which is the whole finding.
-function Fork.legacySecrets(cfg, runSeed: number): { number }
-	local out = {}
-	for level = 1, cfg.Tower.Floors do
-		out[level] = publicBase(cfg, runSeed, level) % UINT32
-	end
-	return out
+	local raw = cfg.WorldSeed * SEED_MIX + (s % RUN_SPAN) * RUN_MIX + level * LEVEL_MIX + salt * SALT_MIX
+	return Rng.new(mix32(raw))
 end
 
 --============================================================================ helpers
@@ -217,54 +153,32 @@ end
 -- that is precisely the property this game promises not to have. Fork.spec measures it as a
 -- lopsided transition table over three-floor histories. A streak of six is allowed to happen and
 -- costs a reader nothing; a cap would have handed every player one free floor in eight.
---
--- From the floor's SECRET, never from the run seed: see the header.
-local function trapSide(secret: number, Rng): number
-	return if secretStream(secret, SALT.side, Rng):next() < 0.5 then 1 else 2
+local function trapSide(cfg, runSeed, level, Rng): number
+	return if stream(cfg, runSeed, level, SALT.side, Rng):next() < 0.5 then 1 else 2
 end
 
 --============================================================================ the plan
 
--- Fork.plan(cfg, runSeed, Rng, secrets) -> { runSeed, floors = { Floor, ... } }
---
--- `secrets` is the list the server drew for this run: one Fork.isSecret per floor, 1..Floors.
+-- Fork.plan(cfg, runSeed, Rng) -> { runSeed, floors = { Floor, ... } }
 --
 -- Floor = {
 --   level, trapDoor (1|2), markedDoor (1|2), tellKind (string), ruleInverted (boolean),
 --   ruleText (string), ruleSign (string, the emoji for tellKind),
 --   doors = { { slot, traitId, theme, label, signs = {kind,...}, signSet = {kind=true} }, ... },
 -- }
-function Fork.plan(cfg, runSeed, Rng, secrets)
+function Fork.plan(cfg, runSeed, Rng)
 	local floors = cfg.Tower.Floors
-	assert(type(secrets) == "table",
-		"Fork.plan: no secrets. The hidden half of a floor is drawn by the server and saved with the profile; it is never derived from a public seed")
-	for level = 1, floors do
-		if not Fork.isSecret(secrets[level]) then
-			error("Fork.plan: secrets[" .. level .. "] is not a 32-bit integer (" .. typeof(secrets[level]) .. ")", 2)
-		end
-	end
 	local subsets = combinations(cfg.Fork.Signs, cfg.Fork.SignsPerDoor)
 	local nSubsets = #subsets
 	assert(nSubsets >= 2, "Fork: need at least two possible sign sets per door")
 
 	local out = {}
 	for level = 1, floors do
-		local secret = secrets[level]
-		-- HIDDEN: the floor's secret, and nothing public.
-		local traitRng = secretStream(secret, SALT.trait, Rng)
-		local liarRng = secretStream(secret, SALT.liar, Rng)
-		-- The tell's own stream. It is the secret twin of the sign stream below and it skips the two
-		-- draws the carvings take there, so that a legacy secret (the public base) lands on the very
-		-- same third draw the 2026-09-17 module took the tell from. For a server-drawn secret that
-		-- alignment is irrelevant; the stream is simply secret.
-		local tellRng = secretStream(secret, SALT.sign, Rng)
-		tellRng:next()
-		tellRng:next()
-		-- VISIBLE: the carvings, from the public base, so nothing a client sees before reading is a
-		-- function of the secret. Everyone on this run seed sees these.
-		local signRng = publicStream(cfg, runSeed, level, SALT.sign, Rng)
+		local traitRng = stream(cfg, runSeed, level, SALT.trait, Rng)
+		local signRng = stream(cfg, runSeed, level, SALT.sign, Rng)
+		local liarRng = stream(cfg, runSeed, level, SALT.liar, Rng)
 
-		local trapDoor = trapSide(secret, Rng)
+		local trapDoor = trapSide(cfg, runSeed, level, Rng)
 
 		-- The liar line. Gated so the first floors teach the vocabulary before the tower starts
 		-- using it against the player. Drawn regardless of the gate so that raising or lowering
@@ -310,7 +224,7 @@ function Fork.plan(cfg, runSeed, Rng, secrets)
 			if not signSets[3 - markedDoor][k] then exclusive[#exclusive + 1] = k end
 		end
 		assert(#exclusive > 0, "Fork: the marked door must hold a sign the other one does not")
-		local tellKind = exclusive[tellRng:below(#exclusive)]
+		local tellKind = exclusive[signRng:below(#exclusive)]
 
 		------------------------------------------------------------------ assemble
 		local doors = {}
@@ -353,8 +267,8 @@ end
 
 -- One floor. The plan is rebuilt each call (ten floors of arithmetic), which keeps the module
 -- stateless — no cache to invalidate when a player rebirths into a new seed.
-function Fork.floor(cfg, runSeed, level, Rng, secrets)
-	local plan = Fork.plan(cfg, runSeed, Rng, secrets)
+function Fork.floor(cfg, runSeed, level, Rng)
+	local plan = Fork.plan(cfg, runSeed, Rng)
 	return plan.floors[level]
 end
 

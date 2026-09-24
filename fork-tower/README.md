@@ -82,12 +82,18 @@ never touches a hazard, and 4.5% faster than one who walks into half of them.
 
 ```
 cd D:/Claude/Roblox/fork-tower
-luau tests/Fork.spec.luau          # 53 passed, 0 failed
+luau tests/Fork.spec.luau          # 71 passed, 0 failed
 luau tests/Section.spec.luau       # 50 passed, 0 failed
 luau tests/Build.spec.luau         # 31 passed, 0 failed
 luau tests/Codes.spec.luau         # 19 passed, 0 failed
 luau tests/Rng.spec.luau           # 32 passed, 0 failed
 luau tests/responsive.spec.luau    # 70 passed, 0 failed
+luau tests/Climb.spec.luau         # 67 passed, 0 failed   (the environment: EYECANDY.md)
+luau tests/EnvConfig.spec.luau     # 361 passed, 0 failed
+luau tests/Pacing.spec.luau        # 87 passed, 0 failed   (measured hazard rarity + pacing)
+luau tests/EnvBands.spec.luau      # 124 passed, 0 failed  (template)
+luau tests/Hazards.spec.luau       # 102 passed, 0 failed  (template)
+luau tests/Rest.spec.luau          # 55 passed, 0 failed   (template)
 
 luau tests/readcost.measure.luau   # a MEASUREMENT, not a suite: where ReadSeconds comes from
 ```
@@ -112,10 +118,17 @@ A game that has never been booted headless is not finished.
 ```
 cd D:/Claude/Roblox/robloxemu
 py -3 wrap.py --game ../fork-tower --out build/fork-tower.luau
-luau check_forktower.luau          # 85 passed, 0 failed
+luau check_forktower.luau              # 129 passed, 0 failed
+luau check_forktower_plansecret.luau   # 96 passed, 0 failed   (the plan secret, REVIEW-4)
+luau check_forktower_env.luau          # 215 passed, 0 failed  (the environment through the real client)
+luau check_forktower_env_secret.luau   # 92 passed, 0 failed   (the environment reveals nothing)
+luau check_forktower_env_join.luau     # 37 passed, 0 failed   (the join card, slow loads)
+luau check_forktower_hud.luau          # PASS                  (HUD + ambience row, ten viewports)
+luau check_forktower_hud_open.luau     # 157 passed, 0 failed  (the phone drawers + Build Reveal card, open)
+luau check_forktower_hud_play.luau     # 324 passed, 0 failed  (the HUD keeps off the player's own character)
 
 cd D:/Claude/Roblox/fork-tower
-luau tests/world.check.luau        # 70 passed, 0 failed   (needs the bundle above)
+luau tests/world.check.luau        # 71 passed, 0 failed   (needs the bundle above)
 ```
 
 There are TWO headless runs and they are not the same run. `check_forktower.luau` lives in
@@ -150,8 +163,14 @@ src/shared/Rng.luau       deterministic LCG (verbatim from the sibling games)
 src/shared/Responsive.luau  HUD sizing rules (verbatim)
 src/shared/Fx.luau        lighting presets + particles (+ a new `Fork` preset)
 src/shared/FxClient.luau  camera/HUD juice (verbatim)
+src/shared/EnvBands.luau  environment bands (template from +1 Jump, verbatim)         (pure)
+src/shared/Hazards.luau   rare telegraphed hazards (template, verbatim)               (pure)
+src/shared/Rest.luau      rest rules (template, verbatim)                             (pure)
+src/shared/Climb.luau     floors climbed, the named floor, the fork-pad sanctuary     (pure)
+src/shared/TowerArt.luau  the scenery walls, far pieces, life, hazard models (client only)
 src/server/Main.server.luau  authoritative: lanes, doors, sections, saving
-src/client/Hud.client.luau   display only
+src/client/Hud.client.luau   display only (owns the ambience row's and the title card's place; keeps off the character)
+src/client/Ambience.client.luau  the tower changes as you climb (EYECANDY.md)
 tests/*.spec.luau         one per pure module
 tests/world.check.luau    the BUILT world: the read, the lane pool, the saved skip (needs the emu)
 tests/readcost.measure.luau  where Config.Fork.ReadSeconds comes from
@@ -205,7 +224,8 @@ the code.
   A trait changes your jump/speed numbers and the colour and material of the next section.
 - **The card is not share-ready.** It renders client-side as promised, but there is no screenshot
   button, no copy-to-clipboard and no share flow — the player takes their own screenshot.
-- **Hazards all look the same.** `Section` gives each hazard a `kind` (`spike`/`saw`/`brand`/
+- **The server's hazards all look the same.** (The rare flying hazards added with the environment bands
+  are client-side and themed per band; see EYECANDY.md.) `Section` gives each hazard a `kind` (`spike`/`saw`/`brand`/
   `shard`) and the server writes it to an attribute, but every one of them renders as the same red
   neon cube. Nothing moves; they are static blocks that send you back to your checkpoint.
 - **The leaderboard ranks best build score, not run time.** A speedrun board would need a clock,

@@ -18,7 +18,10 @@
 --     is a thumb, so anything tappable is sized through `touchSize`. Text may shrink; tap targets
 --     may not;
 --   * the drawable area is SHORTER than the viewport by the topbar inset, so every vertical
---     budget is measured against `drawableHeight`, never against camera.ViewportSize.Y.
+--     budget is measured against `drawableHeight`, never against camera.ViewportSize.Y;
+--   * the middle of the screen is the player's own character (PLAY_TOP): nothing that stays up
+--     in ordinary play goes there, and on a landscape phone that sends the ambience row into the
+--     header (robloxemu/check_forktower_hud_play.luau projects the character to prove it).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -61,6 +64,25 @@ local CODE_PAD, CODE_GAP = 8, 4
 local CODE_BOX_H, CODE_BTN_H = 30, 26
 local LB_W, LB_H = 210, 300
 local CARD_W, CARD_H = 380, 320
+-- The ambience row (Ambience.client.luau): the band chip and the ☕ Hvil button. This file OWNS its
+-- place and size, so the two scripts can never overlap; Ambience only fills the two slots.
+local AMB_ROW_H, AMB_REST_W = 34, 112
+
+-- THE PLAYER'S OWN CHARACTER (review 2026-09-24). Roblox's default camera draws the local character at
+-- the centre of the screen: its focus (the root part + 1.5 studs) is the viewport's centre, and at the
+-- default 12.5-stud zoom and 70° field of view the top of its head is ~44 % of the way down the
+-- viewport, its feet ~75 %, with the red hazard ring round them. Nothing that stays on screen in
+-- ordinary play may reach below PLAY_TOP of the viewport in the middle of the screen. On a landscape
+-- phone the centred stack (inscription, toast, ambience row) ran to 62-74 % and the always-on row sat
+-- over the avatar from head to waist and over the spot a hazard strikes; measured by
+-- robloxemu/check_forktower_hud_play.luau, which projects the character through that camera.
+local PLAY_TOP = 0.42
+-- The chip carries the hazard warning ("⚠️ FLYTT DEG! URVERKSFUGL ◀" is the longest): below this many
+-- screen px it cannot hold it in two readable lines, so the row does not move somewhere that narrow.
+local CHIP_MIN_PX = 130
+-- The band title card (Ambience) gets the strip between the stack and the character when that strip is
+-- at least CARD_MIN_PX tall and 160 px wide; otherwise it sits ON the chip for its few seconds.
+local CARD_MIN_PX, CARD_MAX_H = 48, 84
 
 -- Roblox's own guidance and both mobile platform guidelines put the smallest comfortable tap
 -- target at 44 SCREEN px. Design px are not screen px: the UIScale that makes the HUD fit a phone
@@ -212,6 +234,36 @@ local function showToast(text, color)
 		end
 	end)
 end
+
+--============================================================================ ambience row
+
+-- Empty slots, filled by Ambience.client.luau (the band chip, the ☕ Hvil button, the band's title
+-- card). A frame with no text and a transparent background draws nothing on its own, so a HUD without
+-- the ambience script looks exactly as it did.
+local ambRow = Instance.new("Frame")
+ambRow.Name = "AmbienceRow"
+ambRow.AnchorPoint = Vector2.new(0.5, 0)
+ambRow.BackgroundTransparency = 1
+ambRow.BorderSizePixel = 0
+ambRow.Parent = root
+local chipSlot = Instance.new("Frame")
+chipSlot.Name = "ChipSlot"
+chipSlot.BackgroundTransparency = 1
+chipSlot.BorderSizePixel = 0
+chipSlot.Parent = ambRow
+local restSlot = Instance.new("Frame")
+restSlot.Name = "RestSlot"
+restSlot.BackgroundTransparency = 1
+restSlot.BorderSizePixel = 0
+restSlot.Parent = ambRow
+-- Where the band's title card goes (Ambience fills it and shows it for a few seconds at a new band).
+-- Placed by applyLayout, relative to the row: in the strip above the player's character when there is
+-- room, else exactly over the chip. Draws nothing itself.
+local cardSlot = Instance.new("Frame")
+cardSlot.Name = "CardSlot"
+cardSlot.BackgroundTransparency = 1
+cardSlot.BorderSizePixel = 0
+cardSlot.Parent = ambRow
 
 --============================================================================ drawer toggles
 
@@ -666,7 +718,8 @@ local function applyLayout()
 	end
 	top.Size = UDim2.new(0, topW, 0, topH)
 
-	local headerBottom = MARGIN + math.max(topH, if compact then toggleH else 0) + GAP
+	local headerH = math.max(topH, if compact then toggleH else 0)
+	local headerBottom = MARGIN + headerH + GAP
 
 	-- The inscription sits directly under the header, centred, at whatever width fits. It is the
 	-- only panel that never collapses, so it gets the width first and the side panels take what
@@ -676,10 +729,58 @@ local function applyLayout()
 	rule.Position = UDim2.new(0.5, 0, 0, headerBottom)
 	rule.Size = UDim2.new(0, ruleW, 0, ruleH)
 
+	local toastW = clampNum(rootW - 2 * MARGIN, 120, TOAST_W)
+	local toastH = touchSize(TOAST_H)
+	local toastBottom = headerBottom + ruleH + GAP + toastH
 	toast.Position = UDim2.new(0.5, 0, 0, headerBottom + ruleH + GAP)
-	toast.Size = UDim2.new(0, clampNum(rootW - 2 * MARGIN, 120, TOAST_W), 0, touchSize(TOAST_H))
+	toast.Size = UDim2.new(0, toastW, 0, toastH)
 
-	local bandTop = headerBottom + ruleH + GAP + touchSize(TOAST_H) + GAP
+	-- The ambience row sits under the toast, as wide as the inscription, and the rest button is a
+	-- thumb-sized tap target like every other button here...
+	local rowH = touchSize(AMB_ROW_H)
+	local restW = touchSize(AMB_REST_W)
+	local rowW = math.max(ruleW, restW + 60)
+	local rowTop = toastBottom + GAP
+	local rowX0: number? = nil
+	local counterX: number? = nil -- the counter's left edge when it leaves the centre; nil = centred
+	local inHeader = false
+	-- ... unless that puts it over the player's own character (PLAY_TOP). Then it goes up into the header,
+	-- the one band of the screen that is sky at any camera pitch: right of the counter if the counter can
+	-- stay centred, else with the counter moved beside the menu toggle so the chip is wide enough for a
+	-- warning. Measured 2026-09-24: this is every landscape phone, and nothing else hudcheck measures.
+	-- `insetPx` is the topbar strip; `playTop` is PLAY_TOP in design px from the root's top.
+	local insetPx = vy - vyDraw
+	local playTop = (PLAY_TOP * vy - insetPx) / layout.scale
+	if rowTop + rowH > playTop then
+		local edge = if compact then toggleW + GAP else 0
+		local hdrL, hdrR = MARGIN + edge, rootW - MARGIN - edge
+		local rowMin = restW + GAP + CHIP_MIN_PX / layout.scale
+		local centredRight = (rootW + topW) / 2 + GAP
+		if hdrR - centredRight >= rowMin then
+			rowX0 = centredRight
+		elseif hdrR - (hdrL + topW + GAP) >= rowMin then
+			counterX = hdrL
+			rowX0 = hdrL + topW + GAP
+		end
+		if rowX0 ~= nil then
+			inHeader = true
+			rowW = hdrR - rowX0
+			rowH = math.max(rowH, headerH) -- level with the counter; a taller chip reads better
+			rowTop = MARGIN
+		end
+	end
+	local rowLeft: number = if rowX0 ~= nil then rowX0 else (rootW - rowW) / 2
+	top.Position = if counterX ~= nil then UDim2.new(0, counterX + topW / 2, 0, MARGIN) else UDim2.new(0.5, 0, 0, MARGIN)
+	ambRow.Position = UDim2.new(0, rowLeft + rowW / 2, 0, rowTop)
+	ambRow.Size = UDim2.new(0, rowW, 0, rowH)
+	restSlot.Position = UDim2.new(1, -restW, 0, 0)
+	restSlot.Size = UDim2.new(0, restW, 1, 0)
+	chipSlot.Position = UDim2.new(0, 0, 0, 0)
+	chipSlot.Size = UDim2.new(1, -(restW + GAP), 1, 0)
+	local chipW = rowW - restW - GAP
+
+	-- the centred stack ends under the toast when the row went up into the header
+	local bandTop = (if inHeader then toastBottom else rowTop + rowH) + GAP
 	local bandBottom = math.max(rootH - MARGIN - padDesign, bandTop + 1)
 	local band = bandBottom - bandTop
 
@@ -696,15 +797,45 @@ local function applyLayout()
 		codeFrame.Position = UDim2.new()
 		codeFrame.Size = UDim2.new(1, 0, 0, codeH)
 
+		-- A drawer only has to clear the CENTRED stack (the inscription, the toast, the ambience row)
+		-- where the two share columns. On a landscape phone they do not (the stack is centred, the
+		-- drawers hug the edges), so there a drawer hangs from under the toggles and gets the height
+		-- the stack took; on a portrait phone it still hangs below the row. Measured 2026-09-24
+		-- (robloxemu/check_forktower_hud_open.luau): hanging every drawer from `bandTop` left it
+		-- 1 screen px tall on an 800x360 phone once the ambience row existed, and 35 px before.
+		-- (the row is in the stack only when it is not up in the header; there it ends above headerBottom)
+		local stack = {
+			{ x0 = (rootW - ruleW) / 2, x1 = (rootW + ruleW) / 2, bottom = headerBottom + ruleH },
+			{ x0 = (rootW - toastW) / 2, x1 = (rootW + toastW) / 2, bottom = toastBottom },
+			{ x0 = rowLeft, x1 = rowLeft + rowW, bottom = rowTop + rowH },
+		}
+		local function drawerTop(x0: number, x1: number): number
+			local y = headerBottom
+			for _, e in stack do
+				if e.x0 < x1 + GAP and e.x1 > x0 - GAP then
+					y = math.max(y, e.bottom + GAP)
+				end
+			end
+			return y
+		end
+
+		-- and a drawer ends above the touch controls, whatever `bandBottom` says: on a short phone the
+		-- centred stack already reaches past the controls' line, and `bandBottom` is clamped to at least
+		-- `bandTop + 1`, which would carry a drawer's bottom into the thumbstick (measured: 640x300)
+		local drawerBottom = rootH - MARGIN - padDesign
+		local leftTop = drawerTop(MARGIN, MARGIN + leftW)
+		local leftBand = math.max(1, drawerBottom - leftTop)
 		local stackH = stackHeight(btnH, codeH)
-		local leftH = Responsive.fitHeight(stackH, math.min(usable, band * layout.scale), layout)
+		local leftH = Responsive.fitHeight(stackH, math.min(usable, leftBand * layout.scale), layout)
 		left.AnchorPoint = Vector2.new(0, 0)
-		left.Position = UDim2.new(0, MARGIN, 0, bandTop)
+		left.Position = UDim2.new(0, MARGIN, 0, leftTop)
 		left.Size = UDim2.new(0, leftW, 0, leftH)
 
-		local lbH = Responsive.fitHeight(LB_H, math.min(usable, band * layout.scale), layout)
+		local lbTop = drawerTop(rootW - MARGIN - lbW, rootW - MARGIN)
+		local lbBand = math.max(1, drawerBottom - lbTop)
+		local lbH = Responsive.fitHeight(LB_H, math.min(usable, lbBand * layout.scale), layout)
 		lbFrame.AnchorPoint = Vector2.new(1, 0)
-		lbFrame.Position = UDim2.new(1, -MARGIN, 0, bandTop)
+		lbFrame.Position = UDim2.new(1, -MARGIN, 0, lbTop)
 		lbFrame.Size = UDim2.new(0, lbW, 0, lbH)
 	else
 		if codeFrame.Parent ~= root then
@@ -731,9 +862,51 @@ local function applyLayout()
 	-- The card is centred in the band, never over the inscription, and never taller than the
 	-- room it has.
 	local cardW = clampNum(rootW - 2 * MARGIN, 160, CARD_W)
-	local cardH = Responsive.fitHeight(CARD_H, math.min(usable, band * layout.scale), layout)
+	local cardTop, cardRoom, cardX = bandTop, band, nil
+	-- On a landscape phone there is no room left under the centred stack (the inscription, the toast,
+	-- the ambience row): measured 2026-09-24 (robloxemu/check_forktower_hud_open.luau), the card came
+	-- out 1 screen px tall on 800x360 and 640x300 with its close button drawn above it (35 px on
+	-- 800x360 before the ambience row). But a landscape phone is wide, and the stack is centred: the
+	-- card goes in the free column to the right of the stack, from under the counter down to the touch
+	-- controls. Still never over the inscription (a rebirth taken with the card open lands on a live
+	-- fork), never over the ambience row, never over a toggle.
+	local padLine = rootH - MARGIN - padDesign
+	local cardMinH = 76 + btnH + GAP + 40 -- title and rarity, one row of traits, the close button
+	if compact and padLine - bandTop < cardMinH then
+		local stackHalf = math.max(ruleW, toastW, if inHeader then 0 else rowW) / 2
+		local sideW = rootW / 2 - stackHalf - GAP - MARGIN
+		if sideW >= 160 then
+			cardW = math.min(cardW, sideW)
+			cardTop = headerBottom
+			cardRoom = math.max(1, padLine - headerBottom)
+			cardX = rootW - MARGIN - cardW / 2
+		end
+	end
+	local cardH = Responsive.fitHeight(CARD_H, math.min(usable, cardRoom * layout.scale), layout)
 	card.Size = UDim2.new(0, cardW, 0, cardH)
-	card.Position = UDim2.new(0.5, 0, 0, bandTop + cardH * 0.5)
+	if cardX then
+		card.Position = UDim2.new(0, cardX, 0, cardTop + cardH * 0.5)
+	else
+		card.Position = UDim2.new(0.5, 0, 0, cardTop + cardH * 0.5)
+	end
+
+	-- The band's title card (Ambience). Measured 2026-09-24 (review): hung under the row it covered the
+	-- character's legs and the platform on a landscape phone, ran off the bottom of a 640x300 one, sat on
+	-- an open drawer on a portrait one, and covered the character's head on a 1366x768 laptop. So it gets
+	-- the strip between the centred stack and PLAY_TOP, clear of the side panels' columns (a phone's
+	-- drawers open there), when that strip can hold a title; otherwise it sits exactly on the chip for its
+	-- few seconds (Ambience ends it the moment the chip has a warning to show). Never over the character,
+	-- the inscription, the toast's slot or the ☕ button.
+	local stripX0 = math.max((rootW - RULE_W) / 2, MARGIN + leftW + GAP)
+	local stripX1 = math.min((rootW + RULE_W) / 2, rootW - MARGIN - lbW - GAP)
+	local stripH = math.min(playTop - bandTop, CARD_MAX_H)
+	if stripH * layout.scale >= CARD_MIN_PX and (stripX1 - stripX0) * layout.scale >= 160 then
+		cardSlot.Position = UDim2.new(0, stripX0 - rowLeft, 0, bandTop - rowTop)
+		cardSlot.Size = UDim2.new(0, stripX1 - stripX0, 0, stripH)
+	else
+		cardSlot.Position = UDim2.new(0, 0, 0, 0)
+		cardSlot.Size = UDim2.new(0, chipW, 1, 0)
+	end
 
 	refreshDrawers()
 end
