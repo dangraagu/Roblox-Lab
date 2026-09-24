@@ -53,12 +53,29 @@ Guarded by `robloxemu/check_crystal_spawn.luau`, which replays the recorded engi
 `simulateSpawn` alone cannot see this, because the emulator drains `task.defer` **after** its
 engine step and Roblox drains it **before**.
 
+## The living cavern (2026-09-23) — read `EYECANDY.md` first
+Client-side bands keyed to **chambers owned** (read from the player's own sockets in the world AND the State push),
+a geode pulse, harvest bursts + a Legendary/Mythic beam, rare harmless visitors, 🛋 Relax. **No knock-down hazards** (justified in
+EYECANDY.md §3). Server change: +9 lines, `lastHarvest = { n, socket, seed, tier }` in the State push, sent after the
+roll is paid. Also fixed: the phone code drawer's Redeem button sat under the thumbstick on 640×300.
+Built, unit + headless + mutation tested (resumed 2026-09-24: sweep survivor closed with `check_growacrystal_critters`,
+shot list rebuilt against the real geometry, EYECANDY.md §7 and §12). **Adversarial review round 1 (2026-09-24): 3
+findings, all fixed with a failing test first (EYECANDY.md §13):** (1, high) the HUD could lose the join push to the
+cavern script — Roblox flushes a queued RemoteEvent to the FIRST connection only — so State now has ONE client
+connection, `src/shared/StateFeed.luau`, that both scripts subscribe to; **never add a second `State.OnClientEvent`
+connection** (`check_growacrystal_queue` asserts one); (2) the phone code answer was ~6 px, now it takes the whole row;
+(3) Legendary flashes stacked, now at most one per `Config.Env.HarvestFlash.cooldown`. **NOT seen in Studio.** Two
+findings for the owner, not changed: (1) at luck 0 every seed returns less than it costs (Shard 78 %) — without codes a player never
+buys chamber 2; (2) the refraction seed is `os.time()*1000 + socketId*977 + UserId`, predictable by a client.
+
 ## Files
-Server `src/server/Main.server.luau`; client `src/client/Hud.client.luau`; shared
-`Config/Rng/Rarity/Growth/Economy/Geode/Codex/Codes.luau`; tests `tests/*.spec.luau`.
+Server `src/server/Main.server.luau`; clients `src/client/Hud.client.luau`, `src/client/Grotto.client.luau` (the
+living cavern); shared `Config/Rng/Rarity/Growth/Economy/Geode/Codex/Codes/Cavern/Fx/FxClient/Responsive.luau`, plus
+`EnvBands.luau` + `Rest.luau` (templates from plus1-jump, verbatim), `Visitors.luau`, `Grotto.luau` (pure),
+`StateFeed.luau` (the one client State connection) and `CavernArt.luau` (client-only art); tests `tests/*.spec.luau` + `tests/IdleModel.luau` (pacing model, not shipped).
 Headless (in `robloxemu/`): `check_crystal.luau` (HUD fit), `check_crystal_sockets.luau`
 (sockets are in the world and clicking plants), `check_crystal_spawn.luau` (where a spawning
-player ends up and which way they face).
+player ends up and which way they face), `check_growacrystal_harvest/env/hud/row/join/race/critters/queue/queue_hudfirst/redeem/flash.luau` (the living cavern).
 
 ## Next
 1. In-game test in Studio (plant → grow → harvest → refraction; shop; geode; rejoin keeps

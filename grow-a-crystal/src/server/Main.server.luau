@@ -61,6 +61,11 @@ local orderedLB = tryStore(function() return DataStoreService:GetOrderedDataStor
 
 local profiles = {} -- [player] = profile
 local selected = {} -- [player] = seedTier currently selected in the shop UI
+-- [player] = { n, socket, seed, tier }: this session's LAST finished harvest, repeated in every State
+-- push so the client can draw a burst in the colour the refraction roll produced (and a beam of light
+-- for Legendary/Mythic) when n grows. Cosmetic only: never saved, never read back, and it describes a
+-- roll that has already been paid, so it tells the player nothing their dust and codex do not.
+local harvests = {}
 
 local function defaultProfile()
 	return {
@@ -491,6 +496,7 @@ local function pushState(plr)
 		geodeExclusive = Geode.exclusiveFor(os.time(), Config.Geode),
 		geodeCost = Config.Geode.CostDust,
 		now = os.time(),
+		lastHarvest = harvests[plr],
 	})
 end
 
@@ -533,6 +539,8 @@ grantHarvest = function(plr, socketId)
 	p.totalDust += dust
 	Codex.discover(p.codex, finalTier)
 	p.plants[socketId] = nil
+	local last = harvests[plr]
+	harvests[plr] = { n = (last and last.n or 0) + 1, socket = socketId, seed = plant.tier, tier = finalTier }
 	refreshSocketVisual(plr, socketId)
 	pushState(plr)
 end
@@ -728,6 +736,7 @@ local function onPlayerRemoving(plr)
 	if idx ~= nil then usedPlots[idx] = nil end
 	profiles[plr] = nil
 	selected[plr] = nil
+	harvests[plr] = nil
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)

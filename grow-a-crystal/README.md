@@ -32,7 +32,15 @@ crystal → **refraction roll** may upgrade its tier → Gem Dust → buy rarer 
 4. You spawn on your private plot. Select a seed (left panel), click an empty socket to
    plant, click a glowing crystal to harvest.
 
-## Tests (pure logic, no Roblox) — 166 pass
+## The living cavern (client-side eye candy) — see `EYECANDY.md`
+The cavern changes with the chambers you own: 💧 Sunken Grotto → ✨ Glow-worm Hollow → 🍄 Mushroom Terraces →
+🌊 Waterfall Chamber → 💎 Heart of the Geode, gliding in (never a hard cut), plus a slow geode pulse, harvest bursts in
+the refracted tier's colour, a beam of light for Legendary/Mythic, rare harmless visitors (moth swirl, bat swoop), and
+**🛋 Relax** (sit, soft focus, visitors leave you alone; crystals keep growing). No knock-down hazards, on purpose.
+Everything is built on the client (`src/client/Grotto.client.luau` + `src/shared/CavernArt.luau`); the server only adds
+the harvest's already-paid result to its State push.
+
+## Tests (pure logic, no Roblox) — 16 specs, 1 144 assertions, all pass
 ```
 luau tests/Rng.spec.luau
 luau tests/Rarity.spec.luau
@@ -41,7 +49,18 @@ luau tests/Economy.spec.luau
 luau tests/Geode.spec.luau
 luau tests/Codex.spec.luau
 luau tests/Codes.spec.luau
+luau tests/Cavern.spec.luau
+luau tests/responsive.spec.luau
+luau tests/EnvBands.spec.luau     # template (from plus1-jump, verbatim)
+luau tests/Rest.spec.luau         # template (verbatim)
+luau tests/Visitors.spec.luau     # the rare-visitor clock
+luau tests/Grotto.spec.luau       # progress, bursts, pulse, scenery layout, routes
+luau tests/EnvConfig.spec.luau    # the shipped Config.Env / Visitors / Rest / Budget
+luau tests/Pacing.spec.luau       # when a player reaches each look (tests/IdleModel.luau)
+luau tests/StateFeed.spec.luau    # one State connection shared by the HUD and the cavern
 ```
+Headless (in `robloxemu/`, rebuild the bundle first): `check_crystal`, `check_crystal_sockets`, `check_crystal_spawn`,
+and `check_growacrystal_{harvest,env,hud,row,join,race,critters,queue,queue_hudfirst,redeem,flash}`.
 
 ## Codes (edit in `Config.Codes`)
 `WELCOME` +100 dust · `CRYSTAL` +500 dust · `GEODE` free Amethyst seed · `MYTHIC` +5000 dust.

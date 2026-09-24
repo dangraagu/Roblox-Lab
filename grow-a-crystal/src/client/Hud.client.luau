@@ -10,6 +10,9 @@ local GuiService = game:GetService("GuiService")
 local player = Players.LocalPlayer
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+-- State has ONE client connection, shared with Grotto.client: Roblox hands the join push to the first
+-- connection only, so two would race for it (StateFeed.luau).
+local StateFeed = require(ReplicatedStorage:WaitForChild("StateFeed"))
 local remotes = ReplicatedStorage:WaitForChild("CrystalRemotes")
 local StateEvent = remotes:WaitForChild("State")
 local BuyEvent = remotes:WaitForChild("Buy")
@@ -222,16 +225,45 @@ local codeBtn = Instance.new("TextButton")
 codeBtn.Position = UDim2.new(0, 0, 0, 32); codeBtn.Size = UDim2.new(1, 0, 0, 24)
 codeBtn.Font = Enum.Font.GothamBold; codeBtn.TextScaled = true; codeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 codeBtn.BackgroundColor3 = Color3.fromRGB(70, 150, 90); codeBtn.Text = "Redeem"; codeBtn.Parent = codeFrame; corner(codeBtn, 6)
+-- The server's answer. On desktop the full-width button says it, as it always has. On a phone the drawer is
+-- one row and the button only a thumb wide (applyLayout), where "Invalid code" came out about 6 px tall, so
+-- there the answer takes the whole row for its 2 s instead (robloxemu/check_growacrystal_redeem.luau).
+-- The box and the button are HIDDEN meanwhile, not just covered, so nothing invisible can be tapped; a
+-- mistyped code stays in the box to be corrected.
+local codeResult = Instance.new("TextLabel")
+codeResult.Name = "CodeResult"
+codeResult.Size = UDim2.new(1, 0, 1, 0); codeResult.Visible = false
+codeResult.Font = Enum.Font.GothamBold; codeResult.TextScaled = true; codeResult.TextColor3 = Color3.fromRGB(255, 255, 255)
+codeResult.BackgroundColor3 = Color3.fromRGB(70, 150, 90); codeResult.Text = ""; codeResult.Parent = codeFrame; corner(codeResult, 6)
+local redeemToken = 0
+local function showRedeemResult(msg: string)
+	redeemToken += 1
+	local mine = redeemToken
+	if layout.compact then
+		codeResult.Text = msg
+		codeResult.Visible = true
+		codeBox.Visible = false
+		codeBtn.Visible = false
+	else
+		codeBtn.Text = msg
+	end
+	task.delay(2, function()
+		if redeemToken ~= mine then return end
+		codeResult.Visible = false
+		codeBox.Visible = true
+		codeBtn.Visible = true
+		codeBtn.Text = "Redeem"
+	end)
+end
 codeBtn.Activated:Connect(function()
 	local input = codeBox.Text
 	if input == "" then return end
 	local ok, res = pcall(function() return RedeemFunc:InvokeServer(input) end)
 	if ok and type(res) == "table" then
-		if res.ok then codeBox.Text = ""; codeBtn.Text = "✅ Redeemed!"
-		elseif res.reason == "already" then codeBtn.Text = "Already used"
-		elseif res.reason == "unknown" then codeBtn.Text = "Invalid code"
-		else codeBtn.Text = "Try again" end
-		task.delay(2, function() codeBtn.Text = "Redeem" end)
+		if res.ok then codeBox.Text = ""; showRedeemResult("✅ Redeemed!")
+		elseif res.reason == "already" then showRedeemResult("Already used")
+		elseif res.reason == "unknown" then showRedeemResult("Invalid code")
+		else showRedeemResult("Try again") end
 	end
 end)
 
@@ -277,7 +309,8 @@ LeaderboardEvent.OnClientEvent:Connect(function(top)
 end)
 
 -- ── State render ───────────────────────────────────────────────────────────
-StateEvent.OnClientEvent:Connect(function(s)
+-- Subscribed, not connected: if the cavern script connected first, the join push is handed over here.
+StateFeed.of(StateEvent, task.spawn):subscribe(function(s)
 	dustLabel.Text = "💎 " .. tostring(s.dust)
 	for t = 1, MAXT do
 		local r = seedRows[t]
@@ -392,11 +425,29 @@ local function applyLayout()
 	for _, b in ipairs(shopButtons) do
 		b.Size = UDim2.new(1, 0, 0, shopH)
 	end
-	codeBox.Size = UDim2.new(1, 0, 0, codeBoxH)
-	codeBtn.Position = UDim2.new(0, 0, 0, codeBoxH + 4)
-	codeBtn.Size = UDim2.new(1, 0, 0, codeBtnH)
-	-- Box, gap, button, and the 6 px of padding at the top and the bottom. 68 on desktop.
-	local codeH = codeBoxH + 4 + codeBtnH + 12
+	local codeH
+	if layout.compact then
+		-- ONE ROW on a phone. Stacked, the open code drawer is 164 design px tall at scale 0.6, and on a
+		-- 640x300 screen its Redeem button reached 4 px into the thumbstick's band, where a tap never lands
+		-- (found by robloxemu/check_growacrystal_hud.luau, which opens every drawer; check_crystal never
+		-- does). The button keeps the smallest width that is still a 44-px tap target; the box gets the rest.
+		local rowH = math.max(codeBoxH, codeBtnH)
+		local btnW = math.ceil(MIN_TAP / layout.scale) + 1
+		codeBox.Size = UDim2.new(1, -(btnW + 4), 0, rowH)
+		codeBtn.Position = UDim2.new(1, -btnW, 0, 0)
+		codeBtn.Size = UDim2.new(0, btnW, 0, rowH)
+		codeH = rowH + 12
+		-- the box is what the button leaves: ~49 screen px on a portrait phone, where "Enter code..." came out
+		-- about 6 px tall (robloxemu/check_growacrystal_redeem.luau); the drawer's own toggle says "Code" too
+		codeBox.PlaceholderText = "Code"
+	else
+		codeBox.PlaceholderText = "Enter code..."
+		codeBox.Size = UDim2.new(1, 0, 0, codeBoxH)
+		codeBtn.Position = UDim2.new(0, 0, 0, codeBoxH + 4)
+		codeBtn.Size = UDim2.new(1, 0, 0, codeBtnH)
+		-- Box, gap, button, and the 6 px of padding at the top and the bottom. 68 on desktop.
+		codeH = codeBoxH + 4 + codeBtnH + 12
+	end
 
 	toggleBar.Visible = layout.compact
 
