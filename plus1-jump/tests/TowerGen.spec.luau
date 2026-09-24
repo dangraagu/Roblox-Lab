@@ -85,5 +85,33 @@ truthy(not deepEq(TowerGen.tier(10, cfg), TowerGen.tier(11, cfg)), "different ti
 local cfg2 = { Tower = Config.Tower, Jump = Config.Jump, WorldSeed = Config.WorldSeed + 1 }
 truthy(not deepEq(TowerGen.tier(5, cfg), TowerGen.tier(5, cfg2)), "different world seed differs")
 
+-- Plattform-sentre i verden (review 2026-09-17: klient-scenery skal holde seg unna tårnet). Samme
+-- stabling som serveren: etasje 1 på (0, BaseY, 0), hver neste etasje på toppen av forrige.
+do
+	local all = TowerGen.platformCentres(cfg, 1, 50)
+	eq(#all, 50 * tw.TilesPerTier, "platformCentres returns every platform of tiers 1..50")
+	local ox, oy, oz = 0, tw.BaseY, 0
+	local ok, k = true, 0
+	for t = 1, 50 do
+		local gen = TowerGen.tier(t, cfg)
+		for i, p in ipairs(gen.platforms) do
+			k += 1
+			local c = all[k]
+			if not (c and c.tier == t and c.idx == i and math.abs(c.x - (ox + p.dx)) < 1e-9
+				and math.abs(c.y - (oy + p.dy)) < 1e-9 and math.abs(c.z - (oz + p.dz)) < 1e-9) then
+				ok = false
+			end
+		end
+		ox, oy, oz = ox + gen.exitDx, oy + gen.exitHeight, oz + gen.exitDz
+	end
+	truthy(ok, "in climbing order, stacked exactly the way the server builds the tower")
+	local part = TowerGen.platformCentres(cfg, 40, 44)
+	eq(#part, 5 * tw.TilesPerTier, "a tier range returns just those tiers")
+	eq(part[1].tier, 40, "starting at the first tier asked for")
+	truthy(math.abs(part[1].x - all[39 * tw.TilesPerTier + 1].x) < 1e-9 and math.abs(part[1].y - all[39 * tw.TilesPerTier + 1].y) < 1e-9,
+		"at the same world position as in the full tower")
+	eq(#TowerGen.platformCentres(cfg, 5, 4), 0, "an empty range is empty")
+end
+
 print(string.format("TowerGen: %d passed, %d failed", passed, failed))
 assert(failed == 0, "TowerGen tests failed")

@@ -29,6 +29,17 @@ local RedeemFunc = remotes:WaitForChild("Redeem")
 local LeaderboardEvent = remotes:WaitForChild("Leaderboard")
 
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+local Config = require(ReplicatedStorage:WaitForChild("Config"))
+local EnvBands = require(ReplicatedStorage:WaitForChild("EnvBands"))
+local Progression = require(ReplicatedStorage:WaitForChild("Progression"))
+
+-- The sky band a tier belongs to, as an emoji: "85 🚀" on the board is the brag that you made it to
+-- space. Public information only — the tier is already on the board and in leaderstats.
+local function bandEmoji(tier: number): string
+	local bands = Config.Env and Config.Env.Bands
+	if type(bands) ~= "table" or type(tier) ~= "number" then return "" end
+	return bands[EnvBands.indexAt(bands, tier)].emoji or ""
+end
 -- CurrentCamera can still be nil for the first frames of a join. Indexing it inside
 -- applyLayout would throw before the state connections below are made, leaving the player with
 -- a fully drawn HUD that silently never updates again: jump power stuck at 0, an empty
@@ -352,7 +363,7 @@ local function renderLeaderboard(entries)
 		local name = "Player"
 		local ok, res = pcall(function() return Players:GetNameFromUserIdAsync(entry.userId) end)
 		if ok then name = res end
-		l.Text = string.format("%d. %s — %d", i, name, entry.tier)
+		l.Text = string.format("%d. %s — %d %s", i, name, entry.tier, bandEmoji(entry.tier))
 		l.Parent = lbList
 		local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 15; cc.Parent = l
 	end
@@ -579,12 +590,21 @@ end
 StateEvent.OnClientEvent:Connect(function(s)
 	jumpLabel.Text = "🔼 " .. tostring(s.jumpPower)
 	tierLabel.Text = "🏛️ Tier: " .. tostring(s.tier)
-	bestLabel.Text = "⭐ Best: " .. tostring(s.bestTier)
+	bestLabel.Text = "⭐ Best: " .. tostring(s.bestTier) .. " " .. bandEmoji(s.bestTier)
 	multLabel.Text = "✖️ Multiplier: " .. tostring(s.multiplier) .. "x"
 	heightLabel.Text = string.format("📏 Jump: %.1f", s.jumpHeight)
-	if s.canRebirth then
-		rebirthBtn.Text = "REBIRTH → " .. tostring(s.multiplier * 2) .. "x?"
+	-- The button always works when the server allows a rebirth; it is only LIT when
+	-- Progression.rebirthHighlighted says so (the first rebirth, then again past the last sky band), so
+	-- the HUD never walks a climber away from reaching space in the owner's 30-45 min (Pacing.spec).
+	local loud = s.canRebirth and Progression.rebirthHighlighted(s.tier, s.bestTier, s.rebirths, Config.Rebirth)
+	-- the multiplier the NEXT rebirth gives (Config.Rebirth.Multipliers), not a guess of "double"
+	local nextMult = tostring(Progression.rebirthMultiplier((s.rebirths or 0) + 1, Config.Rebirth))
+	if loud then
+		rebirthBtn.Text = "REBIRTH → " .. nextMult .. "x?"
 		rebirthBtn.BackgroundColor3 = Color3.fromRGB(180, 90, 220)
+	elseif s.canRebirth then
+		rebirthBtn.Text = "Rebirth → " .. nextMult .. "x"
+		rebirthBtn.BackgroundColor3 = Color3.fromRGB(84, 76, 110)
 	else
 		rebirthBtn.Text = "Reach tier " .. tostring(s.nextRebirthTier)
 		rebirthBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)

@@ -28,7 +28,8 @@ Single-server, shared tower streamed ahead of the highest player. Codes + gamepa
 - **Still PRIVATE** — set Audience = Public only after: (1) in-game test that it plays, and
   (2) the content-maturity Questionnaire (all 17 = No for this obby — see maze memory note),
   so it isn't region-blocked.
-- Pure logic: **111 luau-CLI tests pass** (Rng 56, Progression 28, TowerGen 15, Codes 12).
+- Pure logic: **594 luau-CLI assertions pass across 11 specs** (2026-09-17, after review round 2; per-spec counts
+  in EYECANDY.md §7). Before the sky it was 111 in 4 specs (Rng 56, Progression 28, TowerGen 15, Codes 12).
 - Server/client verified with luau-compile (syntax) + luau-analyze (only Roblox
   type/global noise remains).
 
@@ -46,8 +47,32 @@ Single-server, shared tower streamed ahead of the highest player. Codes + gamepa
   bounded by the highest tier reached in the session.
 
 ## Files
-Server `src/server/Main.server.luau`; client `src/client/Hud.client.luau`; shared
-`Config/Rng/Progression/TowerGen/Codes.luau`; tests `tests/*.spec.luau`.
+Server `src/server/Main.server.luau`; client `src/client/Hud.client.luau` + `Sky.client.luau`; shared
+`Config/Rng/Progression/TowerGen/Codes.luau`, template modules `EnvBands/Hazards/Rest.luau`, client art
+`SkyArt.luau`, kit `Fx/FxClient/Responsive.luau`; tests `tests/*.spec.luau` + `tests/ClimbModel.luau`.
+
+## The sky (added 2026-09-17) — read EYECANDY.md first
+Altitude-driven environment bands (temple -> treetops -> cloud sea -> storm -> edge of space ->
+SPACE at tier 85 -> deep space -> beyond the galaxy at tier 240), rare telegraphed hazards, and a
+rest state. All CLIENT-side (`src/client/Sky.client.luau` + `src/shared/SkyArt.luau`); the server
+knows nothing about it and nothing about it touches progress. Game-agnostic template modules:
+`src/shared/EnvBands.luau`, `Hazards.luau`, `Rest.luau` (specs in `tests/`). +1 Jump's numbers live
+in `Config.Env / Config.Hazards / Config.Rest / Config.Pacing / Config.Budget`. Pacing is measured
+by `tests/Pacing.spec.luau` + `tests/ClimbModel.luau`; if you retune `Config.Tower`/`Config.Jump`,
+that spec tells you whether space still lands at 30-45 min. Headless glue checks:
+`robloxemu/check_plus1_sky.luau` and `check_plus1_sky_rejoin.luau`, `check_plus1jump_life.luau` (resume
+session, EYECANDY.md §13: critters keep recycling, scenery cross-fades on a teleport, suit light in space),
+plus the seven `robloxemu/check_plus1jump_*.luau` files from adversarial review round 1 (EYECANDY.md §12): hazards start
+on screen at any camera pitch, a queued rest survives a walked dodge, a slow profile load never shows a
+TEMPLE card or a repeat space fanfare, the sky names bands by the HUD's tier number, cloud decks keep 40
+studs off the climb and the temple island sits below any rescue, and when the HUD lights REBIRTH.
+Review round 2 (EYECANDY.md §14) added `check_plus1jump_dodge` (the red ring IS the hit zone: leaving it in any
+direction dodges; `Hazards.zone`), `check_plus1jump_slowload` (16-40 s profile loads, a placement 20 s late) and
+`check_plus1jump_budget` (weather emitters capped at 2 by `EnvBands.capRates` under fast teleports).
+**OWNER DECISION PENDING (EYECANDY.md §11):** by default the HUD lights every rebirth the server allows, as before
+the sky; a player who presses it every time reaches space after 227 min, not 30-45. The one-line option
+`Config.Rebirth.HighlightFirstRebirths = 1` (lit for the first rebirth, then again past tier 240) brings that
+player to 38 min. Round 1 had switched that option on without the owner; round 2 restored the default.
 
 ## Tests / tooling
 luau CLI binaries live in this session's scratch (`.../scratchpad/luau/`). Run pure

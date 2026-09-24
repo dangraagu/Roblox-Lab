@@ -75,4 +75,25 @@ function TowerGen.tier(t: number, config: any): any
 	}
 end
 
+-- Verdens-sentrene til plattformene i etasje fromTier..toTier, i klatre-rekkefølge, stablet nøyaktig
+-- som serveren bygger tårnet: etasje 1 på (0, BaseY, 0), hver neste på toppen av forrige.
+-- Returnerer { { x, y, z, tier, idx }, ... }. Klienten bruker dette til å holde himmel-scenery
+-- (skydekker) unna klatreruta, uten å vente på at serveren har bygget etasjen.
+function TowerGen.platformCentres(config: any, fromTier: number, toTier: number): { any }
+	local out = {}
+	local ox, oy, oz = 0, config.Tower.BaseY, 0
+	for t = 1, toTier do
+		local gen = TowerGen.tier(t, config)
+		if t >= fromTier then
+			for i, p in ipairs(gen.platforms) do
+				out[#out + 1] = { x = ox + p.dx, y = oy + p.dy, z = oz + p.dz, tier = t, idx = i }
+			end
+		end
+		ox += gen.exitDx
+		oy += gen.exitHeight
+		oz += gen.exitDz
+	end
+	return out
+end
+
 return TowerGen

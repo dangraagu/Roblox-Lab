@@ -189,7 +189,7 @@ local towerFolder = Instance.new("Folder")
 towerFolder.Name = "Tower"
 towerFolder.Parent = workspace
 
-local BASE_POS = Vector3.new(0, 8, 0)
+local BASE_POS = Vector3.new(0, Config.Tower.BaseY, 0) -- 8; himmel-båndene regner høyde fra samme tall
 type Built = { origin: Vector3, top: Vector3, parts: { BasePart } }
 local builtTiers: { [number]: Built } = {}
 local highestBuilt = 0
