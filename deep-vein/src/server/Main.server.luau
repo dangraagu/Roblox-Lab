@@ -27,6 +27,10 @@ local Ore = require(ReplicatedStorage:WaitForChild("Ore"))
 local Economy = require(ReplicatedStorage:WaitForChild("Economy"))
 local Prestige = require(ReplicatedStorage:WaitForChild("Prestige"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
+-- The strata (EYECANDY.md): the rock a cell Part is made of follows its depth. Colour and Material
+-- are replicated with every Part anyway, so this costs no extra instance and no extra traffic.
+local EnvBands = require(ReplicatedStorage:WaitForChild("EnvBands"))
+local Strata = require(ReplicatedStorage:WaitForChild("Strata"))
 
 -- Mørkt, kaldt og tåkete: en gruve. Horror-preset setter ClockTime 0.2, så det finnes ingen sol
 -- under bakken — lampa på hodelykta og de lysende malmårene er ALT lyset spilleren har.
@@ -330,7 +334,19 @@ local swing -- forward declaration (the ClickDetector handler needs it)
 -- there unchanged and the only reasonable thing a player could conclude was that it was broken.
 local pushState
 
-local BEDROCK_COLOR = Color3.fromRGB(26, 24, 30)
+-- The bedrock's look is config (Config.Mine.BedrockColor / BedrockMaterial), so EnvConfig.spec can hold every
+-- stratum's stone away from it: the unbreakable walls must never look like the rock beside them.
+local BEDROCK_COLOR = Color3.fromRGB(Config.Mine.BedrockColor[1], Config.Mine.BedrockColor[2], Config.Mine.BedrockColor[3])
+local BEDROCK_MATERIAL = Enum.Material.Basalt -- a config typo costs the look, never the wall (Enum indexing throws)
+do
+	local ok, m = pcall(function() return (Enum.Material :: any)[Config.Mine.BedrockMaterial] end)
+	if ok and m then BEDROCK_MATERIAL = m end
+end
+
+local function rockLookOf(cell)
+	return Strata.rockLook(Config, EnvBands, cell.y, Mine.unit(0, cell.x, cell.y, cell.z, 91),
+		Mine.unit(0, cell.x, cell.y, cell.z, 92))
+end
 
 local function tintOf(cell): Color3
 	local rgb = Ore.color(Config, cell.ore)
@@ -338,14 +354,12 @@ local function tintOf(cell): Color3
 		return BEDROCK_COLOR
 	end
 	if cell.ore == 0 then
-		-- A per-cell jitter drawn from the cell's OWN hash, so a wall of stone is not one flat
-		-- colour and the jitter is identical for everyone looking at the same block.
-		local j = math.floor(Mine.unit(0, cell.x, cell.y, cell.z, 91) * 22) - 11
-		return Color3.fromRGB(
-			math.clamp(rgb[1] + j, 0, 255),
-			math.clamp(rgb[2] + j, 0, 255),
-			math.clamp(rgb[3] + j, 0, 255)
-		)
+		-- The stratum's rock (Strata.rockLook): the band palette for this depth, blended across a
+		-- band's fade, with the same per-cell jitter drawn from the cell's OWN hash as before (so a
+		-- wall of stone is not one flat colour and is identical for everyone looking at it), and now
+		-- and then an accent cell — a rust streak, a patch of moss. Ore keeps its own Neon colour.
+		local c = rockLookOf(cell).color
+		return Color3.fromRGB(c[1], c[2], c[3])
 	end
 	return Color3.fromRGB(rgb[1], rgb[2], rgb[3])
 end
@@ -385,7 +399,7 @@ local function makeCellPart(plr: Player, cell): BasePart
 		-- Should be unreachable: buildable() refuses bedrock, because the ring and the floor are
 		-- Mine.shell's five slabs now. Kept so a future caller that forgets gets a visible block
 		-- rather than a mystery.
-		part.Material = Enum.Material.Basalt
+		part.Material = BEDROCK_MATERIAL
 		part.Name = "Bedrock_" .. plr.UserId .. "_" .. cell.key
 	elseif cell.ore > 0 then
 		-- A glowing translucent ore cube is the thing you are hunting for in a dark shaft, and
@@ -394,7 +408,10 @@ local function makeCellPart(plr: Player, cell): BasePart
 		part.Transparency = 0.25
 		part.Name = "Ore_" .. plr.UserId .. "_" .. cell.key
 	else
-		part.Material = Enum.Material.Slate
+		-- the stratum's material (Ground, Slate, Rock, Marble, Sandstone, Limestone; never the bedrock's); Slate if a name
+		-- somehow is not a Material, so a config typo costs the look and never the block
+		local ok, mat = pcall(function() return (Enum.Material :: any)[rockLookOf(cell).material] end)
+		part.Material = if ok and mat then mat else Enum.Material.Slate
 		part.Name = "Rock_" .. plr.UserId .. "_" .. cell.key
 	end
 
@@ -857,7 +874,7 @@ local function buildShell(plr: Player)
 		part.BottomSurface = Enum.SurfaceType.Smooth
 		part.Size = Vector3.new(s.sx, s.sy, s.sz)
 		part.Position = origin + Vector3.new(s.x, s.y, s.z)
-		part.Material = Enum.Material.Basalt
+		part.Material = BEDROCK_MATERIAL
 		part.Color = BEDROCK_COLOR
 		part:SetAttribute("Owner", plr.UserId)
 		part:SetAttribute("Shell", s.kind)

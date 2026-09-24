@@ -18,6 +18,16 @@ local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 local Ore = require(ReplicatedStorage:WaitForChild("Ore"))
 local FxClient = require(ReplicatedStorage:WaitForChild("FxClient"))
+local EnvBands = require(ReplicatedStorage:WaitForChild("EnvBands"))
+
+-- The brag: the emoji of the stratum a depth reaches (Config.Env.Bands, the same table the cave's
+-- lighting and the rock follow), next to the best depth and every top-10 row. A depth in m is layers x 6.
+local function strataEmoji(depthM: number): string
+	local bands = Config.Env and Config.Env.Bands
+	if type(bands) ~= "table" or #bands == 0 then return "" end
+	local b = bands[EnvBands.indexAt(bands, math.floor((tonumber(depthM) or 0) / Config.Mine.CellSize))]
+	return if b and b.emoji then " " .. b.emoji else ""
+end
 
 local remotes = ReplicatedStorage:WaitForChild("VeinRemotes")
 local StateEvent = remotes:WaitForChild("State")
@@ -430,7 +440,7 @@ LeaderboardEvent.OnClientEvent:Connect(function(topList)
 		local name = "Miner"
 		local okn, res = pcall(function() return Players:GetNameFromUserIdAsync(e.userId) end)
 		if okn then name = res end
-		l.Text = string.format("%d. %s — %dm", i, name, e.depth)
+		l.Text = string.format("%d. %s — %dm%s", i, name, e.depth, strataEmoji(e.depth))
 		l.Parent = boardList
 		cap(l, 14)
 	end
@@ -442,7 +452,8 @@ local lastRebirths = nil
 
 StateEvent.OnClientEvent:Connect(function(s)
 	cashLabel.Text = "$" .. tostring(s.cash)
-	depthLabel.Text = string.format("⛏️ %dm deep  ·  best %dm  ·  wall %dm", s.depth, s.bestDepth, s.maxDepth)
+	depthLabel.Text = string.format("⛏️ %dm deep  ·  best %dm%s  ·  wall %dm", s.depth, s.bestDepth, strataEmoji(s.bestDepth),
+		s.maxDepth)
 
 	local frac = (s.capacity > 0) and math.clamp(s.carried / s.capacity, 0, 1) or 0
 	bagFill.Size = UDim2.new(frac, 0, 1, 0)

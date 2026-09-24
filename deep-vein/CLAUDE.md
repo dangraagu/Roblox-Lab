@@ -13,7 +13,18 @@ the bedrock depth wall → ♻️ REBIRTH for a permanent cash multiplier, a dee
 seed. Single shared server, one private shaft per player, no PvP.
 
 ## State — v1 built + tested; REVIEW-3's last blocker closed; NEVER RUN BY A PERSON; NOT published
-- **1866 luau-CLI unit tests pass** (Ore 1272, Mine 173, Economy 131, Prestige 220, Responsive 70).
+- **THE STRATA (2026-09-23/24, `EYECANDY.md`, owner's brief of 2026-09-17).** The world changes with the
+  depth you stand in: 11 strata from topsoil to the core, rare telegraphed vertical hazards (a rock
+  overhead, a vent underfoot; one per ~3 min of ordinary digging, measured), and an unexploitable ⛺ Rest.
+  The server only colours and textures the rock Parts it already builds (`Strata.rockLook`), so
+  REVIEW-4's budget is untouched; everything else is `Cave.client` + `CaveArt`. Specs **2578 / 0**
+  (+ EnvBands 124, Hazards 140, Rest 76, Strata 103, EnvConfig 269). Headless: walk 129,
+  check_deepvein 136, check_deepvein_cave 387, _cave_budget 10, _cave_hud PASS, _cave_join 22,
+  _strata 45, _pace 29, _rarity 15, all green. Mutation sweeps and the Studio shot list are in
+  EYECANDY.md. **Adversarially reviewed once (2026-09-24): six findings, all closed test-first
+  (EYECANDY.md §13). Not seen in Studio.**
+- **1866 luau-CLI unit tests pass** for the game itself (Ore 1272, Mine 173, Economy 131,
+  Prestige 220, Responsive 70).
 - **Two headless gates, both green.** `tests/walk.luau` (ours, 129 passed) and
   `robloxemu/check_deepvein.luau` (the emulator's, 136 passed).
 - **THE SPAWN RACE IS FIXED (2026-09-10).** Measured in Studio on a sibling game and now modelled
@@ -115,11 +126,28 @@ seed. Single shared server, one private shaft per player, no PvP.
   seed" was in the sibling game.
 
 ## Files
-Server `src/server/Main.server.luau`; client `src/client/Hud.client.luau`; shared
-`Config / Mine / Ore / Economy / Prestige / Fx / FxClient / Responsive.luau`;
-tests `tests/*.spec.luau`; headless gates `tests/walk.luau` (ours, editable) and
-`../robloxemu/check_deepvein.luau` (the emulator's, read-only). Reviews: `REVIEW.md`,
-`REVIEW-2.md`, `REVIEW-3.md`, `REVIEW-4.md`.
+Server `src/server/Main.server.luau`; clients `src/client/Hud.client.luau` and
+`src/client/Cave.client.luau` (the strata); shared
+`Config / Mine / Ore / Economy / Prestige / Fx / FxClient / Responsive.luau`, plus the strata's
+`EnvBands / Hazards / Rest` (+1 Jump's templates; EnvBands byte-identical, the other two with marked
+Deep Vein sections), `Strata` (pure) and `CaveArt` (client-only art);
+tests `tests/*.spec.luau`; headless gates `tests/walk.luau` (ours, editable),
+`../robloxemu/check_deepvein.luau` (the emulator's) and `../robloxemu/check_deepvein_*.luau` (the
+strata). Reviews: `REVIEW.md`, `REVIEW-2.md`, `REVIEW-3.md`, `REVIEW-4.md`; the strata: `EYECANDY.md`.
+
+**Strata invariants.** The strata are driven by DEPTH, never time. The named layer is `Mine.layerOfY`
+at the ROOT, the server's own `minerLayer`; at the feet it sat on the floor's plane, fixed 2026-09-24.
+The client decides "open" from Parts it can see, never from the cave generator. A hazard launches
+only when the miner has an open cell beside them. Rest can neither start with a hazard inbound nor be
+toggled between swings (`SettleSeconds`, `MinAwakeSeconds`). The client fires no remote and changes
+nothing the server built (`check_deepvein_cave` §8). From the 2026-09-24 review (EYECANDY.md §13):
+a falling hazard is DRAWN by `Strata.dropY` (never inside the miner, `Env.HeadTopAboveFloor`; falls
+visibly; lands on the floor) while the plan and the hit stay the plan's; its ring lies on the floor the
+miner last stood on (`Strata.ringLayer`), not the root's layer; no stone uses the bedrock's material or
+comes within `Env.MinBedrockContrast` of its colour (`Config.Mine.BedrockColor`, the walls have no
+ClickDetector); every glowing decor colour is `Env.DecorGlow` and stays `MinDecorOreContrast` from any
+ore beside it; underground fill light stays within `Env.LampFill` of the server's dark preset, so the
+paid lamp stays the light; a phone HUD drawer moves the strata row aside, never hides it.
 
 ## Things the suite is known NOT to see
 Two mutation sweeps have run: 13 real defects in REVIEW-3 and 12 in REVIEW-4, all 25 killed, with
@@ -134,7 +162,10 @@ the emulator has no physics.
 
 ## Next
 1. **Open it in Studio and play it.** Nothing here has been seen by a human. First real session
-   will surface camera/click/fall problems no emulator can.
+   will surface camera/click/fall problems no emulator can. The strata's own Studio list and the
+   thumbnail shot list (with a recipe to start deep without saves) are in `EYECANDY.md` §9-§10.
+   The strata's first adversarial review (2026-09-24) is closed (§13); the palette and fill-light
+   changes it forced are exactly the things only Studio can judge (§9 items 1, 7, 17).
 2. Create the experience, upload, run the content-maturity questionnaire, set Public.
 3. Then: auto-sell upgrade, a drill (area mining), codes, gamepasses (2x cash, auto-sell, lamp),
-   a per-rebirth biome palette so deep caves look different rather than just paying more.
+   (The per-rebirth biome palette is done: that is the strata.)

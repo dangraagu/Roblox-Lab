@@ -97,6 +97,31 @@ posts of the shaft are not a diagonal gap you can look straight out of the world
 
 ---
 
+## The strata: the world changes as you dig
+
+Eleven strata, named by the layer you stand in (never by a clock). In order they are 🌱 topsoil and roots with a
+timber pithead at dusk, 🪨 grey stone, ⛓️ iron veins, 🌊 an underground river, 🍄 a glowshroom grotto, 🔥 magma,
+💎 a crystal geode, 🦴 fossil beds, 🏛️ lost ruins, 🌑 obsidian and 🌋 the core with its glowing floor.
+
+* **The server** builds each stratum into the rock: the colour and material of every stone Part it already
+  builds, so REVIEW-4's part budget is untouched.
+* **The client** does the rest: lighting, air, grade, the set pieces, finds on the walls (waterfalls,
+  glowing fungus, lavafalls, crystals, ammonites, arches, runes), bats and glowmoths, and drips, spores,
+  embers and sparks.
+* **Everything glides**, even on an elevator ride.
+* **Rare hazards** fit the depth: a rock or crystal works loose overhead, a steam vent bursts underfoot. There
+  is about one every 3 minutes of ordinary digging. Each is telegraphed by a ring at your feet and knocks you
+  down if you stay in it; step into the next cell and it misses.
+* **⛺ Rest** makes the cave leave you alone and can never be used to dodge anything.
+
+Design, measurements, budgets, gates and the thumbnail shot list: **`EYECANDY.md`**. An adversarial review
+(2026-09-24) found six defects in the strata, all closed test-first (EYECANDY.md §13): a falling rock drawn
+through the miner's head in a tunnel, deep stone that looked like the unbreakable bedrock walls, a phone drawer
+hiding the hazard banner, the shadow ring jumping with the player, glowing decor coloured like ore, and a fill
+light that halved what the paid lamp is for.
+
+---
+
 ## Layout
 
 ```
@@ -111,9 +136,15 @@ deep-vein/
   src/shared/Fx.luau        lighting + particle kit          (verbatim from grow-a-crystal)
   src/shared/FxClient.luau  camera/HUD juice                 (verbatim from grow-a-crystal)
   src/shared/Responsive.luau phone-first layout rules        (verbatim from grow-a-crystal)
+  src/shared/EnvBands.luau  progress -> band blend, smoothing (verbatim from plus1-jump)  (pure)
+  src/shared/Hazards.luau   rare telegraphed hazards (plus1-jump's + vertical kinds)    (pure)
+  src/shared/Rest.luau      rest rules (plus1-jump's + settle / min-awake)             (pure)
+  src/shared/Strata.luau    depth, the rock look, open cells, wall decor layout        (pure)
+  src/shared/CaveArt.luau   the strata's art, built in code; CLIENT ONLY
   src/server/Main.server.luau   authoritative; the ONLY file that knows Roblox exists
   src/client/Hud.client.luau    display + buttons
-  tests/*.spec.luau         one per pure module
+  src/client/Cave.client.luau   the strata, hazards and rest (cosmetic / local-only)
+  tests/*.spec.luau         one per pure module (+ EnvConfig.spec for the shipped numbers)
 ```
 
 **Shared modules take their dependencies as ARGUMENTS.** A bare `require("./Ore")` resolves in
@@ -132,6 +163,11 @@ luau tests/Mine.spec.luau           #  173 passed, 0 failed
 luau tests/Economy.spec.luau        #  131 passed, 0 failed
 luau tests/Prestige.spec.luau       #  220 passed, 0 failed
 luau tests/Responsive.spec.luau     #   70 passed, 0 failed
+luau tests/EnvBands.spec.luau       #  124 passed, 0 failed
+luau tests/Hazards.spec.luau        #  140 passed, 0 failed
+luau tests/Rest.spec.luau           #   76 passed, 0 failed
+luau tests/Strata.spec.luau         #  103 passed, 0 failed
+luau tests/EnvConfig.spec.luau      #  269 passed, 0 failed
 ```
 
 Then compile and analyze every source:
@@ -150,8 +186,15 @@ fake engine and then asks the world what actually arrived:
 cd ../robloxemu
 py -3 wrap.py --game ../deep-vein --out build/deep-vein.luau
 luau check_deepvein.luau                     # 136 passed, 0 failed
+luau check_deepvein_cave.luau                # 387 passed, 0 failed   (the strata client, EYECANDY.md)
+luau check_deepvein_cave_budget.luau         #  10 passed, 0 failed
+luau check_deepvein_cave_hud.luau            # PASS (HUD fit with the strata row)
+luau check_deepvein_cave_join.luau           #  22 passed, 0 failed
+luau check_deepvein_strata.luau              #  45 passed, 0 failed
+luau check_deepvein_pace.luau                #  29 passed, 0 failed
+luau check_deepvein_rarity.luau              #  15 passed, 0 failed
 cd ../deep-vein
-luau tests/walk.luau                         # 116 passed, 0 failed
+luau tests/walk.luau                         # 129 passed, 0 failed
 ```
 
 Two headless gates, because they answer different questions. `check_deepvein.luau` is the
