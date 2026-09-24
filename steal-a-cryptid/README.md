@@ -25,6 +25,16 @@ If your traps catch it you get a bounty; if not, it leaves with half of that one
 before it comes: once a poacher is in the yard, no new trap can be placed. Owning a cryptid of one tier opens the
 next camp tier, and harder camps hold better cryptids.
 
+**The night deepens with your Journal** (EYECANDY.md). The lairs stand on a bluff over a dark ravine, with the
+forest running on beyond it to the ridges. Pine Hollow starts at dusk; your first Rare brings
+moonrise and owls on the pines, a Legendary brings strange lights (an aurora, will-o'-wisps, red eyes in the
+treeline), and the Mythic brings Mythic Night: a gold aurora, UFOs over the ridge, meteors, and Bigfoot himself
+walking the horizon. Each camp tier is its own place (badlands, pine barrens, a loch shore where Nessie glides
+past a ruined castle, a redwood forest). Your own cages get a little habitat per species. Now and then a crow,
+bat, will-o'-wisp or meteorite dives at you at home, well telegraphed (a red ring: step out of it); a hit is only
+a stumble. A Rest button sits you by a campfire and the critters leave you alone; poachers, jars and raids do
+not stop for it.
+
 - 8 cryptids in 4 tiers: Jackalope, Hodag, Chupacabra (Common); Dogman, Jersey Devil (Rare);
   Mothman, Nessie (Legendary); Bigfoot (Mythic).
 - 4 camp tiers, 1 map (Pine Hollow), 1 currency (Essence).
@@ -90,11 +100,14 @@ anything is published.
 
 | | |
 |---|---|
-| Unit specs (luau CLI) | 9 files, 1 267 assertions, 0 failed |
+| Unit specs (luau CLI) | 14 files, 2 197 assertions, 0 failed (9 game specs 1 267; the night: Night 427, NightConfig 222, template EnvBands 124, Hazards 102, Rest 55) |
 | `robloxemu/check_stealacryptid.luau` | 332 passed, 0 failed (0 failing runs of 100) |
 | `robloxemu/check_stealacryptid_guards.luau` | 184 passed, 0 failed (0 failing runs of 60) |
 | `robloxemu/check_stealacryptid_hud.luau` | PASS: 10 viewports x 3 HUD modes, box fit and text legibility (0 failing runs of 10) |
 | `tests/walk.luau` | 46 passed, 0 failed (0 failing runs of 60) |
+| The night (EYECANDY.md): `check_stealacryptid_{night,hazards,rest,budget,compile,lateroad,keepout,life,longroad,edge,view}` | 386 + 69 + 63 + 28 + 40 + 12 + 24 + 4 + 4 + 25 + 44 passed, 0 failed; `_nighthud` 3 x PASS |
+| Night review (EYECANDY.md section 13) | one adversarial review: three findings (the world's edge, a knock near it, scenery in the camera's way), all reproduced and closed test-first |
+| Night mutation sweep | after the review: the resume session's 49 edits re-run plus 28 new: 70 of 70 mutations killed, 6 of 6 controls survived, every edit proven to reach the bundle (EYECANDY.md section 8) |
 | Mutation sweep | 56 of 56 mutations killed, 6 of 6 controls survived, every edit proven to reach the bundle |
 | Adversarial reviews | two rounds; the second's ten findings are in REVIEW-1.md, all reproduced and closed |
 | Opened in Roblox Studio | **never** |

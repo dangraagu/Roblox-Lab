@@ -7,8 +7,8 @@
 --   3. nothing tappable in the bottom-left or bottom-right (Roblox's thumbstick and jump button);
 --   4. re-layout on Camera ViewportSize AND on UserInputService.TouchEnabled;
 --   5. every tappable control is at least 44 SCREEN px on a touch device.
--- Layout: top-left readout (Essence, rate, Journal), top-right toggles (Hunt, Build, or Leave camp
--- while raiding), hints / toasts / the raid chip top-centre, the Hunt panel and the build sheet as
+-- Layout: top-left readout (Essence, rate, Journal), top-right toggles (Rest, Hunt, Build, or Leave
+-- camp while raiding), hints / toasts / the raid chip top-centre, the Hunt panel and the build sheet as
 -- centre panels, the not-saving banner under the readout. No emoji anywhere: Roblox's font draws
 -- some as empty boxes (fork-tower/STUDIO.md section 4).
 
@@ -50,6 +50,30 @@ gui.Name = "CryptidHud"
 gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = player:WaitForChild("PlayerGui")
+
+-- The night's side of the HUD (src/client/Night.client.luau, EYECANDY.md): client-local values, never
+-- replicated. This HUD counts presses of its Rest button; the night writes back the button's label and
+-- one status line for the chip (a hazard's warning, or "Resting - poachers still come"). The night owns
+-- the rules; the HUD only draws them.
+local nightBus = Instance.new("Folder")
+nightBus.Name = "NightBus"
+local restPresses = Instance.new("IntValue")
+restPresses.Name = "RestPresses"
+restPresses.Value = 0
+restPresses.Parent = nightBus
+local restLabel = Instance.new("StringValue")
+restLabel.Name = "RestLabel"
+restLabel.Value = "Rest"
+restLabel.Parent = nightBus
+local nightStatus = Instance.new("StringValue")
+nightStatus.Name = "Status"
+nightStatus.Value = ""
+nightStatus.Parent = nightBus
+local nightKind = Instance.new("StringValue")
+nightKind.Name = "StatusKind"
+nightKind.Value = ""
+nightKind.Parent = nightBus
+nightBus.Parent = gui
 
 local root = Instance.new("Frame")
 root.Name = "Root"
@@ -167,6 +191,11 @@ local buildSheet: Frame
 local huntOpen, sheetCell = false, nil
 local applyLayout -- forward
 
+-- Rest: only a pause from the night's critters (Night.client); poachers, jars and raids carry on
+local restToggle = button(toggles, "RestToggle", "Rest", Color3.fromRGB(60, 80, 130), function()
+	restPresses.Value += 1
+end)
+restToggle.LayoutOrder = 0
 local huntToggle = button(toggles, "HuntToggle", "Hunt", Color3.fromRGB(150, 90, 40), function()
 	huntOpen = not huntOpen
 	sheetCell = nil
@@ -352,6 +381,9 @@ local function render()
 	hint.Text = hintText(s)
 
 	local raiding = s.raid ~= nil
+	restToggle.Visible = not raiding
+	restToggle.Text = restLabel.Value
+	restToggle.BackgroundColor3 = if restLabel.Value == "Rest" then Color3.fromRGB(60, 80, 130) else Color3.fromRGB(90, 130, 200)
 	huntToggle.Visible = not raiding
 	buildToggle.Visible = not raiding
 	buildToggle.BackgroundColor3 = if s.buildMode then Color3.fromRGB(80, 190, 120) else Color3.fromRGB(50, 120, 80)
@@ -369,9 +401,15 @@ local function render()
 	elseif s.poacher and s.poacher.active then
 		chip.Visible = true
 		chipText.Text = "A poacher is in your yard"
+	elseif nightStatus.Value ~= "" then
+		-- the night's line: a hazard's warning (danger) or rest (calm); raid and poacher come first
+		chip.Visible = true
+		chipText.Text = nightStatus.Value
 	else
 		chip.Visible = false
 	end
+	local calm = not raiding and not s.poacher and nightKind.Value == "calm"
+	chip.BackgroundColor3 = if calm then Color3.fromRGB(20, 30, 50) else Color3.fromRGB(40, 16, 18)
 
 	for tier, r in campRows do
 		local c = s.camps[tier]
@@ -452,7 +490,7 @@ function applyLayout()
 	local btnH = touchSize(40)
 	local btnW = touchSize(96)
 	local visibleToggles = 0
-	for _, b in { huntToggle, buildToggle, leaveToggle } do
+	for _, b in { restToggle, huntToggle, buildToggle, leaveToggle } do
 		if b.Visible then visibleToggles += 1 end
 		b.Size = UDim2.new(0, if b == leaveToggle then math.max(btnW, touchSize(120)) else btnW, 0, btnH)
 	end
@@ -517,6 +555,14 @@ end
 
 applyLayout()
 camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+-- the night's label and status line change the chip (and so the layout under it)
+local function nightChanged()
+	render()
+	applyLayout()
+end
+restLabel:GetPropertyChangedSignal("Value"):Connect(nightChanged)
+nightStatus:GetPropertyChangedSignal("Value"):Connect(nightChanged)
+nightKind:GetPropertyChangedSignal("Value"):Connect(nightChanged)
 -- A touch device can appear without the window changing size (a touch laptop). The layout is
 -- cosmetic and the readout is not, so this sits last and in a pcall.
 pcall(function()

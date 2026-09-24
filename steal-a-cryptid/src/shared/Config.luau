@@ -280,4 +280,266 @@ Config.Hud = {
 	Panel = { 18, 22, 28 },
 }
 
+--============================================================================ [13b] the night (EYECANDY.md)
+-- Client-only eye candy: src/client/Night.client.luau + src/shared/NightArt.luau, rules in
+-- src/shared/Night.luau (tests/Night.spec.luau, tests/NightConfig.spec.luau). The server builds none of
+-- it and trusts none of it.
+--
+-- HOME is named by the Journal's rank (Economy.rank, the highest tier ever owned; the server reports it
+-- in State.rank): the rarer your collection, the deeper the night over Pine Hollow. A CAMP is its own
+-- place, named by the camp's tier. Every band keeps the readability floor (Night.readable): never darker
+-- or foggier than Config.Lighting above, never less saturated, bloom never harder to trigger, no depth
+-- of field. ClockTime is in NIGHT HOURS (18 = 6 pm, 24 = midnight, 27 = 3 am; the client writes h % 24)
+-- and stays inside 17.5..30, so a glide between two bands never passes through daylight.
+Config.Night = {
+	HalfLife = 0.6,          -- seconds: every written value glides; a teleport or a new rank never cuts
+	LightingHz = 10,         -- Lighting written at most 10 times a second, only on change
+	-- The world's edge at home: the server's Ground is the only floor, so the local far forest floor starts
+	-- past a ravine round it (Night.farGroundRects), never at walking height beside it (EYECANDY section 13).
+	Ravine = {
+		Width = 24,       -- studs from the Ground's edge to the far floor: well over twice a running jump (8.5)
+		Depth = 80,       -- the cliff faces on both sides of it drop this far (a drop, not a step)
+		FarHalf = 1024,   -- the far floor reaches this far from the road's centre (the old 2 048-stud floor)...
+		MinFar = 200,     -- ...or this far past the ravine, on a road longer than that (50 players: 2 520 studs)
+		PineMargin = 36,  -- far pines stand at least this far past the edge (Width + a pine's 8.4-stud radius, + slack)
+	},
+	-- Nothing local may stand between the camera and what the player must see (NightArt:occlude): in a camp,
+	-- the camp; at home, a box this many studs round the player's root (the character, with room to spare).
+	HomeViewRadius = 4,
+	CampMargin = 8,          -- camp scenery and critters keep this far outside the camp's fences
+	CameraCorridorHalfWidth = 30, -- and out of the corridor behind the gate, where the raider's camera is
+	CameraCorridorDepth = 70,
+
+	Home = {
+		{
+			id = "dusk", from = 0, fade = 0, name = "Dusk", sub = "Pine Hollow at sundown",
+			lighting = { ClockTime = 18.15, Brightness = 1.8, ExposureCompensation = 0, Ambient = { 70, 58, 66 },
+				OutdoorAmbient = { 112, 86, 94 }, FogStart = 60, FogEnd = 600, FogColor = { 196, 122, 110 },
+				EnvironmentDiffuseScale = 0.5, EnvironmentSpecularScale = 0.4 },
+			atmosphere = { Density = 0.32, Offset = 0.12, Color = { 236, 160, 128 }, Decay = { 120, 66, 110 }, Glare = 0.7, Haze = 1.3 },
+			sky = { StarCount = 300, MoonAngularSize = 14, SunAngularSize = 26 },
+			bloom = { Intensity = 0.7, Size = 26, Threshold = 0.9 },
+			colorCorrection = { Brightness = 0.02, Contrast = 0.14, Saturation = 0.06, TintColor = { 255, 226, 206 } },
+			sunRays = { Intensity = 0.12, Spread = 0.6 },
+			pieces = { "farGround", "ridges", "farPines" },
+			ambient = { { kind = "crow", count = 3 } },
+			weather = { kind = "fireflies", rate = 5 },
+			hazards = { "crow" },
+		},
+		{
+			id = "moonrise", from = 2, fade = 0, name = "Moonrise", sub = "A Rare cryptid stirs the woods",
+			lighting = { ClockTime = 20.4, Brightness = 1.4, ExposureCompensation = 0.05, Ambient = { 50, 58, 88 },
+				OutdoorAmbient = { 66, 80, 122 }, FogStart = 50, FogEnd = 480, FogColor = { 40, 52, 92 },
+				EnvironmentDiffuseScale = 0.45, EnvironmentSpecularScale = 0.45 },
+			atmosphere = { Density = 0.34, Offset = 0.1, Color = { 110, 126, 176 }, Decay = { 60, 64, 120 }, Glare = 0.3, Haze = 1.4 },
+			sky = { StarCount = 1500, MoonAngularSize = 26, SunAngularSize = 21 },
+			bloom = { Intensity = 0.8, Size = 26, Threshold = 0.9 },
+			colorCorrection = { Brightness = 0.02, Contrast = 0.16, Saturation = 0.02, TintColor = { 220, 230, 255 } },
+			sunRays = { Intensity = 0.04, Spread = 0.4 },
+			pieces = { "farGround", "ridges", "farPines", "owls" },
+			ambient = { { kind = "bat", count = 6 } },
+			weather = { kind = "mist", rate = 3 },
+			hazards = { "bat", "crow" },
+		},
+		{
+			id = "strange", from = 3, fade = 0, name = "Strange Lights", sub = "Legendary lights over the ridge",
+			lighting = { ClockTime = 23.7, Brightness = 1.3, ExposureCompensation = 0.1, Ambient = { 42, 66, 72 },
+				OutdoorAmbient = { 58, 98, 98 }, FogStart = 60, FogEnd = 520, FogColor = { 30, 60, 64 },
+				EnvironmentDiffuseScale = 0.45, EnvironmentSpecularScale = 0.5 },
+			atmosphere = { Density = 0.3, Offset = 0.1, Color = { 90, 170, 150 }, Decay = { 80, 40, 130 }, Glare = 0.2, Haze = 1.2 },
+			sky = { StarCount = 3000, MoonAngularSize = 22, SunAngularSize = 21 },
+			bloom = { Intensity = 1.0, Size = 30, Threshold = 0.85 },
+			colorCorrection = { Brightness = 0.03, Contrast = 0.18, Saturation = 0.08, TintColor = { 210, 255, 235 } },
+			sunRays = { Intensity = 0, Spread = 0.3 },
+			pieces = { "farGround", "ridges", "farPines", "owls", "auroraGreen" },
+			ambient = { { kind = "wisp", count = 5 }, { kind = "redEyes", count = 4 }, { kind = "bat", count = 3 } },
+			weather = { kind = "wisplights", rate = 6 },
+			hazards = { "wisp", "bat" },
+		},
+		{
+			id = "mythic", from = 4, fade = 0, name = "Mythic Night", sub = "Bigfoot walks Pine Hollow",
+			lighting = { ClockTime = 26.8, Brightness = 1.35, ExposureCompensation = 0.1, Ambient = { 66, 56, 76 },
+				OutdoorAmbient = { 98, 84, 112 }, FogStart = 60, FogEnd = 560, FogColor = { 60, 40, 70 },
+				EnvironmentDiffuseScale = 0.5, EnvironmentSpecularScale = 0.5 },
+			atmosphere = { Density = 0.3, Offset = 0.1, Color = { 200, 160, 120 }, Decay = { 120, 60, 140 }, Glare = 0.4, Haze = 1.2 },
+			sky = { StarCount = 4500, MoonAngularSize = 30, SunAngularSize = 21 },
+			bloom = { Intensity = 1.2, Size = 32, Threshold = 0.8 },
+			colorCorrection = { Brightness = 0.04, Contrast = 0.2, Saturation = 0.12, TintColor = { 255, 236, 214 } },
+			sunRays = { Intensity = 0, Spread = 0.3 },
+			pieces = { "farGround", "ridges", "farPines", "owls", "auroraGold", "ufos", "bigfoot" },
+			ambient = { { kind = "meteor", count = 3 }, { kind = "wisp", count = 4 }, { kind = "redEyes", count = 2 } },
+			weather = { kind = "stardust", rate = 6 },
+			hazards = { "meteorite", "wisp" },
+		},
+	},
+
+	-- One place per camp tier (progress = tier - 1). No hazards here, ever: a knock in a camp would
+	-- decide a raid. Camp weather hangs behind the back fence (`at = "campBack"`), never over the yard.
+	Camp = {
+		{
+			id = "badlands", from = 0, fade = 0, name = "Badlands Camp", sub = "Common camp",
+			lighting = { ClockTime = 21.6, Brightness = 1.5, ExposureCompensation = 0.05, Ambient = { 62, 52, 50 },
+				OutdoorAmbient = { 94, 78, 72 }, FogStart = 60, FogEnd = 700, FogColor = { 70, 50, 60 },
+				EnvironmentDiffuseScale = 0.45, EnvironmentSpecularScale = 0.4 },
+			atmosphere = { Density = 0.24, Offset = 0.1, Color = { 180, 130, 110 }, Decay = { 90, 60, 90 }, Glare = 0.3, Haze = 1.0 },
+			sky = { StarCount = 3500, MoonAngularSize = 18, SunAngularSize = 21 },
+			bloom = { Intensity = 0.7, Size = 24, Threshold = 0.9 },
+			colorCorrection = { Brightness = 0.02, Contrast = 0.16, Saturation = 0, TintColor = { 255, 232, 214 } },
+			sunRays = { Intensity = 0, Spread = 0.3 },
+			pieces = { "campSand", "mesas", "cacti" },
+			ambient = { { kind = "tumbleweed", count = 3 }, { kind = "bat", count = 2 } },
+			hazards = {},
+		},
+		{
+			id = "barrens", from = 1, fade = 0, name = "Pine Barrens Camp", sub = "Rare camp",
+			lighting = { ClockTime = 23, Brightness = 1.3, ExposureCompensation = 0.05, Ambient = { 42, 52, 58 },
+				OutdoorAmbient = { 58, 76, 86 }, FogStart = 50, FogEnd = 420, FogColor = { 30, 40, 48 },
+				EnvironmentDiffuseScale = 0.45, EnvironmentSpecularScale = 0.4 },
+			atmosphere = { Density = 0.36, Offset = 0.1, Color = { 100, 120, 130 }, Decay = { 40, 50, 60 }, Glare = 0.1, Haze = 1.4 },
+			sky = { StarCount = 2000, MoonAngularSize = 16, SunAngularSize = 21 },
+			bloom = { Intensity = 0.8, Size = 24, Threshold = 0.9 },
+			colorCorrection = { Brightness = 0.01, Contrast = 0.18, Saturation = 0, TintColor = { 215, 230, 240 } },
+			sunRays = { Intensity = 0, Spread = 0.3 },
+			pieces = { "campNeedles", "pineRing" },
+			ambient = { { kind = "bat", count = 4 } },
+			weather = { kind = "fireflies", rate = 3, at = "campBack" },
+			hazards = {},
+		},
+		{
+			id = "loch", from = 2, fade = 0, name = "Loch Shore Camp", sub = "Legendary camp",
+			lighting = { ClockTime = 24.8, Brightness = 1.4, ExposureCompensation = 0.1, Ambient = { 48, 60, 76 },
+				OutdoorAmbient = { 72, 92, 120 }, FogStart = 60, FogEnd = 520, FogColor = { 54, 70, 96 },
+				EnvironmentDiffuseScale = 0.5, EnvironmentSpecularScale = 0.55 },
+			atmosphere = { Density = 0.33, Offset = 0.1, Color = { 130, 150, 190 }, Decay = { 60, 70, 110 }, Glare = 0.2, Haze = 1.3 },
+			sky = { StarCount = 2500, MoonAngularSize = 24, SunAngularSize = 21 },
+			bloom = { Intensity = 0.9, Size = 28, Threshold = 0.88 },
+			colorCorrection = { Brightness = 0.02, Contrast = 0.18, Saturation = 0.02, TintColor = { 220, 232, 255 } },
+			sunRays = { Intensity = 0, Spread = 0.3 },
+			pieces = { "campShore", "loch", "castle", "nessie" },
+			ambient = { { kind = "bat", count = 2 } },
+			weather = { kind = "mist", rate = 3, at = "campBack" },
+			hazards = {},
+		},
+		{
+			id = "redwoods", from = 3, fade = 0, name = "Redwood Camp", sub = "Mythic camp",
+			lighting = { ClockTime = 27.2, Brightness = 1.3, ExposureCompensation = 0.1, Ambient = { 48, 62, 56 },
+				OutdoorAmbient = { 72, 96, 84 }, FogStart = 50, FogEnd = 440, FogColor = { 60, 74, 70 },
+				EnvironmentDiffuseScale = 0.45, EnvironmentSpecularScale = 0.45 },
+			atmosphere = { Density = 0.4, Offset = 0.1, Color = { 160, 180, 170 }, Decay = { 60, 80, 70 }, Glare = 0.1, Haze = 1.5 },
+			sky = { StarCount = 1500, MoonAngularSize = 20, SunAngularSize = 21 },
+			bloom = { Intensity = 0.9, Size = 28, Threshold = 0.88 },
+			colorCorrection = { Brightness = 0.02, Contrast = 0.2, Saturation = 0, TintColor = { 225, 245, 232 } },
+			sunRays = { Intensity = 0, Spread = 0.3 },
+			pieces = { "campFerns", "redwoods", "bigfootGlimpse" },
+			ambient = { { kind = "wisp", count = 3 } },
+			weather = { kind = "mist", rate = 4, at = "campBack" },
+			hazards = {},
+		},
+	},
+
+	-- Ambient life: never dangerous, never collidable. Distances in studs from the camera (y too), except
+	-- `ground`, an absolute height for things that roll along the floor. In a camp every critter keeps
+	-- out of Night.keepOut (the yard and the camera corridor) and is recycled if it wanders in.
+	Critters = {
+		crow = { rMin = 90, rMax = 260, yMin = 25, yMax = 70, speedMin = 14, speedMax = 22, flock = 3 },
+		bat = { rMin = 40, rMax = 170, yMin = 14, yMax = 45, speedMin = 16, speedMax = 26, flock = 3 },
+		wisp = { rMin = 30, rMax = 130, yMin = -4, yMax = 6, speedMin = 2, speedMax = 5 },
+		redEyes = { rMin = 70, rMax = 150, yMin = -6, yMax = 0, speedMin = 0.5, speedMax = 1.2 },
+		meteor = { rMin = 500, rMax = 1200, yMin = 250, yMax = 600, speedMin = 260, speedMax = 380 },
+		tumbleweed = { rMin = 70, rMax = 200, yMin = 0, yMax = 0, ground = 0.3, speedMin = 6, speedMax = 11 },
+	},
+
+	-- Hazards: RARE, telegraphed, one at a time, and only at HOME (never in a camp, never before the
+	-- tutorial is done, never with a poacher about, never with the Hunt panel or build mode open, never
+	-- near the ground's edge). They only ever harm the local player, so they run on the client; a hit is
+	-- a stumble (PlatformStand + a push). Nothing is lost. The clock runs only while the gate is open and
+	-- the player is not resting (frozen, never reset). The red ring IS the danger zone: step out of it.
+	Hazards = {
+		IntervalMin = 120,
+		IntervalMax = 180,
+		MinTelegraphSeconds = 3,
+		MinCommitSeconds = 1.5,
+		MaxRetargetSpeed = 1.5,
+		PlayerRadius = 1.5,
+		AimJitter = 1.0,
+		SpreadDegrees = 35,       -- a lane starts within +-35 degrees of where the camera looks ...
+		ViewPitchDegrees = 20,    -- ... and +-20 degrees of its pitch: it starts ON SCREEN
+		KindFitDegrees = 25,
+		KnockLift = 8,            -- studs/s up on a hit: a stumble, never a launch
+		KnockSeconds = 0.9,       -- PlatformStand after a hit
+		NearMissStuds = 8,        -- for measurement: passing within 8 studs is a near-hit
+		AfterTutorial = 4,        -- hazards start once State.tutorial reaches this (after the first steal)
+		SettleSeconds = 8,        -- after the gate reopens (home from a raid, a panel closed) wait this long
+		EdgeMarginStuds = 33,     -- no launch within this of the ground's edge: a knock never pushes anyone off
+		                          -- (>= the hardest knock 34 x KnockSeconds 0.9 + PlayerRadius, frictionless)
+		-- the camera looks DOWN at a player on the ground: a launch waits while it looks down more than this,
+		-- and the lane's window never dips below the horizon (Night.hazardPitch), so nothing starts underground
+		MaxLookDownDegrees = 40,
+		-- how a hazard is DRAWN (Night.drawPosition; the hit rule stays the lane's): after it arrives a flier
+		-- swoops up and away at SwoopDegrees instead of flying on into the ground (an `impact` kind ends at
+		-- the ground), and it rises over a player who has left the ring so its centre stays ClearStuds away
+		SwoopDegrees = 35,
+		ClearStuds = 4.5,
+		Kinds = {
+			crow = { label = "Crow", speed = 26, telegraph = 3.2, commit = 1.5, pass = 3.0, hitRadius = 1.8, knock = 30, pitch = 14, pitchSpread = 8 },
+			bat = { label = "Bat", speed = 22, telegraph = 3.2, commit = 1.6, pass = 3.0, hitRadius = 2.0, knock = 28, pitch = 10, pitchSpread = 8 },
+			wisp = { label = "Will-o'-wisp", speed = 12, telegraph = 3.6, commit = 2.0, pass = 4.0, hitRadius = 1.8, knock = 24, pitch = 4, pitchSpread = 4 },
+			meteorite = { label = "Meteorite", speed = 40, telegraph = 3.2, commit = 1.7, pass = 2.5, hitRadius = 2.2, knock = 34, pitch = 28, pitchSpread = 8, impact = true },
+		},
+	},
+
+	-- Rest: the HUD's Rest toggle, or standing still IdleSeconds. Critters leave you alone; nothing else
+	-- changes: poachers still come, jars fill as always, a camp's clock is never paused (rest is refused
+	-- in a camp, and a raid's teleport wakes you). It cannot start in the air or with a hazard inbound.
+	Rest = {
+		IdleSeconds = 20,
+		RequireGrounded = true,
+		BlockWhileThreat = true,
+		WakeOnMove = true,
+		WakeGraceSeconds = 0.4,
+		PendingSeconds = 10,      -- longest hazard flight (7.6 s) + 2.4 s to stand still
+	},
+
+	-- Mobile budget for everything the client builds (measured in robloxemu/check_stealacryptid_night.luau
+	-- at every band, every camp and every seam). The server builds none of it.
+	Budget = {
+		MaxLocalParts = 200,
+		MaxEmitters = 4,
+		MaxWeatherEmitters = 2,   -- enforced with EnvBands.capRates
+		MaxHabitatEmitters = 1,   -- only the rarest habitat in your lair gets particles
+		MaxEmitterRate = 40,      -- particles per second, summed over what is on
+		MaxWeatherRate = 24,      -- of which weather (the rest: one habitat 4/s + the campfire 8/s)
+		MaxBeams = 8,
+		MaxTrails = 6,
+		MaxLights = 3,
+		MaxHazards = 1,
+	},
+
+	-- Your own cages get a habitat patch per species (other lairs keep the plain cage: budget).
+	Habitats = {
+		Species = {
+			jackalope = "prairie", hodag = "northwoods", chupacabra = "desert", dogman = "moonfield",
+			jerseydevil = "barrens", mothman = "bridge", nessie = "loch", bigfoot = "rainforest",
+		},
+		GlowTransparency = { 0.72, 0.58, 0.44, 0.3 }, -- per tier: the rarer, the brighter the rim
+		EmitterRate = 4,          -- particles/s of the one lit habitat
+	},
+
+	-- The campfire that appears beside a resting player (local; others see you sit, not the fire).
+	Campfire = { Rate = 8, LightRange = 14, LightBrightness = 1.6 },
+
+	-- The HUD chip (Hud.client's RaidChip slot, via its NightBus) and the Rest toggle. ASCII only.
+	Text = {
+		Incoming = "%s incoming from %s",
+		Locked = "Move! Leave the red ring - %s",
+		Resting = "Resting - poachers still come",
+		Idle = "Idle - critters leave you alone",
+		Queued = "Rest starts when the sky is clear",
+		RestButton = "Rest",
+		RestingButton = "Resting",
+		QueuedButton = "Rest...",
+		ChipMaxChars = 44,
+	},
+}
+
 return Config

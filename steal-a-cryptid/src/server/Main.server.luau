@@ -672,6 +672,11 @@ function pushState(S: any)
 		rate = Economy.lairRate(Config, p),
 		journal = #p.journal,
 		journalMax = #Config.Species,
+		-- the owner's own progress and plot, for the client's eye candy (Night.client, EYECANDY.md):
+		-- rank is the highest tier ever owned (the pedestals and camps already follow it), plot is the
+		-- lair whose sign carries the owner's name. Neither is anything the owner cannot already see.
+		rank = Economy.rank(Config, p.journal),
+		plot = S.plotIndex,
 		cages = cages,
 		maxJar = maxJar,
 		cagesUnlocked = p.cagesUnlocked,

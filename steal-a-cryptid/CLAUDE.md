@@ -8,7 +8,7 @@ something else, the "Deviations" table below says what and why. README.md is the
 description and the proposed store copy. **REVIEW-1.md** is the second adversarial review round and
 how each of its ten findings was reproduced, tested and closed.
 
-## State (2026-09-17)
+## State (2026-09-17; the night 2026-09-24)
 
 - **v1 built and headless-tested. NEVER OPENED IN ROBLOX STUDIO. NOT PUBLISHED.** No experience, no
   place ID, no publish script. Nothing committed or pushed by the build or fix sessions.
@@ -24,6 +24,20 @@ how each of its ten findings was reproduced, tested and closed.
 - Nothing sells anything: no MarketplaceService, no purchase prompt, no Robux reference in `src/`.
 - No reviewer has yet looked at the second pass's changes (the slide and pull-back, the barriers, the
   grab spot, the lock wait and re-check, the closing flag, camp seeds, the poacher placement rule).
+- **2026-09-23/24: the night (EYECANDY.md is its spec, measurements, Studio list and thumbnail shot list).**
+  Client-only eye candy driven by the Journal's rank (4 home bands: dusk, moonrise, strange lights, mythic
+  night) and by the camp tier (4 camp places), habitats on your own cages, rare telegraphed hazards at home
+  (crow, bat, will-o'-wisp, meteorite; a hit is a stumble), and a Rest toggle (campfire; pauses only the
+  client's hazards). The server's only change: `rank` and `plot` in the owner's State. Built by an interrupted
+  session and finished, fixed and mutation-swept (46 mutations + 3 controls, all killed / all survived) by a resume session.
+  **Reviewed once (2026-09-24, EYECANDY.md section 13):** three findings (the far floor hid the world's edge and a
+  player could walk off it into the void; a knock near the edge could carry a player past it; camp scenery could
+  stand between a zoomed-out camera and the raider), all reproduced with the reviewer's probes and closed test-first
+  on the CLIENT (a ravine round the road; `Night.limitKnock`; a view guard that hides what stands between the camera
+  and the camp, and at home the player). Verification also closed two rare flakes: a keep-out gap in the game
+  (`Night.critterClear`) and a float-noise edge in `_hazards`' telegraph timing (a test-arithmetic bug). Final
+  sweep: the resume session's 49 edits re-run plus 28 new, 70 of 70 mutations killed, 6 of 6 controls survived
+  (EYECANDY.md section 8). Nobody has reviewed the fixes.
 
 ## Gates - run all of them, in this order
 
@@ -40,16 +54,35 @@ luau tests/Heist.spec.luau 2>&1         # 79 passed, 0 failed   (solver over 300
 luau tests/Trace2D.spec.luau 2>&1       # 52 passed, 0 failed
 luau tests/Poacher.spec.luau 2>&1       # 51 passed, 0 failed   (4 000 lairs x 4 defenses)
 luau tests/CryptidModel.spec.luau 2>&1  # 552 passed, 0 failed
+luau tests/EnvBands.spec.luau 2>&1      # 124 passed, 0 failed   (verbatim from plus1-jump: the night's template)
+luau tests/Hazards.spec.luau 2>&1       # 102 passed, 0 failed   (verbatim from plus1-jump)
+luau tests/Rest.spec.luau 2>&1          # 55 passed, 0 failed    (verbatim from plus1-jump)
+luau tests/Night.spec.luau 2>&1         # 427 passed, 0 failed   (the night's rules)
+luau tests/NightConfig.spec.luau 2>&1   # 222 passed, 0 failed   (Config.Night + measured hazard rarity)
 
 for f in src/shared/*.luau src/server/*.luau src/client/*.luau tests/*.luau ../robloxemu/check_stealacryptid*.luau; do luau-compile --binary $f > /dev/null; done
 luau-analyze src/shared/*.luau src/server/*.luau src/client/*.luau tests/*.spec.luau 2>&1 | grep -v "Unknown global\|Unknown type"
-                                        # empty
+                                        # empty. NOTE 2026-09-24: luau-compile.exe and luau-analyze.exe are gone from
+                                        # this machine (scratchpad wiped 2026-09-23); check_stealacryptid_compile below
+                                        # is the compile half; luau-analyze was not run on the night's code.
 
 cd ../robloxemu                         # ALWAYS rebuild the bundle before a headless run
 py -3 wrap.py --game ../steal-a-cryptid --out build/steal-a-cryptid.luau
 luau check_stealacryptid.luau 2>&1         # 332 passed, 0 failed
 luau check_stealacryptid_guards.luau 2>&1  # 184 passed, 0 failed
 luau check_stealacryptid_hud.luau 2>&1     # two PASS lines: box fit (hudcheck) and text legibility
+luau check_stealacryptid_compile.luau 2>&1  # 20 sources, 40 passed, 0 failed (loadstring + no string require)
+luau check_stealacryptid_night.luau 2>&1    # 386 passed, 0 failed   (the night, EYECANDY.md)
+luau check_stealacryptid_hazards.luau 2>&1  # 69 passed, 0 failed
+luau check_stealacryptid_rest.luau 2>&1     # 63 passed, 0 failed
+luau check_stealacryptid_nighthud.luau 2>&1 # three PASS lines: fit, legibility, the toggle row, with the night
+luau check_stealacryptid_budget.luau 2>&1   # 28 passed, 0 failed
+luau check_stealacryptid_lateroad.luau 2>&1 # 12 passed, 0 failed
+luau check_stealacryptid_keepout.luau 2>&1  # 24 passed, 0 failed
+luau check_stealacryptid_life.luau 2>&1     # 4 passed, 0 failed
+luau check_stealacryptid_longroad.luau 2>&1 # 4 passed, 0 failed
+luau check_stealacryptid_edge.luau 2>&1     # 25 passed, 0 failed   (the ravine; knocks near the edge)
+luau check_stealacryptid_view.luau 2>&1     # 44 passed, 0 failed   (nothing local between camera and camp / player)
 cd ../steal-a-cryptid
 luau tests/walk.luau 2>&1                  # 46 passed, 0 failed, and prints the loop in numbers
 ```
@@ -98,6 +131,18 @@ A failure prints the camp seed.
 - `robloxemu/check_stealacryptid_hud.luau` runs `emu/hudcheck` over 10 viewports in three HUD modes
   (Hunt panel, build sheet, raiding with the banner) and ALSO estimates every shown string's rendered
   size with a 100-character toast and a 90-character banner on screen (rule in Traps 11).
+- **The night's checks** (EYECANDY.md sections 3-7 say what each measures): `_night` the take-over glide,
+  rank -> band through real purchases, every camp's place, habitats on your own cage bases, budgets, leaks;
+  `_hazards` the gate (tutorial, camp, build mode, Hunt panel, poacher, edge), hit/dodge, the ring, the drawn
+  path after arrival and over a dodger, rarity at the shipped interval (R, R2 reacting, R3 ignoring);
+  `_rest` rest's rules and that it protects no income and never pauses a raid; `_nighthud` the HUD with the
+  night in 10 viewports; `_budget` the worst case on every frame and the weather cap; `_lateroad` a client that
+  starts before the road replicates; `_keepout` the camp keep-out guard forced to work; `_life` pooled critters
+  keep coming back; `_longroad` the horizon (and the ravine) round a 50-player road; `_edge` nothing local at
+  walking height past the Ground's edge, cliff faces on both sides of the ravine, and 48 walks toward all four
+  edges whose knocks all stop 1.5 studs inside; `_view` the real camera at 11 520 camp spots (zoom 20-400) and
+  3 456 home spots with nothing local in the way, a pine beside the line to the player's root (H4), and Nessie's
+  whole lap past a fixed camera (V4).
 - `tests/walk.luau` is a player held to what a player can do: it runs the real HUD client and presses
   its buttons, presses an in-world prompt only inside its reach (a press out of reach is a FAIL),
   clicks tiles only inside ClickDetector reach, and checks every apron step and every raid route
@@ -249,6 +294,34 @@ A failure prints the camp seed.
     turned nine LF source files into CRLF, and every multi-line mutation string stopped matching (20 of
     62 edits "not found" in a dry run). Edit with the Edit tool or write bytes; scan for `\r` after.
 
+21. **A template tuned for open sky breaks on the ground.** +1 Jump's hazard lanes start around the camera's
+    pitch and fly on after arrival: here the camera looks DOWN at a grounded player, so lanes started inside
+    the ground and, after arrival, dove into it with the `!` marker still blinking (1 083-1 333 part-frames a
+    run). `Night.hazardPitch` and `Night.drawPosition` (EYECANDY.md section 12).
+22. **A LocalScript can run before the workspace reaches it.** The night read the road once at start with
+    FindFirstChild; a client that started early centred the horizon on the origin, never perched an owl and ran
+    hazards with no edge rule. Look for world geometry until it is found, and fail safe until then.
+23. **The road grows with Players.MaxPlayers** (2 520 studs at 50). A fixed-radius horizon stood hills and
+    Bigfoot on the lairs; place far scenery relative to the road's edge (`offRoad` in NightArt).
+24. **A local floor that continues the real one at walking height is a trap door.** The night's far floor sat 1.1
+    studs under the Ground's top: the edge vanished and a player walked onto grass and fell through the world.
+    A cosmetic floor must never be mistakable for the server's: leave a visible drop or a gap nobody can jump
+    (the ravine, `Night.farGroundRects`).
+25. **A launch margin is not a knock margin.** The 33-stud edge margin stopped hazards STARTING near the edge; a
+    player who walked toward it during a flight was knocked on past it (19-20 of 24 frictionless slides). Cut the
+    push itself (`Night.limitKnock`).
+26. **Poppercam ignores non-collidable parts.** Local scenery (CanCollide off, as it must be) can sit between a
+    zoomed-out camera and the player or the camp for as long as the camera stays there; a keep-out that covers
+    only the default camera is not enough. Hide what is in the camera's view hull, every frame, on the frame
+    the camera moves (`Night.campViewHull`, `NightArt:occlude`). A probe that computes geometry for camera spots
+    the client never sees cannot measure such a fix: put the real camera there and fire a frame.
+27. **Keep a drawn thing out by what it draws, measured the way the check measures it.** A 3-stud circle round a
+    critter's centre let a wisp's bobbing, 45-degree-turned halo 0.2 studs into a keep-out corner, 1 run in ~30
+    (`Night.critterClear` tests a box).
+28. **A span taken from a running sum of dt is not exact.** `_hazards` bounded each warning by 3.0 s less one
+    frame; a warning of exactly 89 frames, measured as the difference of two running sums of 1/30, came out 1e-15
+    short (86 % of such spans do, once the clock is large). Compare with a tolerance (1e-6).
+
 ## Deviations from DESIGN.md, and why
 
 | DESIGN.md | v1 does | Why |
@@ -399,6 +472,10 @@ disagreements in 1 440 000 random ticks) and M37 (four corners did not hit the r
 
 ## Needs Studio (nothing here is verified; do not report any of it as verified)
 
+The night's own list (22 items: band looks, atmosphere vs fog, beams, dark critters on a dark sky, the stumble,
+Rest's sit, habitats, frame time, the ravine, the view guard's pop, a server boundary, non-uniform Ball parts...)
+is EYECANDY.md section 9; its thumbnail shot list is section 10.
+
 1. **Lighting and laser readability.** Whether OFF / WARN / ON read instantly from the gate 80 studs
    away, at phone size too; whether the full-height translucent net reads as unjumpable; whether the
    always-on emitter plate reads as "armed" and is distinguishable from a snare; whether the faint cage
@@ -480,19 +557,28 @@ src/shared/Trace2D.luau         the trusted position: step (slide, stuck time), 
 src/shared/Poacher.luau         the NPC's route, caution and stepping
 src/shared/CryptidModel.luau    the eight procedural models
 src/server/Main.server.luau     everything that touches the engine
-src/client/Hud.client.luau      the HUD
+src/client/Hud.client.luau      the HUD (+ the Rest toggle and the NightBus the night writes to)
+src/client/Night.client.luau    the night: bands, lighting, scenery, critters, weather, habitats, hazards, rest (client only)
+src/shared/Night.luau           the night's pure rules (floor, night hours, rank, keep-out, hazard gate, drawn path, the ravine, the knock cut, the camera's view hull, habitats)
+src/shared/NightArt.luau        the night's art, code-only, client-only
+src/shared/EnvBands.luau        verbatim plus1-jump template (bands, glides, critter ring, capRates)
+src/shared/Hazards.luau         verbatim plus1-jump template (rare telegraphed hazards, the ring rule)
+src/shared/Rest.luau            verbatim plus1-jump template (rest rules)
+EYECANDY.md                     the night: bands, hazards + rarity, rest, budgets, gates, sweep, Needs Studio, shot list
 tests/*.spec.luau               one per shared module (+ Rng, Responsive)
 tests/walk.luau                 the player's path through the real HUD, join to a second loop
 ../robloxemu/check_stealacryptid.luau         world / spawn / reach / raid / security gate
 ../robloxemu/check_stealacryptid_guards.luau  one block per review finding (G1-G24)
 ../robloxemu/check_stealacryptid_hud.luau     HUD fit (hudcheck) + text legibility
+../robloxemu/check_stealacryptid_{night,hazards,rest,nighthud,budget,compile,lateroad,keepout,life,longroad,edge,view}.luau  the night
 ```
 
 ## Next
 
 1. Open it in Studio (00:00-06:00 night job) and work through Needs Studio, starting with 1, 3, 4, 6,
-   8, 13 and 18.
-2. An adversarial review by a separate reviewer of the second pass's changes (REVIEW-1.md).
+   8, 13 and 18, then EYECANDY.md section 9, and shoot the thumbnails in EYECANDY.md section 10.
+2. An adversarial review by a separate reviewer of the second pass's changes (REVIEW-1.md) and of the night's
+   review fixes (EYECANDY.md sections 11 and 13).
 3. Port `econ.py` pacing and `success.py` into a Luau measure.
 4. Only then: create the experience (MaxPlayers 8), the maturity questionnaire, a git-ignored publish
    script.
