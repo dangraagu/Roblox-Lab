@@ -56,15 +56,15 @@ Config.Rebirth = {
 	FirstTierRequired = 10,   -- må nå etasje 10 for rebirth #1
 	TierRequiredPerRebirth = 8, -- +8 etasjer i krav pr rebirth du alt har
 	Multipliers = { 2, 5, 10, 25, 50, 100 }, -- rebirth 1..6; deretter siste * (n-5)
-	-- EIERBESLUTNING, ikke tatt (review 2026-09-17 runde 2, EYECANDY.md §11): hvilke rebirths HUD-en
-	-- LYSER opp (lilla «REBIRTH → 5x?»). Knappen virker alltid når serveren tillater rebirth.
-	--   math.huge (standard) = hver rebirth lyser, som før himmelen. Men en vanlig spiller som trykker
-	--     hver gang den lyser (10, 18, 26 …), når verdensrommet først etter 46-227 min, ikke 30-45:
-	--     med hopp-taket gjør rebirth aldri klatringen raskere.
-	--   1 = bare den FØRSTE lyser, og så igjen når beste etasje har nådd siste himmel-bånd
-	--     (HighlightAgainAtBestTier). Da når den samme spilleren verdensrommet på 38 min.
+	-- EIERBESLUTNING tatt 2026-09-24 (Gustav: «ca 38 min er bra», EYECANDY.md §11): hvilke rebirths
+	-- HUD-en LYSER opp (lilla «REBIRTH → 5x?»). Knappen virker alltid når serveren tillater rebirth.
+	--   1 (valgt) = bare den FØRSTE lyser, og så igjen når beste etasje har nådd siste himmel-bånd
+	--     (HighlightAgainAtBestTier). En vanlig spiller som trykker hver gang den lyser, når
+	--     verdensrommet på ca 38 min.
+	--   math.huge = hver rebirth lyser, som før himmelen. Da når den samme spilleren verdensrommet
+	--     først etter 46-227 min, ikke 30-45: med hopp-taket gjør rebirth aldri klatringen raskere.
 	-- Progression.rebirthHighlighted; tests/Pacing.spec.luau måler begge.
-	HighlightFirstRebirths = math.huge,
+	HighlightFirstRebirths = 1,
 	HighlightAgainAtBestTier = 0, -- = Config.Env.Bands[#Bands].from, satt etter Config.Env
 }
 

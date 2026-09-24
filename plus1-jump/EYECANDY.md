@@ -73,10 +73,10 @@ island and the Earth cross-fade over about 3 s, and no part's transparency moves
 frame (`check_plus1jump_life`). Lighting is written at most 10×/s and only when a value changed.
 
 Minutes = minutes of play to STAND on the first platform of the band's tier (rest excluded), measured by
-`tests/Pacing.spec.luau`. "Option follower" = a normal player who presses REBIRTH every time it is lit with
-the owner's first-only option (`Config.Rebirth.HighlightFirstRebirths = 1`): exactly one rebirth, at tier 10.
-With the default HUD (every rebirth lit, as before the sky) the same player takes ten rebirths before space
-and reaches it after 227.4 min (review round 2, below and §14).
+`tests/Pacing.spec.luau`. "Follower" = a normal player who presses REBIRTH every time it is lit. Since the
+owner's decision on 2026-09-24 the default is first only (`Config.Rebirth.HighlightFirstRebirths = 1`): exactly
+one rebirth before space, at tier 10. With the old HUD (every rebirth lit, as before the sky) the same player
+takes ten rebirths before space and reaches it after 227.4 min (review round 2, below and §14).
 
 | # | band | starts at Tier | y (first platform) | normal | option follower (= rebirth @10) | fast | slow | the sky | scenery | life | weather | hazards |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -611,11 +611,11 @@ platform *i* of tier *t* in `workspace.Tower`.
 
 * The review-round-1 fixes (§12) were reviewed in round 2 (§14). The round-2 fixes have **not** had their own
   independent adversarial review.
-* **Owner decisions surfaced, not taken for him:** (a) **which rebirths the HUD lights.** Default, restored in
-  review round 2: every rebirth the server allows, as before the sky. A normal player who presses it every
-  time it is lit takes ten rebirths before tier 85 and reaches space after 227.4 min instead of 34.4. The
-  option `Config.Rebirth.HighlightFirstRebirths = 1` (one line) lights only the first rebirth and again past
-  tier 240; that player then reaches space in 38.4 min. Both are measured in `Pacing.spec` and checked through
+* **Owner decisions:** (a) **which rebirths the HUD lights: TAKEN 2026-09-24, first only** (Gustav: "ca 38 min
+  er bra"). `Config.Rebirth.HighlightFirstRebirths = 1` lights only the first rebirth and again past tier 240,
+  and a normal player who presses it every time it is lit reaches space in 38.4 min. The old HUD, restored in
+  review round 2 (every rebirth lit, `math.huge`), would take that player ten rebirths before tier 85 and
+  227.4 min. Both are measured in `Pacing.spec` and checked through
   the real HUD in `check_plus1jump_rebirth`. (b) **the underlying mechanic:** with the jump capped at 60 and
   every tier reachable without rebirth, the rebirth multiplier never speeds the climb, so rebirth is pure
   prestige that costs altitude. Making it genuinely "climb faster next run" (README's promise) is a

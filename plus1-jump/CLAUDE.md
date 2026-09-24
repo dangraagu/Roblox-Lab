@@ -69,10 +69,11 @@ studs off the climb and the temple island sits below any rescue, and when the HU
 Review round 2 (EYECANDY.md §14) added `check_plus1jump_dodge` (the red ring IS the hit zone: leaving it in any
 direction dodges; `Hazards.zone`), `check_plus1jump_slowload` (16-40 s profile loads, a placement 20 s late) and
 `check_plus1jump_budget` (weather emitters capped at 2 by `EnvBands.capRates` under fast teleports).
-**OWNER DECISION PENDING (EYECANDY.md §11):** by default the HUD lights every rebirth the server allows, as before
-the sky; a player who presses it every time reaches space after 227 min, not 30-45. The one-line option
-`Config.Rebirth.HighlightFirstRebirths = 1` (lit for the first rebirth, then again past tier 240) brings that
-player to 38 min. Round 1 had switched that option on without the owner; round 2 restored the default.
+**OWNER DECISION TAKEN 2026-09-24 (EYECANDY.md §11):** `Config.Rebirth.HighlightFirstRebirths = 1`. The HUD
+lights only the first rebirth, then again past tier 240, so a player who presses every lit button reaches space in
+about 38 min. The old HUD (every rebirth lit, `math.huge`) would take that player 227 min. Round 1 had switched
+first-only on without the owner and round 2 restored every-lit; the owner then chose first-only ("ca 38 min er bra").
+`Progression.spec`, `Pacing.spec` and `check_plus1jump_rebirth` pin the default and measure both settings.
 
 ## Tests / tooling
 luau CLI binaries live in this session's scratch (`.../scratchpad/luau/`). Run pure

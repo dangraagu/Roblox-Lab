@@ -87,35 +87,38 @@ eq(P.canRebirth(rb.FirstTierRequired - 1, 0, rb), false, "cannot rebirth below r
 -- rebirthHighlighted: when the HUD makes REBIRTH stand out. Rebirth sends the climber back to the pad and,
 -- with the jump capped and every tier reachable without it, never shortens the climb, so a HUD that lights
 -- it at 10, 18, 26, ... walks a normal player away from space (46-227 min instead of 34).
--- Review round 1 (finding 2) dimmed every rebirth after the first. Review round 2 (finding 2): that changed
--- the HUD of an existing mechanic without the owner, so the DEFAULT is back to what the HUD did before the
--- sky: every rebirth the server allows is lit. The rule stays, so the owner can choose "first only" with one
--- line (Config.Rebirth.HighlightFirstRebirths = 1); its behaviour is pinned below with that setting.
+-- Review round 1 (finding 2) dimmed every rebirth after the first. Review round 2 (finding 2) put it back to
+-- every rebirth lit, as before the sky, because that changed an existing mechanic's HUD without the owner.
+-- OWNER DECISION 2026-09-24 (Gustav: "ca 38 min er bra"): first only. The DEFAULT now lights the first
+-- rebirth, then again once the best tier reaches the last sky band. "Every rebirth lit" stays available
+-- as Config.Rebirth.HighlightFirstRebirths = math.huge; its behaviour is pinned below with that setting.
 do
 	truthy(type(rb.HighlightFirstRebirths) == "number" and type(rb.HighlightAgainAtBestTier) == "number",
 		"Config.Rebirth says which rebirths the HUD highlights")
+	eq(rb.HighlightFirstRebirths, 1, "owner decision 2026-09-24: by default only the first rebirth is lit")
+
+	local everyLit = table.clone(rb)
+	everyLit.HighlightFirstRebirths = math.huge
 	local every, firstMismatch = true, nil
 	for rebirths = 0, 12 do
 		for tier = 0, 300 do
-			if P.rebirthHighlighted(tier, tier, rebirths, rb) ~= P.canRebirth(tier, rebirths, rb) then
+			if P.rebirthHighlighted(tier, tier, rebirths, everyLit) ~= P.canRebirth(tier, rebirths, everyLit) then
 				every = false
 				firstMismatch = firstMismatch or string.format("tier %d, %d rebirths", tier, rebirths)
 			end
 		end
 	end
-	truthy(every, "by default the HUD lights REBIRTH exactly when the server allows one, as before the sky (owner decision pending"
-		.. (if firstMismatch then "; differs at " .. firstMismatch else "") .. ")")
+	truthy(every, "every-lit option: the HUD lights REBIRTH exactly when the server allows one, as before the sky"
+		.. (if firstMismatch then "; differs at " .. firstMismatch else ""))
 
-	local firstOnly = table.clone(rb)
-	firstOnly.HighlightFirstRebirths = 1
-	local again = firstOnly.HighlightAgainAtBestTier
-	eq(P.rebirthHighlighted(9, 9, 0, firstOnly), false, "first-only option: not highlighted when rebirth is not possible")
-	eq(P.rebirthHighlighted(10, 10, 0, firstOnly), true, "first-only option: the first rebirth is highlighted the moment it is possible")
-	eq(P.rebirthHighlighted(18, 30, 1, firstOnly), false, "first-only option: a later rebirth is possible but NOT highlighted on the way to space")
-	eq(P.rebirthHighlighted(26, 90, 1, firstOnly), false, "first-only option: nor after reaching space, on the way to the galaxy")
-	eq(P.rebirthHighlighted(again, again, 1, firstOnly), true, "first-only option: highlighted again once the best tier reaches the last band")
-	eq(P.rebirthHighlighted(17, again + 5, 1, firstOnly), false, "first-only option: and even then only when it is actually possible")
-	eq(P.rebirthHighlighted(40, again + 5, 3, firstOnly), true, "first-only option: every later rebirth past the galaxy is highlighted")
+	local again = rb.HighlightAgainAtBestTier
+	eq(P.rebirthHighlighted(9, 9, 0, rb), false, "default: not highlighted when rebirth is not possible")
+	eq(P.rebirthHighlighted(10, 10, 0, rb), true, "default: the first rebirth is highlighted the moment it is possible")
+	eq(P.rebirthHighlighted(18, 30, 1, rb), false, "default: a later rebirth is possible but NOT highlighted on the way to space")
+	eq(P.rebirthHighlighted(26, 90, 1, rb), false, "default: nor after reaching space, on the way to the galaxy")
+	eq(P.rebirthHighlighted(again, again, 1, rb), true, "default: highlighted again once the best tier reaches the last band")
+	eq(P.rebirthHighlighted(17, again + 5, 1, rb), false, "default: and even then only when it is actually possible")
+	eq(P.rebirthHighlighted(40, again + 5, 3, rb), true, "default: every later rebirth past the galaxy is highlighted")
 	eq(again, Config.Env.Bands[#Config.Env.Bands].from, "HighlightAgainAtBestTier follows the last sky band")
 end
 

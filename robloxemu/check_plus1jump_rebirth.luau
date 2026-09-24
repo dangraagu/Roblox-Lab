@@ -7,10 +7,11 @@
 -- 46 min (at 10 and 18), 57 min (10, 18, 26), 227 min (every one), against the owner's 30-45. Round 1
 -- answered by dimming every rebirth after the first.
 -- Review round 2 (finding 2): dimming changed the HUD of an existing mechanic (rebirth at 10/18/26) without
--- the owner. The default is back to the HUD before the sky: every rebirth the server allows is lit. The
--- owner's option, Config.Rebirth.HighlightFirstRebirths = 1, is checked here too, in memory for this run,
--- so it is ready the day he picks it. Both are driven by the REAL server (earning platforms by touching
--- them, rebirthing through the remote), and a quiet button still works.
+-- the owner, so round 2 put back the HUD before the sky (every rebirth lit).
+-- OWNER DECISION 2026-09-24: first only (Config.Rebirth.HighlightFirstRebirths = 1, about 38 min to space
+-- for a player who presses every lit button). That is the default checked here. The old every-lit HUD
+-- (= math.huge) is checked too, in memory for this run. Both are driven by the REAL server (earning
+-- platforms by touching them, rebirthing through the remote), and a quiet button still works.
 
 local Harness = require("./emu/harness")
 
@@ -71,29 +72,31 @@ eq(isLoud(), true, "tier 10: the FIRST rebirth is lit, so every player learns it
 rebirthPressed()
 eq(stats.Rebirths.Value, 1, "pressing it rebirths (server)")
 
--- the second: possible at tier 18 and, by default, lit as it was before the sky (owner decision pending)
+-- the second: possible at tier 18 and, by default (owner 2026-09-24: first only), NOT lit
+eq(Config.Rebirth.HighlightFirstRebirths, 1, "owner decision 2026-09-24: the shipped Config lights only the first rebirth")
 climbTo(18)
 eq(stats.Tier.Value, 18, "set-up: back up to tier 18 after the rebirth")
-eq(isLoud(), true, "default HUD: tier 18, rebirth #2 is lit, as before the sky (" .. btn.Text .. ")")
-truthy(string.find(btn.Text, "5x", 1, true) ~= nil, "and it names the multiplier rebirth #2 really gives (" .. btn.Text .. ")")
+eq(isLoud(), false, "default HUD: tier 18, rebirth #2 is possible but NOT lit (" .. btn.Text .. ")")
+truthy(string.find(btn.Text, "5x", 1, true) ~= nil, "the quiet button still names the multiplier rebirth #2 really gives (" .. btn.Text .. ")")
 climbTo(26)
-eq(isLoud(), true, "default HUD: still lit at tier 26")
+eq(isLoud(), false, "default HUD: still quiet at tier 26")
 rebirthPressed()
-eq(stats.Rebirths.Value, 2, "pressing it rebirths (server)")
+eq(stats.Rebirths.Value, 2, "and a quiet button still works: pressing it rebirths (server)")
 
--- the owner's option: only the first rebirth is lit, then again past the last sky band
+-- the old HUD (every rebirth lit, as before the sky), kept as a one-line option
 local defaultFirst = Config.Rebirth.HighlightFirstRebirths
-Config.Rebirth.HighlightFirstRebirths = 1
+Config.Rebirth.HighlightFirstRebirths = math.huge
 climbTo(26)
 eq(stats.Tier.Value, 26, "set-up: back up to tier 26 after rebirth #2")
-eq(isLoud(), false, "first-only option: tier 26, rebirth #3 is possible but NOT lit")
-truthy(string.find(string.lower(btn.Text), "rebirth", 1, true) ~= nil, "the button still offers it (" .. btn.Text .. ")")
+eq(isLoud(), true, "every-lit option: tier 26, rebirth #3 is lit (" .. btn.Text .. ")")
+truthy(string.find(string.upper(btn.Text), "REBIRTH", 1, true) ~= nil, "and offers it (" .. btn.Text .. ")")
 climbTo(40)
-eq(isLoud(), false, "first-only option: tier 40, still quiet")
+eq(isLoud(), true, "every-lit option: still lit at tier 40")
 rebirthPressed()
-eq(stats.Rebirths.Value, 3, "and a quiet button still works: pressing it rebirths")
+eq(stats.Rebirths.Value, 3, "pressing it rebirths (server)")
+Config.Rebirth.HighlightFirstRebirths = defaultFirst
 
--- a climber whose best tier is past the last sky band: lit again (first-only option)
+-- a climber whose best tier is past the last sky band: lit again (default, first only)
 do
 	local again = Config.Rebirth.HighlightAgainAtBestTier
 	truthy(type(again) == "number", "Config.Rebirth.HighlightAgainAtBestTier is set (" .. tostring(again) .. ")")
@@ -108,7 +111,6 @@ do
 	h:advance(0.1)
 	eq(isLoud(), false, "and never when a rebirth is not possible")
 end
-Config.Rebirth.HighlightFirstRebirths = defaultFirst
 
 print("")
 eq(#h.warnings, 0, "no warnings")

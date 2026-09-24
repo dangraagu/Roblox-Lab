@@ -14,11 +14,10 @@
 --   * resting is excluded — the target is minutes of PLAY.
 --
 -- "Normal player" = the `normal` profile, no codes. The promise is asserted for a player who never
--- rebirths and for one who takes the first rebirth. A player who presses REBIRTH every time the HUD lights
--- it is an OWNER DECISION (review round 2, finding 2): by default the HUD lights every rebirth the server
--- allows, as it did before the sky, and that player reaches space after far more than 45 min. With the
--- owner's option `Config.Rebirth.HighlightFirstRebirths = 1` the same player is back in the window; both
--- are measured below, so the numbers in EYECANDY.md stay true whichever way he decides.
+-- rebirths and for one who takes the first rebirth. Which rebirths the HUD lights was an OWNER DECISION
+-- (review round 2, finding 2), taken 2026-09-24: first only (`Config.Rebirth.HighlightFirstRebirths = 1`),
+-- so a player who presses REBIRTH every time the HUD lights it also reaches space in the window. The old
+-- HUD (every rebirth lit, `= math.huge`) is still measured below, to show why it was not chosen.
 -- A band is REACHED when the climber stands on the first platform of tier `from` (the tier number the
 -- HUD and board show). The other rows (fast, slow, rebirths at 10/18/26) are printed for EYECANDY.md.
 local ClimbModel = require("./ClimbModel")
@@ -129,20 +128,20 @@ local function row(name, profile, opts)
 end
 print("  minutes of play to stand in each band's first tier (Tier `from` on the HUD):")
 -- the player who presses REBIRTH whenever the HUD highlights it (Progression.rebirthHighlighted): with the
--- default Config (every rebirth lit, as before the sky) and with the owner's first-only option
-local firstOnly = table.clone(Config.Rebirth)
-firstOnly.HighlightFirstRebirths = 1
+-- default Config (first only, the owner's decision 2026-09-24) and with the old every-rebirth-lit HUD
+local everyLit = table.clone(Config.Rebirth)
+everyLit.HighlightFirstRebirths = math.huge
 local function lit(rb)
 	return function(tier, best, rebirths)
 		return Progression.rebirthHighlighted(tier, best, rebirths, rb)
 	end
 end
-local followSpaceDefault = ClimbModel.followHighlights(bands[spaceIdx].from, Config, lit(Config.Rebirth))
-local followSpace = ClimbModel.followHighlights(bands[spaceIdx].from, Config, lit(firstOnly))
-local followGalaxy = ClimbModel.followHighlights(bands[galaxyIdx].from, Config, lit(firstOnly))
+local followSpaceEvery = ClimbModel.followHighlights(bands[spaceIdx].from, Config, lit(everyLit))
+local followSpace = ClimbModel.followHighlights(bands[spaceIdx].from, Config, lit(Config.Rebirth))
+local followGalaxy = ClimbModel.followHighlights(bands[galaxyIdx].from, Config, lit(Config.Rebirth))
 row("normal", profiles.normal, {})
 row("normal, rebirth @10", profiles.normal, { rebirthAt = { 10 } })
-row("normal, follows HUD (first-only option)", profiles.normal, { rebirthAt = followGalaxy })
+row("normal, follows the HUD", profiles.normal, { rebirthAt = followGalaxy })
 row("normal, rebirth @10,18", profiles.normal, { rebirthAt = { 10, 18 } })
 row("normal, rebirth @10,18,26", profiles.normal, { rebirthAt = { 10, 18, 26 } })
 row("fast", profiles.fast, {})
@@ -153,22 +152,22 @@ local spaceFrom = bands[spaceIdx].from
 local normalSpace = ClimbModel.minutesToTier(spaceFrom, profiles.normal, Config, {}, hz.hitShare)
 local rebirthSpace = ClimbModel.minutesToTier(spaceFrom, profiles.normal, Config, { rebirthAt = { 10 } }, hz.hitShare)
 local followerSpace = ClimbModel.minutesToTier(spaceFrom, profiles.normal, Config, { rebirthAt = followSpace }, hz.hitShare)
-local followerDefault = ClimbModel.minutesToTier(spaceFrom, profiles.normal, Config, { rebirthAt = followSpaceDefault }, hz.hitShare)
+local followerEvery = ClimbModel.minutesToTier(spaceFrom, profiles.normal, Config, { rebirthAt = followSpaceEvery }, hz.hitShare)
 print(string.format("  SPACE = tier %d: normal %.1f min, with one rebirth %.1f min (target %d-%d)", spaceFrom, normalSpace, rebirthSpace, target[1], target[2]))
-print(string.format("  pressing every LIT REBIRTH: default HUD (at %s) %.1f min; first-only option (at %s) %.1f min",
-	table.concat(followSpaceDefault, ","), followerDefault, table.concat(followSpace, ","), followerSpace))
+print(string.format("  pressing every LIT REBIRTH: default HUD, first only (at %s) %.1f min; old every-lit HUD (at %s) %.1f min",
+	table.concat(followSpace, ","), followerSpace, table.concat(followSpaceEvery, ","), followerEvery))
 truthy(normalSpace >= target[1] and normalSpace <= target[2],
 	"a normal player reaches space in " .. target[1] .. "-" .. target[2] .. " min (" .. string.format("%.1f", normalSpace) .. ")")
 truthy(rebirthSpace >= target[1] and rebirthSpace <= target[2],
 	"and still does after taking the first rebirth (" .. string.format("%.1f", rebirthSpace) .. ")")
 truthy(followerSpace >= target[1] and followerSpace <= target[2],
-	"with the owner's first-only option, a normal player who presses REBIRTH every time it is lit reaches space in the window too ("
+	"with the default HUD (first only, owner 2026-09-24), a normal player who presses REBIRTH every time it is lit reaches space in the window too ("
 		.. string.format("%.1f", followerSpace) .. " min, rebirths at " .. table.concat(followSpace, ",") .. ")")
--- the decision EYECANDY.md puts to the owner is real: with the default HUD (as before the sky) the same player
--- misses the window. If this ever fails, rebirth's value or the HUD changed: update EYECANDY.md §2 and §11.
-truthy(followerDefault > target[2],
-	"with the default HUD (every rebirth lit, as before the sky) a player who presses every lit REBIRTH misses the window ("
-		.. string.format("%.1f", followerDefault) .. " min, rebirths at " .. table.concat(followSpaceDefault, ",") .. "): the owner's call")
+-- why the owner chose first only: with the old HUD (every rebirth lit) the same player misses the window.
+-- If this ever fails, rebirth's value changed: update EYECANDY.md §2 and §11.
+truthy(followerEvery > target[2],
+	"with the old HUD (every rebirth lit) a player who presses every lit REBIRTH misses the window ("
+		.. string.format("%.1f", followerEvery) .. " min, rebirths at " .. table.concat(followSpaceEvery, ",") .. ")")
 -- the centre of the window, not an edge: a retune that drifts a few minutes must not silently leave it
 truthy(math.abs(normalSpace - (target[1] + target[2]) / 2) <= 5,
 	"the space band sits near the MIDDLE of the window (" .. string.format("%.1f", normalSpace) .. " min)")
@@ -179,7 +178,7 @@ local galaxyFollower = ClimbModel.minutesToTier(bands[galaxyIdx].from, profiles.
 truthy(galaxyNormal >= 2 * normalSpace, "leaving the galaxy is a long-term goal: at least twice the time to space ("
 	.. string.format("%.1f", galaxyNormal) .. " min)")
 truthy(galaxyNormal <= 180, "but reachable in a few sessions (under 3 h of play)")
-truthy(galaxyFollower <= 180, "also, with the first-only option, for a player who presses every lit REBIRTH ("
+truthy(galaxyFollower <= 180, "also, with the default HUD, for a player who presses every lit REBIRTH ("
 	.. string.format("%.1f", galaxyFollower) .. " min)")
 
 -- the float-precision ceiling: the last band must start where Roblox still renders cleanly
