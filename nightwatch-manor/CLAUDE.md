@@ -20,6 +20,48 @@ the next night reads.
 Failure (caught, or evicted at full dread) costs the haul you were carrying. It does **not** roll
 back the night and does **not** touch the safehouse.
 
+## The nights escalate (eye candy, 2026-09-23/24) — read `EYECANDY.md`
+
+Built to the owner's brief of 2026-09-17, client-side only (`src/client/Haunt.client.luau`,
+`src/shared/HauntArt.luau`, `src/shared/Nightfall.luau`, plus the template modules EnvBands, Rest and Hazards from
+`plus1-jump`). There are six bands by NIGHT, nudged by dread and never by time. They bring:
+* windows on the outer walls (moon, stars, mist, rain, lightning, a blood moon, an eclipse);
+* portraits whose eyes follow you;
+* flicker that deepens with dread;
+* a safehouse that grows cosier with the hub level;
+* ghostly hazards, one every 2-3 minutes in the manor;
+* ☕ Rest in the safehouse only.
+
+`Main.server.luau` and `Hud.client.luau` are unchanged. Invariants a future edit must keep:
+- **Fair to the chase** (`Nightfall.fairness`, `validateHazards`, `hazardClock`):
+  - the lighting stays inside a hard envelope around `Fx.Presets.Horror`;
+  - no cosmetic glow within 60 of the Nightwatcher's light colours (`Config.Env.WatcherSignature`) **or of the
+    Servants' Exit's green** (`Config.Env.ExitSignature`, review 4). Both are pinned to what the server builds by
+    `check_nightwatchmanor_haunt`, and both are scanned on every frame of the worst case by `check_nightwatchmanor_budget`;
+  - hazards: one every 120-180 s of NIGHT. The clock is frozen outside the night, and **held** (running, no launch)
+    while the Nightwatcher sees you and for 10 s after. Review 4: a clock frozen for chases made hazards come more often
+    the better a player hid. A hazard is called off the moment it sees you. A knock is slower than walking and never
+    lifts;
+  - an invalid config switches off only its own part (`check_nightwatchmanor_fairgate`).
+- **Nothing strobes** (review 4): lightning never closer than 4 s of real time (`Nightfall.boltGap`), warnings blink at
+  most twice a second, no lightning while resting, and Roblox's Reduced Motion setting (`GuiService.ReducedMotionEnabled`,
+  read live through pcall; the name is unverified in Studio) turns every flash of ours off (`check_nightwatchmanor_flash`).
+- **Rest never inside the night.** `Nightfall.validateRest` rejects `Rest.Phases.NIGHT`. The night is a timed round.
+- **The server never hears of any of it**: no remote, no attribute. What the client DOES write outside its own folder
+  (review 4 corrected an earlier "only room lights" claim):
+  - room-light `Brightness` (flicker), inside a hard floor;
+  - the bands' own keys on the Lighting service and on the server's `FxAtmosphere` / `FxBloom` / `FxColorCorrection`,
+    never `FxDoF` or any other key, plus one effect of its own (`NightwatchRestFocus`). Asserted by
+    `check_nightwatchmanor_haunt`. **A server-side Lighting change would be overwritten by the client**: put it in the
+    bands, or extend that check on purpose;
+  - its own character's `Humanoid.Sit`, `PlatformStand` and `AssemblyLinearVelocity` (rest, a knock). These are normal
+    character state and may replicate. The server reads none of them.
+- **Budgets** (`Config.Budget`) are asserted every frame of a built worst case by `check_nightwatchmanor_budget`.
+
+Gates for it: 6 more specs (EnvBands, Rest, Hazards, Nightfall, EnvConfig, Pacing) and 8 more headless checks
+(`robloxemu/check_nightwatchmanor_*.luau`, `flash` added by review 4). Counts, the mutation sweeps, review 4's findings
+and fixes (§14), the Studio list and the thumbnail shot list are in `EYECANDY.md`.
+
 ## State — two adversarial reviews closed. NOT published, NOT committed, NEVER run in Roblox.
 
 `REVIEW.md` (first pass) returned BLOCK with six findings; `REVIEW-2.md` (second pass) verified the
@@ -138,6 +180,11 @@ fixes. `REVIEW-3.md` is the resolution of REVIEW-2 and is the file to read next.
   outcome nobody defined).
 - `src/server/Main.server.luau` — world building, the night loop, persistence.
 - `src/client/Hud.client.luau` — display only.
+- `src/client/Haunt.client.luau`, `src/shared/HauntArt.luau`, `src/shared/Nightfall.luau` — the eye candy
+  (`EYECANDY.md`). `src/shared/EnvBands.luau` / `Rest.luau` are the plus1-jump template verbatim;
+  `src/shared/Hazards.luau` is the template plus four additions (elevation clamp, `ctx.paused`, `ctx.held`,
+  `cancel`).
+- `tests/NightModel.luau` — Chase.spec's simulation + a session model, used by `tests/Pacing.spec.luau`.
 - `tests/*.spec.luau` — the pure specs, run straight from the luau CLI.
 - `tests/check_walk.luau` — WALKS the built world. The most important gate in the repo.
 - `tests/check_world.luau` — the join-time guards and the exit door, in the built world.
@@ -145,7 +192,9 @@ fixes. `REVIEW-3.md` is the resolution of REVIEW-2 and is the file to read next.
 - `tests/_mutate.py` — the mutation driver that produced the table below.
 - `../robloxemu/check_nightwatch.luau`, `../robloxemu/check_nightwatch_hud.luau` — NOT ours to
   edit; the three files above exist in `tests/` for exactly that reason. Whoever owns `robloxemu/`
-  may want to fold them in.
+  may want to fold them in. `../robloxemu/check_nightwatchmanor_*.luau` ARE this game's (the eye-candy
+  checks; `_kit` is their shared setup; `_fairgate` takes `-a light|hazards|rest`; `_flash` takes
+  `-a storm|calm`).
 
 ## Mutation results (all restored afterwards)
 

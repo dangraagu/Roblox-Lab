@@ -214,4 +214,231 @@ Config.TickSeconds = 0.1 -- watcher movement + sight checks
 Config.PushEverySeconds = 0.5 -- how often the HUD gets a fresh dread/loot readout
 Config.BeatSeconds = 2.5 -- the pause after a night ends, before you are back in the safehouse
 
+-- ================================================================== THE NIGHTS ESCALATE (client only)
+-- Everything below is read by src/client/Haunt.client.luau + src/shared/HauntArt.luau, which run on
+-- the CLIENT and build nothing the server sees. The server does not read any of it. See EYECANDY.md.
+--
+-- PROGRESS is the night number the server credits (State.night), nudged forward by dread while a night
+-- runs (Nightfall.progress), never time. A band's `from` is a NIGHT; it fades in over `fade` of the
+-- night before it, as that night's dread rises, so the manor visibly wakes up toward what comes next.
+--
+-- FAIRNESS (Nightfall.fairness, enforced at load: an unfair config switches the lighting blend OFF and
+-- keeps the server's preset). The chase was tuned under Fx.Presets.Horror; every band's visibility
+-- fields stay inside a hard envelope around it, no band tints the whole screen red, and no cosmetic
+-- glow uses the Nightwatcher's own light colours. Colours are {r, g, b}.
+Config.Env = {
+	DreadLookahead = 0.9, -- how far toward the next night a full-dread night looks (capped below 1)
+	HalfLife = 0.7, -- seconds: every blended value glides, so a night starting or ending never cuts
+	LightingHz = 10,
+	-- The Nightwatcher's own lights, exactly as Main.server builds them (head: 255,70,70; lamp: GHOST).
+	-- robloxemu/check_nightwatchmanor_haunt.luau asserts the built model still uses these, so the rule
+	-- below cannot drift away from the monster it protects.
+	WatcherSignature = { { 255, 70, 70 }, { 150, 200, 210 } },
+	-- The Servants' Exit's green light (the ExitLamp and the lights on it and on the ExitDoor), exactly as Main.server
+	-- builds it and pinned the same way. Review 4: the ghosts glowed (120, 255, 140), 35 from it; a green light coming
+	-- through a wall must never pass for the one beacon that means "the way out".
+	ExitSignature = { { 120, 220, 140 } },
+	Fairness = {}, -- empty = the hard envelope in Nightfall.HARD; values here may only tighten it
+	FlickerAmp = 0.22, -- the deepest a room light ever flickers: 0.78 of what the server built, at worst
+	FlickerDreadGain = 0.6, -- how much of that depth dread adds on top of the band's own
+	FlashBoost = 0.12, -- colour-grade brightness a lightning flash adds, for 0.12 s
+	BlinkHz = 2, -- the hazard's amber light and its locked marker; Nightfall.HARD.BlinkHzMax caps it
+	-- colours of cosmetic glows that are not per band (rain: the drops on the glass; a paler blue than
+	-- (190, 200, 225), which was 43 from the lamp's colour, measured by check_nightwatchmanor_budget.luau;
+	-- ghost / ghostHalo: the will-o'-wisp and the wraith's eyes, a violet ghost-light, 78 / 74 from the lamp and
+	-- 149 / 148 from the exit's green)
+	Glow = { hazardBlink = { 255, 170, 40 }, ringTrack = { 255, 210, 60 }, ringLocked = { 255, 120, 20 }, fire = { 255, 150, 60 }, rain = { 210, 214, 236 },
+		ghost = { 170, 140, 255 }, ghostHalo = { 205, 180, 255 } },
+
+	-- windows are closed picture-boxes on the inside of OUTER walls (Nightfall.outerFaces)
+	Window = { Width = 7, Height = 6, CentreY = 7.5, Along = 6, Inset = 0.55 },
+	-- a room's own feature wall gets no window: the chapel's stained glass, the library's shelves
+	WindowSkip = { chapel = { { 0, -1 } }, library = { { 1, 0 }, { -1, 0 } } },
+	WindowRange = 70, -- studs from the camera: nearer windows are built, farther ones unparented
+	PortraitRange = 60,
+	EyeShift = 0.14, -- studs a pupil slides across its canvas toward the player
+
+	-- ---------------------------------------------------------------- the bands (by NIGHT)
+	-- Band 1 IS the server's Horror preset, so the client's takeover is seamless. `glow` colours are
+	-- checked against WatcherSignature; `outside` is what the windows show (moon size, mist / stars / cloud /
+	-- eclipse as 0..1, rain in drops per second); `inside` is the manor's mood (dust motes per second, flicker
+	-- 0..1 of FlickerAmp, curtain sway in degrees, portrait-eye glow 0..1). Every band sets every key: a key
+	-- only one side of a blend has would SNAP when the fade reaches half-way (EnvBands.lerp), not glide.
+	Bands = {
+		{
+			id = "quiet", name = "Quiet Night", emoji = "🌙", from = 0, fade = 0,
+			lighting = { Ambient = { 20, 22, 30 }, OutdoorAmbient = { 15, 18, 28 }, Brightness = 1, ExposureCompensation = -0.15 },
+			atmosphere = { Density = 0.42, Offset = 0.1, Color = { 90, 100, 120 }, Decay = { 30, 34, 46 }, Glare = 0.1, Haze = 1.6 },
+			bloom = { Intensity = 0.5, Size = 24, Threshold = 1.1 },
+			colorCorrection = { Brightness = -0.02, Contrast = 0.18, Saturation = -0.35, TintColor = { 200, 210, 235 } },
+			glow = { sky = { 26, 34, 62 }, moon = { 226, 230, 242 }, corona = { 214, 244, 196 }, eyes = { 230, 200, 90 }, flash = { 205, 215, 255 }, dust = { 220, 225, 235 } },
+			outside = { moonSize = 1.0, mist = 0.12, rain = 0, stars = 1, cloud = 0.1, eclipse = 0 },
+			inside = { dust = 3, flicker = 0.25, sway = 2, eyes = 0.15 },
+			hazards = {},
+		},
+		{
+			id = "mist", name = "The Mist Rises", emoji = "🌫️", from = 3, fade = 0.9,
+			lighting = { Ambient = { 22, 24, 30 }, OutdoorAmbient = { 18, 20, 26 }, Brightness = 1, ExposureCompensation = -0.14 },
+			atmosphere = { Density = 0.44, Offset = 0.12, Color = { 112, 118, 128 }, Decay = { 40, 44, 52 }, Glare = 0.05, Haze = 1.8 },
+			bloom = { Intensity = 0.6, Size = 26, Threshold = 1.05 },
+			colorCorrection = { Brightness = -0.02, Contrast = 0.17, Saturation = -0.4, TintColor = { 205, 212, 224 } },
+			glow = { sky = { 52, 58, 70 }, moon = { 214, 214, 216 }, corona = { 214, 244, 196 }, eyes = { 230, 205, 100 }, flash = { 205, 215, 255 }, dust = { 214, 218, 222 } },
+			outside = { moonSize = 0.9, mist = 0.75, rain = 0, stars = 0.3, cloud = 0.3, eclipse = 0 },
+			inside = { dust = 5, flicker = 0.4, sway = 4, eyes = 0.3 },
+			hazards = { "bats" },
+		},
+		{
+			id = "rain", name = "Rain on the Glass", emoji = "🌧️", from = 6, fade = 0.9,
+			lighting = { Ambient = { 20, 23, 32 }, OutdoorAmbient = { 16, 19, 30 }, Brightness = 1, ExposureCompensation = -0.15 },
+			atmosphere = { Density = 0.43, Offset = 0.1, Color = { 84, 96, 118 }, Decay = { 28, 34, 50 }, Glare = 0.05, Haze = 1.7 },
+			bloom = { Intensity = 0.6, Size = 26, Threshold = 1.05 },
+			colorCorrection = { Brightness = -0.02, Contrast = 0.2, Saturation = -0.38, TintColor = { 194, 206, 234 } },
+			glow = { sky = { 30, 38, 58 }, moon = { 214, 214, 204 }, corona = { 214, 244, 196 }, eyes = { 232, 206, 96 }, flash = { 205, 215, 255 }, dust = { 210, 218, 232 } },
+			outside = { moonSize = 0.8, mist = 0.45, rain = 28, stars = 0, cloud = 0.7, eclipse = 0 },
+			lightning = { everyMin = 18, everyMax = 34, bolt = false },
+			inside = { dust = 4, flicker = 0.5, sway = 6, eyes = 0.4 },
+			hazards = { "bats", "wisp" },
+		},
+		{
+			id = "storm", name = "Thunderstorm", emoji = "⛈️", from = 10, fade = 0.9,
+			lighting = { Ambient = { 22, 22, 34 }, OutdoorAmbient = { 18, 18, 32 }, Brightness = 1, ExposureCompensation = -0.14 },
+			atmosphere = { Density = 0.43, Offset = 0.1, Color = { 92, 88, 122 }, Decay = { 34, 30, 52 }, Glare = 0.08, Haze = 1.7 },
+			bloom = { Intensity = 0.7, Size = 28, Threshold = 1.0 },
+			colorCorrection = { Brightness = -0.01, Contrast = 0.22, Saturation = -0.3, TintColor = { 196, 198, 240 } },
+			glow = { sky = { 34, 28, 64 }, moon = { 216, 212, 228 }, corona = { 214, 244, 196 }, eyes = { 236, 210, 100 }, flash = { 214, 222, 255 }, dust = { 212, 214, 236 } },
+			outside = { moonSize = 0.7, mist = 0.35, rain = 44, stars = 0, cloud = 1, eclipse = 0 },
+			lightning = { everyMin = 6, everyMax = 14, bolt = true },
+			inside = { dust = 5, flicker = 0.7, sway = 10, eyes = 0.55 },
+			hazards = { "crockery", "bats" },
+		},
+		{
+			id = "blood", name = "Blood Moon", emoji = "🩸", from = 20, fade = 0.9, celebrate = true,
+			lighting = { Ambient = { 26, 20, 26 }, OutdoorAmbient = { 24, 14, 20 }, Brightness = 1, ExposureCompensation = -0.13 },
+			atmosphere = { Density = 0.44, Offset = 0.12, Color = { 118, 84, 96 }, Decay = { 56, 24, 34 }, Glare = 0.12, Haze = 1.8 },
+			bloom = { Intensity = 0.8, Size = 30, Threshold = 0.98 },
+			colorCorrection = { Brightness = -0.01, Contrast = 0.22, Saturation = -0.2, TintColor = { 214, 196, 210 } },
+			glow = { sky = { 46, 12, 22 }, moon = { 150, 20, 25 }, corona = { 214, 244, 196 }, eyes = { 242, 176, 60 }, flash = { 222, 214, 255 }, dust = { 226, 176, 150 } },
+			outside = { moonSize = 1.6, mist = 0.5, rain = 0, stars = 0.5, cloud = 0.25, eclipse = 0 },
+			lightning = { everyMin = 14, everyMax = 26, bolt = true },
+			inside = { dust = 6, flicker = 0.8, sway = 8, eyes = 0.85 },
+			hazards = { "wraith", "crockery" },
+		},
+		{
+			id = "witching", name = "The Witching Hour", emoji = "🕯️", from = 40, fade = 0.9,
+			lighting = { Ambient = { 20, 26, 24 }, OutdoorAmbient = { 14, 22, 18 }, Brightness = 1, ExposureCompensation = -0.12 },
+			atmosphere = { Density = 0.45, Offset = 0.14, Color = { 84, 110, 96 }, Decay = { 24, 44, 34 }, Glare = 0.1, Haze = 1.9 },
+			bloom = { Intensity = 0.9, Size = 32, Threshold = 0.95 },
+			colorCorrection = { Brightness = -0.01, Contrast = 0.24, Saturation = -0.25, TintColor = { 198, 218, 206 } },
+			glow = { sky = { 16, 34, 26 }, moon = { 20, 22, 24 }, corona = { 214, 244, 196 }, eyes = { 196, 240, 90 }, flash = { 190, 255, 206 }, dust = { 200, 232, 150 } },
+			outside = { moonSize = 1.4, mist = 0.8, rain = 34, stars = 0.2, cloud = 0.8, eclipse = 1 },
+			lightning = { everyMin = 5, everyMax = 11, bolt = true },
+			inside = { dust = 7, flicker = 1.0, sway = 12, eyes = 1.0 },
+			hazards = { "wraith", "crockery", "wisp", "bats" },
+		},
+	},
+	FlagshipBandId = "blood", -- the one the pacing spec holds to 30-45 minutes of play
+
+	-- ---------------------------------------------------------------- the safehouse grows cosier
+	-- By HUB LEVEL (the sum of upgrade levels, max 30), shown in the State payload. Props are local,
+	-- non-collidable and stand along the north wall and the corners, clear of the pads and the door.
+	Cosy = {
+		{ id = "bare", name = "Bare Shelter", minLevel = 0 },
+		{ id = "kindled", name = "Hearth Kindled", minLevel = 2 },
+		{ id = "homely", name = "Homely", minLevel = 6 },
+		{ id = "cosy", name = "Cosy", minLevel = 12 },
+		{ id = "haven", name = "Haven", minLevel = 20 },
+	},
+}
+
+-- ================================================================== hazards (client only, NIGHT only)
+-- Rare, telegraphed apparitions that come at you through the walls: ghosts, so walls do not stop them.
+-- A hit knocks you down for KnockSeconds; it takes nothing (relics, dread and the night are the
+-- server's and it never hears of a hazard). They exist to be SEEN and dodged, not to decide a night:
+--   * one every IntervalMin..IntervalMax seconds of NIGHT: the clock is frozen in the day, and while the
+--     Nightwatcher sees you (and for QuietAfterSpottedSeconds after, longer than its HuntSeconds, validated)
+--     it keeps running but HOLDS the launch (Nightfall.hazardClock). Review 4: with the clock frozen for chases
+--     too, the old 25-40 s came to one hazard per 1.2 minutes in the manor, more for a player who hid well; now
+--     it is one per 2.5 manor-minutes for every player profile (tests/Pacing.spec.luau);
+--   * a hazard in flight is called off the moment it sees you, and a knock ends at that moment too;
+--   * a knock is slower than walking (KnockSpeedFractionMax x WalkSpeed, validated) and never lifts;
+--   * the ring on the floor is where it will land, placed where you are walking (LeadSeconds ahead):
+--     stop, turn or step out of it and it misses. Stepping out works in every direction;
+--   * the warning covers the EARLIEST hit, not the arrival: telegraph - (hitRadius + PlayerRadius) / speed
+--     is at least 3 s for every kind (Nightfall.validateHazards; the headless check measured a 3.0 s
+--     crockery telegraph landing its hit 2.87 s after the warning, which is why these are 3.2-3.6).
+-- Validated by Hazards.validate (template) and Nightfall.validateHazards (the chase rules); an invalid
+-- config switches hazards OFF with a warning. Rarity is measured in tests/Pacing.spec.luau.
+Config.Hazards = {
+	IntervalMin = 120, -- seconds of NIGHT time (frozen in the day; held, not frozen, while hunted)
+	IntervalMax = 180,
+	MinTelegraphSeconds = 3,
+	MinCommitSeconds = 1.3,
+	MaxRetargetSpeed = 1.6,
+	SpreadDegrees = 35,
+	ViewPitchDegrees = 20,
+	KindFitDegrees = 15,
+	ElevationMin = -2, -- the room's height band, as seen from the player: never out of the floor
+	ElevationMax = 12,
+	AimJitter = 0.6,
+	PlayerRadius = 2,
+	KnockLift = 0,
+	KnockSeconds = 0.8,
+	KnockSpeedFractionMax = 0.8,
+	LeadSeconds = 1.0,
+	QuietAfterSpottedSeconds = 10,
+	Kinds = {
+		bats = { speed = 18, telegraph = 3.3, commit = 1.5, pass = 1.5, hitRadius = 1.8, knock = 14, pitch = 6, pitchSpread = 4 },
+		wisp = { speed = 12, telegraph = 3.6, commit = 1.7, pass = 1.5, hitRadius = 1.6, knock = 10, pitch = 2, pitchSpread = 2 },
+		crockery = { speed = 22, telegraph = 3.2, commit = 1.4, pass = 1.2, hitRadius = 1.7, knock = 15, pitch = 4, pitchSpread = 3 },
+		wraith = { speed = 26, telegraph = 3.2, commit = 1.4, pass = 1.5, hitRadius = 2.0, knock = 16, pitch = 8, pitchSpread = 3 },
+	},
+}
+
+-- ================================================================== rest: between rounds, never inside one
+-- The night is a timed round: dread and the Nightwatcher are the server's and never pause, so there is
+-- nothing to rest from inside the manor and nothing a rest could honestly promise there. The safehouse
+-- IS the break room: sit by the fire as long as you like, nothing runs, nothing is lost. Phases.NIGHT is
+-- rejected by Nightfall.validateRest; WakeOnMove / BlockWhileThreat are the template's own rules.
+Config.Rest = {
+	Phases = { DAY = true },
+	WakeOnMove = true,
+	BlockWhileThreat = true,
+	RequireGrounded = true,
+	IdleSeconds = 45, -- stand still in the safehouse this long and you doze by the fire (no sit)
+	PendingSeconds = 6,
+	WakeGraceSeconds = 0.4,
+}
+
+-- ================================================================== budgets (client, measured)
+-- Checked every frame by robloxemu/check_nightwatchmanor_budget.luau; measured numbers in EYECANDY.md.
+Config.Budget = {
+	MaxParts = 160, -- client-built parts parented at once
+	MaxEmitters = 3,
+	MaxWeatherEmitters = 2,
+	MaxEmitterRate = 60, -- particles per second, summed
+	MaxLights = 3, -- PointLights the client creates (flicker reuses the server's; it creates none)
+	MaxHazards = 1,
+	MaxWindowsShown = 6,
+	MaxPortraitsShown = 4,
+}
+
+-- ================================================================== pacing (tests only)
+-- The human half of tests/NightModel.luau, written down instead of hidden in a number. The model plays
+-- the real rules (Manor, Watcher, Night, Upgrades) forward; these are the parts of a person it cannot
+-- know. When real session data exists, retune these first, then the bands' `from`.
+Config.Pacing = {
+	NearHitStuds = 8, -- a hazard that passes this close counts as a near-hit
+	Profiles = {
+		-- seconds to get your bearings at night start; seconds stood at each pedestal pressing E;
+		-- seconds you keep running after it last saw you; the dread at which you head for the exit;
+		-- relics you try for; after how many sightings you stop looting and get out; how long you will
+		-- wait out of sight for its patrol to leave the next room; seconds in the safehouse per night
+		-- (walk to the door, look around) and per purchase; after how many failures on one night you
+		-- stop being careful and dash for the exit, and the dread at which you do the same inside a night
+		normal = { startSeconds = 1.5, promptSeconds = 1.2, fleeSeconds = 8, leaveAtDread = 0.6, relicsPerNight = 99, leaveAfterSpotted = 2, patienceSeconds = 8, retriesBeforeDash = 3, dashAtDread = 0.8, daySeconds = 12, buySeconds = 5 },
+		fast = { startSeconds = 0.8, promptSeconds = 0.8, fleeSeconds = 8, leaveAtDread = 0.75, relicsPerNight = 99, leaveAfterSpotted = 3, patienceSeconds = 5, retriesBeforeDash = 2, dashAtDread = 0.85, daySeconds = 7, buySeconds = 3 },
+		slow = { startSeconds = 3, promptSeconds = 2, fleeSeconds = 10, leaveAtDread = 0.45, relicsPerNight = 3, leaveAfterSpotted = 1, patienceSeconds = 12, retriesBeforeDash = 4, dashAtDread = 0.7, daySeconds = 20, buySeconds = 8 },
+	},
+}
+
 return Config

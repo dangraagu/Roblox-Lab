@@ -2,6 +2,8 @@
 -- Regenerate the bundle first:
 --   py -3 wrap.py --game ../nightwatch-manor --out build/nightwatch-manor.luau
 require("./emu/hudcheck").run({
+	-- Panel-overlap rule 4b: forced on 2026-09-17, zero overlaps at every viewport, so it is asserted.
+	overlap = true,
 	game = "nightwatch-manor",
 	bundle = require("./build/nightwatch-manor"),
 	server = "server/Main.server",

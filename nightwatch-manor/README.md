@@ -37,6 +37,21 @@ Determinism.
 Getting caught, or running out of night, costs you the haul you were carrying — never the night
 you are on and never the safehouse. The tycoon progress is the thing you are allowed to keep.
 
+**The nights escalate.** The manor changes as you survive. The trigger is the night you are on, nudged by dread,
+never time. There are six looks: 🌙 Quiet Night → 🌫️ The Mist Rises → 🌧️ Rain on the Glass → ⛈️ Thunderstorm →
+🩸 Blood Moon (night 20, about 37 minutes of play) → 🕯️ The Witching Hour (night 40). What changes:
+* windows on the outer walls with moon, stars, mist, rain and lightning;
+* portraits whose eyes follow you;
+* candles that flicker harder as the night wears on;
+* a safehouse that grows cosier as you upgrade it.
+
+Ghostly hazards (bats, a will-o'-wisp, flying crockery, a wraith) come through the walls, one every 2-3 minutes in the
+manor, each with 3 s of warning and a ring to step out of, and never while the Nightwatcher is hunting you. The
+safehouse is the break room: ☕ Rest by the fire, where no lightning flashes. Lightning never comes closer than 4 s
+apart, and Roblox's Reduced Motion setting turns every flash off. All of it is client-side and cosmetic; the server,
+the chase and the economy are unchanged and measured to stay that way. **`EYECANDY.md`** has the bands, the measured hazard rarity, what rest means here, the budgets, the
+gates, the Studio list and the thumbnail shot list.
+
 **Determinism.** A manor is generated from `WorldSeed` and the night number and nothing else —
 not your userId, and not your hub level. Night 7 is the same manor for every player in the world,
 which is what makes "I got out of night 14" a claim worth comparing.
@@ -64,9 +79,16 @@ src/shared/Rng.luau         deterministic LCG (copied verbatim from siblings)
 src/shared/Fx.luau          lighting/particle kit          (copied verbatim)
 src/shared/FxClient.luau    camera + HUD juice             (copied verbatim)
 src/shared/Responsive.luau  phone-first layout maths       (copied verbatim)
+src/shared/EnvBands.luau    progress -> band + blend       (template, verbatim from plus1-jump)
+src/shared/Rest.luau        the rest state machine          (template, verbatim)
+src/shared/Hazards.luau     rare telegraphed hazards        (template + 4 additions for a manor)
+src/shared/Nightfall.luau   this game's eye-candy rules: progress, windows, fairness, hazard gate  (pure)
+src/shared/HauntArt.luau    builds the client's local parts (windows, portraits, props, hazards)   (client)
 src/server/Main.server.luau authoritative: builds the world, runs the night, persists
 src/client/Hud.client.luau  display only — it sends the server nothing
-tests/*.spec.luau           one spec per pure module, plus Chase.spec (is it PLAYABLE)
+src/client/Haunt.client.luau the nights escalate: bands, lighting, windows, hazards, rest (client, cosmetic)
+tests/*.spec.luau           one spec per pure module, plus Chase.spec (is it PLAYABLE) and Pacing.spec
+tests/NightModel.luau       Chase.spec's night simulation + a session model, for Pacing.spec
 ```
 
 Every module in `src/shared` takes its dependencies **as arguments** and requires nothing. A bare
@@ -86,6 +108,12 @@ luau tests/Night.spec.luau        # 64 passed, 0 failed
 luau tests/Rng.spec.luau          # 32 passed, 0 failed
 luau tests/responsive.spec.luau   # 70 passed, 0 failed
 luau tests/Chase.spec.luau        # 32 passed, 0 failed
+luau tests/EnvBands.spec.luau     # 124 passed, 0 failed   (template)
+luau tests/Rest.spec.luau         # 55 passed, 0 failed    (template)
+luau tests/Hazards.spec.luau      # 138 passed, 0 failed   (template + the manor's additions)
+luau tests/Nightfall.spec.luau    # 170 passed, 0 failed
+luau tests/EnvConfig.spec.luau    # 244 passed, 0 failed   (the shipped numbers against every rule)
+luau tests/Pacing.spec.luau       # 49 passed, 0 failed    (minutes to each band, hazard rarity, the chase)
 ```
 
 `Chase.spec` reports the smallest number and covers the most ground: one assertion sweeping nights
@@ -128,9 +156,19 @@ so this game is also booted for real, outside Roblox:
 ```
 cd ../robloxemu
 py -3 wrap.py --game ../nightwatch-manor --out build/nightwatch-manor.luau
-luau check_nightwatch.luau        # 113 passed, 0 failed
+luau check_nightwatch.luau        # 127 passed, 0 failed
 luau check_nightwatch_hud.luau    # PASS — fits every viewport checked
+luau check_nightwatchmanor_haunt.luau              # the eye candy through the real server + client
+luau check_nightwatchmanor_hazards.luau            # hazards: rarity rules, dodging, the chase gate
+luau check_nightwatchmanor_join.luau               # a slow profile load
+luau check_nightwatchmanor_layout.luau             # the new UI around the HUD, 10 viewports
+luau check_nightwatchmanor_rest.luau               # rest is the safehouse, and only the safehouse
+luau check_nightwatchmanor_budget.luau             # every budget at its worst, every frame
+luau check_nightwatchmanor_fairgate.luau -a light  # (and -a hazards, -a rest) hostile configs
+luau check_nightwatchmanor_flash.luau -a storm     # (and -a calm) lightning gaps, blink rates, Reduced Motion
 ```
+
+(`check_nightwatchmanor_kit.luau` is their shared setup, not a check. Counts: `EYECANDY.md` §8.)
 
 ...and three more that belong to this game and live in `tests/`, because `robloxemu/` is shared and
 is not ours to edit:
