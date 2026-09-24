@@ -1,6 +1,8 @@
 -- anomaly-observatory — headless HUD fit check. Run: luau check_anomaly.luau
 -- Regenerate the bundle first: py -3 wrap.py --game ../anomaly-observatory --out build/anomaly-observatory.luau
 require("./emu/hudcheck").run({
+	-- Panel-overlap rule 4b: forced on 2026-09-17, zero overlaps at every viewport, so it is asserted.
+	overlap = true,
 	game = "anomaly-observatory",
 	bundle = require("./build/anomaly-observatory"),
 	server = "server/Main.server",

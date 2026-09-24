@@ -57,6 +57,38 @@ with it, pass after pass. It also answers each pass by reading the hall rather t
 attribute and requires the day to climb — which is the game's deepest invariant: the hall
 differs from clean exactly when the server scores the pass as anomalous.
 
+## The night sky outside (2026-09-23) — see `EYECANDY.md`
+The sky beyond the hall's open entrance progresses with your **Day**: a crescent moon that waxes
+with your streak, then a meteor shower (Day 4), aurora (9), the Great Comet (15), a storm front with
+silent lightning and rain (22), Deep Sky nebulae (31, the headline: ~34 min for a normal player),
+the planetary Alignment (40) and The Other Sky (50). A wrong call's reset glides it back to the first
+night. **The hall itself never changes**: everything lives beyond the entrance (behind the spawn and
+behind the capture rig's camera), casts no light, reads nothing about the pass and uses no red.
+**🔭 Break (B)** is the rest: the camera fades out to the telescope, looking up and away from every
+hall; move or press again to come back. Nothing is paused because nothing needs pausing; the server
+is never told. The break never calls your Day "safe": the streak lasts one session and Roblox
+disconnects a player idle for ~20 minutes, so once Roblox reports you idle the break says so. On a
+phone nothing is written over the hall during a pass (it would sit on the wall you are reading): news
+of a new sky waits for your next break, and the button turns a steady blue meanwhile.
+
+Client-only: `src/client/Sky.client.luau`, `src/shared/SkyArt.luau`; pure + tested:
+`src/shared/NightSky.luau`, `EnvBands.luau`, `Rest.luau` (the last two copied from +1 Jump), numbers
+in `Config.Sky`.
+
+```
+luau tests/EnvBands.spec.luau      luau tests/NightSky.spec.luau     luau tests/SkyConfig.spec.luau
+luau tests/Rest.spec.luau          luau tests/Pacing.spec.luau
+(robloxemu)  luau check_anomalyobservatory_sky.luau     the sky follows the real Day; the hall never changes
+             luau check_anomalyobservatory_rest.luau    the break changes nothing and never looks at a hall
+             luau check_anomalyobservatory_hud.luau     HUD + break button fit every viewport
+             luau check_anomalyobservatory_events.luau  every frame: meteors, lightning, turning stars stay out; event rates
+             luau check_anomalyobservatory_cap.luau     the particle budget is enforced in code (made to bind)
+             luau check_anomalyobservatory_occlusion.luau  the sky's GUI never sits on the hall during a pass
+             luau check_anomalyobservatory_shots.luau   the thumbnail shot list, played against the real sky
+```
+There are no hazards (nothing chases you is the premise). Measured budgets, gate counts, the mutation
+sweeps, the Studio list and the **thumbnail shot list** are in `EYECANDY.md`.
+
 ## Marketing
 `marketing/pairs/` holds matched clean/anomaly stills and the spot-the-difference shorts cut
 from them. `py -3 tools/film_anomaly.py` makes more; see `marketing/pairs/README.md`.
