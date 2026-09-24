@@ -55,3 +55,5 @@ skjulte knapper, timer, mørke, 500-nivås kurve, lagring).
 Nivåene er nå deterministiske (`CONFIG.WorldSeed`): samme level ser likt ut for
 alle spillere hver gang. Bytt `WorldSeed` for å trekke om alle banene.
 v2 = de to butikkene (perks + kosmetikk). Se `CLAUDE.md`.
+Biomer (8 miljøer etter nivå), fallende farer og hvilerom i lobbyen: se `EYECANDY.md`
+(bygget og testet headless, adversarial review lukket 24.09, ikke sett i Studio ennå).

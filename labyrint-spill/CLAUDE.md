@@ -172,6 +172,30 @@ Serveren teller mislykkede forsøk pr spiller pr nivå (`stuckState`). Etter
   ikke kjøpes for mynter.
 - `CONFIG.Assist.Enabled = false` slår hele mekanikken av. Kun lobby-modus.
 
+## Biomer, fallende farer og hvilerom — BYGGET (23.-24.09.2026, IKKE sett i Studio)
+Eierens brief (Gustav 17.09): rikere, aldri monotont, miljøet skifter etter hvert som man kommer
+lenger; sjeldne, varslede farer; en måte å hvile på som ikke kan utnyttes; en thumbnail-liste.
+**Alt står i `EYECANDY.md`** (biomer, målt sjeldenhet, hvile, budsjetter, porter, Studio-liste, shot-liste).
+- **8 biomer etter NIVÅ** (`src/shared/Biomes.luau`): Stone Dungeon (L1) → Jungle Ruins (L11) → Ice Cellar
+  (L26) → Lava Forge (L51) → Crystal Caverns (L101) → Haunted Crypt (L161) → Sky Ruins (L241) → Astral
+  Labyrinth (L351). Fargetone, partikler og veggpynt; glir over nivåene før en grense.
+- **Mørket er mekanikken:** en biome skriver KUN fargetone på samme luma som live-verdien. Siktfeltene
+  (Ambient, tåke-avstand, lysstyrke, atmosfære-tetthet, fakkel-rekkevidde) er låst. Biome 1 = live-spillet.
+- **Vegger farges aldri** (tema-butikken selger det); pynten avhenger aldri av om veggen er en hemmelig dør.
+  Når en hemmelig dør synker, synker pynten med den mens den tones ut, og slippes når døra er under gulvet
+  (`Biomes.wallState`: posisjonen avgjør, aldri navnet).
+- **Fallende farer** (`src/shared/CellHazards.luau`) fra Ice Cellar: faste celler + fast syklus på
+  NIVÅ-klokka, like for alle (medaljetider forblir rettferdige). 3 s varsel, sonen passer inni cella (gangen
+  ved siden av er alltid trygg), treff = slått ned 0,8 s, aldri død. Målt: ett nesten-treff per 2,6 min.
+  Varselringen er **blå**, aldri fellas gule: gult lys på gulvet betyr "dette gulvet dreper deg straks".
+- **Hvile** = mellom runder: bål i lobbyen ("Rest by the fire") + gratis walk-out de første 6 s av hvert
+  nivå (serverens egen `Assist.MinRunSeconds`-regel). Aldri pause inne i en løype — klokka ER medaljen.
+  Skiltet vises ikke når en kjøpt "Hjelp meg"-guide er aktiv (den går tapt ved walk-out).
+- Alt er klient (`Biome.client`, `RestClient`, `BiomeArt`). **Serveren er uendret.**
+- Tester: `tests/Biomes|CellHazards|BreakRoom|Pacing|EnvBands|Rest.spec.luau` + `robloxemu/check_labyrintspill_*.luau`.
+- **Adversarial review 24.09:** seks funn, alle lukket med test først og mutasjonstest (`EYECANDY.md` §12).
+  Thumbnail-stedet (`Labyrint-shots.rbxlx`, §9) må **aldri** publiseres.
+
 ## v2 — resten (ikke bygget ennå)
 Bevisst parkert for å få v1 til å funke først. Lagringen er allerede på plass,
 så saldoen finnes når butikkene bygges.

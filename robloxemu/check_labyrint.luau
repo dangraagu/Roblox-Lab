@@ -4,6 +4,7 @@
 --
 -- This game has eleven client scripts, each with its own ScreenGui, so the check has to load
 -- all of them: the panels only fight for the screen when they are all on it at once.
+-- NOT opted in to panel-overlap rule 4b: measured 2026-09-17, every overlap it reports is a gate artifact (it counts ScreenGuis with Enabled = false as shown, and ignores NivaaPanel's UISizeConstraint MaxSize 320) or LobbyPicker, a player-opened modal with DisplayOrder 14 drawn deliberately over the lobby HUD until closed. With both artifacts corrected: 0 overlaps.
 require("./emu/hudcheck").run({
 	game = "labyrint-spill",
 	bundle = require("./build/labyrint-spill"),
