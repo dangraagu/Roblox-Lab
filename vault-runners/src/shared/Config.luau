@@ -335,4 +335,301 @@ Config.Hud = {
 	PanelColor = { r = 18, g = 18, b = 26 },
 }
 
+--============================================================================ the environment (EYECANDY.md)
+
+-- EVERYTHING BELOW IS CLIENT-SIDE LOOK AND FEEL. src/client/Vault.client.luau reads it; the server
+-- never does, and nothing below can change a countdown, a gem, a pad or a save. The time budget
+-- (Config.Collapse, VaultPath) is untouched by all of it — tests/EnvConfig.spec.luau and
+-- tests/Pacing.spec.luau say so in numbers.
+--
+-- THE PROGRESS VALUE IS DEPTH: the floor of the run the server started, plus how deep that tier's
+-- vault is buried. A harder vault is a deeper vault, so unlocking Silver or Gold carries on down the
+-- strata instead of starting again at the bank. Colours are {r, g, b} arrays (EnvBands blends
+-- plain numbers; Color3 does not exist in the luau CLI).
+Config.Env = {
+	-- Bronze floor f is depth f; Silver floor 1 is depth 26; Gold floor 1 is depth 56. Chosen so a
+	-- new tier opens in the band the player is already in (tests/Pacing.spec.luau measures that a
+	-- normal, fast and slow player never unlock their way back to an earlier band).
+	TierDepth = { 0, 25, 55 },
+	HalfLife = 0.6,        -- every written value glides: half the gap closes in this many seconds
+	LightingHz = 10,       -- Lighting is written at most this often, and only when a value changed
+	-- The collapse as the runner feels it (VaultEnv.danger): 0 while the kill plane is this many
+	-- studs or more below the height at which it would catch them, 1 at that height.
+	DangerStuds = 18,
+	MaxDangerBlend = 0.55, -- how far toward Env.Danger the grade goes at danger 1 (readability first)
+	-- Weather and ceiling dust are thinned to this share while the runner is in the climb shaft, so
+	-- the crumbling pads stay readable.
+	ShaftWeatherScale = 0.3,
+	-- One storey above the one you stand on is dressed too, so props never pop in as you climb.
+	PropStoreysAbove = 1,
+	PropBottomAboveFloor = 12.8, -- a hanging prop never reaches below this (a jumping head tops out near 12)
+
+	-- The hub is not a band: it is where every run starts and ends. These are Fx.Presets.Cozy's
+	-- numbers exactly (the server applies Cozy at load), so the client's first write changes nothing.
+	Hub = {
+		lighting = {
+			Ambient = { 40, 44, 58 }, OutdoorAmbient = { 35, 40, 55 }, Brightness = 2, ExposureCompensation = 0.1,
+			ClockTime = 0, FogStart = 20, FogEnd = 240, FogColor = { 22, 26, 40 },
+		},
+		atmosphere = { Density = 0.3, Offset = 0.2, Color = { 120, 150, 170 }, Decay = { 60, 80, 110 }, Glare = 0.2, Haze = 1.2 },
+		bloom = { Intensity = 0.9, Size = 30, Threshold = 0.9 },
+		colorCorrection = { Brightness = 0.02, Contrast = 0.1, Saturation = 0.18, TintColor = { 220, 235, 245 } },
+		sky = { StarCount = 3000 },
+	},
+
+	-- The collapse closing in pulls the grade toward this, by danger * MaxDangerBlend.
+	Danger = {
+		atmosphere = { Color = { 235, 120, 95 } },
+		colorCorrection = { Contrast = 0.24, Saturation = 0.28, TintColor = { 255, 200, 185 } },
+	},
+
+	-- A crumbling pad is pulled toward its band's `crack` colour by CrackBlend as it goes, and a pad
+	-- must stand out MinPadContrast:1 against the floor under it (WCAG ratio; VaultEnv.readablePad).
+	CrackBlend = 0.7,
+	MinPadContrast = 3,
+	-- THE CRACK FOLLOWS THE SERVER'S PAD (VaultEnv.padLook). The server drops a pad CrumbleSeconds
+	-- after its TRUSTED position reached it, on its own 0.2 s tick, and the drop has to replicate
+	-- back — so it goes a beat (plus ping) after this client's own clock says it should. The crack is
+	-- held at full until the server's drop arrives: indefinitely while the runner still stands on it,
+	-- and for this long past the crumble once they have stepped off (a pad only brushed on the way past
+	-- may never have been counted by the server, and then it never drops).
+	CrackHoldSeconds = 1.5,
+	PadFlashSeconds = 0.45, -- a pad that comes back flashes this long, unless a runner lands on it
+	-- GEMS STAY FINDABLE. A gem (and the exit pad, which wears the gem colour) keeps its tier's colour
+	-- where it stands out MinGemContrast:1 against the floor and MinGemWallContrast:1 against the walls,
+	-- and wears the stratum's own `palette.gem` where it would vanish (VaultEnv.gem): Silver's pale
+	-- blue on the Frozen Vault's ice read 1.10:1. The wall bar is what a bright gem can reach on the
+	-- tomb's sandstone.
+	MinGemContrast = 3,
+	MinGemWallContrast = 1.8,
+	-- THE DROP'S RING STAYS VISIBLE. The ring is the danger zone itself, a Neon disc on the floor: the
+	-- first candidate that stands out MinRingContrast:1 against the floor under it (seen through its own
+	-- transparency, VaultEnv.readableRing) is drawn. Yellow read 1.16:1 on the Frozen Vault's snow, and
+	-- a pure red lock cannot reach 3:1 on the bank's or the tomb's floor at any opacity.
+	MinRingContrast = 3,
+	RingFollow = {
+		{ color = { 255, 210, 60 }, transparency = 0.35 }, -- yellow, on the dark floors
+		{ color = { 140, 100, 0 }, transparency = 0.15 },  -- dark gold, on snow
+	},
+	RingLock = {
+		{ color = { 255, 150, 140 }, transparency = 0.1 }, -- hot coral red, on the dark floors
+		{ color = { 170, 0, 20 }, transparency = 0.25 },   -- crimson, on snow
+	},
+
+	-- Five strata. `from` is the DEPTH a band starts at; it blends in over `fade` depths before it.
+	-- palette: colours the client paints onto the server's walls / floors / pads (COLOUR ONLY —
+	--          never Material, Size, CFrame, CanCollide or Transparency, so physics and the obby are
+	--          byte-identical to what the server built). `pad` must stand out against `floor` and
+	--          `wall` (tests/EnvConfig.spec.luau measures the contrast): the obby is read by colour.
+	--          `gem` is the stratum's own gem colour, worn by the gems and the exit pad wherever the
+	--          tier's colour would vanish into this stratum (VaultEnv.gem).
+	-- weather: one ambient particle kind around the camera. props: what hangs from the ceilings.
+	-- piece: the set piece in the sky above the top storey. hazards: which ceiling drops fall here.
+	Bands = {
+		{
+			id = "bank", name = "Bank Vault", emoji = "🏦", from = 0, fade = 0,
+			blurb = "Marble, brass and other people's money",
+			lighting = {
+				Ambient = { 72, 64, 50 }, OutdoorAmbient = { 62, 56, 46 }, Brightness = 2, ExposureCompensation = 0.15,
+				ClockTime = 0, FogStart = 20, FogEnd = 260, FogColor = { 30, 26, 20 },
+			},
+			atmosphere = { Density = 0.28, Offset = 0.2, Color = { 175, 150, 110 }, Decay = { 90, 70, 40 }, Glare = 0.1, Haze = 1.0 },
+			bloom = { Intensity = 1.0, Size = 28, Threshold = 0.9 },
+			colorCorrection = { Brightness = 0.03, Contrast = 0.12, Saturation = 0.1, TintColor = { 255, 240, 215 } },
+			sky = { StarCount = 800 },
+			palette = {
+				wall = { 104, 108, 116 }, floor = { 58, 82, 68 }, pad = { 242, 208, 112 },
+				accent = { 214, 172, 82 }, glow = { 255, 226, 160 }, crack = { 255, 90, 50 }, wallReflect = 0.06,
+				gem = { 255, 214, 90 }, -- gold coin
+			},
+			weather = { kind = "glitter", rate = 6 },
+			props = { kind = "lamp", density = 0.3 },
+			piece = "dome",
+			hazards = { "marble" },
+		},
+		{
+			id = "tomb", name = "Pyramid Tomb", emoji = "🏺", from = 5, fade = 2,
+			blurb = "Older stone under the bank. Sand in the corridors",
+			lighting = {
+				Ambient = { 100, 66, 38 }, OutdoorAmbient = { 92, 64, 40 }, Brightness = 2.2, ExposureCompensation = 0.1,
+				ClockTime = 0, FogStart = 18, FogEnd = 220, FogColor = { 60, 38, 20 },
+			},
+			atmosphere = { Density = 0.36, Offset = 0.1, Color = { 222, 172, 112 }, Decay = { 140, 90, 40 }, Glare = 0.25, Haze = 2.0 },
+			bloom = { Intensity = 1.0, Size = 30, Threshold = 0.85 },
+			colorCorrection = { Brightness = 0.02, Contrast = 0.14, Saturation = 0.2, TintColor = { 255, 226, 186 } },
+			sky = { StarCount = 2600 },
+			palette = {
+				wall = { 214, 172, 110 }, floor = { 110, 78, 44 }, pad = { 252, 236, 196 },
+				accent = { 46, 150, 160 }, glow = { 255, 166, 84 }, crack = { 255, 90, 50 }, wallReflect = 0,
+				gem = { 255, 250, 235 }, -- pearl
+			},
+			weather = { kind = "sand", rate = 10 },
+			props = { kind = "brazier", density = 0.3 },
+			piece = "sunDisc",
+			hazards = { "sandstone" },
+		},
+		{
+			id = "reactor", name = "Reactor Core", emoji = "⚛️", from = 14, fade = 3,
+			blurb = "Somebody built a reactor under the tomb",
+			lighting = {
+				Ambient = { 42, 72, 88 }, OutdoorAmbient = { 32, 62, 80 }, Brightness = 2, ExposureCompensation = 0.05,
+				ClockTime = 0, FogStart = 20, FogEnd = 240, FogColor = { 10, 30, 40 },
+			},
+			atmosphere = { Density = 0.3, Offset = 0.15, Color = { 92, 190, 222 }, Decay = { 20, 70, 100 }, Glare = 0.3, Haze = 1.2 },
+			bloom = { Intensity = 1.3, Size = 32, Threshold = 0.8 },
+			colorCorrection = { Brightness = 0, Contrast = 0.16, Saturation = 0.15, TintColor = { 212, 245, 255 } },
+			sky = { StarCount = 400 },
+			palette = {
+				wall = { 76, 84, 98 }, floor = { 38, 42, 52 }, pad = { 124, 236, 255 },
+				accent = { 0, 255, 210 }, glow = { 120, 230, 255 }, crack = { 255, 90, 50 }, wallReflect = 0.08,
+				gem = { 140, 255, 110 }, -- isotope green
+			},
+			weather = { kind = "sparks", rate = 8 },
+			props = { kind = "panel", density = 0.35 },
+			piece = "reactorRing",
+			hazards = { "pipe" },
+		},
+		{
+			id = "frozen", name = "Frozen Vault", emoji = "❄️", from = 24, fade = 4,
+			blurb = "The reactor's cold side. Everything here is ice",
+			lighting = {
+				Ambient = { 98, 122, 152 }, OutdoorAmbient = { 110, 140, 170 }, Brightness = 2.3, ExposureCompensation = 0.1,
+				ClockTime = 0, FogStart = 18, FogEnd = 200, FogColor = { 60, 80, 110 },
+			},
+			atmosphere = { Density = 0.4, Offset = 0.1, Color = { 192, 222, 246 }, Decay = { 110, 150, 200 }, Glare = 0.15, Haze = 1.8 },
+			bloom = { Intensity = 1.1, Size = 26, Threshold = 0.85 },
+			colorCorrection = { Brightness = 0.04, Contrast = 0.1, Saturation = -0.05, TintColor = { 226, 240, 255 } },
+			sky = { StarCount = 3000 },
+			palette = {
+				wall = { 176, 214, 236 }, floor = { 226, 238, 246 }, pad = { 40, 92, 160 },
+				accent = { 190, 240, 255 }, glow = { 170, 225, 255 }, crack = { 255, 90, 50 }, wallReflect = 0.15,
+				gem = { 40, 80, 200 }, -- sapphire
+			},
+			weather = { kind = "snow", rate = 14 },
+			props = { kind = "icicles", density = 0.35 },
+			piece = "aurora",
+			hazards = { "icicle" },
+		},
+		{
+			id = "volcano", name = "Volcano Temple", emoji = "🌋", from = 40, fade = 6,
+			blurb = "The bottom of every vault. It is warm down here",
+			lighting = {
+				Ambient = { 104, 46, 30 }, OutdoorAmbient = { 92, 40, 28 }, Brightness = 2, ExposureCompensation = 0.05,
+				ClockTime = 0, FogStart = 16, FogEnd = 200, FogColor = { 40, 12, 8 },
+			},
+			atmosphere = { Density = 0.38, Offset = 0.1, Color = { 204, 92, 52 }, Decay = { 90, 30, 10 }, Glare = 0.4, Haze = 1.6 },
+			bloom = { Intensity = 1.4, Size = 34, Threshold = 0.8 },
+			colorCorrection = { Brightness = 0, Contrast = 0.2, Saturation = 0.25, TintColor = { 255, 216, 196 } },
+			sky = { StarCount = 200 },
+			palette = {
+				wall = { 58, 44, 42 }, floor = { 34, 26, 26 }, pad = { 216, 198, 172 },
+				accent = { 255, 110, 30 }, glow = { 255, 124, 56 }, crack = { 255, 90, 50 }, wallReflect = 0,
+				gem = { 255, 226, 120 }, -- molten gold
+			},
+			weather = { kind = "embers", rate = 12 },
+			props = { kind = "embers", density = 0.3 },
+			piece = "eruption",
+			hazards = { "lavaBomb" },
+		},
+	},
+}
+
+--============================================================================ ceiling drops (the hazards)
+
+-- RARE, TELEGRAPHED, AVOIDABLE, and LOCAL: a chunk of ceiling cracks over the runner, the ring under
+-- their feet follows them for a couple of seconds, locks, and the chunk drops. Keep running and it
+-- lands behind you; stand in the ring and it knocks you down for a moment. src/shared/Hazards.luau
+-- is the rule (adapted from +1 Jump's template); VaultEnv.hazardEligible is where it may land.
+--
+-- A hit costs about a second and nothing else — no gems, no death rule, no pad — and it can only
+-- happen to a player who stood still in the ring through the warning. tests/Pacing.spec.luau
+-- measures what that does to a run: nothing, for a player who moves.
+Config.Hazards = {
+	IntervalMin = 120,          -- seconds of RUN time between drops (the hub freezes the clock)
+	IntervalMax = 180,
+	MinTelegraphSeconds = 2.5,
+	MinCommitSeconds = 1.0,
+	MaxTrackSpeed = 60,         -- studs/s the ring may follow; faster (a fall, a teleport) locks it
+	PlayerRadius = 1,           -- R15 root half-width; the ring is hitRadius + this, and so is the rule
+	AimJitter = 0.8,
+	KnockLift = 4,              -- a hop, never a launch (Hazards.MAX_KNOCK_LIFT)
+	MaxKnock = 16,
+	KnockSeconds = 0.9,         -- PlatformStand after a hit: knocked down, then up again
+	-- Where and when a drop may START (VaultEnv.hazardEligible):
+	GraceSeconds = 12,          -- not in the first seconds of a run
+	QuietBeforeSealSeconds = 15, -- not in the last seconds before the seal (the HUD goes red at 10)
+	MaxDanger = 0.5,            -- not with the collapse within half a storey of catching you
+	ShaftMarginCells = 2,       -- fine cells (Chebyshev) kept clear around the shaft and the hole
+	-- The furthest a knocked-down runner is assumed to slide. Asserted against the hole's distance
+	-- in tests/VaultEnv.spec.luau; how far a Roblox humanoid really slides is on the Studio list.
+	KnockClearStuds = 4,
+	Kinds = {
+		marble = { name = "MARBLE SLAB", telegraph = 3.0, commit = 1.2, fall = 0.35, pass = 1.6,
+			hitRadius = 2.4, knock = 12, dropHeight = 13, reach = 8 },
+		sandstone = { name = "SANDSTONE BLOCK", telegraph = 3.0, commit = 1.2, fall = 0.35, pass = 1.6,
+			hitRadius = 2.5, knock = 12, dropHeight = 13, reach = 8 },
+		pipe = { name = "COOLANT PIPE", telegraph = 3.2, commit = 1.3, fall = 0.35, pass = 1.6,
+			hitRadius = 2.4, knock = 12, dropHeight = 13, reach = 8 },
+		icicle = { name = "ICICLE", telegraph = 3.4, commit = 1.4, fall = 0.3, pass = 1.6,
+			hitRadius = 2.0, knock = 10, dropHeight = 13, reach = 8 },
+		lavaBomb = { name = "LAVA BOMB", telegraph = 3.0, commit = 1.2, fall = 0.4, pass = 1.8,
+			hitRadius = 2.5, knock = 14, dropHeight = 13, reach = 8 },
+	},
+}
+
+--============================================================================ rest
+
+-- A Roblox server cannot pause, and a vault run is a timed round: the collapse must never freeze.
+-- So REST IS THE HUB. Between runs nothing can hurt you, no clock runs and no run starts by itself;
+-- the ☕ Rest button there sits you down and softens the view. It is not offered inside a vault.
+-- src/shared/Rest.luau (the template) is the rule; Rest.validate refuses WakeOnMove = false and
+-- BlockWhileThreat = false, and "threat" here is "a run is going".
+Config.Rest = {
+	WakeOnMove = true,
+	BlockWhileThreat = true,
+	RequireGrounded = true,
+	IdleSeconds = 0,       -- no idle rest: the hub has nothing to rest FROM, and a run never pauses
+	PendingSeconds = 10,
+	WakeGraceSeconds = 0.4,
+}
+
+--============================================================================ budgets (client, measured)
+
+-- What the client may build on top of the server's vault, per player. Measured every frame by
+-- robloxemu/check_vaultrunners_env.luau; EYECANDY.md has the table. Mobile is the target.
+Config.Budget = {
+	MaxLocalParts = 180,      -- every Part the client creates, pooled or not, parented at once
+	MaxEmitters = 6,          -- enabled ParticleEmitters the client owns
+	MaxEmitterRate = 90,      -- their summed Rate, particles/s
+	MaxWeatherEmitters = 2,   -- of which ambient weather (two bands blending at most)
+	MaxWeatherRate = 30,
+	MaxLights = 3,
+	MaxBeams = 6,
+	MaxHazards = 1,
+}
+
+--============================================================================ pacing (a MODEL, not the game)
+
+-- NOTHING IN THE RUNNING GAME READS THIS. tests/VaultModel.luau plays the real vaults with these
+-- numbers so tests/Pacing.spec.luau can say how long a normal player takes to reach each band and
+-- how often a ceiling drop comes near them. There is no telemetry yet: when there is, retune
+-- `normal` FIRST, then Config.Env.Bands[*].from — the spec prints where each band lands.
+Config.Pacing = {
+	Profiles = {
+		-- a normal player: reads the maze at every new junction, misses twice the hops the
+		-- countdown prices, and spends a few seconds in the hub between runs
+		normal = { SpeedFactor = 0.85, JunctionPauseSeconds = 0.6, RetryPauseSeconds = 0.2, MissChance = 0.08,
+			HubSecondsPerAttempt = 12, StunSeconds = 1.2, ReactSeconds = 0.5, NearStuds = 8 },
+		fast = { SpeedFactor = 0.95, JunctionPauseSeconds = 0.25, RetryPauseSeconds = 0.1, MissChance = 0.04,
+			HubSecondsPerAttempt = 8, StunSeconds = 1.0, ReactSeconds = 0.35, NearStuds = 8 },
+		slow = { SpeedFactor = 0.75, JunctionPauseSeconds = 1.2, RetryPauseSeconds = 0.4, MissChance = 0.15,
+			HubSecondsPerAttempt = 20, StunSeconds = 1.5, ReactSeconds = 0.8, NearStuds = 8 },
+		-- a normal player who stops to READ the maze for 3 s at every new junction. The three above
+		-- never stand still long enough for a drop to land on them even when they ignore every
+		-- warning, so this is the profile the cost of a hit is measured on (tests/Pacing.spec.luau)
+		reader = { SpeedFactor = 0.85, JunctionPauseSeconds = 3, RetryPauseSeconds = 0.6, MissChance = 0.08,
+			HubSecondsPerAttempt = 12, StunSeconds = 1.2, ReactSeconds = 0.5, NearStuds = 8 },
+	},
+}
+
 return Config

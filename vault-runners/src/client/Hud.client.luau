@@ -19,6 +19,9 @@ local UserInputService = game:GetService("UserInputService")
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 local FxClient = require(ReplicatedStorage:WaitForChild("FxClient"))
+-- Which stratum a vault's next floor is in (EYECANDY.md): the same pure lookup Vault.client uses.
+local EnvBands = require(ReplicatedStorage:WaitForChild("EnvBands"))
+local VaultEnv = require(ReplicatedStorage:WaitForChild("VaultEnv"))
 
 local remotes = ReplicatedStorage:WaitForChild("VaultRemotes")
 local StateEvent = remotes:WaitForChild("State")
@@ -336,7 +339,8 @@ local function renderState(s)
 		local b = vaultRows[i]
 		if b then
 			if t.unlocked then
-				b.Text = string.format("  %s %s\n  Floor %d  ·  tap to drop in", t.emoji, t.name, t.floor)
+				local band = Config.Env.Bands[EnvBands.indexAt(Config.Env.Bands, VaultEnv.depth(Config, i, t.floor))]
+				b.Text = string.format("  %s %s\n  Floor %d %s  ·  tap to drop in", t.emoji, t.name, t.floor, band.emoji)
 				b.TextColor3 = Color3.fromRGB(242, 240, 250)
 			else
 				b.Text = string.format("  🔒 %s\n  %d more gems to bank", t.name, t.remaining)

@@ -6,6 +6,11 @@ v1 is **built and green, and has never been run by a person or published.** No R
 exists for it, no `publish_*.bat` exists, and the tree was deliberately left dirty and
 uncommitted.
 
+**The eye candy (owner's brief 2026-09-17) is built and green, uncommitted, through one adversarial
+review (its findings closed or handed to the owner, EYECANDY.md §12), and NOT yet seen in Studio: read
+`EYECANDY.md` first.** Five strata by depth, rare ceiling drops, rest in the
+hub, all client-side; `Main.server.luau` is unchanged by it.
+
 Four review passes so far, and they supersede each other — read them newest first.
 `REVIEW-4.md` is the obby: the crumbling climb shaft, how its cost was priced into the countdown,
 the re-derived monotonicity table, and the mutation gate. `REVIEW-3.md` is the difficulty curve:
@@ -26,8 +31,20 @@ tests/Collapse.spec.luau       281 passed, 0 failed   IS THE VAULT WINNABLE AT A
 tests/Curve.spec.luau           23 passed, 0 failed   IS "DEEPER" ACTUALLY HARDER
 tests/Ascent.spec.luau          68 passed, 0 failed   THE PADS CRUMBLE, AND EVERY ONE COMES BACK
 tests/Trace.spec.luau           28 passed, 0 failed   the anti-teleport throttle + its BOUNDS
-check_vaultrunners.luau        115 passed, 0 failed   (headless boot: builds vaults, plays runs)
-check_vaulthud.luau            PASS                   (11 viewports x {hub, mid-run})
+tests/EnvBands.spec.luau       124 passed, 0 failed   (the eye candy, EYECANDY.md, from here...)
+tests/Rest.spec.luau            55 passed, 0 failed
+tests/Hazards.spec.luau         91 passed, 0 failed
+tests/VaultEnv.spec.luau       112 passed, 0 failed
+tests/EnvConfig.spec.luau      366 passed, 0 failed   THE PADS, GEMS AND RING STAY READABLE at every depth
+tests/Pacing.spec.luau          47 passed, 0 failed   (...to here)
+check_vaultrunners.luau        138 passed, 0 failed   (headless boot: builds vaults, plays runs)
+check_vaulthud.luau            PASS                   (11 viewports x {hub, mid-run}, HUD + Vault.client)
+../robloxemu/check_vaultrunners_env.luau      255 passed, 0 failed   the strata, real client + server
+../robloxemu/check_vaultrunners_hazards.luau   50 passed, 0 failed   the drops (emulator Random unseeded)
+../robloxemu/check_vaultrunners_shaft.luau     53 passed, 0 failed   the shaft stays readable; crack held till the drop
+../robloxemu/check_vaultrunners_cards.luau     20 passed, 0 failed   returning player's cards; forced guards
+../robloxemu/check_vaultrunners_static.luau    86 passed, 0 failed   compiles; no remote, no attribute
+../robloxemu/check_vaultrunners_readable.luau  47 passed, 0 failed   gems, exit, drop ring readable; signs clear
 walk_vaultrunners.luau         5 floors x 3 runners   (walks the real server, prints outcomes)
 measure_curve.luau             the tuning instrument  (where Config.Collapse's numbers came from)
 mutate_obby.sh                 the obby's mutation gate (13 mutations + 2 controls)
@@ -127,6 +144,18 @@ cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runne
 11. **The HUD is design px; `AbsoluteContentSize` is screen px.** Divide by `uiScale.Scale` when
     setting a `CanvasSize`. Tap targets are sized `ceil(46 / scale)` on touch, so 44+ SCREEN px
     survives the UIScale. Both rules were caught by `check_vaulthud.luau`, not by reading.
+12. **The eye candy is CLIENT-ONLY and never touches a rule** (EYECANDY.md §5). `Vault.client` writes
+    only `Color` and `Reflectance` on the server's vault parts (never Material, Size, CFrame,
+    collision, Transparency or an attribute), fires no remote, and reads only its own vault. Rest is
+    the HUB: it must never be offered, or honoured, inside a run, because a run is a timed round the
+    collapse must be allowed to finish. A ceiling drop must never start in the climb shaft, on a pad,
+    next to the hole, in a run's first 12 s or last 15 s, or with the collapse within half a storey
+    (`VaultEnv.hazardEligible`), and nothing may shake the camera of a runner in the shaft.
+    **The pad's look follows the SERVER's pad** (`VaultEnv.padLook`): a crack is held at full until
+    the server's drop arrives. Never end it on the client's own clock; that painted a pad WHOLE a beat
+    (plus ping) before it fell. **What a runner must find must read in every stratum**: gems and the
+    exit pad wear `VaultEnv.gem`, and the drop's ring `VaultEnv.ring`. Any new stratum palette is
+    checked by `EnvConfig.spec` against those bars (review round, EYECANDY.md §12).
 
 ## How the vault is put together
 

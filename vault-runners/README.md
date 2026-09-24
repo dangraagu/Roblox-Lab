@@ -13,6 +13,17 @@ harder vault and buy Vault-Keeper pets that multiply what you bring out.
 
 Concept brief: `../docs/game-radar/2026-09-09-roblox-game-radar.md`, "1. Vault Runners".
 
+**The look, and the drops (EYECANDY.md).** The deeper the vault, the older and stranger it gets:
+five strata, driven by depth (tier + floor), never by time. They are 🏦 Bank Vault → 🏺 Pyramid Tomb →
+⚛️ Reactor Core → ❄️ Frozen Vault → 🌋 Volcano Temple, each with its own light, wall / floor / pad
+colours, hanging props, weather and a set piece in the sky over the top storey. Blend floors are half
+one stratum and half the next. As the collapse closes in, ceiling dust, sparks and a hotter grade show
+it. Crumbling pads crack (held until the server drops them), drop debris and flash back. Gems, the exit
+pad and the drop's ring keep a colour that reads in every stratum. Once every 2-3 minutes of run time a chunk of
+ceiling cracks over you, follows you, locks and drops: keep moving and it lands behind you. **Rest is
+the hub, between runs**; a run never pauses. All of it is client-side, and `Main.server.luau` is
+unchanged. Not yet seen in Studio.
+
 ---
 
 ## The loop
@@ -105,6 +116,14 @@ vault-runners/
   src/shared/Responsive.luau    HUD sizing rules, copied
   src/server/Main.server.luau   authoritative: the world, the run loop, the DataStore
   src/client/Hud.client.luau    display only, phone-first
+  src/client/Vault.client.luau  the strata, the drops, rest in the hub: CLIENT-ONLY (EYECANDY.md)
+  src/shared/EnvBands.luau      depth -> stratum + blend (+1 Jump's template, verbatim), PURE
+  src/shared/Hazards.luau       rare telegraphed ceiling drops (template, adapted), PURE
+  src/shared/Rest.luau          what rest means (template, verbatim), PURE
+  src/shared/VaultEnv.luau      depth, where a drop may start, the collapse as felt, readable pads,
+                                gems and ring, the pad's look (padLook), PURE
+  src/shared/VaultArt.luau      the client's props / sky pieces / weather / drops, code-only, pooled
+  EYECANDY.md                   the strata, the drops, rest, budgets, gates, Studio list, shot list
   tests/*.spec.luau             one per pure module
   check_vaultrunners.luau       headless boot: builds vaults and plays runs, walking not warping
   check_vaulthud.luau           headless HUD fit, 11 viewports x {hub, mid-run}
@@ -134,6 +153,12 @@ luau tests/Collapse.spec.luau       # 281 passed, 0 failed   IS THE VAULT WINNAB
 luau tests/Curve.spec.luau          #  23 passed, 0 failed   IS "DEEPER" ACTUALLY HARDER
 luau tests/Ascent.spec.luau         #  68 passed, 0 failed   THE PADS CRUMBLE, AND COME BACK
 luau tests/Trace.spec.luau          #  28 passed, 0 failed   the anti-teleport throttle
+luau tests/EnvBands.spec.luau       # 124 passed, 0 failed   (EYECANDY.md from here down)
+luau tests/Rest.spec.luau           #  55 passed, 0 failed
+luau tests/Hazards.spec.luau        #  91 passed, 0 failed
+luau tests/VaultEnv.spec.luau       # 112 passed, 0 failed
+luau tests/EnvConfig.spec.luau      # 366 passed, 0 failed   THE PADS, GEMS AND RING STAY READABLE
+luau tests/Pacing.spec.luau         #  47 passed, 0 failed   when each stratum arrives, how rare a drop is
 ```
 
 Then the headless boot, which runs the REAL server script inside `robloxemu`:
@@ -141,8 +166,15 @@ Then the headless boot, which runs the REAL server script inside `robloxemu`:
 ```
 cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runners.luau
 cd ../vault-runners
-luau check_vaultrunners.luau        # 115 passed, 0 failed
-luau check_vaulthud.luau            # PASS - fits every viewport checked
+luau check_vaultrunners.luau        # 138 passed, 0 failed
+luau check_vaulthud.luau            # PASS - fits every viewport checked (HUD + the strata's chip)
+cd ../robloxemu
+luau check_vaultrunners_env.luau     # 255 passed, 0 failed   the five strata through the real client
+luau check_vaultrunners_hazards.luau #  50 passed, 0 failed   the drops through the real client
+luau check_vaultrunners_shaft.luau   #  53 passed, 0 failed   the shaft stays readable; the crack holds till the pad goes
+luau check_vaultrunners_cards.luau   #  20 passed, 0 failed   a returning player's cards; forced guards
+luau check_vaultrunners_static.luau  #  86 passed, 0 failed   compiles; the client cannot talk to the server
+luau check_vaultrunners_readable.luau #  47 passed, 0 failed  gems, exit, drop ring readable; hub signs never overlap
 ```
 
 `check_vaultrunners.luau` asks the workspace how many parts arrived (112 for Bronze floor 1),

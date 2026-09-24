@@ -74,7 +74,10 @@ HudCheck.run({
 	game = "vault-runners",
 	bundle = require("../robloxemu/build/vault-runners"),
 	server = "server/Main.server",
-	clients = { "client/Hud.client" },
+	-- Vault.client (EYECANDY.md) draws the band chip, the hub's Rest button and the ceiling-drop
+	-- warning on its own ScreenGui. Both scripts are loaded so every rule below — including the
+	-- panel overlap rule, which compares panels ACROSS ScreenGuis — measures the two together.
+	clients = { "client/Hud.client", "client/Vault.client" },
 	viewports = viewports,
 	overlap = true,
 })
