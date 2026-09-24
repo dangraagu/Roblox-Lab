@@ -27,6 +27,12 @@ DataStore with a pcall'd `GetDataStore` and a GUID session lock, phone-first HUD
   - §12: E and Q choose EXTRACT and DESCEND on a keyboard, and the choice panel shows only while the
     player stands in the powered lift (traps 20, 21).
 - Studio is the next step, and everything in "Needs Studio" is unverified.
+- **Environment bands (EYECANDY.md)**, built 2026-09-23 by an attempt that was cut off by a usage limit,
+  resumed and finished 2026-09-24: seven bands by sublevel (offices, labs, server vault, flooded
+  maintenance, reactor, bio-lab, the void), rare telegraphed hazards from the labs down, rest in the break
+  room only, all client-side (`src/client/Env.client.luau`). The server's only change is two break-room
+  benches. Mutation-swept (EYECANDY.md §7). Reviewed by an independent adversarial reviewer on 2026-09-24; its
+  five findings were closed the same day (EYECANDY.md §11, traps 33-37).
 
 ## How to run every gate
 
@@ -37,7 +43,7 @@ Git Bash, from `D:\Claude\Roblox`. `L` is the luau CLI directory (`luau.exe`, `l
 ```
 # 1. pure specs (one per shared module)
 cd facility-nightmare
-for s in tests/Config tests/Economy tests/Facility tests/Survival tests/Trust tests/Responsive tests/Rng tests/MazeGen; do $L/luau.exe $s.spec.luau 2>&1 | tail -1; done
+for s in tests/Config tests/Economy tests/Facility tests/Survival tests/Trust tests/Responsive tests/Rng tests/MazeGen          tests/EnvBands tests/EnvBus tests/EnvConfig tests/Hazards tests/Rest tests/Dressing; do $L/luau.exe $s.spec.luau 2>&1 | tail -1; done
 
 # 2. ALWAYS rebuild the bundle before anything headless (the gates read build/, not src/)
 cd ../robloxemu && py -3 wrap.py --game ../facility-nightmare --out build/facility-nightmare.luau
@@ -47,6 +53,9 @@ $L/luau.exe check_facilitynightmare.luau 2>&1 | tail -1        # world, spawn, r
 $L/luau.exe check_facilitynightmare_input.luau 2>&1 | tail -1  # every HUD button and key, pressed through the real HUD (a phone)
 $L/luau.exe check_facilitynightmare_desktop.luau 2>&1 | tail -1 # mouse and keyboard: Modal, E/Q, camera zoom, the stalled lift
 $L/luau.exe check_facilitynightmare_hud.luau 2>&1 | tail -1    # HUD x 10 viewports x 3 modes
+$L/luau.exe check_facilitynightmare_env.luau 2>&1 | tail -1    # the environment: bands, grade, dressing on real rooms, glow, rest, budgets
+$L/luau.exe check_facilitynightmare_hazards.luau 2>&1 | tail -1 # hazards through the real client: rarity, telegraph, dodge, pads, arrival
+$L/luau.exe check_facilitynightmare_firstframe.luau 2>&1 | tail -1 # 60 Hz: a room is dressed and repainted on the first frame it can be seen
 cd ../facility-nightmare
 $L/luau.exe tests/Fx.spec.luau 2>&1 | tail -1                  # Fx/FxClient, through the harness
 $L/luau.exe tests/walk.luau 2>&1                                # the player's path, in numbers
@@ -60,7 +69,13 @@ rojo build default.project.json -o <somewhere outside the repo>.rbxlx
 
 # a MEASUREMENT, not a gate (about 7 minutes per 200 runs per speed)
 $L/luau.exe tests/curve.luau 2>&1
+# a MEASUREMENT, not a gate: hazards per minute of real play, through Env.client (a few minutes)
+$L/luau.exe tests/hazards.measure.luau 2>&1
 ```
+
+`luau-compile.exe` and `luau-analyze.exe` were gone from the shared scratchpad on 2026-09-24 (another
+session removed them). The resume session compiled every file with `luau.exe` + `loadstring` instead (compile
+only, nothing runs; a deliberately broken file fails it), and could not run `luau-analyze` at all.
 
 `luau-analyze` is clean on 11 of 12 sources after filtering Roblox globals. The 12th, `MazeGen.luau`,
 reports 10 strict-mode type errors — it is a VERBATIM copy (md5 `c269d302…`) and the original in
@@ -92,6 +107,12 @@ Only a failure count above 0 matters.
 - `../robloxemu/check_facilitynightmare.luau`, `check_facilitynightmare_input.luau`,
   `check_facilitynightmare_desktop.luau`, `check_facilitynightmare_hud.luau` — the emulator gates.
 - `REVIEW-1.md` — the two adversarial reviews: every finding, how it was reproduced and closed.
+- The environment (EYECANDY.md): `src/shared/EnvBands.luau` (verbatim from plus1-jump, md5 `c6fc63a1…`),
+  `Hazards.luau` and `Rest.luau` (adapted from plus1-jump), `Dressing.luau` (pure: each band's kit and the
+  rules that keep it fair), `EnvBus.luau` (a client-local bus, Env.client -> HUD), `EnvArt.luau` (client
+  art), `src/client/Env.client.luau` (the glue), `Config.Env` / `Hazards` / `Rest` / `Budget`; specs
+  `EnvBands EnvBus EnvConfig Hazards Rest Dressing`; checks `check_facilitynightmare_env`, `_hazards` and
+  `_firstframe`; the measurement `tests/hazards.measure.luau`.
 - `design-measure/` — the rig DESIGN.md's numbers came from. NOT game code; never copy it into src/.
 
 ## The model, and the invariants that hold it together
@@ -141,7 +162,7 @@ Only a failure count above 0 matters.
 - **A dark death does not kill the Humanoid** (it would enter the respawn cycle the emulator does not
   model). Beat, then a server move to HubArrival.
 
-## Traps this build hit (1-8 and 11-25 each have an assertion now; 9-10 are notes)
+## Traps this build hit (1-8 and 11-36 each have an assertion now; 9-10 and 37 are notes)
 
 1. **Sprint flip-flop at empty stamina.** DESIGN.md §2.3 read literally ("sprint while requested and
    stamina > 0; refill while not sprinting") makes a held Shift alternate 24/16 every tick at empty,
@@ -250,7 +271,66 @@ Only a failure count above 0 matters.
     back after the player left releases its own lock (`releaseLock`), and never another server's
     (check K3).
 
+26. **The env check's densest-floor walk could pick up a fuse** (resume session). Its routes used any open
+    door, so the bot could cross a fuse room the walk had deliberately never entered; PickupRadius 5 took
+    the fuse, the first run's hold ended, the front ran and the floor could end under the check ("attempt
+    to index nil with 'center'", 1 of 8 runs). Routes now use fuse-free rooms only, and every band's walk
+    asserts the fuse count is still 0 (24 of 24 runs green after).
+27. **A hazard called off by a flicker kept its banner** for the rest of its 3 s, telling the player to step
+    out of a ring that was gone while their room went dark. The HUD hides it on the hazard's "clear".
+28. **Floors are LockFirstPerson: the ring is out of view.** A ring 3.5 studs out at your feet is about 55°
+    below eye level and the source is straight overhead; a first-person view shows about ±35° vertically.
+    The banner is the telegraph a player can see: it says STEP OUT OF THE RING while inside, YOU ARE CLEAR
+    once out, and lasts exactly the telegraph.
+29. **A hazard due at the lift's choice landed on the next arrival.** The clock carries over (frozen, never
+    reset); a pad is never a legal spot, so a player waiting in the powered lift let a hazard fall due, and it
+    fired 0.6 s after the next arrival, over THE POWER IS FAILING. `Hazards.arrivalOk`: none in the first
+    `ArrivalGraceSeconds` (6) on a sublevel.
+30. **Text**: the bands' `line` strings were dead config (now on the ride's hint); band 7 read "Going down to
+    the THE VOID…"; the rest hint was 101 characters, longer than any hint the HUD had (81). Banners and hints
+    the environment adds are held to the longest ones the HUD already showed (40 and 81 characters).
+31. **Eight promises no gate held** (the resume session's mutation sweeps): rooms out of range put away,
+    the emitter cap, the screen cap (killed only when a random floor happened to put enough screens near),
+    a live hazard taking one emitter from the rooms, particles kept out of the item volume (the spec's case
+    was rejected by the spread rule first), one hazard at a time, and no hazard on the car or lift pad
+    (twice: the first test stood 1 stud off centre, under the light fixture, so the fixture rule decided).
+    Each has an assertion now, deterministic where the floor is random (EYECANDY.md §7).
+32. **A rolled overhead run gave up on one blocked wall.** The flooded kit's dripping pipe (chance 1) tried a
+    single random wall: 134 of 6 825 real rooms, 13 of 300 entry rooms, had no drip, and two new emitter
+    tests flaked on it. A rolled run now tries the other walls (no extra random draws, so rooms whose first
+    wall worked are unchanged): 0 of 6 825.
+33. **Gamma luma hid how dark a palette was (review finding 1).** Palettes were held at 25-100 % of the server's
+    gamma luma. 26 % of the gamma luma is 7 % of the light: void walls returned 5-7 % of what the server's did, and
+    in the server vault, the reactor and the void a closed door was as bright as its wall. No difficulty number
+    could see it, because the bot reads door positions from the workspace. `Dressing.paletteOk` now works in linear
+    light, under the flashlight's white and under the room's own light: every surface 60-100 % of the server's
+    light, the room light 90-100 % of its output, and a closed door standing out from its wall 90-110 % as much
+    as the server built it (both ways: no harder and no easier to find). Five palettes were retuned.
+34. **A 4 Hz pass is a hard cut (review finding 2).** Rooms were dressed only in the 0.25 s pass, so each new room
+    showed the server's grey-green for up to 14 frames before its palette and furniture snapped in. A room that
+    should be dressed and is not now triggers the pass on that frame, and the ride dresses the entry room wherever
+    it is. `check_facilitynightmare_firstframe` fires RenderStepped at 60 Hz, six frames per server tick; at one
+    frame per tick, as the other checks run, the defect cannot be seen.
+35. **The last row has no next row (review finding 4).** The DEPTH RECORD board highlighted row i only when
+    `i < #rows`, so THE VOID, the brag, was never highlighted.
+36. **ParticleEmitter.LightInfluence defaults to 0 in Roblox (review finding 5).** Never written, steam and drips
+    are drawn at full colour whatever the light, in a dark room too (the documented default; not seen in Studio).
+    Every emitter now writes it (1, or 0 when self-lit), and every particle follows its room's power. A property
+    never written reads nil headless, so the gates assert the written value.
+37. **A mutation masked by its caller tests nothing.** Both Env.client (the emitter budget) and EnvArt checked a
+    room's power for its emitters, so mutating either alone would change nothing observable. The decision lives
+    in one place now (the budget in Env.client gives an emitter only to a near, lit room) and EnvArt applies it.
+
 ## Mutation sweeps
+
+The review round's sweep (2026-09-24) re-ran the resume session's 45 mutations and 3 controls on the final tree
+and added 19 mutations and 3 controls for the review's fixes: EYECANDY.md §7 and §11. Its driver is
+`fn_fix/sweep/sweep.py` + `mutations.py` in that session's scratchpad.
+
+The environment's sweeps (2026-09-24, resume session) are in EYECANDY.md §7: the final one ran 45 mutations
+and 3 controls on the final tree, each proven in the bundle and run against all 22 suites. 45 were KILLED and
+the 3 controls SURVIVED. The driver is `fn_resume/sweep/sweep.py` + `mutations.py` in that session's
+scratchpad.
 
 The REVIEW-1 sweep (33 mutations on the code the seven fixes touched, 28 KILLED, 1 equivalent
 SURVIVED and its line deleted, 4 controls SURVIVED; every mutation proven to be in the bundle) is the
@@ -352,6 +432,9 @@ on sublevel 4 / 5 / 6 / 7 / 8 in 15 / 6 / 7 / 4 / 2, extracted after sublevel 8 
 
 ## Needs Studio (nothing below is verified)
 
+The environment's own list (bands, glow, screens, the first-person telegraph, the shove, the benches, text on a
+phone, frame time) is EYECANDY.md §8, and its thumbnail shot list is §9.
+
 DESIGN.md §15's eighteen items all still apply; in priority order the first five are:
 1. Whether the dark is frightening and fair with real players; time sublevel-1 clears against M8,
    and put real players' depths beside the table above.
@@ -393,6 +476,46 @@ the lift and coming back as they step in.
 2. The Trust routing change (trap 15) is still the least-measured rule: REVIEW-1's reviewer fuzzed it
    (900 000 ticks, 0 wall or closed-door crossings) but its lag model is invented. Log it in Studio.
 3. Only then: create the experience, the maturity questionnaire, the store text in README.md.
+4. The environment (EYECANDY.md): in the same Studio night, its §8 list (the palette A/B screenshot first) and
+   the §9 thumbnail shots; and Gustav's call on the hazard interval and the near-hit share (§3, §10).
+
+## Last run of every gate (2026-09-24, the environment after the adversarial review, final code)
+
+```
+spec: Config 106, Economy 93, Facility 84, Survival 74, Trust 53, Responsive 70, Rng 37, MazeGen 3, Fx 26,
+      EnvBands 124, EnvBus 11, EnvConfig 475, Hazards 92, Rest 43, Dressing 87      = 1 378 passed, 0 failed
+check_facilitynightmare            203 / 0   (10 of 10 runs)
+check_facilitynightmare_input      116 / 0   (10 of 10)
+check_facilitynightmare_desktop     47 / 0   (20 of 20)
+check_facilitynightmare_hud        PASS
+check_facilitynightmare_env        251 / 0   (24 of 24)
+check_facilitynightmare_hazards     44 / 0   (10 of 10)
+check_facilitynightmare_firstframe  18 / 0   (20 of 20; 72 840 frames at 60 Hz, 0 with a room in view not ready)
+walk                                55-71 / 0 (4 runs; the count varies with depth)
+compile (luau.exe + loadstring)     45 of 45 files clean; luau-analyze NOT run (binary still gone)
+rojo build                          builds (Rojo 7.7.0)
+bundle md5                          735c51b370be0b629cb9bc0ce1e1059b (the repeated runs and the sweep used 1bbf3b9a…,
+                                    which differs by one comment line; every gate re-run on the final bundle)
+mutation sweep                      64 of 64 KILLED (45 re-run + 19 new), 6 of 6 controls SURVIVED
+```
+The review's findings, how each was reproduced and closed, and the measurements: EYECANDY.md §11.
+
+## Last run of every gate (2026-09-24, the environment, final code of the resume session)
+
+```
+spec: Config 106, Economy 93, Facility 84, Survival 74, Trust 53, Responsive 70, Rng 37, MazeGen 3, Fx 26,
+      EnvBands 124, EnvBus 11, EnvConfig 417, Hazards 92, Rest 43, Dressing 79      = 1 312 passed, 0 failed
+check_facilitynightmare          203 / 0
+check_facilitynightmare_input    116 / 0
+check_facilitynightmare_desktop   47 / 0
+check_facilitynightmare_hud      PASS
+check_facilitynightmare_env      221 / 0   (24 of 24 runs)
+check_facilitynightmare_hazards   42 / 0   (10 of 10 runs)
+walk                              55-63 / 0 (3 runs; the count varies with depth)
+compile (luau.exe + loadstring)   44 of 44 files clean; luau-analyze NOT run (binary gone)
+rojo build                        builds (Rojo 7.7.0)
+```
+Mutation sweeps and measurements: EYECANDY.md §3 and §7.
 
 ## Last run of every gate (2026-09-17, final code after REVIEW-1)
 

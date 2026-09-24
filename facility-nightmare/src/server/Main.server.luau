@@ -226,6 +226,29 @@ do
 	end)
 end
 
+-- The break room's benches: where a player rests between runs (EYECANDY.md §4). Real Seats, so a player
+-- sits the Roblox way (walk into one, jump to stand) and everyone in the break room sees it. On the south
+-- wall, clear of the spawn -> car path (z = 0), the arrival pad and the perk terminal. Resting pauses
+-- nothing because nothing runs here: no front, no hazard, no clock (Rest.luau refuses rest in a run).
+local benches = folder("Benches", hubFolder)
+for i, x in { 6, 18 } do
+	local seat = Instance.new("Seat")
+	seat.Name = "Bench" .. i
+	seat.Anchored = true
+	seat.Size = Vector3.new(6, 1, 2.4)
+	-- facing into the room (+Z): a Seat seats you looking along its front
+	seat.CFrame = CFrame.new(x, 1.3, -H.SizeZ / 2 + 1.6) * CFrame.Angles(0, math.pi, 0)
+	seat.Material = Enum.Material.Fabric
+	seat.Color = Color3.fromRGB(92, 60, 48)
+	seat.TopSurface = Enum.SurfaceType.Smooth
+	seat.BottomSurface = Enum.SurfaceType.Smooth
+	seat.Parent = benches
+	part({ Name = "BenchBack" .. i, Size = Vector3.new(6, 3.2, 0.5), CFrame = CFrame.new(x, 2.9, -H.SizeZ / 2 + 0.35),
+		Material = Enum.Material.Fabric, Color = Color3.fromRGB(80, 52, 42), Parent = benches })
+	part({ Name = "BenchBase" .. i, Size = Vector3.new(5.6, 0.8, 2), CFrame = CFrame.new(x, 0.4, -H.SizeZ / 2 + 1.6),
+		Material = Enum.Material.Metal, Color = Color3.fromRGB(50, 50, 54), Parent = benches })
+end
+
 local function inHubCar(pos: Vector3): boolean
 	return math.abs(pos.X - H.CarX) <= H.CarDepth / 2 and math.abs(pos.Z) <= H.CarWidth / 2 and pos.Y < 10
 end

@@ -21,7 +21,20 @@ test and change it is [CLAUDE.md](CLAUDE.md).
   generated floor. A silent black figure sometimes stands in a dark room you already walked
   through; it changes no rule and is gone when you look back.
 - **No sound.** There is not one `Sound` in the game. It needs asset IDs this project does not have.
-- **One room kit.** Every sublevel is a new layout of the same lab rooms.
+- **Seven environment bands, client-side only.** Every sublevel is a new layout of the same room shells,
+  dressed by how deep it is: admin offices, laboratories (from sublevel 3), a server vault (5), flooded
+  maintenance (7), the reactor core (9), an overgrown bio-lab (11) and the void (13). The dressing, colour
+  grade and particles never make a room brighter than the server built it and never stand where an item can.
+  A band's paint returns 60-100 % of the server's light and keeps every closed door as much darker than its
+  wall as the server built it, so doors are no harder to find. Every self-lit piece and every particle goes
+  dark with its room. [EYECANDY.md](EYECANDY.md) has the rules and the numbers.
+- **Rare environmental hazards from the laboratories down**: a chemical leak, an arcing cable, a burst pipe, a
+  steam valve, a spore pod, a rift. One every 2-3 minutes of lit time at most; measured in real runs, about
+  one per 4-5 minutes on a floor (one per 3.3-4 in the bands that have them). Telegraphed 2.8-3.2 s with a
+  red ring and a banner; a hit is a shove and nothing is lost. Never in a dark room: the dark stays the
+  threat. The ring is drawn where you stood, so a player who keeps walking is usually clear before it bursts
+  (about 1 % of bursts landed within 8 studs of a bot that never stops); how often a hazard should be a
+  near-miss is the owner's call (EYECANDY.md §10).
 - **Nothing costs Robux.** No game passes, no developer products, no spin wheels, no paid revives.
 - **Every survival number is a model number.** Battery, grace, the speed of the dark and the perk
   values were measured against a simulated explorer walking at 16 / 12.8 / 10.4 studs per second,
@@ -44,6 +57,8 @@ test and change it is [CLAUDE.md](CLAUDE.md).
    Essence into the run, and asks: EXTRACT or DESCEND. A powered elevator never goes dark; an
    unpowered one is the last room to lose its light, one ring after the rest of the floor.
 6. On your very first run, the dark waits until you pick up your first fuse.
+7. Between runs, rest in the break room: sit on a bench, or just stand still. Nothing runs there, and the
+   DEPTH RECORD board shows how deep you have been.
 
 Perks (Essence only): Deep Cell (+10 s battery per rank), Night Eyes (+1 s grace), Marathon (+1 s
 sprint), Soul Anchor (+10% kept on death), Second Wind (once per run, the dark lets you go).
@@ -84,17 +99,23 @@ default.project.json   Rojo: src/server -> ServerScriptService, src/client -> St
                        src/shared -> ReplicatedStorage; StreamingEnabled false, RespawnTime 3,
                        EnableMouseLockOption false
 src/shared/            Config, Facility, Survival, Trust, Economy (pure, tested), Rng, MazeGen,
-                       Responsive (verbatim copies), Fx (+ the Facility preset), FxClient
+                       Responsive (verbatim copies), Fx (+ the Facility preset), FxClient;
+                       the environment: EnvBands (verbatim from plus1-jump), Hazards, Rest (adapted),
+                       Dressing (pure, tested), EnvBus, EnvArt (client art)
 src/server/Main.server.luau
 src/client/Hud.client.luau
+src/client/Env.client.luau   the environment: bands, dressing, hazards, rest (EYECANDY.md)
 tests/*.spec.luau      one spec per shared module
 tests/Bot.luau         a headless player that knows only what a client could know
 tests/walk.luau        join -> three sublevels -> extract -> perk -> a second run, in numbers
 tests/curve.luau       a measurement: the built game's difficulty curve, played by the bot
+tests/hazards.measure.luau  a measurement: how often hazards come in real runs, through Env.client
 ../robloxemu/check_facilitynightmare*.luau
                        the headless gates: world and rules; the HUD on 10 viewports; every
                        button and key pressed through the real HUD on a phone; a mouse-and-
-                       keyboard player
+                       keyboard player; the environment (_env), its hazards (_hazards), and every
+                       new room dressed on its first frame at 60 Hz (_firstframe)
 REVIEW-1.md            two adversarial reviews' findings and how each was closed
+EYECANDY.md            the environment bands, hazards, rest, budgets, gates and the thumbnail shot list
 design-measure/        the measurement rig DESIGN.md's numbers came from (not game code)
 ```

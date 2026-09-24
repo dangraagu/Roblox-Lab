@@ -24,6 +24,10 @@ local GuiService = game:GetService("GuiService")
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 local FxClient = require(ReplicatedStorage:WaitForChild("FxClient"))
+local EnvBands = require(ReplicatedStorage:WaitForChild("EnvBands"))
+-- Env.client (the environment) talks to this HUD over a client-local bus, so its hazard warning and the
+-- rest line are drawn by the layout this file already fits to every screen (EYECANDY.md §5).
+local EnvBus = require(ReplicatedStorage:WaitForChild("EnvBus"))
 
 local remotes = ReplicatedStorage:WaitForChild("FacilityRemotes")
 local StateEvent = remotes:WaitForChild("State")
@@ -285,10 +289,30 @@ end
 --============================================================================ state
 
 local S: any = nil -- last State
+local resting = false -- Env.client says the player is resting in the break room
 local perksOpen = false
 local wantSprint = false
 local hintOverride, hintUntil = nil, 0
 local layout = Responsive.layout(1280, 720, false)
+
+-- The name of the environment band a sublevel is in (Config.Env.Bands, by the sublevel number).
+local function bandName(k: number?): string?
+	local bands = Config.Env and Config.Env.Bands
+	if type(k) ~= "number" or type(bands) ~= "table" or #bands == 0 then return nil end
+	local b = bands[EnvBands.indexAt(bands, k)]
+	return b and b.name
+end
+
+-- The ride's hint: where the lift is taking you, and that band's line ("Going down to the LABORATORIES… Do
+-- not touch the samples."). The lines are in Config.Env.Bands; EnvConfig.spec checks their glyphs.
+local function rideHint(k: number?): string
+	local name = bandName(k)
+	if not name then return "Going down…" end
+	local b = Config.Env.Bands[EnvBands.indexAt(Config.Env.Bands, k :: number)]
+	local line = b and b.line
+	local article = if string.sub(name, 1, 4) == "THE " then "" else "the " -- not "the THE VOID"
+	return "Going down to " .. article .. name .. "…" .. (if type(line) == "string" and line ~= "" then " " .. line else "")
+end
 
 local function now()
 	-- tick(), not os.clock(): os.clock is CPU time and barely moves under the headless virtual clock
@@ -444,13 +468,13 @@ local function showToast(msg: string, seconds: number?)
 end
 
 local bannerToken = 0
-local function showBanner(msg: string, color: Color3?)
+local function showBanner(msg: string, color: Color3?, seconds: number?)
 	bannerToken += 1
 	local mine = bannerToken
 	banner.Text = msg
 	banner.TextColor3 = color or DANGER
 	banner.Visible = true
-	task.delay(3, function()
+	task.delay(seconds or 3, function()
 		if bannerToken == mine then banner.Visible = false end
 	end)
 end
@@ -492,11 +516,14 @@ local function paint()
 			h = "Saving is off on this server — progress will not be kept. Walk into the elevator."
 		elseif not S.loaded then
 			h = "Loading your file…"
+		elseif resting then
+			-- no longer than the longest hint the HUD already had (81 characters, check_facilitynightmare_env B)
+			h = "Resting — nothing reaches the break room, and nothing is lost. Get up when ready."
 		else
 			h = "Walk into the elevator to go down."
 		end
 	elseif S.phase == "ride" then
-		h = "Going down…"
+		h = rideHint(if run then run.k else nil)
 	elseif S.phase == "floor" and run then
 		local have, needed = (run.fuses or 0) + (run.fusesIn or 0), run.fusesNeeded or 0
 		if run.dark and not run.lightOn then
@@ -559,9 +586,11 @@ NoticeEvent.OnClientEvent:Connect(function(kind, data)
 	elseif kind == "perks" then
 		perksOpen = true
 	elseif kind == "boarding" then
-		setHint("Going down…", 2)
+		-- every run starts on sublevel 1
+		setHint(rideHint(1), 2)
 	elseif kind == "sublevel" then
-		showBanner("SUBLEVEL " .. tostring(data.k), ACCENT)
+		local name = bandName(data.k)
+		showBanner("SUBLEVEL " .. tostring(data.k) .. (if name then " — " .. name else ""), ACCENT)
 		FxClient.shake(0.6, 0.8)
 	elseif kind == "arrive" then
 		-- the server cleared both requests on arrival; keep this side's idea of them in step
@@ -608,6 +637,39 @@ NoticeEvent.OnClientEvent:Connect(function(kind, data)
 	end
 	paint()
 	applyLayout()
+end)
+
+--============================================================================ the environment's messages
+
+-- A hazard's banner, kept no longer than the longest banner the HUD already showed ("THE POWER IS FAILING
+-- — STAY IN THE LIGHT", 40 characters): EnvConfig.spec and check_facilitynightmare_hazards hold every kind to it.
+local function hazardText(name: any, inside: boolean): string
+	return tostring(name) .. (if inside then " — STEP OUT OF THE RING" else " — YOU ARE CLEAR")
+end
+local hazardBanner = 0 -- the bannerToken of the hazard warning on screen (0: none)
+EnvBus.on(function(kind, data)
+	if kind == "hazard" and type(data) == "table" then
+		if data.phase == "warn" then
+			local secs = if type(data.seconds) == "number" and data.seconds > 0 then data.seconds else nil
+			showBanner(hazardText(data.name, true), DANGER, secs)
+			hazardBanner = bannerToken
+		elseif data.phase == "zone" then
+			-- Floors are first person: the ring at the player's feet is out of view, so the banner says
+			-- whether the step out of it worked (and says so again if they walk back in).
+			if hazardBanner ~= 0 and hazardBanner == bannerToken and banner.Visible then
+				banner.Text = hazardText(data.name, data.inside == true)
+				banner.TextColor3 = if data.inside == true then DANGER else GOOD
+			end
+		elseif data.phase == "clear" then
+			-- A hazard is called off when its room starts to flicker. The dark's warning outranks it, so the
+			-- banner must not go on saying "step out of the ring" for a ring that is gone (EYECANDY.md §3).
+			if hazardBanner ~= 0 and hazardBanner == bannerToken then banner.Visible = false end
+			hazardBanner = 0
+		end
+	elseif kind == "rest" and type(data) == "table" then
+		resting = data.resting == true
+		paint()
+	end
 end)
 
 --============================================================================ input
