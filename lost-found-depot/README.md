@@ -5,9 +5,9 @@ a tray, each wearing a luggage tag, and six bins in an arc beyond it. Read the t
 the bin the tag names, press E. The tag's letter was drawn without looking at the item, so it
 disagrees with what the item looks like three times in four. Trust the tag, not the item.
 
-**Status, honestly:** v1 is built and passes every headless gate in this repo: 8 unit specs, a
-walk of the player's first two shifts, and 8 checks against the built world (counts in
-`CLAUDE.md`). A first adversarial review (REVIEW-1) found real defects, and every one was fixed test
+**Status, honestly:** v1 is built and passes every headless gate in this repo: 15 unit specs, a
+walk of the player's first two shifts, and 12 checks against the built world (counts in
+`CLAUDE.md` and `EYECANDY.md` §7). A first adversarial review (REVIEW-1) found real defects, and every one was fixed test
 first: saves lost or locked when the DataStore is slow, a tutorial hint that caused a misfile, a
 stuck camera, hidden toasts on a phone, a missing catalog, taps that picked the wrong item and boards
 that hid the tray. A second round found nine more, all fixed test first (`REVIEW-1.md`): pick and
@@ -15,10 +15,25 @@ put-back spam, a server hop that spent cash twice, a shift the tray made predict
 that vanished into the cart, nothing saying which item E drops, "press E" on a phone, tags covering
 the memo board, and missing deposit feedback. The game has **never been opened in Roblox Studio, never been played by a person,
 and is not published.** Nothing here has been rendered, so nothing about how it looks, feels or reads
-on a phone is known yet. The list of what only Studio can answer is in `CLAUDE.md`.
+on a phone is known yet. The list of what only Studio can answer is in `CLAUDE.md` (the game) and
+`EYECANDY.md` §8 (the wings).
 
 The full design, with the measurement behind every number, is `DESIGN.md`; `design/model.luau`
 reproduces those numbers.
+
+**The wings (2026-09-24, `EYECANDY.md`).** The depot now moves you to a new wing as your career grows:
+a city depot, an airport lost-and-found, a train station, a theme park, a lost property office on a
+**space station** (about 35 minutes of play for a normal player) and, as the long-term goal, the last
+lost-and-found beyond the galaxy. Each wing has its own light and sky, a roof over your bay, landmarks over
+the walls, life in the air and weather, all built on your own client. From the second wing on, a rare
+runaway (about one per shift) rolls across your sorting floor. It can only knock you once you have stood a
+full second inside its red ring, and never sooner than 2 s after its warning appeared, walking or not: step
+out of the ring and it cannot touch you; if it does, you only stumble. A BREAK button lets you sit down
+between shifts; pressed mid-shift it books the break for the end of the shift, because the clock is the
+game. Built and tested headless, mutation-tested, and adversarially reviewed once: the review's six
+findings (a walker warned too late, a phone drawer hiding the warning, runaways rolling through the tray, a
+cosmetic error stranding a knocked player, the title card over the hotbar, an unpinned promise) are fixed
+test first (`EYECANDY.md` §13). **Not yet seen in Studio.**
 
 ---
 
@@ -51,7 +66,8 @@ reproduces those numbers.
 | in | not in (and why, in `DESIGN.md` §15) |
 |---|---|
 | Private bays, 12 per server | Co-op or a shared depot |
-| 16 items, 3 rule layers, 12 memos | Extra wings |
+| 16 items, 3 rule layers, 12 memos | New items or rules per wing (the wings change the scenery, not the job) |
+| Six wings, rare client-side hazards, a BREAK (`EYECANDY.md`) | Custom meshes, textures or skyboxes (all built from parts) |
 | Cart and shoes upgrades | A scanner, overtime, 2x cash |
 | A personal best (fastest Perfect Shift) | Any leaderboard |
 | The Back Room ending | Audio, badges |
@@ -84,9 +100,14 @@ src/shared/Economy.luau     pay, Perfect, upgrades, save sanitizer
 src/shared/Codes.luau       code normalisation and the redeem decision (the table is passed in)
 src/shared/Layout.luau      bay geometry in bay-local studs
 src/shared/Rng.luau  Fx.luau  FxClient.luau  Responsive.luau    copied verbatim from the siblings
+src/shared/EnvBands.luau  Hazards.luau  Rest.luau              the environment template, verbatim from +1 Jump
+src/shared/Wings.luau       the wings' pure rules: career progress, lanes on a walled floor, the ring, the BREAK
+src/shared/WingArt.luau     every wing's scenery, critters, weather and hazard models (client only, no assets)
+src/shared/StateCache.luau  the HUD hands each State payload to the wings (one listener on the remote)
 src/server/Main.server.luau world, bays, spawn, shift loop, handlers, persistence
 src/server/Secret.luau      the Back Room note and the code table (server only)
 src/client/Hud.client.luau  the phone-first HUD
+src/client/Wings.client.luau the wings, hazards and the break (client only; the server never hears of them)
 tests/*.spec.luau           luau-CLI tests for every pure shared module
 tests/walk.luau             the player's first two shifts, with the HUD running, in numbers
 design/model.luau           the design-time model (not shipped)
@@ -99,6 +120,10 @@ design/model.luau           the design-time model (not shipped)
 ../robloxemu/check_lostfounddepot_hud.luau      every HUD panel across six viewports
 ../robloxemu/check_lostfounddepot_rng.luau      what a client can predict from what it can see
 ../robloxemu/check_lostfounddepot_firstmin.luau a new player's first minute, and what pressing E drops
+../robloxemu/check_lostfounddepot_wings.luau    the wings, hazards and the break through the real client
+../robloxemu/check_lostfounddepot_wingview.luau taps and sightlines unchanged with every wing built
+../robloxemu/check_lostfounddepot_hud_wings.luau the HUD and the wings' panel together on every viewport
+../robloxemu/check_lostfounddepot_compile.luau  every source compiles; no require by string
 ```
 
 How to run every gate is in `CLAUDE.md`.

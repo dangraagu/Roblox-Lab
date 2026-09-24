@@ -6,6 +6,10 @@ authoritative server, a phone-first HUD, `robloxemu` headless gates). Built from
 first: every number in it carries its source). Build pass 1: 2026-09-16. REVIEW-1 findings fixed in
 build pass 2: 2026-09-17. The second review round's nine findings (E1-E3, U1-U6) fixed in pass 3 the same
 day: **`REVIEW-1.md`** has each finding, its before/after numbers, the mutation table and what is open.
+**The wings (owner's brief 2026-09-17, built 2026-09-23/24): `EYECANDY.md`** — six wings driven by the
+career, rare client-side hazards on the sorting floor, a BREAK between shifts, budgets, the gates, the
+Studio list and the thumbnail shot list. Read it before touching anything under "wings" below. The wings'
+adversarial review (REVIEW-2, six findings, all fixed test first the same day) is `EYECANDY.md` §13.
 
 ## What it is
 A solo sorting job. A private bay per player: a tray of 8 tagged lost items, six bins on an arc.
@@ -16,8 +20,8 @@ resolves a torn letter) from career shift 2, a rule-bending memo from shift 3. C
 2-5) and shoes (walk 16-22) at the locker. 500 first-try sorts open the Back Room. Nothing costs Robux.
 
 ## State — every headless gate green; NEVER OPENED IN STUDIO; NOT published; NOT committed
-Last run of every gate, on the final source (2026-09-17). `luau` is the luau CLI; it writes to
-stderr, so ALWAYS append `2>&1`.
+Last run of every gate, on the final source (2026-09-24, after the wings and the REVIEW-2 fixes). `luau` is the luau CLI; it
+writes to stderr, so ALWAYS append `2>&1`. The wings' own gates are listed after the original ones.
 
 | gate | command | result |
 |---|---|---|
@@ -38,12 +42,20 @@ stderr, so ALWAYS append `2>&1`.
 | HUD fit | `cd ../robloxemu && luau check_lostfounddepot_hud.luau` | PASS, 60 viewport x mode measurements |
 | what a client can predict | `cd ../robloxemu && luau check_lostfounddepot_rng.luau` | 24 passed, 0 failed |
 | the first minute, and what E drops | `cd ../robloxemu && luau check_lostfounddepot_firstmin.luau` | 67 passed, 0 failed |
-| syntax | `luau-compile --binary <each of the 14 sources>` | 14 clean |
-| analysis | `luau-analyze <each source> 2>&1 \| grep -v -E 'Unknown global\|Unknown type\|Unknown require\|unsupported path\|Unknown symbol'` | 14 clean |
+| the wings' pure rules | `luau tests/Wings.spec.luau` | 256 passed, 0 failed |
+| the wings' config | `luau tests/EnvConfig.spec.luau` | 268 passed, 0 failed |
+| minutes to each wing, hazard rarity | `luau tests/Pacing.spec.luau` | 115 passed, 0 failed |
+| the HUD -> wings hand-off | `luau tests/StateCache.spec.luau` | 10 passed, 0 failed |
+| template (verbatim from +1 Jump) | `luau tests/EnvBands.spec.luau`, `Hazards.spec.luau`, `Rest.spec.luau` | 124 / 102 / 55 passed, 0 failed |
+| the wings through the real client | `cd ../robloxemu && luau check_lostfounddepot_wings.luau` | 217 passed, 0 failed |
+| taps and sightlines with every wing built | `cd ../robloxemu && luau check_lostfounddepot_wingview.luau` | 66 passed, 0 failed |
+| HUD + wings on every viewport | `cd ../robloxemu && luau check_lostfounddepot_hud_wings.luau` | PASS (hudcheck, 10 modes) + PASS (the HUD's text rows, the title card on 10 viewports, no launch under a phone drawer or a card) |
+| syntax | `cd ../robloxemu && luau check_lostfounddepot_compile.luau` (loadstring over every bundled source; no `require` by string) | 21 sources, 42 passed, 0 failed |
+| analysis | `luau-analyze` | **NOT RUN on the wings**: luau-compile.exe and luau-analyze.exe were wiped from this machine on 2026-09-23 (luau.exe survived). The 2026-09-17 run was 14 clean. |
 
 **Rebuild the bundle before every headless run**, or you are testing the last build, not the source:
 `cd ../robloxemu && py -3 wrap.py --game ../lost-found-depot --out build/lost-found-depot.luau`.
-The walk and all eight `check_lostfounddepot*` files read `robloxemu/build/lost-found-depot.luau`.
+The walk and all twelve `check_lostfounddepot*` files read `robloxemu/build/lost-found-depot.luau`.
 
 ### What the walk showed (numbers from the last run)
 A new player on an 800x360 touch viewport, the real HUD running, every tap on the item's own
@@ -174,6 +186,48 @@ last put old data back: an autosave in flight when a shift ended wrote 1011 over
 - `require("./X")` appears only in `tests/` (CLI). Roblox sources use
   `require(ReplicatedStorage:WaitForChild("X"))`; shared modules take dependencies as arguments.
 
+### Traps — the wings (EYECANDY.md)
+- **The HUD is the ONLY listener on the State remote.** Roblox hands an event queued before any client
+  listener to the FIRST connection, and the loaded profile is pushed at join, usually before a phone runs
+  its LocalScripts. `Hud.client` passes every payload to `StateCache.set`; `Wings.client` polls
+  `StateCache.get` each frame. Never add a second `OnClientEvent` on State; `_wings` asserts it.
+- **The wings are client-only and the server never hears of them.** No remote, no attribute, nothing in a
+  bay; everything under `workspace.DepotWings`, the `DepotWings` ScreenGui, and `DepotSky` /
+  `DepotBreakFocus` in Lighting (the server's `Fx*` effects are taken over by name). `_wings` §9 checks a
+  creation log of every Instance the wings made, and a source scan.
+- **The knock is `Wings.checkHit`, never `Hazards.checkHit`** (REVIEW-2 finding 1): a hit needs the player a full
+  `MinReactSeconds` inside the red ring (from red, or from stepping in) and `MinWarnSeconds` of warning, by
+  construction. Call it every frame while a hazard flies: it tracks the time in the ring on the plan. The
+  promise (1 s, 2 s) is pinned as LITERALS in `Pacing.spec`, `_wings` and `EnvConfig.spec` (finding 6): never
+  compare a measurement against Config's own value.
+- **A due hazard waits while the screen is covered** (`Wings.mayLaunch`): a phone's HUD drawer or card, or the
+  wing's title card. It stays due; the clock is not touched. A hazard already flying when a drawer opens keeps
+  its warning, placed below the drawer (finding 2).
+- **A ray from inside a fixture's margin** stops where it would enter the fixture (`rayToObstacle`, finding 3);
+  boxes carry their margin (`m`). Do not go back to "a ray that starts inside a box ignores it".
+- **Every frame step of `Wings.client` has its own guard, the stumble's release FIRST** (finding 4). A new step
+  goes in its own `guard(...)`; set `knockUntil` before anything that can fail after a knock.
+- **Tried and rejected for finding 1, measured** (EYECANDY §13): launching only at a player standing still
+  (a still sorter faces the tray or a crate: 0 hazards), and locking by closing speed (near-hits fell to one
+  per 4.2 min). Do not re-try them without new data.
+- **Nothing may ever pause the shift clock.** The BREAK starts only while the clock is NOT running, books
+  itself when pressed mid-shift, and ends at the first pickup; idle pauses hazards only. Hazards run on the
+  RUNNING clock only and `Wings.endWithShift` removes one still flying when the clock stops.
+- **Overhead scenery must sit at or above `Config.Env.OverheadFade.Gone` (16).** The roof fades with the
+  camera's height; a part below Gone could be seen from below by a camera looking down at a tag. `_wings`
+  §5 measures the lowest overhead part (16.2 today, the train shed's feet on the walls).
+- **Budgets assume at most two wings blend at once** (`Wings.keepStrongest`): keep it, or a flurry of career
+  jumps stacks 3+ wings of scenery (223 parts before it existed).
+- **The headless checks must fire `RunService.RenderStepped` themselves**: the harness never does, and the
+  wings draw from it. hudcheck does not either; `_hud_wings` runs a second of frames in every mode.
+- **Hazard settings in the checks are overridden IN MEMORY** (6-7 s, 1-2 s, 40-41 s intervals), before the
+  client loads, because the scheduler rolls its first interval at load.
+- **Some sources have CRLF line endings, some LF** (CRLF: `Wings.client`, `Config`, `Wings`, `WingArt`,
+  `Wings.spec`, `EnvConfig.spec`). A textual patch or mutation must match the file's own line endings (the
+  sweep normalises them); a Python rewrite that reads text mode and writes `newline='
+'` silently turns a
+  CRLF file into LF (it happened in REVIEW-2's fixes and was put back).
+
 ## Corrections to DESIGN.md found while building (DESIGN.md itself was not edited)
 1. §4.1 "the farthest any bin stand point gets from any tray slot is 31.5": over every pair it is
    **32.93**; `Layout.spec` asserts it. The conclusion (under MaxDistance 40) holds.
@@ -216,6 +270,16 @@ last put old data back: an autosave in flight when a shift ended wrote 1011 over
 - Pass 3: the tutorial highlights BOTH ways (the DROP/PRESS E HERE marker AND the bin light pulse).
 - Pass 3: career shift 1 excludes the tutorial's archetypes from every draw (14 archetypes).
 - Pass 3: the MemoBoard is at bay-local (MaxX - 0.2, 8, -4), Face Left.
+
+## Mutation sweep (REVIEW-2 fixes, 2026-09-24)
+Scratch copies only, each mutation proved to reach the bundle, all 28 suites per mutation, sources restored and
+md5-checked: see `EYECANDY.md` §13 for the table (25 mutations of the fixes, 3 controls).
+
+## Mutation sweep (the wings, 2026-09-24)
+Scratch copies only, each mutation proved to reach the bundle, all 28 suites per mutation, sources restored
+and md5-checked: **26 of 27 KILLED**; the survivor (W1, the weather cap skipped) is equivalent with this config
+and `EnvConfig.spec` asserts its premise; the harness control and 2 controls survived. Table in
+`EYECANDY.md` §7.
 
 ## Mutation sweep (pass 3)
 In place, one mutation at a time, each proven to reach `build/lost-found-depot.luau`, all 17 suites per
@@ -310,6 +374,7 @@ sweep (35 files).
 - **FxClient is a no-op headless**; ScrollingFrame clipping is not modelled.
 
 ## Needs Studio (none of this is claimed anywhere)
+The wings add 18 more items: `EYECANDY.md` §8. The thumbnail shot list is `EYECANDY.md` §9.
 1. First-spawn order on join (trace HRP per Heartbeat), and the play-solo "character before script" case.
 2. Spawn facing (-Z) and whether the first frame shows tray, bins and the Back Room door.
 3. Taps: that a ClickDetector on the item Model fires for its pieces; whether one tap fires BOTH the
@@ -348,16 +413,20 @@ sweep (35 files).
 22. Gamepad: the hint says "press E"; Cart and Shoes share one Part and neither sets GamepadKeyCode.
 
 ## Files
-Server `src/server/Main.server.luau`, `src/server/Secret.luau`; client `src/client/Hud.client.luau`;
-shared `Config / Rules / Shift / Seed / Economy / Codes / Layout` plus `Rng / Fx / FxClient /
-Responsive` (verbatim copies); tests `tests/*.spec.luau`, `tests/walk.luau`; headless gates
-`../robloxemu/check_lostfounddepot.luau`, `_spawn`, `_save`, `_hudflow`, `_view`, `_hud`, `_rng`,
-`_firstmin`; design `DESIGN.md`, `design/model.luau`; reviews `REVIEW-1.md` (pass 3).
+Server `src/server/Main.server.luau`, `src/server/Secret.luau`; client `src/client/Hud.client.luau`,
+`src/client/Wings.client.luau`; shared `Config / Rules / Shift / Seed / Economy / Codes / Layout` plus
+`Rng / Fx / FxClient / Responsive` (verbatim copies), `EnvBands / Hazards / Rest` (verbatim from +1 Jump),
+`Wings / WingArt / StateCache` (the wings); tests `tests/*.spec.luau`, `tests/walk.luau`,
+`tests/SortModel.luau` (test-side); headless gates `../robloxemu/check_lostfounddepot.luau`, `_spawn`,
+`_save`, `_hudflow`, `_view`, `_hud`, `_rng`, `_firstmin`, `_wings`, `_wingview`, `_hud_wings`, `_compile`;
+design `DESIGN.md`, `design/model.luau`; reviews `REVIEW-1.md` (pass 3); the wings `EYECANDY.md`.
 
 ## Next
-1. **Open it in Studio** (00:00-06:00 window) and work the Needs Studio list, starting with 1, 3, 4, 5, 13.
+1. **Open it in Studio** (00:00-06:00 window) and work the Needs Studio list, starting with 1, 3, 4, 5, 13,
+   then `EYECANDY.md` §8 and the thumbnail shots in §9 (build a fresh place: `LostFoundDepot.rbxlx` on disk
+   predates the wings).
 2. An independent review of pass 3 (the action bucket, the merge re-pricing, the per-shift salt and
-   cart keys, the return-to-tray rule, the selection change); only its author's tests and sweep have
-   looked at it.
+   cart keys, the return-to-tray rule, the selection change) AND of the wings (`EYECANDY.md` §11-§12);
+   only their authors' tests and sweeps have looked at them.
 3. Commit (nothing is committed), then create the experience, publish script (git-ignored), the
    maturity questionnaire, Public.

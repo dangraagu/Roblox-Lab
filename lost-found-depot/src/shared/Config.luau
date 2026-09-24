@@ -275,4 +275,241 @@ Config.Codes = {
 	MaxLength = 20,
 }
 
+--============================================================================== the wings (EYECANDY.md)
+
+-- Everything below is read by the CLIENT only (src/client/Wings.client.luau): cosmetic, or harmful only
+-- to the local player. The server never reads it and nothing in it is secret.
+--
+-- The depot moves you to a new WING as your career grows. Progress = career shifts completed (the
+-- server's own `shifts`) plus the share of the RUNNING shift already cleared (Wings.progress), so a wing
+-- fades in while you sort the last third of the shift before it, and glides (HalfLife) when progress
+-- jumps (a timed-out shift, a join). A wing is NAMED by whole completed shifts: the chip, the title
+-- card and which hazards fly. `from` = completed shifts; the career shift you work there is from + 1.
+-- Minutes to each wing: tests/Pacing.spec.luau, from design/model.luau's own career (Config.Pacing).
+-- Colours are {r, g, b} so EnvBands can blend them in the luau CLI.
+
+Config.Env = {
+	SpaceBandId = "station", -- the wing that counts as "I made it to space"
+	HalfLife = 0.6, -- s: lighting, fog and scenery glide toward the target, never cut
+	LightingHz = 10, -- Lighting is written at most 10 times a second
+	-- The overhead pieces (roofs, lamps, string lights; every part of them sits above the 16-stud wall
+	-- tops) fade out as the CAMERA rises toward the wall tops (Wings.overheadFade). Every overhead part is at
+	-- or above Gone, so a camera that can see any of the roof is below all of it and cannot look down at a
+	-- tag through it; a camera at or above Gone sees no roof at all. Shown in full at camera y <= Full.
+	-- Studio shots from above the roof: raise both in the shots place only (EYECANDY.md §9).
+	OverheadFade = { Full = 13, Gone = 16 },
+	Bands = {
+		{
+			id = "city", from = 0, fade = 0, name = "CITY DEPOT", sub = "Lost & Found, platform level",
+			-- = Fx.Presets.Temple (the server's lighting), so the client takes over without a jump
+			lighting = { ClockTime = 15.5, Brightness = 3, ExposureCompensation = 0.15,
+				Ambient = { 120, 125, 140 }, OutdoorAmbient = { 150, 160, 185 },
+				FogStart = 100, FogEnd = 900, FogColor = { 200, 220, 245 } },
+			atmosphere = { Density = 0.32, Offset = 0.25, Color = { 200, 220, 245 }, Decay = { 130, 160, 200 }, Glare = 0.4, Haze = 2 },
+			sky = { StarCount = 0, SunAngularSize = 21, MoonAngularSize = 11 },
+			bloom = { Intensity = 1.1, Size = 28, Threshold = 0.85 },
+			colorCorrection = { Brightness = 0.03, Contrast = 0.08, Saturation = 0.15, TintColor = { 255, 250, 240 } },
+			sunRays = { Intensity = 0.18, Spread = 0.9 },
+			pieces = { "cityRoof", "citySkyline" },
+			ambient = { { kind = "pigeon", count = 6 } },
+			hazards = {},
+		},
+		{
+			id = "airport", from = 3, fade = 0.34, name = "AIRPORT LOST & FOUND", sub = "Arrivals hall, gate B",
+			lighting = { ClockTime = 12.5, Brightness = 3.2, ExposureCompensation = 0.1,
+				Ambient = { 125, 132, 148 }, OutdoorAmbient = { 160, 175, 205 },
+				FogStart = 150, FogEnd = 1400, FogColor = { 205, 225, 250 } },
+			atmosphere = { Density = 0.26, Offset = 0.2, Color = { 205, 225, 250 }, Decay = { 150, 180, 220 }, Glare = 0.3, Haze = 1.4 },
+			sky = { StarCount = 0, SunAngularSize = 20, MoonAngularSize = 11 },
+			bloom = { Intensity = 1.0, Size = 26, Threshold = 0.9 },
+			colorCorrection = { Brightness = 0.03, Contrast = 0.1, Saturation = 0.12, TintColor = { 245, 250, 255 } },
+			sunRays = { Intensity = 0.12, Spread = 0.8 },
+			pieces = { "airportRoof", "airfield" },
+			ambient = { { kind = "airliner", count = 2 } },
+			hazards = { "trolley", "suitcase" },
+		},
+		{
+			id = "train", from = 6, fade = 0.34, name = "TRAIN STATION", sub = "Left luggage, under the clock",
+			lighting = { ClockTime = 17.2, Brightness = 2.6, ExposureCompensation = 0.15,
+				Ambient = { 132, 122, 116 }, OutdoorAmbient = { 172, 150, 130 },
+				FogStart = 120, FogEnd = 1100, FogColor = { 232, 204, 172 } },
+			atmosphere = { Density = 0.33, Offset = 0.15, Color = { 235, 205, 170 }, Decay = { 200, 140, 100 }, Glare = 0.8, Haze = 2.2 },
+			sky = { StarCount = 0, SunAngularSize = 24, MoonAngularSize = 11 },
+			bloom = { Intensity = 1.2, Size = 30, Threshold = 0.82 },
+			colorCorrection = { Brightness = 0.02, Contrast = 0.12, Saturation = 0.18, TintColor = { 255, 240, 222 } },
+			sunRays = { Intensity = 0.25, Spread = 0.7 },
+			pieces = { "trainShed", "viaduct" },
+			ambient = { { kind = "pigeon", count = 8 } },
+			weather = { kind = "steam", rate = 6 },
+			hazards = { "porter", "pigeon" },
+		},
+		{
+			id = "park", from = 9, fade = 0.34, name = "THEME PARK", sub = "Guest services, by the big wheel",
+			lighting = { ClockTime = 18.1, Brightness = 2.0, ExposureCompensation = 0.25,
+				Ambient = { 138, 118, 142 }, OutdoorAmbient = { 178, 142, 172 },
+				FogStart = 150, FogEnd = 1200, FogColor = { 240, 172, 162 } },
+			atmosphere = { Density = 0.3, Offset = 0.1, Color = { 245, 182, 172 }, Decay = { 220, 110, 140 }, Glare = 1.0, Haze = 1.8 },
+			sky = { StarCount = 400, SunAngularSize = 26, MoonAngularSize = 12 },
+			bloom = { Intensity = 1.3, Size = 32, Threshold = 0.8 },
+			colorCorrection = { Brightness = 0.03, Contrast = 0.14, Saturation = 0.3, TintColor = { 255, 236, 242 } },
+			sunRays = { Intensity = 0.3, Spread = 0.6 },
+			pieces = { "parkLights", "parkRides" },
+			ambient = { { kind = "balloon", count = 8 } },
+			weather = { kind = "confetti", rate = 8 },
+			hazards = { "beachball", "bumpercar" },
+		},
+		{
+			id = "station", from = 13, fade = 0.34, name = "SPACE STATION", sub = "Orbital lost property, deck 3",
+			celebrate = true,
+			lighting = { ClockTime = 23, Brightness = 1.2, ExposureCompensation = 0.5,
+				Ambient = { 120, 126, 162 }, OutdoorAmbient = { 125, 135, 180 },
+				FogStart = 20000, FogEnd = 100000, FogColor = { 5, 8, 20 } },
+			atmosphere = { Density = 0, Offset = 0, Color = { 20, 25, 45 }, Decay = { 40, 40, 80 }, Glare = 0, Haze = 0 },
+			sky = { StarCount = 3500, SunAngularSize = 12, MoonAngularSize = 14 },
+			bloom = { Intensity = 1.4, Size = 40, Threshold = 0.78 },
+			colorCorrection = { Brightness = 0.03, Contrast = 0.16, Saturation = 0.08, TintColor = { 235, 240, 255 } },
+			sunRays = { Intensity = 0, Spread = 0.2 },
+			pieces = { "stationDome", "earthView" },
+			ambient = { { kind = "satellite", count = 2 }, { kind = "astronaut", count = 1 } },
+			weather = { kind = "motes", rate = 5 },
+			hazards = { "crate", "drone" },
+		},
+		{
+			id = "galaxy", from = 36, fade = 0.34, name = "BEYOND THE GALAXY", sub = "The last lost & found there is",
+			lighting = { ClockTime = 23.8, Brightness = 1.0, ExposureCompensation = 0.6,
+				Ambient = { 128, 116, 152 }, OutdoorAmbient = { 145, 125, 175 },
+				FogStart = 20000, FogEnd = 100000, FogColor = { 15, 5, 25 } },
+			atmosphere = { Density = 0, Offset = 0, Color = { 40, 20, 60 }, Decay = { 90, 40, 110 }, Glare = 0, Haze = 0 },
+			sky = { StarCount = 5000, SunAngularSize = 8, MoonAngularSize = 6 },
+			bloom = { Intensity = 1.5, Size = 44, Threshold = 0.76 },
+			colorCorrection = { Brightness = 0.04, Contrast = 0.2, Saturation = 0.3, TintColor = { 250, 232, 255 } },
+			sunRays = { Intensity = 0, Spread = 0.2 },
+			pieces = { "stationDome", "galaxyView" },
+			ambient = { { kind = "comet", count = 1 }, { kind = "satellite", count = 1 } },
+			weather = { kind = "stardust", rate = 6 },
+			hazards = { "blob", "meteorite" },
+		},
+	},
+	-- Ambient life: spawned on a ring around the CAMERA (EnvBands.ambientSpawn), always outside the bay
+	-- (rMin >= 60) and over the 16-stud walls (yMin >= 25 above the camera). Pooled, recycled when out of range.
+	Critters = {
+		pigeon = { rMin = 60, rMax = 220, yMin = 26, yMax = 70, speedMin = 14, speedMax = 22, flock = 3 },
+		airliner = { rMin = 380, rMax = 800, yMin = 90, yMax = 260, speedMin = 55, speedMax = 75 },
+		balloon = { rMin = 80, rMax = 300, yMin = 25, yMax = 90, speedMin = 3, speedMax = 6, rise = true },
+		satellite = { rMin = 160, rMax = 480, yMin = 60, yMax = 220, speedMin = 6, speedMax = 12 },
+		astronaut = { rMin = 90, rMax = 220, yMin = 40, yMax = 110, speedMin = 2, speedMax = 4 },
+		comet = { rMin = 700, rMax = 1500, yMin = 200, yMax = 600, speedMin = 90, speedMax = 140 },
+	},
+}
+
+-- Hazards: RARE, telegraphed, one at a time, client-only (they can only ever bump YOU). A hit is a
+-- stumble: a short sideways shove and 0.6 s off your feet. Nothing is dropped, lost or recorded; the
+-- server never hears of it. The clock they run on counts only RUNNING shift time you are not resting
+-- (Wings.hazardsMayRun): none between shifts, none on a break, none in the first wing.
+-- The red ring at your feet IS the danger zone (Hazards.checkHit): step out of it in any direction.
+Config.Hazards = {
+	IntervalMin = 120, -- s of running shift clock between hazards, at least ...
+	IntervalMax = 180, -- ... and at most
+	MinTelegraphSeconds = 3,
+	MinCommitSeconds = 1.5,
+	MaxRetargetSpeed = 1.5,
+	PlayerRadius = 1.5,
+	AimJitter = 0.8,
+	SpreadDegrees = 35, -- a lane STARTS within ±35 degrees of where the camera looks ...
+	ViewPitchDegrees = 20, -- ... and within ±20 degrees of its pitch
+	KindFitDegrees = 25,
+	KnockLift = 6, -- studs/s up on a hit: 0.1 studs of lift, never onto the tray step
+	KnockSeconds = 0.6, -- PlatformStand after a hit: the stumble
+	NearMissStuds = 6, -- for measurement: passing within 6 studs is a near-hit
+	-- The bay is walled. A lane starts at least FloorMargin off a wall (Wings.clipLane pulls it in and
+	-- slows it, so the warning keeps its length), and a hazard waits until the camera's view window has at
+	-- least MinLaneStuds of floor ahead (Wings.room), so it never pops out of a wall in your face.
+	FloorMargin = 2,
+	MinLaneStuds = 10,
+	-- The tray, the six crates and the locker are obstacles too (Wings.obstacles), grown by this much: a
+	-- trolley never rolls through a crate. 1.5, because a bin stand is only 2 studs in front of its crate.
+	ObstacleMargin = 1.5,
+	-- A lane also LOCKS (turns red, stops following you) the moment the hazard comes within its reach + this
+	-- many studs of you (Wings.lockNear): on a small floor a homing hazard could otherwise touch a player
+	-- before its ring turned red. 3 is more than one frame can close (a 22-stud/s walker + 1.5x a hazard).
+	LockExtraStuds = 3,
+	-- ... and early enough that a player standing in the ring has MinReactSeconds between the ring turning
+	-- red and the first moment the hazard can touch them (Wings.lockNear locks at reach + speed x this). A
+	-- fitted lane is slow, and a slow hazard touches a player well before it "arrives" at the aim point, so
+	-- the template's commit time alone is not enough here.
+	-- ENFORCED by the hit rule (Wings.checkHit, REVIEW-2 finding 1): a knock needs the player to have been
+	-- INSIDE THE RED RING this long without leaving it (counted from the ring turning red or from stepping into
+	-- it, whichever is later), whatever they do; a walker could otherwise meet a hazard 0.13 s after red.
+	-- Walking out of a ring takes 0.21-0.28 s. EYECANDY.md promises the player 1 s: never lower it.
+	MinReactSeconds = 1.0,
+	-- ENFORCED (Wings.checkHit): no knock sooner than this after the warning appeared. EYECANDY.md promises 2 s.
+	MinWarnSeconds = 2.0,
+	-- `ground` kinds roll on the floor: their lane is kept level (Wings.groundLane), the model sits on the floor.
+	-- hitRadius is smaller than the model: forgiving, never unfair.
+	Kinds = {
+		trolley = { label = "RUNAWAY TROLLEY", speed = 14, telegraph = 3.2, commit = 1.6, pass = 2.5, hitRadius = 1.8, visualRadius = 2.6, knock = 24, pitch = 0, pitchSpread = 0, ground = true },
+		suitcase = { label = "TUMBLING SUITCASE", speed = 12, telegraph = 3.0, commit = 1.5, pass = 2.5, hitRadius = 1.5, visualRadius = 2, knock = 22, pitch = 0, pitchSpread = 0, ground = true },
+		porter = { label = "PORTER'S CART", speed = 13, telegraph = 3.2, commit = 1.6, pass = 2.5, hitRadius = 1.8, visualRadius = 2.6, knock = 24, pitch = 0, pitchSpread = 0, ground = true },
+		pigeon = { label = "PIGEON", speed = 16, telegraph = 3.0, commit = 1.5, pass = 2.0, hitRadius = 1.2, visualRadius = 1.2, knock = 16, pitch = 12, pitchSpread = 6 },
+		beachball = { label = "GIANT BEACH BALL", speed = 12, telegraph = 3.2, commit = 1.6, pass = 3.0, hitRadius = 2.0, visualRadius = 2.5, knock = 26, pitch = 0, pitchSpread = 0, ground = true },
+		bumpercar = { label = "BUMPER CAR", speed = 13, telegraph = 3.2, commit = 1.6, pass = 2.5, hitRadius = 1.9, visualRadius = 2.8, knock = 26, pitch = 0, pitchSpread = 0, ground = true },
+		crate = { label = "FLOATING CRATE", speed = 8, telegraph = 3.6, commit = 2.0, pass = 3.5, hitRadius = 1.8, visualRadius = 2.2, knock = 20, pitch = 0, pitchSpread = 10 },
+		drone = { label = "REPAIR DRONE", speed = 14, telegraph = 3.0, commit = 1.5, pass = 2.5, hitRadius = 1.4, visualRadius = 1.8, knock = 20, pitch = 10, pitchSpread = 6 },
+		blob = { label = "RUNAWAY ALIEN PET", speed = 10, telegraph = 3.4, commit = 1.8, pass = 3.0, hitRadius = 1.8, visualRadius = 2.2, knock = 22, pitch = 0, pitchSpread = 0, ground = true },
+		meteorite = { label = "SPACE ROCK", speed = 14, telegraph = 3.0, commit = 1.5, pass = 2.5, hitRadius = 1.8, visualRadius = 2.2, knock = 26, pitch = 8, pitchSpread = 6 },
+	},
+}
+
+-- The BREAK (EYECANDY.md §4): the button, or standing still IdleSeconds. It STARTS only while the shift
+-- clock is not running; pressed mid-shift it is booked for the end of the shift; the first pickup ends it
+-- (Wings.pressBreak / updateBreak). Rest's own rules on top: never mid-air, never with a hazard in the
+-- air (queued instead), any movement wakes you.
+Config.Rest = {
+	IdleSeconds = 20,
+	RequireGrounded = true,
+	BlockWhileThreat = true,
+	WakeOnMove = true,
+	WakeGraceSeconds = 0.4,
+	-- a queued break outlives the longest hazard flight (crate: 3.6 + 3.5 = 7.1 s) by at least 2 s
+	PendingSeconds = 10,
+}
+
+-- Client budget, phone first. Measured in robloxemu/check_lostfounddepot_wings.luau at every wing and
+-- every seam. The server builds none of this.
+Config.Budget = {
+	MaxLocalParts = 220,
+	MaxEmitters = 4,
+	MaxWeatherEmitters = 2, -- enforced in WingArt through EnvBands.capRates
+	MaxEmitterRate = 60, -- particles per second, summed over active emitters (also enforced)
+	MaxBeams = 8,
+	MaxTrails = 8,
+	MaxLights = 3,
+	MaxHazards = 1,
+}
+
+-- The pacing model behind the wings' `from` numbers (tests/Pacing.spec.luau). NOT used in the game.
+-- Career = cumulative minutes after each career shift 1..40, the running `minutes` total of
+-- design/model.luau PART 9 (career(): 30 items, 330 s clock, stage by shift number, the 250/800/2000
+-- ladder, buying the cheapest next upgrade as soon as affordable, 4 s intermission per shift, medians of
+-- 2000 seeded shifts). Printed by adding one print per shift inside career(); the numbers are that run's,
+-- to 0.1 min. The model's durations are LOWER bounds (no reading of the summary, no walk back, no locker
+-- visit), so BetweenShiftsSeconds adds an ASSUMED human overhead per shift.
+Config.Pacing = {
+	SpaceMinutes = { 30, 45 }, -- the owner's target for a normal player (+1 Jump's brief, applied here)
+	NormalProfile = "regular",
+	SlowProfile = "first-timer",
+	BetweenShiftsSeconds = 10, -- [A] summary, walk back to the tray, the odd locker visit
+	Career = {
+		regular = { 2.8, 5.3, 8.0, 10.6, 13.1, 15.6, 18.2, 20.7, 23.1, 25.6, 28.0, 30.4, 32.9, 35.3, 37.7, 40.1,
+			42.5, 44.9, 47.3, 49.7, 52.1, 54.5, 56.9, 59.3, 61.8, 64.2, 66.6, 69.0, 71.4, 73.8, 76.2, 78.6, 81.0,
+			83.4, 85.8, 88.2, 90.7, 93.1, 95.5, 97.9 },
+		["first-timer"] = { 4.2, 8.3, 12.7, 17.2, 21.5, 25.8, 30.0, 34.2, 38.4, 42.6, 46.9, 51.1, 55.2, 59.4, 63.5,
+			67.7, 71.8, 75.9, 80.0, 84.1, 88.2, 92.3, 96.3, 100.4, 104.5, 108.6, 112.7, 116.8, 120.9, 125.0, 129.1,
+			133.2, 137.2, 141.3, 145.4, 149.5, 153.6, 157.7, 161.8, 165.9 },
+	},
+	-- the sorter the hazard-rarity model walks (tests/SortModel.luau): design/model.luau's `regular`
+	-- reactSeconds [A]: a human's delay between the ring turning red under them and starting to step out
+	Sorter = { decode = 2.5, press = 0.5, carry = 3, walkSpeed = 18, cameraPitchDegrees = -20, reactSeconds = 0.4 },
+}
+
 return Config

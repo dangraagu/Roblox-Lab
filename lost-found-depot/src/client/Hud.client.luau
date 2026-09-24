@@ -25,6 +25,8 @@ local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 local FxClient = require(ReplicatedStorage:WaitForChild("FxClient"))
+-- The HUD is the ONLY listener on State; it passes every payload to the wings (StateCache.luau says why).
+local StateCache = require(ReplicatedStorage:WaitForChild("StateCache"))
 
 local remotes = ReplicatedStorage:WaitForChild("DepotRemotes")
 local StateEvent = remotes:WaitForChild("State")
@@ -744,6 +746,7 @@ StateEvent.OnClientEvent:Connect(function(st)
 	if type(st) ~= "table" then
 		return
 	end
+	StateCache.set(st)
 	render(st)
 end)
 
