@@ -342,6 +342,8 @@ local announcer = EnvBands.newAnnouncer()
 local scheduler = Hazards.newScheduler(Hz, rand)
 local rest = Rest.new()
 local sat = false -- this script sat the character down (manual rest)
+local satAt = 0 -- when it did: a Humanoid sat without a seat drops onto the floor for ~0.3 s (Studio, 2026-09-27)
+local SIT_SETTLE_SECONDS = 1.0
 local knockUntil: number? = nil
 local settleLeft = 0 -- seconds after the profile has loaded before bands are announced (placement arrives late)
 local settleWaited = 0 -- seconds since the character appeared, for the timeout
@@ -412,6 +414,7 @@ restBtn.Activated:Connect(function()
 	local result = Rest.request(rest, RestCfg, { moving = false, grounded = grounded, threat = scheduler.active ~= nil })
 	if result == "resting" then
 		sat = true
+		satAt = now
 		restFocus.Enabled = true
 		if hum then pcall(function() (hum :: Humanoid).Sit = true end) end
 	end
@@ -568,12 +571,14 @@ local function frame(dt: number)
 	-- grounded / moving, from the Humanoid (the client's own character)
 	local fm = (humanoid :: any).FloorMaterial
 	local grounded = fm ~= nil and fm ~= Enum.Material.Air and knockUntil == nil
-	-- A seated Humanoid may report FloorMaterial = Air. For the rest rules, a player we sat down is
-	-- supported as long as they are not actually falling.
+	-- A seated Humanoid reports FloorMaterial = Air. For the rest rules, a player we sat down is
+	-- supported as long as they are not actually falling. Sitting without a seat drops the root onto
+	-- the floor first (Studio trace: vy -3 .. -26, a bounce, settled in ~0.3 s), so the first
+	-- SIT_SETTLE_SECONDS after the sit are not a fall (check_plus1jump_sitdrop).
 	local supported = grounded
 	if sat and not grounded and knockUntil == nil then
 		local vy = root.AssemblyLinearVelocity.Y
-		supported = math.abs(vy) < 2
+		supported = math.abs(vy) < 2 or (now - satAt) < SIT_SETTLE_SECONDS
 	end
 	local md = (humanoid :: any).MoveDirection
 	local moving = (md ~= nil and md.Magnitude > 0.05) or (humanoid :: any).Jump == true
@@ -583,6 +588,7 @@ local function frame(dt: number)
 		local ev = Rest.update(rest, RestCfg, dt, { moving = moving, grounded = supported, threat = scheduler.active ~= nil })
 		if ev == "started" and rest.source == "manual" then
 			sat = true
+			satAt = now
 			restFocus.Enabled = true
 			pcall(function() humanoid.Sit = true end)
 		elseif ev == "woke" or ev == "dropped" or ev == "expired" then
