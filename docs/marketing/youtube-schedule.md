@@ -43,6 +43,18 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `plus1-jump/marketing/clips/climb_tier3.mp4` | Tier 3: taller steps, same +1 | 2026-09-26 10:00 | https://youtube.com/shorts/Q6-mQ5l1c2E | Planlagt (verified in Studio 2026-09-25) |
 | `grow-a-crystal/marketing/clips/harvest.mp4` | Clicking a grown crystal for Gem Dust | 2026-09-26 12:00 | https://youtube.com/shorts/h-jQXSjutrI | Planlagt (verified in Studio 2026-09-25) |
 | `labyrint-spill/marketing/clips/lobby_enter.mp4` | Three doors into the maze | 2026-09-26 14:00 | https://youtube.com/shorts/gvhxnfnuSyk | Planlagt (verified in Studio 2026-09-25) |
+| `plus1-jump/marketing/clips/climb_tier3.mp4` | When the steps get taller, so does your jump | 2026-10-01 10:00 | https://youtube.com/shorts/rc2sCCNtYbs | Planlagt (verified in Studio 2026-10-01) |
+| `grow-a-crystal/marketing/clips/cavern_descend.mp4` | From the basin to the first socket | 2026-10-01 12:00 | https://youtube.com/shorts/qW0vN5050-4 | Planlagt (verified in Studio 2026-10-01) |
+| `labyrint-spill/marketing/clips/lobby_enter.mp4` | Pick a door: solo, group or friends | 2026-10-01 14:00 | https://youtube.com/shorts/ddyGwrKuXHI | Planlagt (verified in Studio 2026-10-01) |
+| `anomaly-observatory/marketing/pairs/scale_bench/spot.mp4` | Hardest one so far. Find it | 2026-10-01 16:00 | https://youtube.com/shorts/XyUgZv4kyuU | Planlagt (verified in Studio 2026-10-01) |
+| `plus1-jump/marketing/clips/saw_tier5.mp4` | Climbing past the first obstacle | 2026-10-01 18:00 | https://youtube.com/shorts/Chmw8iezxP8 | Planlagt (verified in Studio 2026-10-01) |
+| `grow-a-crystal/marketing/clips/grow_timelapse.mp4` | A crystal growing in 60 seconds, sped up | 2026-10-01 20:00 | https://youtube.com/shorts/80leZDW-J1Y | Planlagt (verified in Studio 2026-10-01) |
+| `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Coins, gems, exit. Level 1 done | 2026-10-01 22:00 | https://youtube.com/shorts/zKgOFy_MNLQ | Planlagt (verified in Studio 2026-10-01) |
+| `plus1-jump/marketing/clips/pendulum_tier6.mp4` | Six more platforms, six more jump power | 2026-10-02 00:00 | https://youtube.com/shorts/xkbQFa8oljo | Planlagt (verified in Studio 2026-10-01) |
+| `grow-a-crystal/marketing/clips/harvest.mp4` | Harvest day in the cavern | 2026-10-02 02:00 | https://youtube.com/shorts/UEqC_5LMnYM | Planlagt (verified in Studio 2026-10-01) |
+| `labyrint-spill/marketing/clips/level2_run.mp4` | Can you find the exit faster? | 2026-10-02 04:00 | https://youtube.com/shorts/YJpN8YhXrc8 | Planlagt (verified in Studio 2026-10-01) |
+| `anomaly-observatory/marketing/pairs/static_screen/spot.mp4` | Only the sharp-eyed get this one | 2026-10-02 06:00 | https://youtube.com/shorts/B55oPWGxKBg | Planlagt (verified in Studio 2026-10-01) |
+| `plus1-jump/marketing/clips/climb_tier1.mp4` | Every step you take gives +1 jump | 2026-10-02 08:00 | https://youtube.com/shorts/WbBBGzvuDzM | Planlagt (verified in Studio 2026-10-01) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
