@@ -592,6 +592,34 @@ do
 	eq(Wings.mayLaunch({ roomy = true }), false, "onFloor not reported: no")
 end
 
+-- REVIEW-3 finding 2: held with no limit, a covered screen was a total shield. A phone player who read with the
+-- MANUAL open met 0 hazards in 991 s of running clock (6 with it closed): a due hazard stayed due for good.
+-- The wait is capped: Wings.holdForCover counts the RUNNING-clock seconds a due hazard has waited for a
+-- covered screen and stops holding it after `maxHold` (it then comes with its warning beside the drawer).
+-- The promise, as a literal (never Config's value): a drawer delays a due hazard by at most 15 s.
+do
+	local MAX = 15
+	local hold = { t = 0 }
+	local held = 0
+	for _ = 1, 30 * 60 do -- a minute, due and covered the whole time, 30 frames a second
+		if Wings.holdForCover(hold, 1 / 30, true, true, MAX) then held += 1 / 30 end
+	end
+	truthy(held <= MAX + 1 / 30 + 1e-6 and held >= MAX - 1 / 30 - 1e-6,
+		string.format("a due hazard waits for a covered screen at most %d s of running clock (held %.2f s)", MAX, held))
+	eq(Wings.holdForCover(hold, 1 / 30, true, false, MAX), false, "an uncovered screen never holds it")
+	local h2 = { t = 0 }
+	for _ = 1, 30 * 10 do Wings.holdForCover(h2, 1 / 30, true, true, MAX) end
+	truthy(Wings.holdForCover(h2, 1 / 30, true, true, MAX), "CONTROL: 10 s in, a covered screen still holds it")
+	for _ = 1, 30 * 60 do Wings.holdForCover(h2, 0, true, true, MAX) end
+	truthy(Wings.holdForCover(h2, 0, true, true, MAX), "a stopped clock (between shifts, on a break) does not use up the wait")
+	Wings.holdForCover(h2, 1 / 30, true, false, MAX)
+	for _ = 1, 30 * 5 do Wings.holdForCover(h2, 1 / 30, true, true, MAX) end
+	eq(Wings.holdForCover(h2, 1 / 30, true, true, MAX), false,
+		"closing and re-opening the drawer does not restart the wait (10 s + 5 s: it comes)")
+	Wings.holdForCover(h2, 1 / 30, false, true, MAX)
+	truthy(Wings.holdForCover(h2, 1 / 30, true, true, MAX), "the next hazard (no longer due, then due again) gets its own wait")
+end
+
 --================================================================ a lane that cannot fit is withdrawn
 
 -- Wings.room samples the view window; a lane's own heading and aim jitter can still clip it on a crate
@@ -892,6 +920,7 @@ do
 		end
 		local sch = Hazards.newScheduler(HzCfg, rand)
 		local b, r = Wings.newBreak(), Rest.new()
+		local hold = { t = 0 }
 		local working, dt = 0, 0.1
 		local badLaunch = 0
 		local t = 0
@@ -916,7 +945,11 @@ do
 			Wings.updateBreak(b, r, Rest, restCfg, dt, state, ctx)
 			local may = Wings.hazardsMayRun(r, Rest, state)
 			if may then working += dt end
-			local launchOk = Wings.mayLaunch({ onFloor = true, roomy = true, covered = mode == "reader" and (t % 60) < 25 })
+			-- the client's own rule: a covered screen holds a DUE hazard at most 15 s of running clock
+			local covered = (mode == "reader" and (t % 60) < 25) or mode == "readerAll"
+			local due = sch.active == nil and sch.clock + dt >= sch.nextAt
+			local held = Wings.holdForCover(hold, if may then dt else 0, due, covered, 15)
+			local launchOk = Wings.mayLaunch({ onFloor = true, roomy = true, covered = held })
 			local ev = Hazards.step(sch, HzCfg, dt, { resting = not may, grounded = launchOk, kinds = { "trolley" },
 				aim = { x = 0, y = 3, z = 0 }, yaw = 0, pitch = -0.3 }, rand)
 			if ev and ev.type == "spawn" and not may then
@@ -930,12 +963,17 @@ do
 	local tog, _, tt = run("toggler")
 	local idl, _, ti = run("idler")
 	local rdr = run("reader")
+	local rdrAll = run("readerAll")
 	print(string.format("  break probe: never rests %d, presses BREAK every 7 s %d, idles 25 s of every 60 %d (6 h of working clock each; wall %.0f / %.0f / %.0f s)",
 		base, tog, idl, tb, tt, ti))
 	truthy(math.abs(tog - base) <= 1, "pressing BREAK over and over does not thin hazards per working minute")
 	truthy(math.abs(idl - base) <= 1, "idling does not thin hazards per working minute")
-	print(string.format("  a phone player with a drawer open 25 s of every 60 (launches wait while it is up): %d", rdr))
+	print(string.format("  a phone player with a drawer open 25 s of every 60 (launches wait while it is up, 15 s at most): %d", rdr))
 	truthy(rdr >= base * 0.95 and rdr <= base, "a covered screen delays a hazard, it does not skip it (within 5%)")
+	-- REVIEW-3 finding 2: a drawer that is NEVER closed was a total shield (0 hazards). With the wait capped at
+	-- 15 s each hazard comes at most 15 s late: 6 h at a 120-180 s interval + 15 s is at least 90% of the count.
+	print(string.format("  a phone player who never closes the drawer: %d (never rests: %d)", rdrAll, base))
+	truthy(rdrAll >= base * 0.9 and rdrAll <= base, "a drawer kept open is not a shield: hazards still come, at most 15 s late each")
 	truthy(base >= 6 * 3600 / 180 and base <= 6 * 3600 / 120 + 1, "and the count is inside the configured interval")
 end
 

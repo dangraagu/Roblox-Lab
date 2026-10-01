@@ -8,7 +8,10 @@
 -- What it does: a brand-new player joins on a phone-sized touch viewport, spawns, and plays one
 -- full loop — the tutorial from the spawn pad, all 30 items of shift 1, the summary — then walks
 -- to the locker, buys the cart upgrade, and plays the whole second loop (stage 2, torn tags) with
--- one deliberate misfile. Every answer is derived the way a player derives it: the rendered tag
+-- one deliberate misfile. Then they LEAVE AND REJOIN (docs/complete-game-standard.md §1: spawn,
+-- first objective, one full loop, earn, spend, rejoin): everything earned and bought is back, the
+-- career goes on at shift 3, the first tap of the new session works, and the highscore board by the
+-- spawn shows them. Every answer is derived the way a player derives it: the rendered tag
 -- text, the rendered memo board, the rendered bin signs, and the public manual. Every step the
 -- HUD is read back: the hint line, the clock, the cleared counter, the toasts, the summary card.
 -- It prints what happened in numbers.
@@ -63,7 +66,8 @@ local remotes = h.ReplicatedStorage:FindFirstChild("DepotRemotes")
 local StateEvent, NoticeEvent = remotes.State, remotes.Notice
 local SelectEvent = remotes.Select
 
-local me = h:join("Walker", 424242)
+local WALKER = 424242
+local me = h:join("Walker", WALKER)
 h:advance(0.1)
 
 -- the HUD, then the queued traffic it would have received
@@ -359,6 +363,9 @@ do
 	eq(root.SummaryCard.Visible, true, "the summary card is up")
 	say("CARD   %q / %s", root.SummaryCard.Title.Text, (string.gsub(root.SummaryCard.Body.Text, "\n", " | ")))
 	truthy(string.find(root.SummaryCard.Body.Text, "Sorted 30 / 30", 1, true) ~= nil, "the card says Sorted 30 / 30")
+	-- walked at WalkSpeed, the Perfect counts on the highscore board, and the card says so
+	truthy(string.find(root.SummaryCard.Body.Text, "On the board: 1 Perfect Shift", 1, true) ~= nil,
+		"the card says the Perfect Shift counts on the board")
 	table.insert(cashLog, st.cash)
 end
 
@@ -435,9 +442,70 @@ do
 	eq(st.cash, cashLog[1] - 250 + s.pay, "cash = loop 1 pay - cart + loop 2 pay")
 	eq(st.backlog, 30 + firstTries, "backlog counts first tries only")
 	eq(loop2.maxCarried, 3, "the upgraded cart carried 3")
+	truthy(string.find(root.SummaryCard.Body.Text, "On the board: 2 Perfect Shifts", 1, true) ~= nil,
+		"the card counts the second Perfect Shift on the board")
 	table.insert(cashLog, st.cash)
 	say("TOTAL  cash %d, backlog %d / %d, shifts %d, perfects %d, best Perfect %d s, %.0f studs walked in all",
 		st.cash, st.backlog, st.backlogSize, st.shifts, st.perfects, st.best, walked)
+end
+
+--============================================================================ leave, and come back
+
+do
+	local before = state()
+	h:leave(me)
+	h:advance(2)
+	me = h:join("Walker", WALKER)
+	h:advance(0.1)
+	local okHud2, hudErr2 = h:tryRun("client/Hud.client")
+	truthy(okHud2, "the HUD loads again for the rejoined player" .. (if okHud2 then "" else ": " .. tostring(hudErr2)))
+	for _, remote in { StateEvent, NoticeEvent } do
+		for _, rec in remote:sentTo(me) do
+			remote:FireClient(me, table.unpack(rec.args, 1, rec.args.n))
+		end
+	end
+	h.Players:simulateSpawn(me, h.workspace)
+	h:advance(0.5)
+	root = me.PlayerGui.DepotHud.Root
+	bay = me.RespawnLocation.Parent
+	ox = bay.BayPad.Position.X
+	P = Vector3.new(ox, 3, 0)
+	local st = state()
+	local pad = bay.BayPad
+	local r = hrp().Position
+	local fromPad = math.sqrt((r.X - pad.Position.X) ^ 2 + (r.Z - pad.Position.Z) ^ 2)
+	say("REJOIN %s again, landed %.2f studs from the pad centre; cash %d, carry %d, backlog %d, shifts %d, perfects %d; career shift %d (stage %d) armed; HUD %q",
+		bay.Name, fromPad, st.cash, st.carry, st.backlog, st.shifts, st.perfects, st.shift.careerShift, st.stage, hudText("CashPanel.Cash"))
+	truthy(fromPad < 1 and r.Y > pad.Position.Y, "the rejoined player lands on their own pad")
+	eq(st.loaded, true, "the profile loaded")
+	eq(st.canSave, true, "and saves (the release freed the lock)")
+	eq(st.cash, before.cash, "cash survived the rejoin")
+	eq(st.carry, 3, "the cart upgrade survived")
+	eq(st.backlog, before.backlog, "the backlog survived")
+	eq(st.shifts, 2, "both shifts survived")
+	eq(st.perfects, 2, "both Perfect Shifts survived")
+	eq(st.shift.careerShift, 3, "the career goes on: career shift 3")
+	eq(st.stage, 3, "at stage 3")
+	truthy(string.find(bay.MemoBoard.SignGui.Label.Text, "TODAY'S MEMO", 1, true) ~= nil, "with the first memo on the board")
+	eq(hudText("CashPanel.Cash"), "CASH " .. before.cash, "the HUD shows the cash that came back")
+	eq(hudText("ClockPanel.Clock"), "5:30", "the clock waits at 5:30")
+	root.Toggles.Toggle_upgrades.Activated:Fire()
+	eq(hudText("UpgradesDrawer.CartRow"), "CART   carry 3 -> 4 for 800", "UPGRADES offers the NEXT cart level, not the one bought")
+	root.Toggles.Toggle_upgrades.Activated:Fire()
+	-- the first tap of the new session, from the pad
+	local first = readTray()[1]
+	first.click.MouseClick:Fire(me)
+	h:advance(0.35)
+	eq(#state().shift.carried, 1, "the first tap of the new session picks an item from the pad")
+	eq(state().shift.state, "RUNNING", "and starts the clock")
+	-- the highscore board behind the spawn: the walker's two counted Perfect Shifts, by name
+	h:advance(Config.Board.PublicCacheSeconds + 1)
+	local rowText = nil
+	for _, lbl in bay.Leaderboard.BoardGui:GetDescendants() do
+		if lbl:IsA("TextLabel") and string.find(lbl.Text, "Walker", 1, true) then rowText = lbl.Text end
+	end
+	say("BOARD  the board behind the spawn: %q", tostring(rowText))
+	truthy(rowText ~= nil and string.find(rowText, "2$") ~= nil, "the board by the spawn shows the walker with 2 Perfect Shifts")
 end
 
 --============================================================================ what the HUD showed, overall

@@ -13,6 +13,12 @@
 -- full five-slot hotbar, with each of MANUAL, UPGRADES and CODES open, with the summary card up, and
 -- with the Back Room note card up.
 --
+-- The viewports are hudcheck's ten PLUS the two smallest phones Roblox still runs on in landscape: 568x320
+-- (iPhone SE 1st gen) and 667x375 (iPhone 6/7/8/SE 2), so rule 4b (overlap = true) covers them too
+-- (docs/complete-game-standard.md §2). Until pass 2 of the standard (2026-10-01) 568x320 was left out because
+-- the HUD's own five-slot hotbar, wrapped onto two rows in the 40% centre band, rose over the clock there
+-- (measured 120x38 screen px, idle, a full cart).
+--
 -- Nothing measured here is a hand-written payload. The tester's save is preloaded (cart level 3,
 -- so the hotbar really has five slots; stage 3, so the manual really has all three layers), and
 -- the warmup drives the real server: a shift that runs out of time produces the SUMMARY payload,
@@ -160,7 +166,10 @@ local modes = {
 	{ tag = ", note", before = note },
 }
 local viewports = {}
-for _, v in HudCheck.VIEWPORTS do
+local PHONES = table.clone(HudCheck.VIEWPORTS)
+table.insert(PHONES, { name = "iPhone SE 1", w = 568, h = 320, touch = true })
+table.insert(PHONES, { name = "iPhone 8", w = 667, h = 375, touch = true })
+for _, v in PHONES do
 	for _, m in modes do
 		table.insert(viewports, { name = v.name .. m.tag, w = v.w, h = v.h, touch = v.touch, before = m.before })
 	end

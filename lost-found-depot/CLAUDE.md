@@ -9,7 +9,8 @@ day: **`REVIEW-1.md`** has each finding, its before/after numbers, the mutation 
 **The wings (owner's brief 2026-09-17, built 2026-09-23/24): `EYECANDY.md`** — six wings driven by the
 career, rare client-side hazards on the sorting floor, a BREAK between shifts, budgets, the gates, the
 Studio list and the thumbnail shot list. Read it before touching anything under "wings" below. The wings'
-adversarial review (REVIEW-2, six findings, all fixed test first the same day) is `EYECANDY.md` §13.
+adversarial review (REVIEW-2, six findings, all fixed test first the same day) is `EYECANDY.md` §13; the second
+(REVIEW-3, 2026-09-30, six findings, all fixed test first) and the owner's decisions of 2026-09-30 are §14.
 
 ## What it is
 A solo sorting job. A private bay per player: a tray of 8 tagged lost items, six bins on an arc.
@@ -19,43 +20,52 @@ Tap an item, read its tag (`T · 3 · RED`) against the Depot Manual (RED route 
 resolves a torn letter) from career shift 2, a rule-bending memo from shift 3. Cash buys cart (carry
 2-5) and shoes (walk 16-22) at the locker. 500 first-try sorts open the Back Room. Nothing costs Robux.
 
-## State — every headless gate green; NEVER OPENED IN STUDIO; NOT published; NOT committed
-Last run of every gate, on the final source (2026-09-24, after the wings and the REVIEW-2 fixes). `luau` is the luau CLI; it
-writes to stderr, so ALWAYS append `2>&1`. The wings' own gates are listed after the original ones.
+## State — every headless gate green; NEVER OPENED IN STUDIO; NOT published; REVIEW-3, the board and pass 2 NOT committed
+The game and the wings are committed (1d27fc2, 62550b2). Last run of every gate, on the current tree (2026-10-01,
+after pass 2 of the complete-game standard: see "Pass 2 of the complete-game standard" below; before it, pass 1 run
+a second time with the REVIEW-3 fixes, the owner's decisions and the highscore board). `luau` is the luau CLI; it writes to stderr, so ALWAYS append
+`2>&1`. **The specs print `N passed, M failed` and exit 0 even when M > 0: read the count, not the exit code.**
+The wings' own gates are listed after the original ones.
 
 | gate | command | result |
 |---|---|---|
 | Codes | `luau tests/Codes.spec.luau` | 16 passed, 0 failed |
-| Economy | `luau tests/Economy.spec.luau` | 157 passed, 0 failed |
+| Economy | `luau tests/Economy.spec.luau` | 172 passed, 0 failed (157 before the board) |
 | Layout | `luau tests/Layout.spec.luau` | 32 passed, 0 failed |
 | Rng | `luau tests/Rng.spec.luau` (verbatim copy of fork-tower's; `Rng.luau` is byte-identical) | 32 passed, 0 failed |
 | Rules | `luau tests/Rules.spec.luau` | 95 passed, 0 failed |
 | Seed | `luau tests/Seed.spec.luau` | 24 passed, 0 failed |
 | Shift | `luau tests/Shift.spec.luau` | 79 passed, 0 failed |
 | responsive | `luau tests/responsive.spec.luau` (copied verbatim) | 70 passed, 0 failed |
-| the walk | `luau tests/walk.luau` | 48 passed, 0 failed |
+| the walk | `luau tests/walk.luau` | 68 passed, 0 failed (48 before the board) |
 | world + play | `cd ../robloxemu && luau check_lostfounddepot.luau` | 238 passed, 0 failed |
 | spawn order | `cd ../robloxemu && luau check_lostfounddepot_spawn.luau` | 29 passed, 0 failed |
 | saving with a slow store, and client spam | `cd ../robloxemu && luau check_lostfounddepot_save.luau` | 111 passed, 0 failed |
 | HUD flows on a phone | `cd ../robloxemu && luau check_lostfounddepot_hudflow.luau` | 44 passed, 0 failed |
 | taps and sightlines | `cd ../robloxemu && luau check_lostfounddepot_view.luau` | 17 passed, 0 failed |
-| HUD fit | `cd ../robloxemu && luau check_lostfounddepot_hud.luau` | PASS, 60 viewport x mode measurements |
+| HUD fit | `cd ../robloxemu && luau check_lostfounddepot_hud.luau` | PASS, 72 viewport x mode measurements (hudcheck's 10 + 568x320 and 667x375, six modes each, overlap rule on) |
 | what a client can predict | `cd ../robloxemu && luau check_lostfounddepot_rng.luau` | 24 passed, 0 failed |
 | the first minute, and what E drops | `cd ../robloxemu && luau check_lostfounddepot_firstmin.luau` | 67 passed, 0 failed |
-| the wings' pure rules | `luau tests/Wings.spec.luau` | 256 passed, 0 failed |
-| the wings' config | `luau tests/EnvConfig.spec.luau` | 268 passed, 0 failed |
+| the wings' pure rules | `luau tests/Wings.spec.luau` | 264 passed, 0 failed |
+| the wings' config | `luau tests/EnvConfig.spec.luau` | 299 passed, 0 failed (273 before pass 2: every wing's own weather and life) |
 | minutes to each wing, hazard rarity | `luau tests/Pacing.spec.luau` | 115 passed, 0 failed |
 | the HUD -> wings hand-off | `luau tests/StateCache.spec.luau` | 10 passed, 0 failed |
 | template (verbatim from +1 Jump) | `luau tests/EnvBands.spec.luau`, `Hazards.spec.luau`, `Rest.spec.luau` | 124 / 102 / 55 passed, 0 failed |
-| the wings through the real client | `cd ../robloxemu && luau check_lostfounddepot_wings.luau` | 217 passed, 0 failed |
+| the wings through the real client | `cd ../robloxemu && luau check_lostfounddepot_wings.luau` | 231 passed, 0 failed (217 before pass 2) |
 | taps and sightlines with every wing built | `cd ../robloxemu && luau check_lostfounddepot_wingview.luau` | 66 passed, 0 failed |
-| HUD + wings on every viewport | `cd ../robloxemu && luau check_lostfounddepot_hud_wings.luau` | PASS (hudcheck, 10 modes) + PASS (the HUD's text rows, the title card on 10 viewports, no launch under a phone drawer or a card) |
-| syntax | `cd ../robloxemu && luau check_lostfounddepot_compile.luau` (loadstring over every bundled source; no `require` by string) | 21 sources, 42 passed, 0 failed |
+| HUD + wings on every viewport | `cd ../robloxemu && luau check_lostfounddepot_hud_wings.luau` | PASS (hudcheck, 10 viewports x 10 modes) + PASS (the HUD's text rows; the panel, a flying hazard's warning and the title card on 22 viewports; since pass 2 also the HUD's own full hotbar against its own text rows on all 22; a drawer holds a due hazard 15 s at most, on the running clock only) |
+| the BREAK survives the sit's own drop (REVIEW-3) | `cd ../robloxemu && luau check_lostfounddepot_sitdrop.luau` | 22 passed, 0 failed |
+| the budget is capped in code (REVIEW-3) | `cd ../robloxemu && luau check_lostfounddepot_budget.luau` | 16 passed, 0 failed |
+| the highscore board's pure rules (found in the tree 2026-10-01; mutation-tested in pass 2, no independent review) | `luau tests/Board.spec.luau`, `luau tests/Ledger.spec.luau` | 84 / 28 passed, 0 failed |
+| the highscore board through the real server (same) | `cd ../robloxemu && luau check_lostfounddepot_board.luau` | 106 passed, 0 failed |
+| syntax | `cd ../robloxemu && luau check_lostfounddepot_compile.luau` (loadstring over every bundled source; no `require` by string) | 23 sources, 46 passed, 0 failed |
 | analysis | `luau-analyze` | **NOT RUN on the wings**: luau-compile.exe and luau-analyze.exe were wiped from this machine on 2026-09-23 (luau.exe survived). The 2026-09-17 run was 14 clean. |
 
 **Rebuild the bundle before every headless run**, or you are testing the last build, not the source:
 `cd ../robloxemu && py -3 wrap.py --game ../lost-found-depot --out build/lost-found-depot.luau`.
-The walk and all twelve `check_lostfounddepot*` files read `robloxemu/build/lost-found-depot.luau`.
+The walk and all fifteen `check_lostfounddepot*` files read `robloxemu/build/lost-found-depot.luau`.
+33 suites in all (17 specs, the walk, 15 checks); on 2026-10-01 after pass 2: specs + walk 1669 passed, 0 failed;
+the 13 counting checks 1017 passed, 0 failed; `_hud` PASS; `_hud_wings` PASS + PASS.
 
 ### What the walk showed (numbers from the last run)
 A new player on an 800x360 touch viewport, the real HUD running, every tap on the item's own
@@ -222,10 +232,35 @@ last put old data back: an autosave in flight when a shift ended wrote 1011 over
   wings draw from it. hudcheck does not either; `_hud_wings` runs a second of frames in every mode.
 - **Hazard settings in the checks are overridden IN MEMORY** (6-7 s, 1-2 s, 40-41 s intervals), before the
   client loads, because the scheduler rolls its first interval at load.
+- **The BREAK's sit drops first** (REVIEW-3 finding 1): a Humanoid sat without a seat falls onto the floor for
+  ~0.3 s and reads FloorMaterial Air while seated. `Wings.client` counts the first `Config.Rest.SitSettleSeconds`
+  after `sitDown()` as supported (`satAt`). Any new way of sitting the player must go through `sitDown()`.
+- **A covered screen holds a due hazard 15 s at most** (REVIEW-3 finding 2, `Wings.holdForCover`,
+  `Config.Hazards.MaxCoverHoldSeconds`), counted on the RUNNING clock only (pass dt 0 while hazards may not
+  run), not restarted by closing and re-opening the drawer; a hazard never launches where its warning has no
+  room beside the drawer. Held for good it was a total shield.
+- **Every wing part goes through `setWeight(..., self.ledger)`** (REVIEW-3 finding 5): the ledger in `WingArt`
+  is what keeps the budget. A new piece or critter that bypasses it (parenting a part directly) is uncounted;
+  the hazard's items are `reserved` and must fit `Budget.HazardReserve` (`_budget` measures it).
+- **The wings' layout copies the HUD's numbers** (`Wings.client` applyLayout: cash, clock, toggles, rows,
+  hotbar). A HUD layout change needs the same change there; `_hud_wings` sweeps 22 viewports to catch a drift.
+  Since pass 2 of the standard (2026-10-01) that includes two rules: the clock stays in the TOP row whenever the gap
+  between the cash panel and the toggles holds it (`clockLo <= clockHi`; the clock then sits as near the centre as
+  that gap allows), and a hotbar wrapped onto two rows that would reach the text rows takes ONE row as wide as the
+  margins allow (it sits wholly above the touch controls, so nothing lands under the thumbstick or jump button).
+  Mutations H2 and H4 (each rule reverted in `Wings.client` only) measure whether the copy matters (§ pass 2 below).
+- **The checks name critter MODELS by name** (`_wings`: the in-bay sweep and the glide sweep; `_budget`: its
+  `CRITTER` set and the over-budget `ambient(...)` calls). A new critter kind (pass 2 added `gull`, model `Gull`)
+  must be added to those lists, or a critter flying inside the bay would go unseen and the glide sweep would
+  count its 0.35 s fade as a cut.
+- **`_hud_wings` makes the live shift 10 hours long IN MEMORY** after its warmup: the server's own shift used to
+  run out during the long drawer runs and its summary card replaced an open drawer (a toggle then closed it).
+- **A check that moves the player in a frame hook measures what the player was shown FIRST**, at the position
+  the client just tested, then moves (REVIEW-3 finding 4: measured after the step, a cosmetic Config edit gave a
+  false "knocked outside the ring").
 - **Some sources have CRLF line endings, some LF** (CRLF: `Wings.client`, `Config`, `Wings`, `WingArt`,
   `Wings.spec`, `EnvConfig.spec`). A textual patch or mutation must match the file's own line endings (the
-  sweep normalises them); a Python rewrite that reads text mode and writes `newline='
-'` silently turns a
+  sweep normalises them); a Python rewrite that reads text mode and writes `newline='\n'` silently turns a
   CRLF file into LF (it happened in REVIEW-2's fixes and was put back).
 
 ## Corrections to DESIGN.md found while building (DESIGN.md itself was not edited)
@@ -250,6 +285,20 @@ last put old data back: an autosave in flight when a shift ended wrote 1011 over
 10. §5.1 "Pick: this item becomes the selected one" (see Traps: selection) and §1/§5.1 "back to the
     tray, or to the front of the cart" (always the tray now).
 11. §12 "The memo board above the tray": it now hangs on the right wall (pass 3, U5).
+12. §2, §10.3 and §15 cut every leaderboard from v1 ("the only defensible board ranks something a bot cannot do
+    faster than a careful human"). The owner's complete-game standard (2026-09-30, §3) asks every game for a public
+    + friends board on "a server-measured metric that a script cannot inflate". The board built here ranks a COUNT
+    of Perfect Shifts, never a time, and a shift counts only when §10.3's own travel ledger (`Ledger.luau`) holds.
+    What the ledger closes, measured: a teleporting bot's Perfect Shift does not count (`_board` §1), nor does a
+    1.5x or 3x speed hack (`Ledger.spec`). What it does NOT close, measured 2026-10-01: a script that reads the
+    public manual and walks straight lines at WalkSpeed is counted, and it needs **33 s** of server clock per Perfect
+    Shift (zero reading time, carry 5, walk 22; printed by `_board` §4), where the design model's regular player
+    spends about **134 s** a shift late in the career (`Config.Pacing.Career.regular`: 35.3 to 97.9 min
+    over shifts 14-40, 2.41 min a shift, less the assumed 10 s between shifts; the model's player reads every tag). So a walking script earns about four Perfect Shifts to a
+    regular's one, and a 1.2x speed hack (inside `SpeedTolerance` 1.25) about 1.2 times more. It cannot get one
+    without doing the shift's walking, which is what "cannot inflate" can mean for a count; a script left running
+    for hours still out-counts a person, as on any count board. A board of fastest Perfect Shifts would be won by
+    the script outright, which is why the count was chosen.
 
 ## Deviations from DESIGN.md, deliberate
 - `Config.Shift.RefillSeconds = 0.3`; `Config.Bay.SamePickSeconds = 0.05`.
@@ -270,6 +319,13 @@ last put old data back: an autosave in flight when a shift ended wrote 1011 over
 - Pass 3: the tutorial highlights BOTH ways (the DROP/PRESS E HERE marker AND the bin light pulse).
 - Pass 3: career shift 1 excludes the tutorial's archetypes from every draw (14 archetypes).
 - Pass 3: the MemoBoard is at bay-local (MaxX - 0.2, 8, -4), Face Left.
+
+## Mutation sweep (REVIEW-3 fixes, 2026-09-30)
+Scratch copies only (`scratchpad/lfdp1/sweep.py`), each mutation proved to reach the bundle, all 30 suites per
+mutation (a spec's printed failure counts as red), the real tree's 68 files sha256-identical before and after:
+**23 of 23 KILLED** (D5, the drawer's wait running while the clock is stopped, survived the first run and was
+killed once `_hud_wings` asserted it), the harness control and 2 controls survived (one of them the reviewer's
+pigeons 8 -> 40, which used to turn `_wings` red). Table in `EYECANDY.md` §14.
 
 ## Mutation sweep (REVIEW-2 fixes, 2026-09-24)
 Scratch copies only, each mutation proved to reach the bundle, all 28 suites per mutation, sources restored and
@@ -374,7 +430,7 @@ sweep (35 files).
 - **FxClient is a no-op headless**; ScrollingFrame clipping is not modelled.
 
 ## Needs Studio (none of this is claimed anywhere)
-The wings add 18 more items: `EYECANDY.md` §8. The thumbnail shot list is `EYECANDY.md` §9.
+The wings add 27 more items: `EYECANDY.md` §8 (22 and 23 from REVIEW-3, 24-27 from pass 2 of the standard: the gulls, the board, the board on a live server, the ledger on a real connection). The thumbnail shot list is `EYECANDY.md` §9.
 1. First-spawn order on join (trace HRP per Heartbeat), and the play-solo "character before script" case.
 2. Spawn facing (-Z) and whether the first frame shows tray, bins and the Back Room door.
 3. Taps: that a ClickDetector on the item Model fires for its pieces; whether one tap fires BOTH the
@@ -411,20 +467,126 @@ The wings add 18 more items: `EYECANDY.md` §8. The thumbnail shot list is `EYEC
 21. Pass 3: the FILED stamp, the bin light pulse (a looping Brightness tween) and the MANUAL pulse on
     screen. robloxemu's tween jumps to its goal instead of easing.
 22. Gamepad: the hint says "press E"; Cart and Shoes share one Part and neither sets GamepadKeyCode.
+23. The Top Sorters board (pass 2): legibility of its title, mode line and ten rows on a 12 x 8 stud board from its
+    prompt's reach and from the pad; the prompt as a tap button; EVERYONE / FRIENDS (`EYECANDY.md` §8 items 25-27).
+24. Live server only: the board's OrderedDataStore, `GetSortedAsync`, `Players:GetFriendsAsync` (paging, 200 cap,
+    throttle), `GetNameFromUserIdAsync`; and the real spread between the server's view of a phone player's position
+    and theirs, which the travel ledger's slack (2 studs, 1.5 s, 25%) was sized against in a model only.
 
 ## Files
 Server `src/server/Main.server.luau`, `src/server/Secret.luau`; client `src/client/Hud.client.luau`,
 `src/client/Wings.client.luau`; shared `Config / Rules / Shift / Seed / Economy / Codes / Layout` plus
 `Rng / Fx / FxClient / Responsive` (verbatim copies), `EnvBands / Hazards / Rest` (verbatim from +1 Jump),
-`Wings / WingArt / StateCache` (the wings); tests `tests/*.spec.luau`, `tests/walk.luau`,
-`tests/SortModel.luau` (test-side); headless gates `../robloxemu/check_lostfounddepot.luau`, `_spawn`,
-`_save`, `_hudflow`, `_view`, `_hud`, `_rng`, `_firstmin`, `_wings`, `_wingview`, `_hud_wings`, `_compile`;
-design `DESIGN.md`, `design/model.luau`; reviews `REVIEW-1.md` (pass 3); the wings `EYECANDY.md`.
+`Wings / WingArt / StateCache` (the wings), `Board / Ledger` (the highscore board); tests `tests/*.spec.luau`,
+`tests/walk.luau`, `tests/SortModel.luau` (test-side); headless gates `../robloxemu/check_lostfounddepot.luau`,
+`_spawn`, `_save`, `_hudflow`, `_view`, `_hud`, `_rng`, `_firstmin`, `_wings`, `_wingview`, `_hud_wings`,
+`_compile`, `_sitdrop`, `_budget`, `_board`;
+design `DESIGN.md`, `design/model.luau`; reviews `REVIEW-1.md` (pass 3); the wings `EYECANDY.md`; the clip list
+`MARKETING.md`; the store copy in `README.md`.
+
+## The owner's decisions (2026-09-30, "take the recommended option for all"; details in `EYECANDY.md` §14)
+- (a) Hazards and the personal best: DECIDED 2026-09-30 (owner: take recommended): hazards stay on in every
+  shift; the personal best is not made hazard-free.
+- (b) Where hazards begin: DECIDED 2026-09-30 (owner: take recommended): the second wing (first hazards) at
+  career shift 4, as built.
+- (c) The launch code in the store description: DECIDED 2026-09-30 (owner: take recommended): print it
+  (`Code: SORTED` stays in the README store copy, 873 characters).
+- Searched again on 2026-10-01 (EYECANDY.md, CLAUDE.md, REVIEW-1.md, README.md): these three are the only owner
+  decisions, all recorded as DECIDED; none is newly open.
+
+## Pass 1 run again (2026-10-01): no code changed, everything re-measured
+The workflow re-ran pass 1 with the same six REVIEW-3 findings; all six fixes were already in the tree. Each
+finding was reproduced again on the reviewed source (HEAD 62550b2 = the reviewer's snapshot, line endings
+aside) with the reviewer's own probes, and is gone on the current tree; the REVIEW-3 gates are red on the
+reviewed source; the REVIEW-3 sweep re-run on the current tree killed 23 of 23 again, 3 controls survived, real
+tree sha256 unchanged (73 files). Numbers: `EYECANDY.md` end of §14.
+
+## The highscore board (found in the tree 2026-10-01; notes and mutation sweep by pass 2 of the standard)
+An interrupted session added it between 00:37 and 00:49 on 2026-10-01 and wrote no notes; pass 1 described it
+from its code, and pass 2 of the complete-game standard (below) checked it against §3 item by item, measured what
+it does not close (Corrections to DESIGN.md, 12) and mutation-tested its assertions for the first time.
+- **What it is** (§3): `src/shared/Board.luau` (encode `count * 2e9 + (2e9 - reachedAt)`, keep-higher, ranking,
+  the public and friends views, a TTL cache, a token bucket; after grow-a-crystal's), `src/shared/Ledger.luau`
+  (DESIGN.md §10.3's travel ledger: slack once per shift, refuses nothing), `Config.Board` / `Config.Ledger`. The
+  OrderedDataStore `LostFoundDepot_Board_v1`, key `u_<userId>`, written through UpdateAsync + `Board.keepHigher`
+  only after a profile save LANDED and only when the count rose. The public top 10 is read once per 60 s for the
+  whole server; a player's friends (`Players:GetFriendsAsync`, at most 200) only when they ask, cached 300 s, a
+  failed fetch not retried for 60 s, friends' values read through one token bucket (40, then 1 a second) that also
+  keeps 10 GetAsync of Roblox's budget free. Names from the server, the friends pages or `GetNameFromUserIdAsync`,
+  cached for the server's life, never stored. A one-sided board on each bay's back wall left of the pad, a
+  ProximityPrompt (8 studs, out of reach from the pad) switching EVERYONE / FRIENDS; another player's prompt press
+  is refused with a toast. Empty boards say what to do. `profile.boardPerfects` / `boardAt` (Economy: sanitised,
+  merged); the summary card's `counted` / `boardPerfects` (in the main check's State allowlist).
+- **Its gates**: `tests/Board.spec` 84, `tests/Ledger.spec` 28, `check_lostfounddepot_board` 106 (a walked Perfect
+  counts, a teleported one is still a Perfect for the player but not on the board, and the card says so), the
+  walk's rejoin step (the board by the spawn shows the walker's 2), the main check's allowlist.
+- **Mutation-tested 2026-10-01 (pass 2)**: twelve mutants of the board and ledger (B1-B12 below), each proven in the
+  rebuilt bundle, 33 suites each.
+- **Not closed, by design, measured**: a script that reads the public manual and walks at WalkSpeed is counted (33 s
+  a Perfect Shift against a regular's ~134 s; Corrections to DESIGN.md, 12). `Config.luau` points here for that.
+
+## Pass 2 of the complete-game standard (2026-10-01)
+Every item of `docs/complete-game-standard.md` checked against this game; what was missing was built test first.
+| standard item | before this pass (measured) | built, test first | proven by |
+|---|---|---|---|
+| §2 bands: each with its own critters and weather | CITY DEPOT and AIRPORT had no weather (4 of 6 wings); CITY and TRAIN had the same life (pigeons only) | the city gets gulls (`CRITTERS.gull`, `Config.Env.Critters.gull`) and blowing autumn leaves; the airport ticket stubs drifting from the glass roof (`WEATHER.leaves` / `tickets`; a weather kind may carry a colour list) | `EnvConfig.spec`: every wing has weather, no two share a kind, each has a critter no other wing has (watched fail with 4 failures, then 299 / 0). `_wings`: at every wing its own weather emitter is on and each of its critters is drawn by the real client (+14 assertions). Budgets re-measured: peaks unchanged (135 parts, 3 emitters, 10.9 particles/s); `_budget` 15 426 frames inside the budget |
+| §2 phone first, rule 4b on small phones | `_hud` with 568x320 and 667x375 added: FAIL, ClockPanel and Hotbar overlap by 120x38 px at 568x320 (a full cart's hotbar wrapped onto two rows). Fixing only the hotbar (one wide row) then put it on the hint and toast rows (236x13 and 236x14 px), which hudcheck cannot see | (1) the clock stays in the top row whenever the gap between the cash panel and the toggles holds it, as near the centre as that gap allows; (2) a wrapped hotbar that would reach the text rows takes one row as wide as the margins allow (above the touch controls). Both mirrored in `Wings.client` | `_hud` PASS on 12 viewports x 6 modes (72). `_hud_wings`: the HUD's own hotbar measured against its memo, hint, toast, stamp, cash, clock and toggles on all 22 viewports, 0 clashes; the wing panel now sits beside the hotbar on 568x320, so it shows in a session that is not saving too (REVIEW-3's other open item: "keeps clear of the HUD's not-saving line") |
+| §3 the board: notes, and what a script can do | Config pointed to notes that did not exist; never mutation-tested | the notes (Corrections to DESIGN.md 12; "The highscore board" above); `_board` prints the walked Perfect Shift's time | measured: 33 s a Perfect Shift for a walking script with zero reading time, about 134 s for the model's regular; B1-B12 killed |
+| §4 store copy | 873 characters, predating the wings, hazards, BREAK and board | rewritten: 940 characters, ASCII except the tag's middle dot | counted with Python on the README text |
+| §4 clip list | no `MARKETING.md` | eight clips, 7-15 s vertical, each with its staging and what may not be staged | written; `tools/film_game.py` has no scenarios for this game yet (tools owner) |
+| §4 thumbnails, needs-Studio | §9 never stated 1920x1080; §8 had 23 items | §9 states 1920x1080 and how to check it; §8 items 16 and 23 updated, 24-27 added (gulls, the board, the board on a live server, the ledger on a real connection) | `EYECANDY.md` §8, §9 |
+
+Checked and already met (no change): the walk has a rejoin step (the board session added it: cash, cart, backlog,
+shifts, Perfects, career shift 3 and the first tap all survive, the board shows the walker); spawn order (`_spawn`);
+the brag moment and the long goal (`Pacing.spec`: space at 35.1 min for a regular, a slow reader 57.4, the galaxy
+94.2, the Back Room 47.9); hazards (one near-miss per 2.7 min for a reacting sorter, one at a time, a stumble only);
+the BREAK; budgets capped in code; the promo code public and printed; nothing for Robux. Not run: `luau-analyze`
+(not on this machine).
+
+**Mutation sweep (pass 2, `scratchpad/lfdp2/sweep.py`)**: scratch copies only, 33 suites per entry, each mutant proved
+in its rebuilt bundle, the real tree's 68 source, test and check files sha256-identical before and after. **21 of 21
+KILLED**; the harness control C0 and the controls C1 (gull top speed 16 -> 17) and C2 (a board row a shade lighter)
+SURVIVED.
+
+| id | mutation | killed by |
+|---|---|---|
+| X1 | the city's weather removed | EnvConfig.spec, `_wings` |
+| X2 | the city's gulls back to pigeons | EnvConfig.spec, `_budget` |
+| X3 | emitters without a single colour never switch on (leaves, confetti) | `_wings` only: no earlier gate noticed a wing's weather missing |
+| X4 | the gull built as a "Pigeon" model | `_wings` |
+| X5 | the airport's weather = the city's leaves | EnvConfig.spec |
+| H1 | the HUD's wide-row hotbar rule off | `_hud_wings` (the hotbar on its own text rows; `_hud` sees Frames only) |
+| H2 | the same rule off in `Wings.client` only | `_hud_wings` (the title card on the HUD) |
+| H3 | the HUD's clock back to centred-or-second-row | `_hud_wings` |
+| H4 | the same in `Wings.client` only | `_hud_wings` |
+| B1 | every Perfect counted, ledger or not | `_board` |
+| B2 | keep-higher writes an equal count (a later reach replaces the first) | Board.spec |
+| B3 | the tie-break inverted (latest first) | Board.spec, `_board`, the walk |
+| B4 | friends cap 200 -> 1000 | Board.spec, `_board` (8 page advances for 450 friends, want 3) |
+| B5 | public cache 60 -> 5 s | Board.spec |
+| B6 | names not cached | `_board` (42 lookups, want 1) |
+| B7 | another player's board prompt not refused | `_board` |
+| B8 | the ledger's latency slack x100 | Ledger.spec, `_board` |
+| B9 | the board written at every save | `_board` (60 writes in 10 idle minutes, want 0) |
+| B10 | no note on an empty friends board | Board.spec, `_board` |
+| B11 | a failed friends fetch retried at once | `_board` |
+| B12 | friends' score reads not throttled | `_board` |
+
+H1 and H3 together are the source before this pass, and that fails `_hud` itself (the 120x38 overlap); alone, each
+is caught only by `_hud_wings`. The REVIEW-3 mutations L5 (no top-right pocket for the title card) and L6 (the
+panel's pocket ignores the HUD's not-saving line), re-run on this source: both now SURVIVE. They were killed on
+2026-09-30 because 568x320 used those pockets; since this pass no viewport of the 22 reaches them, so they are
+fallbacks for a screen shorter than any measured, unproven by any gate. Kept rather than deleted (they cost
+nothing and keep the wings off the HUD if such a screen exists); a later pass may delete them instead.
 
 ## Next
 1. **Open it in Studio** (00:00-06:00 window) and work the Needs Studio list, starting with 1, 3, 4, 5, 13,
-   then `EYECANDY.md` §8 and the thumbnail shots in §9 (build a fresh place: `LostFoundDepot.rbxlx` on disk
-   predates the wings).
+   then `EYECANDY.md` §8 (item 12: the BREAK sits and stays seated; 22, 23 new) and the thumbnail shots in §9
+   (build a fresh place: `LostFoundDepot.rbxlx` on disk predates the wings).
+1b. Pass 2 of the complete-game standard (2026-10-01, below) closed REVIEW-3's two open 568x320 items, gave every
+   wing its own weather and life, rewrote the store copy and wrote `MARKETING.md`. Still open: an independent
+   review of the highscore board (only its author's tests and this pass's mutation sweep have looked at it); the
+   film scenarios in `tools/film_game.py` (tools owner) for the eight clips in `MARKETING.md`.
 2. An independent review of pass 3 (the action bucket, the merge re-pricing, the per-shift salt and
    cart keys, the return-to-tray rule, the selection change) AND of the wings (`EYECANDY.md` §11-§12);
    only their authors' tests and sweeps have looked at them.

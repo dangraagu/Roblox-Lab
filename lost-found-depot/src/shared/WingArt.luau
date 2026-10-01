@@ -75,7 +75,53 @@ local function member(item, a, b, thick, color, props)
 	})
 end
 
-local function setWeight(item, w, folder)
+-- ─────────────────────────────────────────── the budget, IN CODE (REVIEW-3 finding 5)
+-- Config.Budget used to be measured by the checks only (a train wing with 40 pigeons built 228 parts against
+-- 220 and nothing refused). Now a LEDGER counts what every item holds while it is shown: its parts, lights,
+-- beams, trails and emitters, all of them, whether a weight has switched them on yet or not. Scenery and life
+-- are shown only while they fit under Config.Budget LESS a reserve kept for the hazard (Budget.HazardReserve:
+-- its model, lane and ring) and, for emitters, less the weather's own share (Budget.MaxWeatherEmitters); the
+-- hazard's items are `reserved`, counted apart (ledger.hazard) and always drawn (a hazard that could not be
+-- drawn must not fly; the reserve is its room). A piece that does not fit stays hidden and is tried again next
+-- frame; a critter that does not fit is let go. With this game's config the cap never binds (peak 151 of 220
+-- parts); check_lostfounddepot_budget loads an over-budget config and asserts every count on every frame.
+local LIMITS = { parts = "MaxLocalParts", lights = "MaxLights", beams = "MaxBeams", trails = "MaxTrails", emitters = "MaxEmitters",
+	rate = "MaxEmitterRate" }
+
+local function newLedger(budget)
+	return { budget = budget, used = { parts = 0, lights = 0, beams = 0, trails = 0, emitters = 0, rate = 0 },
+		hazard = { parts = 0, lights = 0, beams = 0, trails = 0, emitters = 0, rate = 0 } }
+end
+
+local function costOf(item)
+	local rate = 0
+	for _, pe in item.emitters do rate += pe.Rate end
+	return { parts = #item.entries, lights = #item.lights, beams = #item.beams, trails = #item.trails, emitters = #item.emitters, rate = rate }
+end
+
+-- Does `cost` fit beside what is shown, leaving the hazard's reserve (and the weather's emitters) free?
+local function fits(ledger, cost)
+	local b = ledger.budget
+	local reserve = b.HazardReserve or {}
+	for k, key in LIMITS do
+		local limit = (b[key] or math.huge) - (reserve[k] or 0)
+		if k == "emitters" then limit -= b.MaxWeatherEmitters or 0 end
+		if ledger.used[k] + (cost[k] or 0) > limit + 1e-9 then
+			return false
+		end
+	end
+	return true
+end
+
+local function charge(ledger, cost, sign, reserved)
+	local pool = if reserved then ledger.hazard else ledger.used
+	for k, v in cost do
+		pool[k] += sign * v
+	end
+end
+
+-- Returns whether the item is shown. With a ledger, an item that would break the budget stays hidden.
+local function setWeight(item, w, folder, ledger)
 	w = math.clamp(w, 0, 1)
 	item.weight = w
 	if w <= 0.01 then
@@ -89,10 +135,24 @@ local function setWeight(item, w, folder)
 			for _, l in item.lights do l.Enabled = false end
 			for _, pe in item.emitters do pe.Enabled = false end
 			item.shown = false
+			if item.cost and item.ledger then
+				charge(item.ledger, item.cost, -1, item.reserved)
+			end
+			item.cost, item.ledger = nil, nil
 		end
-		return
+		return false
 	end
 	if not item.shown then
+		if ledger then
+			local cost = costOf(item)
+			-- the hazard's own items are always drawn: their room is the reserve every other item leaves
+			if not item.reserved and not fits(ledger, cost) then
+				item.weight = 0
+				return false
+			end
+			charge(ledger, cost, 1, item.reserved)
+			item.cost, item.ledger = cost, ledger
+		end
 		for _, e in item.entries do
 			e.part.Parent = folder
 		end
@@ -121,6 +181,7 @@ local function setWeight(item, w, folder)
 	for _, t in item.trails do t.Enabled = w > 0.5 end
 	for _, l in item.lights do l.Enabled = w > 0.3 end
 	for _, pe in item.emitters do pe.Enabled = w > 0.3 end
+	return true
 end
 
 local function place(item, root)
@@ -560,6 +621,21 @@ CRITTERS.pigeon = function()
 	end
 	return it
 end
+-- the city's own bird (pass 2, 2026-10-01): white, long grey wings, a slow glide with an odd flap
+CRITTERS.gull = function()
+	local it = newItem("Gull")
+	addPart(it, { size = V(1.1, 1.0, 1.9), color = WHITE, shape = BALL })
+	addPart(it, { size = V(2.4, 0.12, 0.8), offset = CFrame.new(-1.3, 0.25, 0), color = { 175, 180, 190 }, role = "wingL" })
+	addPart(it, { size = V(2.4, 0.12, 0.8), offset = CFrame.new(1.3, 0.25, 0), color = { 175, 180, 190 }, role = "wingR" })
+	it.animate = function(item, cf, now)
+		local t = now * 3 + (item.phase or 0)
+		local flap = 0.12 + math.max(0, math.sin(t)) ^ 4 * 0.5
+		item.entries[1].part.CFrame = cf
+		item.entries[2].part.CFrame = cf * CFrame.new(-1.3, 0.25, 0) * CFrame.Angles(0, 0, -flap)
+		item.entries[3].part.CFrame = cf * CFrame.new(1.3, 0.25, 0) * CFrame.Angles(0, 0, flap)
+	end
+	return it
+end
 CRITTERS.airliner = function()
 	local it = newItem("Airliner")
 	addPart(it, { size = V(48, 6, 6), offset = CFrame.Angles(0, math.rad(90), 0), color = WHITE, shape = CYL })
@@ -608,6 +684,12 @@ end
 -- Emitters live on ONE invisible host over the player's bay. At most Budget.MaxWeatherEmitters are on,
 -- summed rate at most Budget.MaxEmitterRate (EnvBands.capRates, enforced in updateWeather).
 local WEATHER = {
+	-- CITY DEPOT: autumn leaves blowing in under the trusses, drifting sideways as they fall (pass 2)
+	leaves = { colors = { { 214, 120, 48 }, { 176, 88, 40 }, { 232, 172, 64 } }, size = { 0.45, 0.45 }, transparency = 0,
+		lifetime = { 7, 9 }, speed = { 0.5, 1.5 }, accel = { 1.2, -1.6, 0 }, light = 0, hostY = 26, hostH = 1, dir = "Bottom", spin = true },
+	-- AIRPORT: stray ticket stubs fluttering down from the glass roof (pass 2)
+	tickets = { color = { 245, 238, 215 }, size = { 0.3, 0.3 }, transparency = 0, lifetime = { 7, 9 }, speed = { 0.5, 1.5 },
+		accel = { 0, -1.2, 0 }, light = 0.1, hostY = 26, hostH = 1, dir = "Bottom", spin = true },
 	steam = { color = { 240, 240, 240 }, size = { 5, 10 }, transparency = 0.55, lifetime = { 4, 6 }, speed = { 2, 4 },
 		accel = { 0, 2.5, 0 }, light = 0, hostY = 30, hostH = 2, dir = "Top" },
 	confetti = { color = nil, size = { 0.35, 0.35 }, transparency = 0, lifetime = { 6, 8 }, speed = { 1, 3 },
@@ -727,6 +809,7 @@ function WingArt.new(folder, rand, Config, EnvBands)
 	self.items = {}
 	self.critters = {}
 	self.hazardModels = {}
+	self.ledger = newLedger(Config.Budget) -- what is shown, against Config.Budget (REVIEW-3 finding 5)
 	self.root = nil -- CFrame of the player's bay, set by setBay
 	return self
 end
@@ -755,7 +838,7 @@ function WingArt:updatePiece(id, w, now)
 	if w <= 0.01 and self.items[id] == nil then return end
 	local it = self:item(id)
 	if it == nil then return end
-	setWeight(it, w, self.folder)
+	setWeight(it, w, self.folder, self.ledger)
 	if it.shown and it.animate then
 		it.animate(it, self.root, now)
 	end
@@ -800,8 +883,11 @@ function WingArt:updateCritters(desired, cam, dt, now)
 					if c.leaving and c.w < 0.03 then
 						c.active = false
 						setWeight(c.item, 0, self.folder)
+					elseif not setWeight(c.item, c.w, self.folder, self.ledger) and c.w > 0.01 then
+						-- no room left in the budget: life gives way, never the wing (REVIEW-3 finding 5)
+						c.active = false
+						active -= 1
 					else
-						setWeight(c.item, c.w, self.folder)
 						local p = Vector3.new(c.pos.x, c.pos.y, c.pos.z)
 						local hv = Vector3.new(c.vel.x, 0, c.vel.z)
 						local look = if hv.Magnitude > 0.01 then p + hv else p + V(0, 0, -1)
@@ -850,7 +936,10 @@ function WingArt:updateWeather(rates)
 		self.emitters = {}
 	end
 	local budget = self.cfg.Budget
-	local capped = self.EnvBands.capRates(rates, math.min(budget.MaxWeatherEmitters, budget.MaxEmitters), budget.MaxEmitterRate, 0.05)
+	-- the weather's own share: its emitters, and whatever particles per second the shown pieces' emitters (the
+	-- loco's smoke) leave of the budget
+	local rateLeft = math.max(0, budget.MaxEmitterRate - self.ledger.used.rate)
+	local capped = self.EnvBands.capRates(rates, math.min(budget.MaxWeatherEmitters, budget.MaxEmitters), rateLeft, 0.05)
 	local on, hostY, hostH = nil, 20, 2
 	for kind, def in WEATHER do
 		local rate = capped[kind] or 0
@@ -858,7 +947,13 @@ function WingArt:updateWeather(rates)
 		if pe == nil and rate > 0.05 then
 			pe = Instance.new("ParticleEmitter")
 			pe.Name = "Weather_" .. kind
-			if def.color then
+			if def.colors then
+				local keys = {}
+				for i, c in def.colors do
+					table.insert(keys, ColorSequenceKeypoint.new((i - 1) / math.max(1, #def.colors - 1), rgb(c)))
+				end
+				pe.Color = ColorSequence.new(keys)
+			elseif def.color then
 				pe.Color = ColorSequence.new(rgb(def.color))
 			else
 				pe.Color = ColorSequence.new({
@@ -903,11 +998,15 @@ function WingArt:updateWeather(rates)
 			end
 		end
 	end
-	if on and self.root then
+	-- the host is one part in the budget like any other (REVIEW-3 finding 5)
+	local HOST = { parts = 1 }
+	if on and self.root and (self.weatherHost.Parent ~= nil or fits(self.ledger, HOST)) then
+		if self.weatherHost.Parent == nil then charge(self.ledger, HOST, 1) end
 		self.weatherHost.Size = V(70, hostH, 54)
 		self.weatherHost.CFrame = self.root * CFrame.new(0, hostY, -8)
 		self.weatherHost.Parent = self.folder
 	else
+		if self.weatherHost.Parent ~= nil then charge(self.ledger, HOST, -1) end
 		self.weatherHost.Parent = nil
 	end
 end
@@ -918,6 +1017,7 @@ function WingArt:hazardModel(kind)
 	local item = self.hazardModels[kind]
 	if item then return item end
 	item = newItem("Hazard_" .. kind)
+	item.reserved = true -- drawn inside Budget.HazardReserve, which every other item leaves free
 	local groundLift = HAZARDS[kind](item)
 	item.groundLift = groundLift -- nil: flies at the lane's height; a number: rests that far above the floor
 	local marker = Instance.new("BillboardGui")
@@ -958,6 +1058,7 @@ end
 function WingArt:laneItem()
 	if self.lane then return self.lane end
 	local it = newItem("HazardLane")
+	it.reserved = true
 	addPart(it, { name = "Lane", size = V(0.5, 0.1, 1), color = { 255, 210, 60 }, material = NEON, transparency = 0.35 })
 	self.lane = it
 	return it
@@ -966,6 +1067,7 @@ end
 function WingArt:ringItem()
 	if self.ring then return self.ring end
 	local it = newItem("HazardRing")
+	it.reserved = true
 	addPart(it, { name = "Ring", size = V(0.12, 4, 4), color = { 255, 210, 60 }, shape = CYL, material = NEON, transparency = 0.5 })
 	self.ring = it
 	return it
@@ -976,7 +1078,7 @@ end
 -- possible, which on a small floor can be a little after the hazard arrives. The lane goes at arrival.
 function WingArt:showHazard(plan, pos, now, zone, floorY, ringLive)
 	local item = self:hazardModel(plan.kind)
-	setWeight(item, 1, self.folder)
+	setWeight(item, 1, self.folder, self.ledger)
 	item.billboard.Enabled = not plan.locked or (math.floor(now * 6) % 2 == 0)
 	item.lights[1].Enabled = math.floor(now * 4) % 2 == 0
 	local p = Vector3.new(pos.x, pos.y, pos.z)
@@ -1001,7 +1103,7 @@ function WingArt:showHazard(plan, pos, now, zone, floorY, ringLive)
 	local colour = if plan.locked then Color3.fromRGB(255, 60, 60) else Color3.fromRGB(255, 210, 60)
 	local ring = self:ringItem()
 	if ringLive then
-		setWeight(ring, 1, self.folder)
+		setWeight(ring, 1, self.folder, self.ledger)
 		local ringE = ring.entries[1]
 		local d = 2 * zone.radius
 		ringE.part.Color = colour
@@ -1020,7 +1122,7 @@ function WingArt:showHazard(plan, pos, now, zone, floorY, ringLive)
 		setWeight(lane, 0, self.folder)
 		return
 	end
-	setWeight(lane, 1, self.folder)
+	setWeight(lane, 1, self.folder, self.ledger)
 	local laneE = lane.entries[1]
 	laneE.part.Color = colour
 	laneE.part.Size = V(0.5, 0.1, len)

@@ -5,8 +5,8 @@ a tray, each wearing a luggage tag, and six bins in an arc beyond it. Read the t
 the bin the tag names, press E. The tag's letter was drawn without looking at the item, so it
 disagrees with what the item looks like three times in four. Trust the tag, not the item.
 
-**Status, honestly:** v1 is built and passes every headless gate in this repo: 15 unit specs, a
-walk of the player's first two shifts, and 12 checks against the built world (counts in
+**Status, honestly:** v1 is built and passes every headless gate in this repo: 17 unit specs, a
+walk of the player's first two shifts, and 15 checks against the built world (counts in
 `CLAUDE.md` and `EYECANDY.md` §7). A first adversarial review (REVIEW-1) found real defects, and every one was fixed test
 first: saves lost or locked when the DataStore is slow, a tutorial hint that caused a misfile, a
 stuck camera, hidden toasts on a phone, a missing catalog, taps that picked the wrong item and boards
@@ -30,10 +30,23 @@ runaway (about one per shift) rolls across your sorting floor. It can only knock
 full second inside its red ring, and never sooner than 2 s after its warning appeared, walking or not: step
 out of the ring and it cannot touch you; if it does, you only stumble. A BREAK button lets you sit down
 between shifts; pressed mid-shift it books the break for the end of the shift, because the clock is the
-game. Built and tested headless, mutation-tested, and adversarially reviewed once: the review's six
+game. Built and tested headless, mutation-tested, and adversarially reviewed twice: the first review's six
 findings (a walker warned too late, a phone drawer hiding the warning, runaways rolling through the tray, a
 cosmetic error stranding a knocked player, the title card over the hotbar, an unpinned promise) are fixed
-test first (`EYECANDY.md` §13). **Not yet seen in Studio.**
+test first (`EYECANDY.md` §13), and so are the second's (the BREAK standing you back up on the sit's own
+drop, a phone drawer kept open as a hazard shield, the wing panel on the HUD on the smallest phones, a gate
+measured a step late, budgets that only a test enforced, an unpinned wake rule: §14, with the owner's
+decisions of 2026-09-30). **Not yet seen in Studio.**
+
+**The complete-game standard (2026-10-01, `docs/complete-game-standard.md`).** A public + friends **Top Sorters**
+board stands on the wall behind your spawn pad. It ranks Perfect Shifts that the server saw walked at the speed
+your shoes allow (a teleport or a speed hack is still a Perfect for you, but not on the board, and the summary card
+says so), earliest first on a tie, and a prompt switches it between everyone and your Roblox friends. Every wing now
+has weather and life of its own (the city got gulls and blowing leaves, the airport ticket stubs drifting from the
+glass roof). On the smallest phones (568x320) the clock stays in the top row and a full cart's hotbar takes one
+row, so the HUD no longer covers itself there. The store copy below covers the wings, and `MARKETING.md` has the clip
+list for the night shift. Unreviewed: the board's code was found in the tree with no notes and has been
+mutation-tested since, but no independent reviewer has read it.
 
 ---
 
@@ -69,7 +82,7 @@ test first (`EYECANDY.md` §13). **Not yet seen in Studio.**
 | 16 items, 3 rule layers, 12 memos | New items or rules per wing (the wings change the scenery, not the job) |
 | Six wings, rare client-side hazards, a BREAK (`EYECANDY.md`) | Custom meshes, textures or skyboxes (all built from parts) |
 | Cart and shoes upgrades | A scanner, overtime, 2x cash |
-| A personal best (fastest Perfect Shift) | Any leaderboard |
+| A personal best (fastest Perfect Shift), and a Top Sorters board (Perfect Shifts; everyone or friends) | A speed leaderboard (a script that reads tags beats a careful person; DESIGN.md §10.3) |
 | The Back Room ending | Audio, badges |
 | One launch code, `SORTED` (+250) | Anything sold for Robux |
 
@@ -84,8 +97,15 @@ prompt text or remote payload carries it. The upcoming items come from server ke
 touches, and each shift's salt is drawn fresh, so what a client can see of one shift predicts neither
 the rest of its cart nor the next shift. The Back Room note and the code table live in
 `src/server/Secret.luau`, which never replicates. What a client *can* do is run the public manual
-against the public tag with a script; with no leaderboard, trading or shared state that only speeds
-up its own progress (DESIGN.md §10.3).
+against the public tag with a script. With no trading or shared state, that only speeds up its own
+progress (DESIGN.md §10.3), with one exception: the Top Sorters board. It ranks a count of Perfect Shifts,
+not a time, and a shift counts only when the server's travel ledger (`Ledger.luau`) found every pick and
+deposit reachable at the player's own walk speed (25% tolerance, 2 studs and 1.5 s of slack). So a script
+gets no more Perfect Shifts per hour than walking allows: measured headless, a walker with zero reading time
+and the best cart and shoes needs 33 s for one, where the design model's regular player spends about 134 s a shift
+late in the career (shifts 14-40) (`CLAUDE.md`, "The highscore board"). So a script earns them about four times as fast
+as a regular, and one that plays for hours out-counts a person who plays for less; the board says what it
+ranks, and nothing on it can be had without doing the walking.
 
 ## Layout
 
@@ -104,6 +124,8 @@ src/shared/EnvBands.luau  Hazards.luau  Rest.luau              the environment t
 src/shared/Wings.luau       the wings' pure rules: career progress, lanes on a walled floor, the ring, the BREAK
 src/shared/WingArt.luau     every wing's scenery, critters, weather and hazard models (client only, no assets)
 src/shared/StateCache.luau  the HUD hands each State payload to the wings (one listener on the remote)
+src/shared/Board.luau       the Top Sorters board's pure rules: encode, keep-higher, public/friends views, caches
+src/shared/Ledger.luau      the server's travel ledger: was each Perfect Shift walkable at the player's speed
 src/server/Main.server.luau world, bays, spawn, shift loop, handlers, persistence
 src/server/Secret.luau      the Back Room note and the code table (server only)
 src/client/Hud.client.luau  the phone-first HUD
@@ -117,40 +139,51 @@ design/model.luau           the design-time model (not shipped)
 ../robloxemu/check_lostfounddepot_save.luau     saving and locking with a DataStore that takes time
 ../robloxemu/check_lostfounddepot_hudflow.luau  tutorial hints, toasts and the camera, on a phone
 ../robloxemu/check_lostfounddepot_view.luau     what a tap hits and what a player can see
-../robloxemu/check_lostfounddepot_hud.luau      every HUD panel across six viewports
+../robloxemu/check_lostfounddepot_hud.luau      every HUD panel in six modes on twelve viewports (overlap rule on)
 ../robloxemu/check_lostfounddepot_rng.luau      what a client can predict from what it can see
 ../robloxemu/check_lostfounddepot_firstmin.luau a new player's first minute, and what pressing E drops
 ../robloxemu/check_lostfounddepot_wings.luau    the wings, hazards and the break through the real client
 ../robloxemu/check_lostfounddepot_wingview.luau taps and sightlines unchanged with every wing built
 ../robloxemu/check_lostfounddepot_hud_wings.luau the HUD and the wings' panel together on every viewport
+../robloxemu/check_lostfounddepot_sitdrop.luau  the BREAK survives the sit's own drop (a Studio trace replayed)
+../robloxemu/check_lostfounddepot_budget.luau   the phone budget holds in code under an over-budget config
+../robloxemu/check_lostfounddepot_board.luau    the Top Sorters board through the real server: walked counts, teleported does not
 ../robloxemu/check_lostfounddepot_compile.luau  every source compiles; no require by string
+
+MARKETING.md                the clip list for tools/film_game.py (vertical 1080x1920, 7-15 s)
+EYECANDY.md                 the wings; §8 needs Studio, §9 the thumbnail shot list (1920x1080)
 ```
 
 How to run every gate is in `CLAUDE.md`.
 
 ## Proposed store copy
 
-873 characters, measured; no emoji. It drops the three lines of the original brief that v1 cannot
-honour (co-op with friends, weekly new wings, a procedurally generated depot every shift).
+940 characters, measured (Roblox allows 1000); no emoji, and no character outside ASCII but the `·` of the tag.
+Rewritten on 2026-10-01 for the wings, the hazards, the BREAK and the board (the 2026-09-17 copy, 873 characters,
+predated them). It still drops the three lines of the original brief that v1 cannot honour (co-op with friends,
+weekly new wings, a procedurally generated depot every shift), and it names no minutes: the 35 minutes to the
+space station are a model's, not telemetry.
 
 ```
-Welcome to the Lost & Found Depot. You have your own sorting bay, a tray of lost things, and six bins.
+Welcome to the Lost & Found Depot. You get your own sorting bay, a tray of lost things and six bins.
 
 Every item wears a tag like T · 3 · RED. The tag was written without looking at the item, so a teddy bear can be tagged for ELECTRONICS. Trust the tag, not the item.
 
-Read the tag against the Depot Manual. RED route goes to CLAIMS, condition 5 goes to REPAIR, and otherwise the letter picks the bin. Pick up an item, walk it to the right bin and drop it in.
+Read the tag against the Depot Manual, walk the item to the right bin and drop it in.
 
-- 30 items against a 5:30 clock that starts at your first pickup
-- A wrong bin costs 8 seconds and resets your combo
-- Torn tags from your second shift, and from your third a memo that bends one rule
-- New items, new tags and reshuffled bins every shift
-- Earn cash to buy a bigger cart and faster shoes
-- Clear the depot's 500-item backlog to open the Back Room
+- 30 items against a 5:30 clock. A wrong bin costs 8 seconds
+- Torn tags from your second shift, then a memo that bends one rule
+- Earn cash for a bigger cart and faster shoes
+- Your career takes the depot through six wings: city, airport, train station, theme park, a space station and beyond the galaxy
+- Rare runaway trolleys, beach balls and space rocks: step out of the red ring
+- Take a break between shifts
+- A Top Sorters board of Perfect Shifts: everyone, or just your friends
+- Clear the 500-item backlog to open the Back Room
 
 Nothing in the game costs Robux.
 
 Code: SORTED
 ```
 
-One thing to decide before using it: whether to print the launch code in the description. Codes
-are usually published this way, and the table is server-only so *unreleased* codes stay secret.
+Whether to print the launch code in the description: DECIDED 2026-09-30 (owner: take recommended): print it.
+Codes are usually published this way, and the table is server-only so *unreleased* codes stay secret.

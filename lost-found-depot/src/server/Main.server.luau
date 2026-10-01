@@ -41,6 +41,8 @@ local Shift = require(ReplicatedStorage:WaitForChild("Shift"))
 local Economy = require(ReplicatedStorage:WaitForChild("Economy"))
 local Codes = require(ReplicatedStorage:WaitForChild("Codes"))
 local Layout = require(ReplicatedStorage:WaitForChild("Layout"))
+local Board = require(ReplicatedStorage:WaitForChild("Board"))
+local Ledger = require(ReplicatedStorage:WaitForChild("Ledger"))
 -- Server-only: the Back Room note and the code table. ServerScriptService never replicates.
 local Secret = require(ServerScriptService:WaitForChild("Secret"))
 
@@ -51,6 +53,7 @@ local C = Config.Colors
 local S = Config.Shift
 local B = Config.Bay
 local BIN_NAMES = Config.Rules.BinNames
+local BC = Config.Board
 
 -- ONE clock for the shift timer. os.clock() is CPU time in Roblox and barely moves on a quiet
 -- server; GetServerTimeNow is the wall clock, tick() the fallback (and the clock robloxemu
@@ -165,6 +168,9 @@ type Session = {
 	-- The action bucket (Config.Remotes.ActionBurst / ActionsPerSecond) and when it last refilled.
 	actionTokens: number,
 	actionAt: number,
+	-- The highscore board: the count this session last saw land in the board store (0 until the first
+	-- write; a write that keepHigher aborts is one UpdateAsync per session).
+	boardWritten: number,
 }
 
 local sessions: { [Player]: Session } = {}
@@ -180,6 +186,20 @@ if Config.Save.Enabled then
 		store = ds
 	else
 		warn("[Depot] datastore unavailable (" .. tostring(ds) .. ") - the game runs, progress will NOT be saved.")
+	end
+end
+
+-- The highscore board's own OrderedDataStore (Config.Board.Store; docs/complete-game-standard.md §3).
+-- Unavailable in an unpublished place, like the profile store: the board then says it is offline.
+local boardStore = nil
+if Config.Save.Enabled then
+	local ok, ds = pcall(function()
+		return DataStoreService:GetOrderedDataStore(BC.Store)
+	end)
+	if ok then
+		boardStore = ds
+	else
+		warn("[Depot] board store unavailable (" .. tostring(ds) .. ") - the highscore board is offline.")
 	end
 end
 
@@ -207,6 +227,8 @@ local function snapshot(p: any)
 		bestPerfectSeconds = p.bestPerfectSeconds,
 		endingSeen = p.endingSeen,
 		redeemed = table.clone(p.redeemed),
+		boardPerfects = p.boardPerfects,
+		boardAt = p.boardAt,
 	}
 end
 
@@ -254,6 +276,35 @@ end
 
 local pushState -- forward
 local applyWalkSpeed -- forward
+
+-- THE HIGHSCORE BOARD'S WRITE (docs/complete-game-standard.md §3). The stored value is
+-- Board.encode(count, reachedAt): a higher count always ranks higher, and on the same count whoever reached
+-- it FIRST ranks higher. Written only after a profile save LANDED (commit's "wrote"), so the board never
+-- shows a count the profile does not hold; only when the count has risen past what this session last saw
+-- written; through UpdateAsync + Board.keepHigher, which never lowers what is stored and aborts rather than
+-- rewrite it. A write that fails is tried again at the next save (boardWritten does not move).
+local function writeBoard(session: Session)
+	local p = session.profile
+	if boardStore == nil or p == nil then
+		return
+	end
+	local n = p.boardPerfects
+	if n <= 0 or n <= session.boardWritten then
+		return
+	end
+	-- boardAt is 0 only on a record that predates it (none shipped); never claim an earlier reach than now
+	local value = Board.encode(n, if p.boardAt > 0 then p.boardAt else os.time(), BC)
+	local ok, err = pcall(function()
+		boardStore:UpdateAsync(Board.key(session.userId), function(old)
+			return Board.keepHigher(old, value)
+		end)
+	end)
+	if ok then
+		session.boardWritten = n -- also when keepHigher aborted: what is stored is at least as high
+	else
+		warn("[Depot] board write failed for " .. session.player.Name .. ": " .. tostring(err))
+	end
+end
 
 -- THE ONE WRITE PATH. Every save — autosave, shift end, the ending, the leave, BindToClose — comes
 -- through here, and it decides INSIDE the transform, against the record it is about to overwrite:
@@ -369,6 +420,7 @@ local function commit(session: Session, release: boolean): string
 			pushState(plr)
 		end
 	end
+	writeBoard(session)
 	return "wrote"
 end
 
@@ -635,7 +687,7 @@ type Bay = { [string]: any }
 local bays: { Bay } = {}
 
 -- Forward-declared handlers, wired to each bay's prompts at build time.
-local onPick, onDrop, onPutBack, onBuy, onDoor
+local onPick, onDrop, onPutBack, onBuy, onDoor, onBoard
 
 local function buildBay(k: number): Bay
 	local ox = Layout.bayOriginX(Config, k)
@@ -814,6 +866,51 @@ local function buildBay(k: number): Bay
 	bay.backlogLabel = backlogLabel
 	local _, nameSign = board(folder, "NameSign", V(14, 2.5, 0.4), at(0, 12, B.MaxZ - 0.2), Enum.NormalId.Front, "")
 	bay.nameLabel = nameSign
+
+	-- THE HIGHSCORE BOARD (docs/complete-game-standard.md §3): on the wall behind the spawn pad, left of it
+	-- as the locker is right of it, facing into the bay. One-sided like every board here (board()); its rows
+	-- are drawn by the server for the bay's owner. The prompt switches it between everyone and the owner's
+	-- Roblox friends; it is out of reach from the pad centre, so it never shows over the first tap.
+	do
+		local c, sz = BC.Centre, BC.Size
+		local lbPart, back = board(folder, "Leaderboard", V(sz[1], sz[2], sz[3]), at(c[1], c[2], c[3]),
+			Enum.NormalId.Front, "")
+		back.Parent.Name = "BoardGui"
+		back.Name = "Background"
+		back.BackgroundColor3 = Color3.fromRGB(26, 30, 42)
+		local function line(name: string, y: number, h: number, font: Enum.Font, color: Color3): TextLabel
+			local l = Instance.new("TextLabel")
+			l.Name = name
+			l.BackgroundTransparency = 1
+			l.Position = UDim2.fromScale(0.05, y)
+			l.Size = UDim2.fromScale(0.9, h)
+			l.Font = font
+			l.TextScaled = true
+			l.TextXAlignment = Enum.TextXAlignment.Left
+			l.TextColor3 = color
+			l.Text = ""
+			l.Parent = back
+			return l
+		end
+		local title = line("Title", 0.03, 0.11, Enum.Font.GothamBlack, Color3.fromRGB(255, 214, 110))
+		title.Text = BC.Text.Title
+		title.TextXAlignment = Enum.TextXAlignment.Center
+		local mode = line("Mode", 0.145, 0.06, Enum.Font.GothamMedium, Color3.fromRGB(170, 200, 230))
+		mode.TextXAlignment = Enum.TextXAlignment.Center
+		local rows = {}
+		for i = 1, BC.PublicRows do
+			rows[i] = line("Row" .. i, 0.22 + (i - 1) * 0.065, 0.058, Enum.Font.GothamMedium, Color3.fromRGB(225, 232, 245))
+		end
+		local note = line("Note", 0.885, 0.09, Enum.Font.Gotham, Color3.fromRGB(190, 205, 225))
+		note.TextXAlignment = Enum.TextXAlignment.Center
+		note.TextWrapped = true
+		local pp = prompt(lbPart, "BoardPrompt", BC.Text.ShowFriends, BC.Text.Object, Enum.KeyCode.E, BC.PromptDistance)
+		bay.board = { part = lbPart, title = title, mode = mode, rows = rows, note = note, prompt = pp,
+			view = "public", job = nil }
+		pp.Triggered:Connect(function(plr)
+			onBoard(bay, plr)
+		end)
+	end
 
 	-- warehouse air
 	Fx.dustVolume(folder, V(B.MaxX - B.MinX - 2, 14, B.MaxZ - B.MinZ - 2), at(0, 7, sideMid),
@@ -1284,6 +1381,8 @@ local function arm(bay: Bay)
 	bay.manualLabel.Text = table.concat(Rules.manualLines(Config, stage, sh.memo), "\n")
 	updateBacklogSign(bay, p)
 	bay.run = Economy.newRun()
+	-- the travel ledger for this shift (Ledger.luau): it decides whether a Perfect counts on the board
+	bay.ledger = Ledger.new()
 	bay.endsAt = 0
 	bay.startedAt = 0
 	bay.summary = nil
@@ -1305,11 +1404,20 @@ local function endShift(bay: Bay, timedOut: boolean)
 	local perfect = Economy.isPerfect(Config, run.sorted, S.Items, run.misfiles, timedOut)
 	local seconds = math.floor(math.max(0, clock() - bay.startedAt))
 	local bonus = 0
+	local counted = nil
 	if perfect then
 		bonus = Config.Economy.PerfectBonus
 		p.cash += bonus
 		p.perfects += 1
 		p.bestPerfectSeconds = Economy.betterBest(p.bestPerfectSeconds, seconds)
+		-- THE HIGHSCORE BOARD counts it only when the travel ledger held: nothing in the shift was reached
+		-- faster than the player's shoes allow (Ledger.luau). Everything above stands either way; the
+		-- summary card says which it was, so a player is never left wondering why the board did not move.
+		counted = bay.ledger ~= nil and Ledger.verified(bay.ledger)
+		if counted then
+			p.boardPerfects += 1
+			p.boardAt = os.time()
+		end
 	end
 	-- A timed-out shift counts too, so a struggling player still unlocks stages (DESIGN.md §5).
 	p.shifts += 1
@@ -1324,6 +1432,9 @@ local function endShift(bay: Bay, timedOut: boolean)
 		backlogGained = run.firstTry,
 		seconds = seconds,
 		best = p.bestPerfectSeconds,
+		-- the board (nil when the shift was not Perfect): whether this one counted, and the count now
+		counted = counted,
+		boardPerfects = if perfect then p.boardPerfects else nil,
 	}
 	bay.state = "SUMMARY"
 	bay.generation += 1
@@ -1397,6 +1508,18 @@ local function admit(bay: Bay, plr: Player, target: Vector3, reach: number, tooF
 	return session
 end
 
+-- The travel ledger's step for an accepted pick, deposit or put-back (Ledger.luau): where the server sees
+-- the root part now, and the walk speed the player's shoes give. No yield; refuses nothing.
+local function ledgerStep(bay: Bay, plr: Player, session: Session)
+	local char = plr.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if bay.ledger == nil or hrp == nil then
+		return
+	end
+	local pos = (hrp :: BasePart).Position
+	Ledger.step(bay.ledger, clock(), pos.X, pos.Z, Economy.walkSpeed(Config, session.profile.shoesLevel), Config.Ledger)
+end
+
 -- One token per accepted state change (Config.Remotes.ActionBurst / ActionsPerSecond). Checked AFTER
 -- every other refusal, immediately before the state change, so a refused event spends nothing and
 -- the "no yield between check and change" rule still holds. -> true when the action may go ahead;
@@ -1444,6 +1567,7 @@ onPick = function(bay: Bay, slot: number, plr: Player)
 	if not spendAction(session) then
 		return
 	end
+	ledgerStep(bay, plr, session)
 	-- the state change, in single assignments
 	clearSlot(bay, slot)
 	bay.lastPick = { slot = slot, by = plr, at = clock() }
@@ -1483,6 +1607,7 @@ onDrop = function(bay: Bay, arc: number, plr: Player)
 	if not spendAction(session) then
 		return
 	end
+	ledgerStep(bay, plr, session)
 	local p = session.profile
 	local idx = math.clamp(bay.selected, 1, #bay.carried)
 	local n = table.remove(bay.carried, idx)
@@ -1549,6 +1674,7 @@ onPutBack = function(bay: Bay, plr: Player)
 	if not spendAction(session) then
 		return
 	end
+	ledgerStep(bay, plr, session)
 	local n = table.remove(bay.carried, math.clamp(bay.selected, 1, #bay.carried))
 	placeInTray(bay, n)
 	bay.selected = 1
@@ -1657,6 +1783,275 @@ onDoor = function(bay: Bay, plr: Player)
 	end
 end
 
+--============================================================================== the highscore board
+
+-- docs/complete-game-standard.md §3. One physical board per bay (buildBay), drawn by the server for the
+-- bay's owner. Its prompt switches it between everyone (the store's top 10, read at most once per
+-- Config.Board.PublicCacheSeconds for the whole server) and the owner's Roblox friends (fetched only when
+-- asked, capped, cached, every call pcall'd, the score reads throttled by one token bucket for the whole
+-- server). Names: resolved here, cached for the life of the server, never saved anywhere. The metric is
+-- profile.boardPerfects (endShift, Ledger.luau); nothing a client sends reaches it.
+local names: { [number]: string } = {}
+local publicSorted: { any }? = nil -- the last GetSortedAsync page: { { userId, value } }, nil before the first read
+local scoreCache = Board.newCache(BC.ScoreCacheSeconds) -- [userId] = a friend's stored value (0 = none)
+local friendsCache = Board.newCache(BC.FriendsCacheSeconds) -- [userId] = { ids = { number } }
+local friendsFailed = Board.newCache(BC.FriendsRetrySeconds) -- [userId] = true: a fetch failed, wait
+local readLimiter = Board.newLimiter(BC.ReadsBurst, BC.ReadsPerSecond, tick())
+
+local function nameOf(uid: number): string
+	local n = names[uid]
+	if n then
+		return n
+	end
+	local online = Players:GetPlayerByUserId(uid)
+	if online then
+		names[uid] = online.Name
+		return online.Name
+	end
+	local ok, res = pcall(function()
+		return Players:GetNameFromUserIdAsync(uid)
+	end)
+	if ok and type(res) == "string" then
+		names[uid] = res
+		return res
+	end
+	return "Sorter " .. tostring(uid) -- not cached: the next refresh tries again
+end
+
+-- A player on this server is ranked by their live count, never by a store read.
+local function liveValue(plr: Player): number
+	local session = sessions[plr]
+	local p = session and session.loaded and session.profile
+	if not p or p.boardPerfects <= 0 then
+		return 0
+	end
+	return Board.encode(p.boardPerfects, if p.boardAt > 0 then p.boardAt else os.time(), BC)
+end
+
+local function drawRows(bay: Bay, view: any, you: number?)
+	local b = bay.board
+	for i, label in b.rows do
+		local r = view and view.rows[i]
+		if r then
+			local mark = if r.you or r.userId == you then "  (you)" else ""
+			label.Text = string.format("%d.  %s%s  \u{2014}  %d", r.rank, nameOf(r.userId), mark, r.metric)
+			label.TextColor3 = if r.userId == you then Color3.fromRGB(255, 214, 110) else Color3.fromRGB(225, 232, 245)
+		else
+			label.Text = ""
+		end
+	end
+	b.note.Text = (view and view.note) or ""
+end
+
+-- A board with no owner is blank, offers the friends view, and forgets any friends fetch in flight.
+local function resetBoard(bay: Bay)
+	local b = bay.board
+	if not b then
+		return
+	end
+	b.view = "public"
+	b.job = nil
+	b.prompt.ActionText = BC.Text.ShowFriends
+	b.mode.Text = ""
+	drawRows(bay, nil, nil)
+end
+
+local function drawPublic(bay: Bay)
+	local b = bay.board
+	local owner = bay.owner
+	if not b or owner == nil or b.view ~= "public" then
+		return
+	end
+	b.mode.Text = BC.Text.Everyone .. "  \u{00B7}  " .. BC.Text.Subtitle
+	if boardStore == nil then
+		drawRows(bay, { rows = {}, note = BC.Text.Offline }, nil)
+	elseif publicSorted == nil then
+		drawRows(bay, { rows = {}, note = BC.Text.Loading }, nil)
+	else
+		drawRows(bay, Board.publicView(publicSorted, BC), owner.UserId)
+	end
+end
+
+-- One GetSortedAsync for the whole server (the loop at the bottom). A failed read keeps the rows the
+-- boards already show.
+local function refreshPublic()
+	if boardStore == nil then
+		return
+	end
+	local ok, page = pcall(function()
+		return boardStore:GetSortedAsync(false, BC.PublicRows)
+	end)
+	if not ok or not page then
+		return
+	end
+	local okp, entries = pcall(function()
+		return page:GetCurrentPage()
+	end)
+	if not okp or type(entries) ~= "table" then
+		return
+	end
+	local sorted = {}
+	for _, e in entries do
+		local uid = Board.userIdOf(tostring(e.key))
+		if uid and type(e.value) == "number" then
+			table.insert(sorted, { userId = uid, value = e.value })
+		end
+	end
+	publicSorted = sorted
+	for _, bay in bays do
+		drawPublic(bay)
+	end
+end
+
+-- The owner's friends list: pages of GetFriendsAsync until FriendsCap, names kept from the pages.
+local function fetchFriends(uid: number): any
+	local ok, pages = pcall(function()
+		return Players:GetFriendsAsync(uid)
+	end)
+	if not ok or pages == nil then
+		return nil
+	end
+	local ids = {}
+	while #ids < BC.FriendsCap do
+		local okp, page = pcall(function()
+			return pages:GetCurrentPage()
+		end)
+		if not okp or type(page) ~= "table" then
+			if #ids == 0 then
+				return nil
+			end
+			break
+		end
+		for _, f in page do
+			if #ids >= BC.FriendsCap then
+				break
+			end
+			local id = tonumber(f.Id)
+			if id then
+				table.insert(ids, id)
+				if type(f.Username) == "string" then
+					names[id] = f.Username
+				end
+			end
+		end
+		if pages.IsFinished or #ids >= BC.FriendsCap then
+			break
+		end
+		local oka = pcall(function()
+			pages:AdvanceToNextPageAsync()
+		end)
+		if not oka then
+			break
+		end
+	end
+	return { ids = ids }
+end
+
+local function readBudgetLow(): boolean
+	local ok, n = pcall(function()
+		return DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetAsync)
+	end)
+	return ok and type(n) == "number" and n < BC.BudgetReserve
+end
+
+-- One friend's stored value: live if they are on this server, else cached, else ONE throttled store read.
+local function friendValue(fid: number): number
+	local fp = Players:GetPlayerByUserId(fid)
+	if fp and sessions[fp] and sessions[fp].loaded then
+		return liveValue(fp)
+	end
+	local cached = Board.cacheGet(scoreCache, fid, tick())
+	if cached ~= nil then
+		return cached
+	end
+	if boardStore == nil then
+		return 0
+	end
+	while not Board.take(readLimiter, tick()) or readBudgetLow() do
+		task.wait(1 / BC.ReadsPerSecond)
+	end
+	local ok, v = pcall(function()
+		return boardStore:GetAsync(Board.key(fid))
+	end)
+	local value = if ok and type(v) == "number" then v else 0
+	if ok then
+		Board.cachePut(scoreCache, fid, value, tick())
+	end
+	return value
+end
+
+local function drawFriends(bay: Bay)
+	local b = bay.board
+	local owner = bay.owner
+	if not b or owner == nil or b.view ~= "friends" then
+		return
+	end
+	local job = {}
+	b.job = job
+	b.mode.Text = BC.Text.Friends .. "  \u{00B7}  " .. BC.Text.Subtitle
+	drawRows(bay, { rows = {}, note = BC.Text.Loading }, nil)
+	local uid = owner.UserId
+	local list = Board.cacheGet(friendsCache, uid, tick())
+	local failedFetch = false
+	if list == nil then
+		if Board.cacheHas(friendsFailed, uid, tick()) then
+			failedFetch = true
+		else
+			list = fetchFriends(uid) -- yields
+			if list then
+				Board.cachePut(friendsCache, uid, list, tick())
+			else
+				failedFetch = true
+				Board.cachePut(friendsFailed, uid, true, tick())
+			end
+		end
+	end
+	local function current(): boolean
+		return bay.owner == owner and b.view == "friends" and b.job == job
+	end
+	if not current() then
+		return
+	end
+	local ids = if list then list.ids else {}
+	local values = { [uid] = liveValue(owner) }
+	local checked = 0
+	local function draw()
+		drawRows(bay, Board.friendsView(uid, values, { friendCount = #ids, checked = checked, failed = failedFetch }, BC), uid)
+	end
+	draw()
+	for _, fid in ids do
+		local v = friendValue(fid) -- may wait on the read limiter
+		if not current() then
+			return
+		end
+		values[fid] = v
+		checked += 1
+		if checked % 10 == 0 or checked == #ids then
+			draw()
+		end
+	end
+end
+
+-- The prompt: the owner switches the view; anyone else is told why nothing happened.
+onBoard = function(bay: Bay, plr: Player)
+	local b = bay.board
+	if not b then
+		return
+	end
+	if bay.owner ~= plr then
+		notice(plr, "refused", BC.Text.NotYours)
+		return
+	end
+	b.view = if b.view == "public" then "friends" else "public"
+	b.job = nil
+	b.prompt.ActionText = if b.view == "public" then BC.Text.ShowFriends else BC.Text.ShowEveryone
+	if b.view == "public" then
+		drawPublic(bay)
+	else
+		task.spawn(drawFriends, bay)
+	end
+end
+
 --============================================================================== players
 
 local function claimBay(): number?
@@ -1698,6 +2093,8 @@ local function freeBay(bay: Bay)
 	if props then
 		props:Destroy()
 	end
+	bay.ledger = nil
+	resetBoard(bay)
 	updatePrompts(bay)
 end
 
@@ -1783,6 +2180,7 @@ local function onPlayerAdded(plr: Player)
 		selectPushPending = false,
 		actionTokens = Config.Remotes.ActionBurst,
 		actionAt = clock(),
+		boardWritten = 0,
 	}
 	sessions[plr] = session
 	local bay = idx and bays[idx]
@@ -1836,6 +2234,7 @@ local function onPlayerAdded(plr: Player)
 	end
 	applyWalkSpeed(plr)
 	arm(bay)
+	drawPublic(bay)
 end
 
 local function onPlayerRemoving(plr: Player)
@@ -2018,6 +2417,18 @@ task.spawn(function()
 				task.spawn(commit, session, false)
 			end
 		end
+	end
+end)
+
+-- The highscore board's public top 10: ONE GetSortedAsync for the whole server, at most once per
+-- Config.Board.PublicCacheSeconds, drawn on every owned bay's board that shows everyone.
+task.spawn(function()
+	while true do
+		local ok, err = pcall(refreshPublic)
+		if not ok then
+			warn("[Depot] board refresh failed: " .. tostring(err))
+		end
+		task.wait(BC.PublicCacheSeconds)
 	end
 end)
 

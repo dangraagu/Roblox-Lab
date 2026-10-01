@@ -834,8 +834,8 @@ local function measure(label)
 				lowestOverhead = math.min(lowestOverhead, low)
 				if low < Config.Env.OverheadFade.Gone - 1e-3 then lowOverhead += 1 end
 			end
-			if (d.Name == "Pigeon" or d.Name == "Balloon" or d.Name == "Satellite" or d.Name == "Astronaut" or d.Name == "Comet"
-				or d.Name == "Airliner") and inRect and p.Y < 18 then
+			if (d.Name == "Pigeon" or d.Name == "Gull" or d.Name == "Balloon" or d.Name == "Satellite" or d.Name == "Astronaut"
+				or d.Name == "Comet" or d.Name == "Airliner") and inRect and p.Y < 18 then
 				critterInBay += 1
 			end
 		elseif cls == "ParticleEmitter" and d.Enabled then
@@ -888,6 +888,20 @@ for i, b in bands do
 	table.insert(rows, string.format("  %-30s %5d  %8d (%4.1f)  %5d  %6d  %6d", b.name, m.parts, m.emitters, m.rate, m.beams, m.trails, m.lights))
 	eq(wingName.Text, b.name, "at " .. b.from .. " shifts the panel names " .. b.name)
 	near(Lighting.ClockTime, b.lighting.ClockTime, 0.05, b.name .. " lighting settles on its own ClockTime")
+	-- the wing's OWN weather and life, drawn by the real client (docs/complete-game-standard.md §2: each band has
+	-- its own critters and weather; pass 2, 2026-10-01: the city and the airport had no weather, and the city's
+	-- only life was the train station's pigeons)
+	local wx = b.weather and folder:FindFirstChild("Weather_" .. b.weather.kind, true)
+	truthy(wx ~= nil and wx.Enabled and wx.Rate > 0 and wx.Parent ~= nil and wx.Parent.Parent == folder, string.format(
+		"%s: its own weather is on (%s, rate %s)", b.name, tostring(b.weather and b.weather.kind), tostring(wx and wx.Rate)))
+	for _, a in b.ambient or {} do
+		local model = string.upper(string.sub(a.kind, 1, 1)) .. string.sub(a.kind, 2)
+		local seen = 0
+		for _, d in folder:GetDescendants() do
+			if d:IsA("BasePart") and d.Name == model and d.Transparency < 0.99 then seen += 1 end
+		end
+		truthy(seen > 0, string.format("%s: its %s fly (%d %s parts shown)", b.name, a.kind, seen, model))
+	end
 	if i < #bands then
 		local nb = bands[i + 1]
 		local seamShifts = nb.from - 1
@@ -1054,30 +1068,8 @@ do
 		local si, stayLeft = 1, nil
 		local active, warnAt, redAt, enteredAt, wasPS, wasIn = false, nil, nil, nil, false, false
 		frameHook = function(dt)
-			-- the walk (the check moves the character; there is no physics)
-			local goal = stops[si]
-			if stayLeft then
-				stayLeft -= dt
-				hum.MoveDirection = Vector3.new(0, 0, 0)
-				if goal.face then camLook = goal.face end
-				if stayLeft <= 0 then
-					stayLeft = nil
-					si = si % #stops + 1
-				end
-			else
-				local dx, dz = goal.x - pos.x, goal.z - pos.z
-				local d = math.sqrt(dx * dx + dz * dz)
-				if d < 0.3 then
-					stayLeft = goal.stay
-				else
-					local step = math.min(d, SPEED * dt)
-					pos = { x = pos.x + dx / d * step, z = pos.z + dz / d * step }
-					camLook = Vector3.new(dx / d, 0, dz / d)
-					hum.MoveDirection = camLook
-				end
-			end
-			hrp.CFrame = CFrame.new(W(pos.x, 3, pos.z))
-			-- what the player was shown
+			-- what the player was shown, measured FIRST, at the position the client just tested (REVIEW-3 finding 4:
+			-- measured after this hook's own step, a knock at 3.0 studs from a 3.4-stud ring read as 3.6, outside)
 			local hz = hazardPart() ~= nil
 			if hz and not active then
 				totals.hazards += 1
@@ -1105,6 +1097,30 @@ do
 				hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0) -- no physics: the stumble is observed, not simulated
 			end
 			wasPS = hum.PlatformStand
+			-- then the walk (the check moves the character; there is no physics): the client tests next frame's
+			-- hit at the position set here
+			local goal = stops[si]
+			if stayLeft then
+				stayLeft -= dt
+				hum.MoveDirection = Vector3.new(0, 0, 0)
+				if goal.face then camLook = goal.face end
+				if stayLeft <= 0 then
+					stayLeft = nil
+					si = si % #stops + 1
+				end
+			else
+				local dx, dz = goal.x - pos.x, goal.z - pos.z
+				local d = math.sqrt(dx * dx + dz * dz)
+				if d < 0.3 then
+					stayLeft = goal.stay
+				else
+					local step = math.min(d, SPEED * dt)
+					pos = { x = pos.x + dx / d * step, z = pos.z + dz / d * step }
+					camLook = Vector3.new(dx / d, 0, dz / d)
+					hum.MoveDirection = camLook
+				end
+			end
+			hrp.CFrame = CFrame.new(W(pos.x, 3, pos.z))
 		end
 		run(150)
 		frameHook = nil
@@ -1281,7 +1297,8 @@ do
 	frameHook = function()
 		for _, d in folder:GetDescendants() do
 			if d:IsA("BasePart") and last[d] ~= nil and d.Parent ~= nil and not string.match(d.Name, "^Hazard_")
-				and d.Name ~= "Lane" and d.Name ~= "Ring" and d.Name ~= "Pigeon" and d.Name ~= "Comet" and d.Name ~= "Satellite" then
+				and d.Name ~= "Lane" and d.Name ~= "Ring" and d.Name ~= "Pigeon" and d.Name ~= "Gull" and d.Name ~= "Comet"
+				and d.Name ~= "Satellite" then
 				worstT = math.max(worstT, math.abs(d.Transparency - last[d]))
 			end
 			if d:IsA("BasePart") then last[d] = d.Transparency end

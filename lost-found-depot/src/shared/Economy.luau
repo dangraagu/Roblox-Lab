@@ -114,6 +114,11 @@ function Economy.defaultProfile(_cfg: any)
 		bestPerfectSeconds = 0,
 		endingSeen = false,
 		redeemed = {} :: { [string]: boolean },
+		-- The highscore board (docs/complete-game-standard.md §3): Perfect Shifts the server's travel
+		-- ledger found physically possible (Ledger.luau), and the unix time that count last rose, which
+		-- breaks a tie in favour of whoever reached it first.
+		boardPerfects = 0,
+		boardAt = 0,
 	}
 end
 
@@ -146,6 +151,8 @@ function Economy.sanitize(cfg: any, raw: any)
 	p.backlog = math.min(count(raw.backlog), cfg.Economy.BacklogSize)
 	p.bestPerfectSeconds = count(raw.bestPerfectSeconds)
 	p.endingSeen = raw.endingSeen == true
+	p.boardPerfects = math.min(count(raw.boardPerfects), p.perfects)
+	p.boardAt = count(raw.boardAt)
 	if type(raw.redeemed) == "table" then
 		for k, v in raw.redeemed do
 			if type(k) == "string" and #k > 0 and #k <= cfg.Codes.MaxLength and v == true then
@@ -213,6 +220,12 @@ function Economy.merge(cfg: any, storedRaw: any, baseRaw: any, currentRaw: any)
 	end
 	out.bestPerfectSeconds = best
 	out.endingSeen = stored.endingSeen or current.endingSeen
+	-- The board's count rides on top like perfects. It rose at the session's time when the session added
+	-- to it, never earlier than the store's own count was reached.
+	out.boardPerfects = stored.boardPerfects + (current.boardPerfects - base.boardPerfects)
+	out.boardAt = if current.boardPerfects > base.boardPerfects
+		then math.max(stored.boardAt, current.boardAt)
+		else stored.boardAt
 	for code in stored.redeemed do
 		out.redeemed[code] = true
 	end

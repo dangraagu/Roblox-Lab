@@ -275,6 +275,74 @@ Config.Codes = {
 	MaxLength = 20,
 }
 
+--============================================================================== the highscore board
+
+-- docs/complete-game-standard.md §3 (owner, 2026-09-16; required of every game 2026-09-30). The board
+-- ranks PERFECT SHIFTS (30 sorted, at most 3 wrong bins, before the clock) that the server's travel
+-- ledger (below) found physically possible: profile.boardPerfects. Ties go to whoever reached the count
+-- first. OrderedDataStore key u_<userId>, value count * 2e9 + (2e9 - reachedAtUnix), written only when
+-- the count rises (Board.keepHigher). A physical board on the wall behind each bay's spawn pad, drawn by
+-- the server for the bay's owner; its ProximityPrompt switches it between everyone and the owner's
+-- Roblox friends. Names are looked up and cached, never stored.
+--
+-- DESIGN.md §2 / §10.3 / §15 cut every leaderboard in v1, because a bot that reads tags beats a careful
+-- human even when it has to walk. The owner's standard of 2026-09-30 asks for one in every game; the
+-- ledger (DESIGN.md's own prerequisite) now makes a teleport or a speed hack worth nothing on it. What it
+-- does not close is written in CLAUDE.md (Corrections to DESIGN.md).
+Config.Board = {
+	Store = "LostFoundDepot_Board_v1",
+	PublicRows = 10,            -- GetSortedAsync(false, 10)
+	PublicCacheSeconds = 60,    -- the server reads the top 10 at most once a minute
+	FriendsRows = 10,
+	FriendsCap = 200,           -- Players:GetFriendsAsync is never read further than this
+	FriendsCacheSeconds = 300,  -- a player's friends list
+	FriendsRetrySeconds = 60,   -- a failed friends fetch is not retried sooner (the note says "in a minute")
+	ScoreCacheSeconds = 120,    -- a friend's stored value, per server (also "no Perfect Shift yet")
+	ReadsBurst = 40,            -- GetAsync on the board store for friends: 40 at once ...
+	ReadsPerSecond = 1,         -- ... then 1 a second (Roblox gives 60 + 10 per player a minute)
+	BudgetReserve = 10,         -- always leave this many GetAsync in Roblox's request budget
+	MaxMetric = 4000000,        -- the value is exact in a double up to here (4e6 * 2e9 < 2^53)
+	-- Bay-local, on the wall behind the spawn pad (+Z), left of the pad as the locker is right of it:
+	-- clear of the name sign above the pad and of the wing's name on the same wall (WingArt wingSigns).
+	Centre = { -14, 6, 19.8 },
+	Size = { 12, 8, 0.4 },
+	-- The prompt is out of reach from the pad centre (so it never shows over the first tap) and in
+	-- reach a few steps toward the board.
+	PromptDistance = 8,
+	Text = {
+		Title = "\u{2605} TOP SORTERS \u{2605}",
+		Subtitle = "Perfect Shifts",
+		Everyone = "EVERYONE",
+		Friends = "FRIENDS",
+		EmptyPublic = "No Perfect Shifts on the board yet. Sort all 30 with 3 wrong bins or fewer and be the first!",
+		FriendsFailed = "Couldn't load your Roblox friends right now. Try again in a minute.",
+		NoFriends = "No Roblox friends yet. Friends you add show up here, ranked against you.",
+		FriendsNoScores = "None of your %d friends has a Perfect Shift yet. Invite one and see who sorts cleaner!",
+		FriendsChecking = "Checking your friends: %d of %d so far...",
+		Loading = "Loading...",
+		Offline = "The board is offline on this server (no DataStore).",
+		ShowFriends = "Show friends",
+		ShowEveryone = "Show everyone",
+		Object = "Top Sorters",
+		NotYours = "That's another sorter's board.",
+		-- a Perfect Shift the ledger did not believe: the summary card says so (two short lines on a phone)
+		NotCounted = "Not counted on the board:\nfaster than your shoes allow.",
+	},
+}
+
+-- The travel ledger (Ledger.luau; DESIGN.md §10.3). From a shift's first accepted pick, deposit or
+-- put-back, each one adds max(0, distance - PositionSlack) / (WalkSpeed * SpeedTolerance) seconds to what
+-- the shift needs; it holds while elapsed + LatencySlack >= needed (the slack once per shift, never per
+-- leg). It refuses nothing: a shift that breaks it pays and counts as Perfect for the player, but not on
+-- the board. LatencySlack is 1.5 s (the design model's was 0.3 s) because a false alarm here costs an
+-- honest player a board count: tests/Ledger.spec.luau measures how many an honest player would lose with
+-- a noisy server view.
+Config.Ledger = {
+	PositionSlack = 2,
+	SpeedTolerance = 1.25,
+	LatencySlack = 1.5,
+}
+
 --============================================================================== the wings (EYECANDY.md)
 
 -- Everything below is read by the CLIENT only (src/client/Wings.client.luau): cosmetic, or harmful only
@@ -311,7 +379,10 @@ Config.Env = {
 			colorCorrection = { Brightness = 0.03, Contrast = 0.08, Saturation = 0.15, TintColor = { 255, 250, 240 } },
 			sunRays = { Intensity = 0.18, Spread = 0.9 },
 			pieces = { "cityRoof", "citySkyline" },
-			ambient = { { kind = "pigeon", count = 6 } },
+			-- the city's own life and weather (complete-game standard §2, pass 2 2026-10-01): gulls over the
+			-- skyline (the pigeons are the train station's) and autumn leaves blowing in under the trusses
+			ambient = { { kind = "gull", count = 6 } },
+			weather = { kind = "leaves", rate = 4 },
 			hazards = {},
 		},
 		{
@@ -326,6 +397,8 @@ Config.Env = {
 			sunRays = { Intensity = 0.12, Spread = 0.8 },
 			pieces = { "airportRoof", "airfield" },
 			ambient = { { kind = "airliner", count = 2 } },
+			-- stray ticket stubs fluttering down from the glass roof (pass 2, 2026-10-01: the wing had no weather)
+			weather = { kind = "tickets", rate = 4 },
 			hazards = { "trolley", "suitcase" },
 		},
 		{
@@ -394,6 +467,7 @@ Config.Env = {
 	-- (rMin >= 60) and over the 16-stud walls (yMin >= 25 above the camera). Pooled, recycled when out of range.
 	Critters = {
 		pigeon = { rMin = 60, rMax = 220, yMin = 26, yMax = 70, speedMin = 14, speedMax = 22, flock = 3 },
+		gull = { rMin = 70, rMax = 240, yMin = 30, yMax = 80, speedMin = 10, speedMax = 16, flock = 2 },
 		airliner = { rMin = 380, rMax = 800, yMin = 90, yMax = 260, speedMin = 55, speedMax = 75 },
 		balloon = { rMin = 80, rMax = 300, yMin = 25, yMax = 90, speedMin = 3, speedMax = 6, rise = true },
 		satellite = { rMin = 160, rMax = 480, yMin = 60, yMax = 220, speedMin = 6, speedMax = 12 },
@@ -444,6 +518,11 @@ Config.Hazards = {
 	MinReactSeconds = 1.0,
 	-- ENFORCED (Wings.checkHit): no knock sooner than this after the warning appeared. EYECANDY.md promises 2 s.
 	MinWarnSeconds = 2.0,
+	-- A DUE hazard waits while a phone's HUD drawer or card (or the wing's title card) covers the middle of the
+	-- screen, but at most this many seconds of running clock (Wings.holdForCover, REVIEW-3 finding 2): held for
+	-- good, a drawer kept open was a total shield (0 hazards in 991 s). Long enough for a look at the manual,
+	-- short against the 120-180 s interval (a drawer never closed costs about 1 hazard in 11).
+	MaxCoverHoldSeconds = 15,
 	-- `ground` kinds roll on the floor: their lane is kept level (Wings.groundLane), the model sits on the floor.
 	-- hitRadius is smaller than the model: forgiving, never unfair.
 	Kinds = {
@@ -472,6 +551,10 @@ Config.Rest = {
 	WakeGraceSeconds = 0.4,
 	-- a queued break outlives the longest hazard flight (crate: 3.6 + 3.5 = 7.1 s) by at least 2 s
 	PendingSeconds = 10,
+	-- A Humanoid sat without a seat drops onto the floor first (Studio trace, +1 Jump 2026-09-27: vy -3 .. -26,
+	-- a bounce, settled in ~0.3 s) and reads FloorMaterial Air while seated. For this long after the sit the
+	-- drop is not a fall, so the break is not woken by its own sit (REVIEW-3 finding 1). A real fall lasts longer.
+	SitSettleSeconds = 1.0,
 }
 
 -- Client budget, phone first. Measured in robloxemu/check_lostfounddepot_wings.luau at every wing and
@@ -485,6 +568,11 @@ Config.Budget = {
 	MaxTrails = 8,
 	MaxLights = 3,
 	MaxHazards = 1,
+	-- ENFORCED in WingArt (REVIEW-3 finding 5): scenery and life are shown only while they fit under the budget
+	-- less this, so the one hazard (its model, lane and ring: the repair drone is the biggest, 5 + 1 + 1 parts,
+	-- and every model's blink light) can always be drawn. check_lostfounddepot_budget measures every hazard
+	-- drawn against it.
+	HazardReserve = { parts = 8, lights = 1 },
 }
 
 -- The pacing model behind the wings' `from` numbers (tests/Pacing.spec.luau). NOT used in the game.

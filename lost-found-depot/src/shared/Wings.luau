@@ -210,6 +210,25 @@ function Wings.mayLaunch(ctx: any): boolean
 	return ctx.onFloor == true and ctx.roomy == true and ctx.covered ~= true
 end
 
+-- Does a covered screen still hold a DUE hazard back? (REVIEW-3 finding 2.) Held with no limit, a covered
+-- screen was a total shield: a phone player who read with the MANUAL open met 0 hazards in 991 s of running
+-- clock (6 with it closed), since a held hazard just stayed due. So the wait is capped: `hold.t` counts the
+-- RUNNING-clock seconds (pass dt = 0 while hazards may not run) a due hazard has waited for a covered screen,
+-- and after `maxHold` it is held no longer; it then comes with its warning beside the drawer, as one already
+-- flying when a drawer opens does. Closing and re-opening the drawer does not restart the wait; the next
+-- hazard gets its own. The caller passes the answer to Wings.mayLaunch as `covered`.
+function Wings.holdForCover(hold: { t: number }, dt: number, due: boolean, covered: boolean, maxHold: number): boolean
+	if not due then
+		hold.t = 0
+		return false
+	end
+	if not covered then
+		return false
+	end
+	hold.t += dt
+	return hold.t < maxHold
+end
+
 -- Withdraw the hazard just launched (its fitted lane was too short), before anything is drawn. It stays
 -- DUE: not skipped and not counted, so withdrawing never thins hazards out. True when it withdrew one.
 function Wings.withdraw(sch: any): boolean

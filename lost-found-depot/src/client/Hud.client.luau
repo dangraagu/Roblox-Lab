@@ -27,6 +27,7 @@ local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 local FxClient = require(ReplicatedStorage:WaitForChild("FxClient"))
 -- The HUD is the ONLY listener on State; it passes every payload to the wings (StateCache.luau says why).
 local StateCache = require(ReplicatedStorage:WaitForChild("StateCache"))
+local Config = require(ReplicatedStorage:WaitForChild("Config"))
 
 local remotes = ReplicatedStorage:WaitForChild("DepotRemotes")
 local StateEvent = remotes:WaitForChild("State")
@@ -710,6 +711,13 @@ local function render(st: any)
 			if s.best and s.best > 0 then
 				table.insert(lines, "Best Perfect Shift " .. fmtClock(s.best))
 			end
+			-- the highscore board: whether this Perfect Shift counted there, and if not, why
+			if s.counted == true and type(s.boardPerfects) == "number" then
+				table.insert(lines, string.format("On the board: %d Perfect Shift%s", s.boardPerfects,
+					if s.boardPerfects == 1 then "" else "s"))
+			elseif s.counted == false then
+				table.insert(lines, Config.Board.Text.NotCounted)
+			end
 			summaryBody.Text = table.concat(lines, "\n")
 			setCentre("summary")
 			FxClient.popIn(summaryPanel)
@@ -890,11 +898,14 @@ applyLayout = function()
 		b.Size = UDim2.fromOffset(toggleW, toggleH)
 		i += 1
 	end
-	local left = rootW / 2 - clockW / 2
-	local single = left >= M + cashW + 8 and rootW / 2 + clockW / 2 <= rootW - M - togglesW - 8
+	-- The clock sits in the top row, as close to the centre as the cash panel and the toggles allow; only when
+	-- even the gap between them is too narrow does it drop to a row of its own. On 568x320 the centred clock met
+	-- the toggles and dropped, and the rows under it left no room for the hotbar (pass 2, 2026-10-01).
+	local clockLo, clockHi = M + cashW + 8, rootW - M - togglesW - 8 - clockW
+	local single = clockLo <= clockHi
 	local topBottom
 	if single then
-		clockPanel.Position = UDim2.new(0.5, -clockW / 2, 0, M)
+		clockPanel.Position = UDim2.fromOffset(math.clamp(rootW / 2 - clockW / 2, clockLo, clockHi), M)
 		topBottom = M + math.max(toggleH, clockH, cashH)
 	else
 		local rowOne = math.max(toggleH, cashH)
@@ -927,6 +938,14 @@ applyLayout = function()
 		perRow = math.max(1, math.floor((bandW + GAP) / (slotW + GAP)))
 	end
 	local rows = math.ceil(carry / perRow)
+	-- Wrapped onto two rows in the 40% band, the hotbar rose over the clock on the smallest phone (568x320, a full
+	-- cart: 120x38 screen px). It sits wholly ABOVE the touch controls (its bottom is M over padDesign), so when the
+	-- wrapped bar would reach the text rows it may use the width between the margins instead: one row, nothing
+	-- under the thumbstick or the jump button (check_lostfounddepot_hud, 568x320 and 667x375; pass 2, 2026-10-01).
+	if rows > 1 and rootH - M - padDesign - (rows * slotH + (rows - 1) * GAP) < textBottom + GAP then
+		perRow = math.max(perRow, math.floor((rootW - 2 * M + GAP) / (slotW + GAP)))
+		rows = math.ceil(carry / perRow)
+	end
 	local cols = math.min(carry, perRow)
 	local barW = cols * slotW + (cols - 1) * GAP
 	local barH = rows * slotH + (rows - 1) * GAP

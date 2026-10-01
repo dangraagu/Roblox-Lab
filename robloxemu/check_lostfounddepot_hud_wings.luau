@@ -30,6 +30,31 @@ local HudCheck = require("./emu/hudcheck")
 
 local TESTER = 5551212
 
+-- REVIEW-3 finding 3: the wing panel, the warning and the title card sat on the HUD's rows on phone sizes the
+-- ten hudcheck viewports do not have (568x320: the panel and the warning on the memo, hint and toast rows, the
+-- card on them too; 667x375, the common iPhone SE 2/3 and 6-8: the space card on the BREAK panel). The wings'
+-- own placements are therefore swept over these twelve more touch viewports as well (the reviewer's list),
+-- after the ten standard ones. hudcheck's full run (the HUD's own rules, every mode) stays on the standard ten
+-- here; check_lostfounddepot_hud runs it on 568x320 and 667x375 as well since pass 2 of the complete-game standard
+-- (2026-10-01), when the HUD's OWN five-slot hotbar stopped sitting on its clock at 568x320 (EYECANDY.md §15). The
+-- sweep below also measures the hotbar against the HUD's own text rows on all 22, which hudcheck cannot see.
+local EXTRA_VIEWPORTS = {
+	{ name = "iphone se1", w = 568, h = 320, touch = true },
+	{ name = "iphone 8", w = 667, h = 375, touch = true },
+	{ name = "iphone 8 plus", w = 736, h = 414, touch = true },
+	{ name = "galaxy s8", w = 740, h = 360, touch = true },
+	{ name = "android 780", w = 780, h = 360, touch = true },
+	{ name = "iphone 13", w = 844, h = 390, touch = true },
+	{ name = "iphone 11", w = 896, h = 414, touch = true },
+	{ name = "android 915", w = 915, h = 412, touch = true },
+	{ name = "iphone 15 pm", w = 932, h = 430, touch = true },
+	{ name = "portrait 375", w = 375, h = 667, touch = true },
+	{ name = "portrait 390", w = 390, h = 844, touch = true },
+	{ name = "portrait 360", w = 360, h = 800, touch = true },
+}
+local ALL_VIEWPORTS = table.clone(HudCheck.VIEWPORTS)
+for _, v in EXTRA_VIEWPORTS do table.insert(ALL_VIEWPORTS, v) end
+
 local hzConfig = nil
 local realTryRun = Harness.tryRun
 Harness.tryRun = function(self, key)
@@ -222,7 +247,7 @@ end
 -- A hazard is already flying, then a drawer is opened. On a phone the drawer owns the middle of the screen: the
 -- warning must stay up (below the drawer, or beside it). And no NEW hazard launches while a phone's drawer is
 -- open. `holds` / `aside` count what was seen, per viewport.
-local holds = { phoneDrawer = 0, phoneLaunched = 0, phoneAfter = 0, desktop = 0 }
+local holds = { phoneDrawer = 0, phoneLaunched = 0, phoneAfter = 0, desktop = 0, capCame = 0, capWarned = 0, capMin = math.huge, capMax = 0 }
 local aside = { shown = 0, measured = 0 }
 local function hazardFlying(h)
 	local folder = h.workspace:FindFirstChild("DepotWings")
@@ -273,6 +298,34 @@ local function drawerWithHazard(key)
 			holds.phoneLaunched += launched
 		elseif launched > 0 then
 			holds.desktop += 1
+		end
+		-- REVIEW-3 finding 2: held for good, a drawer kept open was a total shield (0 hazards in 991 s of running
+		-- clock). On a phone the held hazard now comes at most 15 s (a literal, the promise) after it fell due,
+		-- with the drawer still open and its warning up beside the drawer. It fell due at most 2 s after the
+		-- drawer opened (hazards every 1-2 s here), so it comes 15-17 s after opening, never sooner than 15.
+		if phone then
+			local cameAt = nil
+			for f = 1, 30 * 10 do
+				step()
+				local now = hazardFlying(h)
+				if now and not was then
+					cameAt = 10 + f / 30
+					break
+				end
+				was = now
+			end
+			if cameAt then
+				holds.capCame += 1
+				holds.capMin = math.min(holds.capMin, cameAt)
+				holds.capMax = math.max(holds.capMax, cameAt)
+				settle(h, player, 1 / 30)
+				if warn.Visible then holds.capWarned += 1 end
+			end
+			-- let it pass before the drawer closes
+			for _ = 1, 30 * 12 do
+				if not hazardFlying(h) then break end
+				step()
+			end
 		end
 		toggle.Activated:Fire()
 		-- 2. closed again: the held hazard comes (it stayed due). A NEW launch is waited for (any hazard still
@@ -360,6 +413,10 @@ local okRun, errRun = pcall(HudCheck.run, {
 		assert(summaryPayload.shift.state == "SUMMARY", "no SUMMARY payload was produced")
 		h:advance(5)
 		assert(last().shift.state == "ARMED", "the bay did not re-arm")
+		-- In memory, from here on: the live shift lasts 10 hours of harness time. The modes below re-send its
+		-- RUNNING payload every frame, but the server's own shift used to run out somewhere in the long drawer
+		-- runs and its summary card replaced an open drawer in the HUD (the drawer toggle then CLOSED it).
+		h:_require(h.ReplicatedStorage:FindFirstChild("Config")).Shift.Seconds = 36000
 		for s = 1, 5 do
 			bay:FindFirstChild("Slot_" .. s):FindFirstChildOfClass("ClickDetector").MouseClick:Fire(player)
 		end
@@ -388,15 +445,18 @@ local okRun, errRun = pcall(HudCheck.run, {
 			settle(h, player, 1 / 30)
 		end
 		assert(card.Visible and card.Text == "YOU MADE IT TO SPACE!", "the space card did not come up (" .. tostring(card.Text) .. ")")
-		local cardClashes, cardShown, subShown = {}, 0, 0
-		for _, v in HudCheck.VIEWPORTS do
+		local cardClashes, cardShown, subShown, extraShown = {}, 0, 0, 0
+		for vi, v in ALL_VIEWPORTS do
 			h:setTouch(v.touch)
 			h:setViewport(v.w, v.h)
 			settle(h, player, 2 / 30)
 			local hudR = rectsByName(h, player:FindFirstChild("PlayerGui"):FindFirstChild("DepotHud"), v.w, v.h)
 			local wingR = rectsByName(h, player:FindFirstChild("PlayerGui"):FindFirstChild("DepotWings"), v.w, v.h)
-			if wingR.WingCard then cardShown += 1 end
-			if wingR.WingCardSub then subShown += 1 end
+			local standard = vi <= #HudCheck.VIEWPORTS
+			if wingR.WingCard then
+				if standard then cardShown += 1 else extraShown += 1 end
+			end
+			if wingR.WingCardSub and standard then subShown += 1 end
 			for _, cn in { "WingCard", "WingCardSub" } do
 				local a = wingR[cn]
 				if a then
@@ -419,9 +479,10 @@ local okRun, errRun = pcall(HudCheck.run, {
 			end
 		end
 		for _, c in cardClashes do print("   " .. c) end
-		print(string.format("   the title card was up on %d of %d viewports (its sub line on %d), %d clash(es)",
-			cardShown, #HudCheck.VIEWPORTS, subShown, #cardClashes))
+		print(string.format("   the title card was up on %d of %d viewports (its sub line on %d) and on %d of %d more phone sizes, %d clash(es)",
+			cardShown, #HudCheck.VIEWPORTS, subShown, extraShown, #EXTRA_VIEWPORTS, #cardClashes))
 		assert(cardShown == #HudCheck.VIEWPORTS, "the title card must be SHOWN on every viewport to be measured")
+		assert(extraShown == #EXTRA_VIEWPORTS, "and on every one of the twelve more phone sizes (" .. extraShown .. ")")
 		assert(#cardClashes == 0, "FAIL - the title card covers the HUD")
 		-- its sub line too, wherever there is room for it (all but the two 800x360 touch runs, whose free band
 		-- takes the title alone): a card shown on one viewport re-decides its lines on the next
@@ -455,6 +516,157 @@ local okRun, errRun = pcall(HudCheck.run, {
 			cardFrames / 30, launchedUnderCard, tostring(cameAfter)))
 		assert(launchedUnderCard == 0, "no hazard launches while the title card is up")
 		assert(cameAfter, "CONTROL: the held hazard came once the card had gone")
+
+		-- REVIEW-3 finding 3: the wing panel and a hazard's warning, on all 22 viewports, against the HUD's rows
+		-- and panels (and, on touch, the BREAK button clear of the thumbstick and jump button and >= 44 px).
+		-- Each viewport is measured while a hazard is flying, so the warning is really up.
+		local sweepClashes, panelShown, warnShown, hotbarShown = {}, 0, 0, 0
+		local wr = wings(player)
+		local warnP = wr:FindFirstChild("WarningPanel")
+		for _, v in ALL_VIEWPORTS do
+			h:setTouch(v.touch)
+			h:setViewport(v.w, v.h)
+			local came = false
+			for _ = 1, 30 * 12 do
+				tick()
+				if warnP.Visible and hazardFlying(h) then came = true; break end
+			end
+			assert(came, string.format("%dx%d: no hazard warning within 12 s (hazards due every 1-2 s)", v.w, v.h))
+			local hudRoot = hud(player)
+			hudRoot:FindFirstChild("Memo").Text = "MEMO: every T goes to REPAIR today"
+			hudRoot:FindFirstChild("Hint").Text = "Read the TAG: walk it to the bin the tag names."
+			hudRoot:FindFirstChild("Toast").Text = "-8 s. Keyring: K goes to KEYS & WALLETS."
+			local hudR = rectsByName(h, player:FindFirstChild("PlayerGui"):FindFirstChild("DepotHud"), v.w, v.h)
+			local wingR = rectsByName(h, player:FindFirstChild("PlayerGui"):FindFirstChild("DepotWings"), v.w, v.h)
+			if wingR.WingPanel then panelShown += 1 end
+			if wingR.WarningPanel then warnShown += 1 end
+			-- the HUD against ITSELF, text rows included (hudcheck's overlap rule sees Frames only): a full cart's
+			-- hotbar keeps off the memo, hint, toast, stamp, cash, clock and toggles on all 22 (pass 2, 2026-10-01: on
+			-- 568x320 the two-row hotbar sat on the clock, 120x38 px)
+			local bar = hudR.Hotbar
+			if bar then
+				hotbarShown += 1
+				for _, hn in { "Memo", "Hint", "Toast", "Stamp", "CashPanel", "ClockPanel", "Toggles" } do
+					local o = hudR[hn]
+					if o then
+						local ox = math.min(bar.sx + bar.sw, o.sx + o.sw) - math.max(bar.sx, o.sx)
+						local oy = math.min(bar.sy + bar.sh, o.sy + o.sh) - math.max(bar.sy, o.sy)
+						if ox > 1 and oy > 1 then
+							table.insert(sweepClashes, string.format("[%s %dx%d] the HUD's own Hotbar covers its %s by %.0fx%.0f px",
+								v.name, v.w, v.h, hn, ox, oy))
+						end
+					end
+				end
+			end
+			for _, wn in { "WingPanel", "WarningPanel" } do
+				local a = wingR[wn]
+				if a then
+					local others = {}
+					for _, hn in { "Memo", "Hint", "Toast", "Stamp", "CashPanel", "ClockPanel", "Toggles", "Hotbar" } do
+						if hudR[hn] then others[hn] = hudR[hn] end
+					end
+					if wn == "WarningPanel" and wingR.WingPanel then others.WingPanel = wingR.WingPanel end
+					for on, b in others do
+						local ox = math.min(a.sx + a.sw, b.sx + b.sw) - math.max(a.sx, b.sx)
+						local oy = math.min(a.sy + a.sh, b.sy + b.sh) - math.max(a.sy, b.sy)
+						if ox > 1 and oy > 1 then
+							table.insert(sweepClashes, string.format("[%s %dx%d] %s covers %s by %.0fx%.0f px", v.name, v.w, v.h, wn, on, ox, oy))
+						end
+					end
+					if a.sx < -1 or a.sy < -1 or a.sx + a.sw > v.w + 1 or a.sy + a.sh > v.h + 1 then
+						table.insert(sweepClashes, string.format("[%s %dx%d] %s is off screen", v.name, v.w, v.h, wn))
+					end
+				end
+			end
+			local b = wingR.BreakButton
+			if b and v.touch then
+				local pad = math.min(150, math.floor(v.h * 0.35))
+				local function hits(x0, y0, x1, y1)
+					return b.sx < x1 and x0 < b.sx + b.sw and b.sy < y1 and y0 < b.sy + b.sh
+				end
+				if hits(0, v.h - pad, v.w * 0.35, v.h) or hits(v.w * 0.75, v.h - pad, v.w, v.h) then
+					table.insert(sweepClashes, string.format("[%s %dx%d] BREAK sits under a touch control", v.name, v.w, v.h))
+				end
+				if b.sw < 44 - 0.5 or b.sh < 44 - 0.5 then
+					table.insert(sweepClashes, string.format("[%s %dx%d] BREAK is %.0fx%.0f px, under 44", v.name, v.w, v.h, b.sw, b.sh))
+				end
+			end
+		end
+		for _, c in sweepClashes do print("   " .. c) end
+		print(string.format("   the wing panel and a flying hazard's warning on all %d viewports: panel shown on %d, warning on %d, the HUD's full hotbar on %d, %d clash(es)",
+			#ALL_VIEWPORTS, panelShown, warnShown, hotbarShown, #sweepClashes))
+		assert(panelShown == #ALL_VIEWPORTS and warnShown == #ALL_VIEWPORTS, "the panel and the warning must be SHOWN on every viewport to be measured")
+		assert(hotbarShown == #ALL_VIEWPORTS, "the HUD's hotbar must be SHOWN on every viewport to be measured")
+		assert(#sweepClashes == 0, "FAIL - the wing panel, the warning or the HUD's own hotbar covers the HUD on some phone size")
+		-- ... and in a session that is not saving, the HUD's red "not saving" line under the cash panel is up: on
+		-- 568x320 the panel's pocket starts below it, and the panel is not shown where the pocket is then too short
+		do
+			h:setTouch(true)
+			h:setViewport(568, 320)
+			local ro = table.clone(livePayload)
+			ro.canSave = false
+			for _ = 1, 3 do
+				state:FireClient(player, ro)
+				settle(h, player, 1 / 30)
+			end
+			local hudR = rectsByName(h, player:FindFirstChild("PlayerGui"):FindFirstChild("DepotHud"), 568, 320)
+			local wingR = rectsByName(h, player:FindFirstChild("PlayerGui"):FindFirstChild("DepotWings"), 568, 320)
+			assert(hudR.SaveWarn ~= nil, "CONTROL: the HUD shows its not-saving line on a read-only payload")
+			local a, b = wingR.WingPanel, hudR.SaveWarn
+			local clear = a == nil or math.min(a.sx + a.sw, b.sx + b.sw) - math.max(a.sx, b.sx) <= 1
+				or math.min(a.sy + a.sh, b.sy + b.sh) - math.max(a.sy, b.sy) <= 1
+			print(string.format("   568x320, not saving: the wing panel %s the HUD's not-saving line",
+				if a == nil then "steps away (no pocket) from" elseif clear then "keeps clear of" else "COVERS"))
+			assert(clear, "the wing panel never covers the HUD's not-saving line")
+			state:FireClient(player, livePayload)
+			settle(h, player, 2 / 30)
+		end
+		-- REVIEW-3 finding 2: a drawer's wait (15 s at most) runs on the RUNNING clock only. A phone player who reads
+		-- the MANUAL between shifts must not use it up there and meet the hazard the instant the next shift starts.
+		-- 4 s of running clock with the drawer open (a hazard due within 2 s of opening), then 20 s with the clock
+		-- stopped (an armed tray), then running again with the drawer still open: at least 15 - 4 = 11 s of the wait
+		-- are left, so nothing comes for 10 s (a literal), and the held hazard does come after that.
+		do
+			h:setTouch(true)
+			h:setViewport(800, 360)
+			local hudRoot = hud(player)
+			closeAll(hudRoot)
+			local armedP = table.clone(livePayload)
+			armedP.shift = table.clone(livePayload.shift)
+			armedP.shift.state = "ARMED"
+			armedP.shift.carried = {}
+			local frames = 0
+			local function stepWith(payload)
+				frames += 1
+				state:FireClient(player, payload)
+				hum.MoveDirection = if frames % 120 == 0 then Vector3.new(0.3, 0, 0) else Vector3.new(0, 0, 0)
+				settle(h, player, 1 / 30)
+			end
+			for _ = 1, 30 * 12 do
+				if not hazardFlying(h) then break end
+				stepWith(livePayload)
+			end
+			local manualToggle = hudRoot:FindFirstChild("Toggles"):FindFirstChild("Toggle_manual")
+			manualToggle.Activated:Fire()
+			assert(hudRoot:FindFirstChild("ManualDrawer").Visible, "CONTROL: the MANUAL drawer opened")
+			local early = false
+			for _ = 1, 30 * 4 do
+				stepWith(livePayload)
+				if hazardFlying(h) then early = true end
+			end
+			for _ = 1, 30 * 20 do stepWith(armedP) end
+			local cameAfter = nil
+			for f = 1, 30 * 16 do
+				stepWith(livePayload)
+				if hazardFlying(h) then cameAfter = f / 30; break end
+			end
+			print(string.format("   the drawer's wait runs on the running clock only: 4 s running + 20 s stopped + running again: the held hazard came %s s after the clock restarted",
+				tostring(cameAfter and string.format("%.1f", cameAfter))))
+			assert(not early, "CONTROL: no hazard in the first 4 s under the drawer")
+			assert(cameAfter ~= nil and cameAfter >= 10, "a stopped clock does not use up the drawer's wait (" .. tostring(cameAfter) .. ")")
+			manualToggle.Activated:Fire()
+			settle(h, player, 2 / 30)
+		end
 		-- back to the tester's own career, the card gone, before hudcheck measures
 		h:setTouch(HudCheck.VIEWPORTS[1].touch)
 		h:setViewport(HudCheck.VIEWPORTS[1].w, HudCheck.VIEWPORTS[1].h)
@@ -474,10 +686,16 @@ assert(aside.measured == 3 * #HudCheck.VIEWPORTS and aside.shown >= aside.measur
 print(string.format("   a phone drawer open 10 s with hazards due every 1-2 s: %d launches over %d runs (and a hazard came within 6 s of closing it every time); %d non-phone runs launched with it open",
 	holds.phoneLaunched, holds.phoneDrawer, holds.desktop))
 assert(holds.phoneDrawer >= 9, "CONTROL: the phone drawer runs happened (" .. holds.phoneDrawer .. ")")
-assert(holds.phoneLaunched == 0, "no hazard launches while a phone's drawer covers the screen (" .. holds.phoneLaunched .. ")")
+assert(holds.phoneLaunched == 0, "no hazard launches in the first 10 s a phone's drawer covers the screen (" .. holds.phoneLaunched .. ")")
+print(string.format("   kept open: the held hazard came under the open drawer in %d of %d phone runs, %.1f-%.1f s after it opened, its warning up in %d",
+	holds.capCame, holds.phoneDrawer, holds.capMin, holds.capMax, holds.capWarned))
+assert(holds.capCame == holds.phoneDrawer, "a drawer kept open is not a shield: the held hazard comes in every phone run (" .. holds.capCame .. ")")
+assert(holds.capMin >= 15 - 1e-6, "and never sooner than 15 s after the drawer opened (" .. holds.capMin .. ")")
+assert(holds.capMax <= 17 + 2 / 30 + 1e-6, "and at most 15 s after it fell due (<= 17 s after opening: " .. holds.capMax .. ")")
+assert(holds.capWarned == holds.capCame, "with its warning up beside the drawer every time (" .. holds.capWarned .. ")")
 assert(holds.desktop >= 3, "CONTROL: where a drawer does not cover the screen hazards launch with it open (" .. holds.desktop .. ")")
 if #clashes > 0 then
 	error(string.format("FAIL — the wings sit on the HUD's rows %d time(s)", #clashes), 0)
 end
-print(string.format("PASS — the wing panel and the hazard warning keep off the HUD's memo, hint, toast, stamp, cash, clock, toggles and hotbar on all %d viewports x 5 modes; the title card keeps off them and the hotbar on all %d",
-	#HudCheck.VIEWPORTS, #HudCheck.VIEWPORTS))
+print(string.format("PASS — the wing panel and the hazard warning keep off the HUD's memo, hint, toast, stamp, cash, clock, toggles and hotbar on all %d viewports x 5 modes and on all %d with a hazard in flight; the title card keeps off them and the hotbar on all %d",
+	#HudCheck.VIEWPORTS, #ALL_VIEWPORTS, #ALL_VIEWPORTS))

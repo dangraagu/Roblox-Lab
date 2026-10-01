@@ -1176,6 +1176,9 @@ do
 		"shift.summary", "shift.summary.sorted", "shift.summary.total",
 		"shift.summary.misfiles", "shift.summary.pay", "shift.summary.bonus", "shift.summary.perfect",
 		"shift.summary.timedOut", "shift.summary.backlogGained", "shift.summary.seconds", "shift.summary.best",
+		-- the highscore board (2026-10-01): whether the owner's own finished Perfect Shift counted there, and
+		-- the owner's own count, which the public board shows anyway
+		"shift.summary.counted", "shift.summary.boardPerfects",
 	} do
 		ALLOWED_PATHS[p] = true
 	end

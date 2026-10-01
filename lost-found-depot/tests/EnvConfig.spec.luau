@@ -151,6 +151,33 @@ do
 	truthy(worst <= 0.35, string.format("one sort never moves a wing's weight by more than 0.35 (worst %.3f; the half-life glides the rest)", worst))
 end
 
+--================================================================ every wing has its OWN weather and critters
+-- docs/complete-game-standard.md §2: at least 5 bands, EACH with its own light, colour, scenery, critters and
+-- weather. Pass 2 of the standard (2026-10-01): CITY DEPOT and AIRPORT had no weather (4 of 6 wings had any), and
+-- CITY and TRAIN had the same life (pigeons and nothing else).
+do
+	local weatherWing, crittersIn = {}, {}
+	for _, b in bands do
+		local kind = b.weather and b.weather.kind
+		truthy(type(kind) == "string", "wing " .. b.id .. " has weather")
+		if type(kind) == "string" then
+			truthy(weatherWing[kind] == nil, "wing " .. b.id .. "'s weather '" .. kind .. "' is its own, not "
+				.. tostring(weatherWing[kind]) .. "'s too")
+			weatherWing[kind] = b.id
+		end
+		for _, a in b.ambient or {} do
+			crittersIn[a.kind] = (crittersIn[a.kind] or 0) + 1
+		end
+	end
+	for _, b in bands do
+		local own = {}
+		for _, a in b.ambient or {} do
+			if crittersIn[a.kind] == 1 then table.insert(own, a.kind) end
+		end
+		truthy(#own >= 1, "wing " .. b.id .. " has life of its own (a critter no other wing has): " .. table.concat(own, ", "))
+	end
+end
+
 -- The client shows the scenery, critters and weather of the two strongest wings only (Wings.keepStrongest),
 -- and a wing has one weather kind at most (the schema has one `weather` field). So at most two weather
 -- emitters are ever wanted, and two wings' weather at full rate must fit the particle budget: then
@@ -210,6 +237,10 @@ do
 		string.format("and at least 2 s of warning: MinWarnSeconds >= 2.0 (%s)", tostring(Hz.MinWarnSeconds)))
 	truthy(Hz.MinWarnSeconds <= Hz.MinTelegraphSeconds,
 		"the warning floor is inside every kind's telegraph (a still player is reached at arrival)")
+	-- REVIEW-3 finding 2, as literals: a covered screen delays a due hazard by 10-15 s at most, never for good
+	-- (a longer hold makes a drawer kept open a shield again; Wings.spec measures what 15 s costs)
+	truthy(type(Hz.MaxCoverHoldSeconds) == "number" and Hz.MaxCoverHoldSeconds >= 10 and Hz.MaxCoverHoldSeconds <= 15,
+		string.format("a drawer holds a due hazard back 10-15 s at most: MaxCoverHoldSeconds (%s)", tostring(Hz.MaxCoverHoldSeconds)))
 	truthy(RestCfg.PendingSeconds >= longest + 2,
 		string.format("a booked break outlives the longest hazard flight (%.1f s) by 2 s (%.1f)", longest, RestCfg.PendingSeconds))
 end
@@ -221,6 +252,35 @@ do
 	truthy(ok, "Config.Rest validates (" .. tostring(err) .. ")")
 	eq(RestCfg.WakeOnMove, true, "moving always ends a rest")
 	eq(RestCfg.BlockWhileThreat, true, "a rest never starts with a hazard in the air")
+end
+
+-- REVIEW-3 finding 6: "any movement wakes you" was pinned by no gate (WakeGraceSeconds 0.4 -> 5 passed all 28
+-- suites), so an idle rest mid-shift could keep hazards paused through seconds of walking. The promise, as
+-- LITERALS (never read back from Config): walking ends an idle rest within half a second, however soon after
+-- it began the player moves; this game's own Config through the template's own Rest.
+do
+	truthy(type(RestCfg.WakeGraceSeconds) == "number" and RestCfg.WakeGraceSeconds <= 0.5,
+		string.format("any movement wakes you within 0.5 s: WakeGraceSeconds <= 0.5 (%s)", tostring(RestCfg.WakeGraceSeconds)))
+	local STILL = { moving = false, grounded = true, threat = false }
+	local MOVING = { moving = true, grounded = true, threat = false }
+	local dt = 1 / 60
+	local r, t = Rest.new(), 0
+	while not Rest.isResting(r) and t < 60 do
+		Rest.update(r, RestCfg, dt, STILL)
+		t += dt
+	end
+	truthy(Rest.isResting(r) and r.source == "idle", "set-up: standing still starts an idle rest")
+	local walked = 0
+	while Rest.isResting(r) and walked < 10 do
+		Rest.update(r, RestCfg, dt, MOVING)
+		walked += dt
+	end
+	truthy(not Rest.isResting(r) and walked <= 0.5 + 1e-6,
+		string.format("walking from the first frame of an idle rest ends it within 0.5 s (%.2f s)", walked))
+	-- REVIEW-3 finding 1: the sit's own drop (Studio: settled in ~0.3 s) must not wake a break, and a real fall
+	-- while seated still must. check_lostfounddepot_sitdrop replays the trace through the real client.
+	truthy(type(RestCfg.SitSettleSeconds) == "number" and RestCfg.SitSettleSeconds >= 0.5 and RestCfg.SitSettleSeconds <= 1.5,
+		string.format("the sit's drop is not a fall for 0.5-1.5 s: SitSettleSeconds (%s)", tostring(RestCfg.SitSettleSeconds)))
 end
 
 --================================================================ budgets

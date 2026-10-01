@@ -282,6 +282,7 @@ local lay = { rootW = Responsive.REF_X, rootH = Responsive.REF_Y, padDesign = 0 
 local warnHome = { pos = UDim2.fromOffset(0, 0), size = UDim2.fromOffset(0, 0) }
 local WARN_H_TALL = 52 -- two lines: the warning's size when it steps aside for a phone's drawer or card
 local cardFits, cardSubFits = true, true -- where the title card can go without covering the HUD (applyLayout)
+local panelFits = true -- the wing panel has a place that covers nothing of the HUD's (applyLayout)
 local cardUp = false -- a card is on (from showCard until it has faded): a new layout re-decides what of it shows
 local function applyLayout()
 	local v = camera.ViewportSize
@@ -307,7 +308,8 @@ local function applyLayout()
 	local toggleW, toggleH = touchSize(80), touchSize(34)
 	local togglesW = 3 * toggleW + 2 * GAP
 	local cashW, cashH, clockW, clockH = 150, 46, 200, 64
-	local single = rootW / 2 - clockW / 2 >= M + cashW + 8 and rootW / 2 + clockW / 2 <= rootW - M - togglesW - 8
+	-- the clock stays in the top row whenever the gap between the cash panel and the toggles holds it (Hud: clockLo)
+	local single = M + cashW + 8 <= rootW - M - togglesW - 8 - clockW
 	local topBottom = if single then M + math.max(toggleH, clockH, cashH) else M + math.max(toggleH, cashH) + GAP + clockH
 	local ceiling = topBottom + 80 -- nothing of ours above this line (Hud: textBottom)
 	-- Bottom: the hotbar, centred in a 40% band above the touch controls.
@@ -322,6 +324,11 @@ local function applyLayout()
 		perRow = math.max(1, math.floor((bandW + GAP) / (slotW + GAP)))
 	end
 	local rows = math.ceil(carry / perRow)
+	-- the HUD's own rule (Hud.client applyLayout): a wrapped bar that would reach the text rows takes one wide row
+	if rows > 1 and rootH - M - padDesign - (rows * slotH + (rows - 1) * GAP) < ceiling + GAP then
+		perRow = math.max(perRow, math.floor((rootW - 2 * M + GAP) / (slotW + GAP)))
+		rows = math.ceil(carry / perRow)
+	end
 	local cols = math.min(carry, perRow)
 	local barW = cols * slotW + (cols - 1) * GAP
 	local barH = rows * slotH + (rows - 1) * GAP
@@ -332,14 +339,25 @@ local function applyLayout()
 	-- The wing panel sits LEFT of the hotbar, its bottom level with the hotbar's (so above the thumbstick),
 	-- growing upward no higher than the HUD's text rows. Stacked (name, next, BREAK under them) when that
 	-- fits; on a short landscape phone the BREAK button goes to the right of the text instead.
+	-- REVIEW-3 finding 3: on a phone too short for either (568x320: 43 design px between the HUD's rows and the
+	-- hotbar's foot) the stacked panel used to rise onto the memo, hint and toast rows. There the row goes into
+	-- the POCKET under the cash panel (and its "not saving" line), above the memo row, left of the clock and the
+	-- hotbar; with no pocket either, the panel is not shown at all (it never covers the HUD).
 	local btnH = touchSize(34)
 	local stackedH = 6 + 20 + 16 + 4 + btnH + 6
 	local rowH = 6 + math.max(40, btnH) + 6
 	local availH = barBottom - ceiling
-	local panelW, panelH
-	if stackedH <= availH or rowH > availH then
+	local pocketTop = M + cashH + GAP + (if lastState and lastState.canSave == false then 18 else 0)
+	local pocketBottom = topBottom + 4 - GAP
+	local pocketRight = rootW - M
+	if not single then pocketRight = math.min(pocketRight, rootW / 2 - clockW / 2 - GAP) end
+	if barTop < pocketBottom then pocketRight = math.min(pocketRight, (rootW - barW) / 2 - GAP) end
+	local panelW, panelH, panelY
+	panelFits = true
+	if stackedH <= availH then
 		panelW = math.max(0, math.min(PANEL_W, sideRoom))
 		panelH = stackedH
+		panelY = barBottom - panelH
 		wingName.Position = UDim2.fromOffset(8, 6)
 		wingName.Size = UDim2.fromOffset(panelW - 16, 20)
 		wingNext.Position = UDim2.fromOffset(8, 26)
@@ -347,8 +365,15 @@ local function applyLayout()
 		breakBtn.Position = UDim2.fromOffset(6, 46)
 		breakBtn.Size = UDim2.fromOffset(panelW - 12, btnH)
 	else
-		panelW = math.max(0, math.min(PANEL_W_ROW, sideRoom))
 		panelH = rowH
+		if rowH <= availH then
+			panelW = math.max(0, math.min(PANEL_W_ROW, sideRoom))
+			panelY = barBottom - panelH
+		else
+			panelW = math.max(0, math.min(PANEL_W_ROW, pocketRight - M))
+			panelY = pocketBottom - panelH
+			panelFits = panelY >= pocketTop and panelW >= touchSize(96) + 100
+		end
 		local btnW = math.max(touchSize(96), math.floor(panelW * 0.4))
 		local textW = panelW - btnW - 20
 		local textTop = (panelH - 38) / 2
@@ -359,11 +384,14 @@ local function applyLayout()
 		breakBtn.Position = UDim2.fromOffset(panelW - btnW - 6, 6)
 		breakBtn.Size = UDim2.fromOffset(btnW, panelH - 12)
 	end
-	panel.Position = UDim2.fromOffset(M, barBottom - panelH)
+	panel.Position = UDim2.fromOffset(M, panelY)
 	panel.Size = UDim2.fromOffset(panelW, panelH)
+	local panelBeside = panelFits and panelY + panelH >= barBottom - 1e-6 -- beside the hotbar (not in the pocket)
 
 	-- The warning: centred just above the hotbar when there is room under the text rows; otherwise to the
-	-- RIGHT of the hotbar, in its band (it is not a button, so the jump button's corner does not matter).
+	-- RIGHT of the hotbar, in its band (it is not a button, so the jump button's corner does not matter), level
+	-- with the hotbar but never above the foot of the HUD's rows (REVIEW-3 finding 3: centred on a two-row
+	-- hotbar it sat on the memo and hint rows at 568x320).
 	local warnH = 34
 	local centreW = math.min(440, rootW - 2 * (M + panelW + GAP))
 	if barTop - GAP - warnH >= ceiling and centreW >= 240 then
@@ -371,7 +399,9 @@ local function applyLayout()
 		warnHome.size = UDim2.fromOffset(centreW, warnH)
 	else
 		local w = math.max(0, math.min(440, sideRoom))
-		warnHome.pos = UDim2.fromOffset((rootW + barW) / 2 + GAP, barTop + (barH - warnH) / 2)
+		local y = barTop + (barH - warnH) / 2
+		if y < ceiling and ceiling + warnH <= barBottom then y = ceiling end
+		warnHome.pos = UDim2.fromOffset((rootW + barW) / 2 + GAP, y)
 		warnHome.size = UDim2.fromOffset(w, warnH)
 	end
 	warnPanel.Position = warnHome.pos
@@ -379,37 +409,53 @@ local function applyLayout()
 	lay.rootW, lay.rootH, lay.padDesign = rootW, rootH, padDesign
 
 	-- The title card (REVIEW-2 finding 5: at 40% of the height it sat on the hotbar on 800x360, 844x390 and
-	-- 640x300 phones, covering the slot labels that say what E drops). It never covers the HUD's text rows or
-	-- the hotbar: both lines in the free band between them when they fit; the title alone there when only it
-	-- fits; else both lines beside the hotbar, on its right (the wing panel is on its left, and no hazard
-	-- launches while a card is up, so the warning is never there with it). Nowhere clear: not shown at all
-	-- (the wing panel names the wing anyway). check_lostfounddepot_hud_wings.luau measures it on every viewport.
+	-- 640x300 phones, covering the slot labels that say what E drops). It never covers the HUD's text rows, the
+	-- hotbar or the wing panel: both lines in the free band between the rows and the hotbar when they fit (kept
+	-- clear of a panel that rises into the band: REVIEW-3 finding 3, 667x375); the title alone there when only it
+	-- fits; else both lines beside the hotbar, on its right, below the rows (the wing panel is on its left, and no
+	-- hazard launches while a card is up, so the warning is never there with it); else the title alone in the
+	-- pocket right of the clock, under the toggles (568x320). Nowhere clear: not shown at all (the wing panel
+	-- names the wing anyway). check_lostfounddepot_hud_wings.luau measures it on every viewport.
 	local cardW = math.min(720, rootW - 2 * M)
 	local titleH, subH = 64, 28
 	local bandTop, bandBottom = ceiling + 4, barTop - GAP
+	if panelBeside and panelY < bandBottom then
+		cardW = math.min(cardW, rootW - 2 * (M + panelW + GAP))
+	end
 	local band = bandBottom - bandTop
 	local rightW = math.min(420, sideRoom)
+	local sideTop = math.max(barTop, ceiling + 4)
+	local sideH = barBottom - sideTop
+	local topPocketLeft = if single then rootW else rootW / 2 + clockW / 2 + GAP
+	if barTop < pocketBottom then topPocketLeft = math.max(topPocketLeft, (rootW + barW) / 2 + GAP) end
+	local topPocketTop = M + toggleH + GAP
+	local topPocketW = math.min(420, rootW - M - topPocketLeft)
 	cardFits = true
-	if band >= titleH + 4 + subH then
+	if band >= titleH + 4 + subH and cardW >= 240 then
 		local cy = math.clamp(rootH * 0.4, bandTop + titleH / 2, bandBottom - subH - 4 - titleH / 2)
 		card.Position = UDim2.fromOffset(rootW / 2, cy)
 		card.Size = UDim2.fromOffset(cardW, titleH)
 		cardSub.Position = UDim2.fromOffset(rootW / 2, cy + titleH / 2 + 4)
 		cardSub.Size = UDim2.fromOffset(cardW, subH)
 		cardSubFits = true
-	elseif band >= 40 then
+	elseif band >= 40 and cardW >= 240 then
 		local h = math.min(titleH, band)
 		card.Position = UDim2.fromOffset(rootW / 2, bandTop + band / 2)
 		card.Size = UDim2.fromOffset(cardW, h)
 		cardSubFits = false
-	elseif rightW >= 200 then
+	elseif rightW >= 200 and sideH >= 40 then
 		local x = (rootW + barW) / 2 + GAP + rightW / 2
-		local h1 = math.floor(barH * 0.62)
-		card.Position = UDim2.fromOffset(x, barTop + h1 / 2)
+		local h1 = math.max(40, math.floor(sideH * 0.62))
+		card.Position = UDim2.fromOffset(x, sideTop + h1 / 2)
 		card.Size = UDim2.fromOffset(rightW, h1)
-		cardSub.Position = UDim2.fromOffset(x, barTop + h1 + 2)
-		cardSub.Size = UDim2.fromOffset(rightW, math.max(0, barH - h1 - 2))
-		cardSubFits = true
+		cardSub.Position = UDim2.fromOffset(x, sideTop + h1 + 2)
+		cardSub.Size = UDim2.fromOffset(rightW, math.max(0, sideH - h1 - 2))
+		cardSubFits = sideH - h1 - 2 >= 16
+	elseif topPocketW >= 200 and pocketBottom - topPocketTop >= 40 then
+		local h = math.min(titleH, pocketBottom - topPocketTop)
+		card.Position = UDim2.fromOffset(topPocketLeft + topPocketW / 2, topPocketTop + h / 2)
+		card.Size = UDim2.fromOffset(topPocketW, h)
+		cardSubFits = false
 	else
 		cardFits = false
 	end
@@ -479,7 +525,7 @@ end
 local function refreshVisibility()
 	local crowded = layout.compact and hudCentreOpen()
 	local loaded = lastState ~= nil and lastState.loaded == true
-	panel.Visible = panelWanted and loaded and not crowded
+	panel.Visible = panelWanted and loaded and not crowded and panelFits
 	local shown = false
 	if warnWanted then
 		if crowded then
@@ -541,9 +587,16 @@ local lightAccum = 0
 local announcer = EnvBands.newAnnouncer()
 local pendingCard: number? = nil -- a wing reached while the HUD's centre was busy: shown when it clears
 local scheduler = Hazards.newScheduler(Hz, rand)
+local coverHold = { t = 0 } -- running-clock seconds the due hazard has waited for a covered screen (Wings.holdForCover)
+local COVER_HOLD = if type(Hz.MaxCoverHoldSeconds) == "number" then Hz.MaxCoverHoldSeconds else 15
 local rest = Rest.new()
 local brk = Wings.newBreak()
 local sat = false
+-- when this script sat the character: a Humanoid sat without a seat drops onto the floor first (Studio trace,
+-- +1 Jump 2026-09-27: vy -3 .. -26, a bounce, settled in ~0.3 s), so the first Config.Rest.SitSettleSeconds
+-- after the sit are not a fall (check_lostfounddepot_sitdrop)
+local satAt = 0
+local SIT_SETTLE = if type(RestCfg.SitSettleSeconds) == "number" then RestCfg.SitSettleSeconds else 1.0
 local knockUntil: number? = nil
 local bayOx: number? = nil
 local rect: any = nil
@@ -571,8 +624,10 @@ local function pollState()
 	end
 	seenVersion = version
 	local carryBefore = lastState and lastState.carry
+	local canSaveBefore = lastState and lastState.canSave
 	lastState = st
-	if st.carry ~= carryBefore then
+	-- the hotbar's rows follow the carry; the panel's pocket moves below the HUD's "not saving" line
+	if st.carry ~= carryBefore or st.canSave ~= canSaveBefore then
 		applyLayout()
 	end
 end
@@ -588,6 +643,7 @@ end
 
 local function sitDown()
 	sat = true
+	satAt = now
 	breakFocus.Enabled = true
 	if hum then
 		pcall(function() (hum :: Humanoid).Sit = true end)
@@ -837,8 +893,14 @@ local function stepHazards(dt: number, grounded: boolean)
 	-- room for a lane in view is only worked out on a frame when a hazard is due
 	local due = scheduler.active == nil and scheduler.clock + dt >= scheduler.nextAt
 	local roomy = onFloor and (not due or Wings.room(rect, pos, yaw, Hz.SpreadDegrees, Hz.FloorMargin, boxes) >= Hz.MinLaneStuds)
-	-- a due hazard waits (stays due) while a phone's drawer or card, or our title card, covers the screen
-	local covered = (layout.compact and hudCentreOpen()) or cardUp
+	-- a due hazard waits (stays due) while a phone's drawer or card, or our title card, covers the screen, but
+	-- at most MaxCoverHoldSeconds of running clock (REVIEW-3 finding 2: held for good, a drawer kept open was a
+	-- total shield); then it comes, its warning beside the drawer. Where the warning has no room beside the
+	-- drawer it keeps waiting: a hazard never launches with its warning hidden.
+	local drawer = layout.compact and hudCentreOpen()
+	local runDt = if Wings.hazardsMayRun(rest, Rest, fr.state) then dt else 0
+	local covered = Wings.holdForCover(coverHold, runDt, due, drawer or cardUp, COVER_HOLD)
+		or (due and drawer and not placeWarningAside())
 	local before = if scheduler.active then scheduler.active.t else nil
 	local ev = Hazards.step(scheduler, Hz, dt, {
 		resting = not Wings.hazardsMayRun(rest, Rest, fr.state),
@@ -921,10 +983,11 @@ local function frame(dt: number)
 		local rootPart = hrp :: BasePart
 		local humanoid = hum :: Humanoid
 		local grounded = isGrounded()
-		-- a seated Humanoid may report FloorMaterial = Air: a player we sat down is supported unless falling
+		-- a seated Humanoid reports FloorMaterial = Air: a player we sat down is supported unless falling, and
+		-- the sit's own drop onto the floor (the first SitSettleSeconds) is not a fall (REVIEW-3 finding 1)
 		local supported = grounded
 		if sat and not grounded and knockUntil == nil then
-			supported = math.abs(rootPart.AssemblyLinearVelocity.Y) < 2
+			supported = math.abs(rootPart.AssemblyLinearVelocity.Y) < 2 or (now - satAt) < SIT_SETTLE
 		end
 		local md = (humanoid :: any).MoveDirection
 		local moving = (md ~= nil and md.Magnitude > 0.05) or (humanoid :: any).Jump == true

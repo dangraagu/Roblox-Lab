@@ -320,6 +320,47 @@ do
 	eq(stale.cash, 1050, "CONTROL: merge mutates none of its inputs")
 end
 
+--============================================================ the highscore board's count (docs/complete-game-standard.md §3)
+
+-- The board ranks Perfect Shifts the server's travel ledger found physically possible (Ledger.luau):
+-- `boardPerfects`, and `boardAt`, the unix time that count last rose (the tie-break: whoever reached it
+-- first). Both persist, so a rejoin keeps the tie-break; both go through the sanitizer and the merge.
+do
+	local d = Economy.defaultProfile(Config)
+	eq(d.boardPerfects, 0, "board: a new profile has 0 counted Perfect Shifts")
+	eq(d.boardAt, 0, "board: ... reached at no time yet")
+
+	local s = Economy.sanitize(Config, { shifts = 10, perfects = 4, boardPerfects = 9, boardAt = 1790000000.7 })
+	eq(s.boardPerfects, 4, "board: counted Perfect Shifts can never exceed Perfect Shifts")
+	eq(s.boardAt, 1790000000, "board: the time is a whole unix second")
+	local junk = Economy.sanitize(Config, { shifts = 10, perfects = 4, boardPerfects = "lots", boardAt = 0 / 0 })
+	eq(junk.boardPerfects, 0, "board: a non-number count becomes 0")
+	eq(junk.boardAt, 0, "board: a NaN time becomes 0")
+	local neg = Economy.sanitize(Config, { shifts = 10, perfects = 4, boardPerfects = -3, boardAt = -5 })
+	eq(neg.boardPerfects, 0, "board: a negative count becomes 0")
+	eq(neg.boardAt, 0, "board: a negative time becomes 0")
+	local kept = Economy.sanitize(Config, { shifts = 10, perfects = 4, boardPerfects = 3, boardAt = 1790000123 })
+	eq(kept.boardPerfects, 3, "board: a sane count survives a load")
+	eq(kept.boardAt, 1790000123, "board: ... and so does when it was reached")
+
+	-- merge: the session's own counted Perfects ride on top of the store's, like its perfects
+	local stored = { v = 1, shifts = 20, perfects = 8, boardPerfects = 6, boardAt = 1790000000, redeemed = {} }
+	local base = { v = 1, shifts = 5, perfects = 2, boardPerfects = 2, boardAt = 1780000000, redeemed = {} }
+	local cur = { v = 1, shifts = 7, perfects = 4, boardPerfects = 3, boardAt = 1790000500, redeemed = {} }
+	local m = Economy.merge(Config, stored, base, cur)
+	eq(m.boardPerfects, 7, "board merge: the stored 6 plus this session's 1")
+	eq(m.boardAt, 1790000500, "board merge: reached when this session added its last one (the later time)")
+	local idle = table.clone(cur)
+	idle.boardPerfects, idle.boardAt = 2, 1780000000
+	local m2 = Economy.merge(Config, stored, base, idle)
+	eq(m2.boardPerfects, 6, "board merge: a session that counted nothing leaves the store's count")
+	eq(m2.boardAt, 1790000000, "board merge: ... and the store's time (it reached 6 then, not later)")
+	local early = table.clone(cur)
+	early.boardAt = 1700000000 -- a clock that went backwards must not make the merged count look earlier
+	local m3 = Economy.merge(Config, stored, base, early)
+	eq(m3.boardAt, 1790000000, "board merge: the merged count is never dated before the stored count was reached")
+end
+
 --============================================================ personal best
 
 eq(Economy.betterBest(0, 150), 150, "the first Perfect sets the best")

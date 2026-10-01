@@ -11,11 +11,14 @@ office on a **space station**, and finally the last lost-and-found **beyond the 
 its own light and sky, its own roof over your bay, landmarks over the walls, life in the air, weather,
 and its own two runaway hazards on the sorting floor.
 
-**State: built, unit-tested, headless-tested, mutation-tested, and adversarially reviewed once (REVIEW-2,
-2026-09-24): its six findings were each reproduced, turned into a failing gate, fixed and mutation-tested
-(§13). NOT seen in Studio.** Nothing committed, pushed or published. This work was started by earlier
-sessions that were cut off by a usage limit; §12 says what the resume found and fixed, §13 what the review
-found and what changed.
+**State: built, unit-tested, headless-tested, mutation-tested, and adversarially reviewed twice (REVIEW-2,
+2026-09-24; REVIEW-3, 2026-09-30): each finding was reproduced, turned into a failing gate, fixed and
+mutation-tested (§13, §14). The owner's open decisions were taken on 2026-09-30 (§14). Re-verified on
+2026-10-01 (pass 1 run again: every REVIEW-3 finding reproduced on the reviewed source and gone on the current
+tree, the REVIEW-3 sweep 23 of 23 killed again; end of §14). NOT seen in Studio.**
+Committed with the wings (62550b2); nothing published. This work was started by earlier sessions that were cut
+off by a usage limit; §12 says what the resume found and fixed, §13 and §14 what the reviews found and what
+changed.
 
 ---
 
@@ -67,8 +70,8 @@ per shift. `tests/Pacing.spec.luau` asserts the owner's window and prints:
 
 | # | wing | from (shifts done) | career shifts | normal (regular) | slow (first-timer) | light and sky | over the bay | out past the walls | life | weather | hazards |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | CITY DEPOT | 0 | 1-3 | 0 min | 0 min | afternoon = the server's Temple preset (no jump at join) | steel roof trusses, four hanging lamps | a city skyline all round, lit windows | pigeons | — | **none**: the tutorial, torn tags and the first memo each get a calm shift |
-| 2 | AIRPORT LOST & FOUND | 3 | 4-6 | 8.5 | 13.2 | bright noon | glass terminal roof on white ribs; departures board over the arc: `ARRIVALS / LOST PROPERTY B3 ON TIME` | control tower with a blinking red beacon, hangar, terminal | airliners crossing | — | runaway trolley, tumbling suitcase |
+| 1 | CITY DEPOT | 0 | 1-3 | 0 min | 0 min | afternoon = the server's Temple preset (no jump at join) | steel roof trusses, four hanging lamps | a city skyline all round, lit windows | gulls (pass 2: the pigeons are the train station's) | autumn leaves blowing in under the trusses (pass 2) | **none**: the tutorial, torn tags and the first memo each get a calm shift |
+| 2 | AIRPORT LOST & FOUND | 3 | 4-6 | 8.5 | 13.2 | bright noon | glass terminal roof on white ribs; departures board over the arc: `ARRIVALS / LOST PROPERTY B3 ON TIME` | control tower with a blinking red beacon, hangar, terminal | airliners crossing | stray ticket stubs fluttering down from the glass roof (pass 2) | runaway trolley, tumbling suitcase |
 | 3 | TRAIN STATION | 6 | 7-9 | 16.6 | 26.8 | late-afternoon gold, sun rays | iron-and-glass arched shed; a station clock over the arc whose minute hand really runs (a lap a minute) | a viaduct 70 studs up with a train crossing every 30 s (smoking loco), a brick clock tower | pigeons | steam | porter's cart, pigeon |
 | 4 | THEME PARK | 9 | 10-13 | 24.6 | 39.9 | dusk, pink haze, first 400 stars | strings of coloured bulbs | a turning ferris wheel (a turn a minute), a loop coaster, a big top | balloons rising | confetti | giant beach ball (bouncing), bumper car |
 | 5 | **SPACE STATION** | **13** | 14-36 | **35.1** | **57.4** | night, 3 500 stars, no haze | white dome ribs with blue running lights | **the Earth** with its cloud shell and airglow over the back wall, solar wings | satellites, a drifting astronaut | floating motes | floating crate, repair drone |
@@ -124,8 +127,11 @@ Rare, telegraphed, one at a time, **client-only** (they only ever bump you), on 
   through the tray and its items);
 * **a due hazard also waits while the screen is covered** (`Wings.mayLaunch`): on a phone while a HUD drawer
   or card is open (it sits exactly where the warning and the hazard's marker would be), and while the
-  wing's title card is up. It stays due with its clock running, so this delays a hazard, it does not skip it
-  (REVIEW-2 finding 2; measured below);
+  wing's title card is up (REVIEW-2 finding 2). **It waits at most 15 s of running clock**
+  (`Wings.holdForCover`, `Config.Hazards.MaxCoverHoldSeconds`; REVIEW-3 finding 2: held for good, a drawer kept
+  open was a total shield) and then comes with its warning beside the drawer; the wait does not run while the
+  clock is stopped and does not restart when the drawer is closed and opened again. So a drawer delays a hazard
+  by 15 s at most, it does not skip it (measured below and in §14);
 * **telegraph**: an always-on-top `!` marker and a blinking light on the hazard, a lane line from it through
   you, a ring at your feet and a banner `<< RUNAWAY TROLLEY INCOMING`, with an arrow when it is off to a side.
   While it tracks you (yellow) the lane re-aims at you; then it **locks**: ring and lane turn red, the banner
@@ -241,6 +247,11 @@ the clock only starts at your first pickup.** The wings add a place to take it:
   a clear sky (no hazard outlives the shift).
 * **Your first pickup ends a break** in the same frame, standing still or not: the clock running again is
   the end of the break.
+* **The sit itself never wakes the break** (REVIEW-3 finding 1): a Humanoid sat without a seat drops onto the
+  floor for about 0.3 s (+1 Jump's Studio trace: vy -3 .. -26, a bounce, FloorMaterial Air while seated), so
+  the first `Config.Rest.SitSettleSeconds` (1.0) after the sit are not a fall. Until then TAKE A BREAK stood the
+  player back up on the drop's first frame. A real fall while seated still ends it
+  (`check_lostfounddepot_sitdrop`).
 * **Idle** (AFK safety, from the template): stand still 20 s and hazards leave you alone
   (`Idle - hazards leave you alone`). Mid-shift that pauses **hazards only**; the server's clock runs on.
 * Roblox's own idle disconnect still applies; nothing is lost then either (the server's autosave is
@@ -254,8 +265,10 @@ the clock only starts at your first pickup.** The wings add a place to take it:
    30 s on a break, the tray still armed and the server's clock fields unchanged; a booked break and 30 s of
    hazards later, `endsAt` unchanged; idle for 46 s mid-shift, the server's clock ran the whole 46 s.
 2. **It cannot dodge a penalty.** There are only two: the 8 s misfile penalty (server-side, per deposit;
-   a break cannot happen mid-shift) and the clock itself (see 1). Nothing else in the game is timed, raided or
-   ranked (no leaderboard; a personal best is your own fastest Perfect Shift, on the server's clock).
+   a break cannot happen mid-shift) and the clock itself (see 1). Nothing else in the game is timed or raided.
+   What is ranked is server-side only: the personal best (your own fastest Perfect Shift, on the server's
+   clock) and, since 2026-10-01, the highscore board (a count of Perfect Shifts that the server's travel ledger
+   found possible; §14). A break happens only while the clock is stopped and the server never hears of it.
 3. **It is not a panic button.** A break never starts with a hazard in the air or while you are airborne
    (`Rest.validate` refuses a config that allows it); pressed then, it is queued and taken the first safe
    moment you stand still, or dropped. Mid-shift it cannot start at all. A knock voids a pending one.
@@ -268,10 +281,13 @@ the clock only starts at your first pickup.** The wings add a place to take it:
    hazard that would cost a second or two.
 6. **Nor is a drawer.** Since REVIEW-2 a due hazard waits while a phone's HUD drawer or card (or the wing's
    title card) covers the screen (§3). That is not a rest: the shift clock runs on, the hazard stays due and
-   comes the moment the drawer closes (within 6 s in every one of 18 phone runs, `check_lostfounddepot_hud_wings`).
-   It delays hazards, it does not skip them: a phone player who keeps the MANUAL open 25 s of every minute
-   meets 137 hazards in 6 h of working clock against 142 (3.5% fewer, `Wings.spec`), while sorting a third
-   of their shift with the middle of the screen covered. A knock costs 0.16% of the shift clock at most.
+   comes the moment the drawer closes (within 6 s in every one of 18 phone runs, `check_lostfounddepot_hud_wings`)
+   **or after 15 s of running clock, whichever is first** (REVIEW-3 finding 2: until then a drawer that was
+   never closed held it for good, 0 hazards in 991 s of running clock against 6 with it closed). It delays
+   hazards, it does not skip them: in 6 h of working clock a phone player who keeps the MANUAL open 25 s of
+   every minute meets 138 hazards and one who never closes it 129, against 142 (`Wings.spec`); through the real
+   client the held hazard came under the open drawer 15.0 s after it opened in 18 of 18 phone runs, its warning
+   up; the reviewer's 3-shift probe with the real interval: 6 hazards with the drawer open, 6 closed.
 
 ---
 
@@ -318,25 +334,26 @@ every seam (both wings live), over 8 more seconds of frames with hazards flying 
 
 | where | parts | emitters (particles/s) | beams | trails | lights |
 |---|---|---|---|---|---|
-| CITY DEPOT | 64 | 0 | 0 | 0 | 0 |
-| city › airport | 85 | 0 | 0 | 0 | 0 |
-| AIRPORT | 44 | 0 | 0 | 0 | 1 |
-| airport › train | 93 | 2 (7.1) | 0 | 0 | 0 |
-| TRAIN STATION | 80 | 2 (9.8) | 0 | 0 | 1 |
-| **train › park** | **134** | **3 (10.9)** | 0 | 0 | 1 |
-| THEME PARK | 77 | 1 (7.9) | 0 | 0 | 0 |
-| park › station | 111 | 2 (6.5) | 0 | 0 | 1 |
-| SPACE STATION | 44 | 1 (4.9) | 0 | 0 | 0 |
+| CITY DEPOT | 65 | 1 (3.9) | 0 | 0 | 0 |
+| city › airport | 86 | 2 (3.9) | 0 | 0 | 0 |
+| AIRPORT | 42 | 1 (4.0) | 0 | 0 | 1 |
+| airport › train | 93 | 3 (9.2) | 0 | 0 | 0 |
+| TRAIN STATION | 81 | 2 (9.8) | 0 | 0 | 1 |
+| **train › park** | **129** | **3 (10.9)** | 0 | 0 | 0 |
+| THEME PARK | 81 | 1 (7.9) | 0 | 0 | 1 |
+| park › station | 107 | 2 (6.5) | 0 | 0 | 0 |
+| SPACE STATION | 48 | 1 (4.9) | 0 | 0 | 1 |
 | station › galaxy | 48 | 2 (5.6) | 4 | 1 | 1 |
 | BEYOND THE GALAXY | 35 | 1 (5.8) | 4 | 1 | 0 |
 
 (A row is the scene at the end of its 16 s; when a hazard happens to be flying then, its model, lane and ring
-add 4-7 parts and its blinking light 1. The peaks below are over every frame.)
+add 4-7 parts and its blinking light 1. The peaks below are over every frame. Re-measured 2026-10-01 after the city
+and the airport got their own weather and the city its gulls: every wing now has one weather emitter of its own.)
 
 | metric | measured peak | budget (`Config.Budget`) |
 |---|---|---|
 | local parts | **135** (train › park, also the worst frame with a hazard in flight) | 220 |
-| particle emitters | 3 (steam + confetti + the loco's smoke) | 4 (weather capped at 2 by `EnvBands.capRates`) |
+| particle emitters | 3 (two wings' weather + the loco's smoke) | 4 (weather capped at 2 by `EnvBands.capRates`) |
 | particles per second | 10.9 | 60 |
 | beams | 4 (galaxy arms) | 8 |
 | trails | 1 (comet) | 8 |
@@ -344,13 +361,25 @@ add 4-7 parts and its blinking light 1. The peaks below are over every frame.)
 | hazards at once | 1 | 1 |
 
 **Stress** (§8): first a flurry through all six wings 0.3 s apart, twenty times round (1 080 frames): never
-more than two wings' scenery on screen, peak 137 parts. Then 160 random career jumps (0-40 shifts, running
-or not, 0.2 s or 4 s apart) with hazards every 6-7 s, every budget asserted on every frame: peak **142
-parts**, 370 unique instances ever under the folder (pooled, nothing piles up). The reviewer's own harder
+more than two wings' scenery on screen, peak 140 parts. Then 160 random career jumps (0-40 shifts, running
+or not, 0.2 s or 4 s apart) with hazards every 6-7 s, every budget asserted on every frame: peak **136
+parts**, 396 unique instances ever under the folder (pooled, nothing piles up). The reviewer's own harder
 stress (city, train and park in every order, held 0.4-2 s, the camera switching between low and zoomed out,
 hazards every 3 s) peaks at 151 parts, 3 emitters, 1 light: inside the budget. Before `Wings.keepStrongest`
 (the scenery of the two strongest wings only; normal play never blends more) random jumps reached 223 parts,
 over budget (§12).
+
+**Capped IN CODE** (REVIEW-3 finding 5; until then only the checks measured it, and a train wing with 40
+pigeons built 228 parts with nothing refusing). A ledger in `WingArt` counts the parts, lights, beams, trails,
+emitters and particles per second of everything shown; scenery and life are shown only while they fit under
+`Config.Budget` less `Budget.HazardReserve` (8 parts and 1 light: the biggest hazard, the repair drone, is 5
+parts + lane + ring) and the weather's own emitters; the hazard's model, lane and ring are counted apart and
+always drawn. A piece that does not fit waits for room, a critter that does not fit is let go, and the weather's
+rate cap is what the pieces' emitters leave. `check_lostfounddepot_budget` loads the real client with an
+over-budget config (40 gulls, 40 pigeons, 60 balloons, 20 satellites, 12 comets, weather at 50/s, hazards every
+3-4 s): every one of 15 426 frames stays inside the budget (peak 218 / 220 parts, 8 / 8 trails), every wing keeps its
+roof and landmark, all ten hazard kinds are drawn (at most 7 of their 8 reserved parts), and no hazard is ever
+warned of without being drawn. With this game's config the cap never binds: `_wings` prints the same numbers.
 
 **What is pooled / how it stays cheap:** a wing's pieces are built the first time it is needed and
 **unparented** at zero weight (a wing you are not in costs no draw calls); critters are pooled per kind,
@@ -386,14 +415,22 @@ hazard with its lane and ring, and the invisible weather host.
 opens), overlap rule on: PASS, and the wing panel and warning never sit on the HUD's memo, hint, toast, stamp,
 cash, clock, toggles or hotbar. The wing panel sits LEFT of the hotbar, level with it (so above the
 thumbstick); on a short landscape phone (640x300) it switches to a row (text, then BREAK to its right) and the
-warning moves right of the hotbar. When a drawer opens on a phone during a hazard's flight the warning stays
+warning moves right of the hotbar (never above the foot of the HUD's rows). When a drawer opens on a phone during a hazard's flight the warning stays
 up (30 of 30 runs), two lines just below the drawer where the hidden hotbar sits, clear of the thumbstick and
 the jump button (18 of 18 touch runs); with a drawer open no new hazard launches (0 in 18 ten-second runs with
 hazards due every 1-2 s). **The title card** (REVIEW-2 finding 5) goes in the free band between the HUD's text
 rows and the hotbar with both lines when they fit (8 viewports), the title alone when only it fits (800x360
 touch), or beside the hotbar on its right (640x300, where there is no band at all); measured with
 "YOU MADE IT TO SPACE!" on all 10 viewports: shown on 10, 0 clashes with the rows, the hotbar or the wing
-panel. No hazard launches while a card is up.
+panel. No hazard launches while a card is up. **Twelve more phone sizes** (REVIEW-3 finding 3: 568x320 put the
+panel, the warning and the card on the HUD's rows, and 667x375 the card on the panel): the wing panel, a flying
+hazard's warning and the card are measured on all 22 viewports, 0 clashes. Until pass 2 (§15) the panel went
+into the pocket under the cash panel on 568x320 and the card's title into the pocket right of the clock; since then
+568x320 lays out like 640x300 (panel left of the one-row hotbar, warning and card right of it). On 667x375 the
+card narrows to keep clear of the panel. ~~The HUD's own hotbar still covers its clock on 568x320 (§14, open).~~ Closed in
+pass 2 of the standard (§15): the clock stays in the top row and a full cart's hotbar takes one row there, so the
+panel now sits LEFT of the hotbar on 568x320 too (as on 640x300), the warning right of it, and the HUD's own hotbar
+is measured against its own text rows on all 22 viewports (hudcheck, which sees Frames only, cannot).
 
 ---
 
@@ -401,43 +438,50 @@ panel. No hazard launches while a card is up.
 
 Every gate, run on the final source and a freshly rebuilt bundle. `luau` is the luau CLI, always `2>&1`.
 
-| gate | before the wings (CLAUDE.md, 2026-09-17) | the wings as reviewed (REVIEW-2) | now, after REVIEW-2 |
-|---|---|---|---|
-| tests/Codes.spec | 16 / 0 | 16 / 0 | 16 / 0 |
-| tests/Economy.spec | 157 / 0 | 157 / 0 | 157 / 0 |
-| tests/Layout.spec | 32 / 0 | 32 / 0 | 32 / 0 |
-| tests/Rng.spec | 32 / 0 | 32 / 0 | 32 / 0 |
-| tests/Rules.spec | 95 / 0 | 95 / 0 | 95 / 0 |
-| tests/Seed.spec | 24 / 0 | 24 / 0 | 24 / 0 |
-| tests/Shift.spec | 79 / 0 | 79 / 0 | 79 / 0 |
-| tests/responsive.spec | 70 / 0 | 70 / 0 | 70 / 0 |
-| tests/walk.luau | 48 / 0 | 48 / 0 | 48 / 0 |
-| tests/EnvBands.spec (template, verbatim) | — | 124 / 0 | 124 / 0 |
-| tests/Hazards.spec (template, verbatim) | — | 102 / 0 | 102 / 0 |
-| tests/Rest.spec (template, verbatim) | — | 55 / 0 | 55 / 0 |
-| tests/Wings.spec | — | 213 / 0 | **256 / 0** |
-| tests/EnvConfig.spec | — | 265 / 0 | **268 / 0** |
-| tests/Pacing.spec | — | 100 / 0 | **115 / 0** |
-| tests/StateCache.spec | — | 10 / 0 | 10 / 0 |
-| **spec + walk total** | **553 / 0** | **1 422 / 0** | **1 483 / 0** |
-| check_lostfounddepot | 238 / 0 | 238 / 0 | 238 / 0 |
-| check_lostfounddepot_spawn | 29 / 0 | 29 / 0 | 29 / 0 |
-| check_lostfounddepot_save | 111 / 0 | 111 / 0 | 111 / 0 |
-| check_lostfounddepot_hudflow | 44 / 0 | 44 / 0 | 44 / 0 |
-| check_lostfounddepot_view | 17 / 0 (front/pad taps 99.4%) | 17 / 0 (99.4%) | 17 / 0 (99.4%, 3169 of 3187, unchanged) |
-| check_lostfounddepot_hud | PASS | PASS | PASS |
-| check_lostfounddepot_rng | 24 / 0 | 24 / 0 | 24 / 0 |
-| check_lostfounddepot_firstmin | 67 / 0 | 67 / 0 | 67 / 0 |
-| check_lostfounddepot_wings | — | 183 / 0 | **217 / 0** |
-| check_lostfounddepot_wingview | — | 66 / 0 | 66 / 0 |
-| check_lostfounddepot_hud_wings | — | PASS + PASS (text rows) | **PASS + PASS** (10 modes; the title card on 10 viewports; the launch holds) |
-| check_lostfounddepot_compile | — | 21 sources, 42 / 0 | 21 sources, 42 / 0 |
-| **headless check total** | **530 / 0 + PASS** | **821 / 0 + PASS + PASS + PASS** | **855 / 0 + PASS + PASS + PASS** |
-| `luau-compile` / `luau-analyze` | 14 / 14 clean | **not available**: both binaries were wiped from this machine on 2026-09-23 (only `luau.exe` survived). The compile half is `check_lostfounddepot_compile` (loadstring over all 21 sources); **luau-analyze was not run**. | still not available; not run |
+| gate | before the wings (CLAUDE.md, 2026-09-17) | the wings as reviewed (REVIEW-2) | after REVIEW-2 | now, after REVIEW-3 (2026-09-30) |
+|---|---|---|---|---|
+| tests/Codes.spec | 16 / 0 | 16 / 0 | 16 / 0 | 16 / 0 |
+| tests/Economy.spec | 157 / 0 | 157 / 0 | 157 / 0 | 157 / 0 |
+| tests/Layout.spec | 32 / 0 | 32 / 0 | 32 / 0 | 32 / 0 |
+| tests/Rng.spec | 32 / 0 | 32 / 0 | 32 / 0 | 32 / 0 |
+| tests/Rules.spec | 95 / 0 | 95 / 0 | 95 / 0 | 95 / 0 |
+| tests/Seed.spec | 24 / 0 | 24 / 0 | 24 / 0 | 24 / 0 |
+| tests/Shift.spec | 79 / 0 | 79 / 0 | 79 / 0 | 79 / 0 |
+| tests/responsive.spec | 70 / 0 | 70 / 0 | 70 / 0 | 70 / 0 |
+| tests/walk.luau | 48 / 0 | 48 / 0 | 48 / 0 | 48 / 0 |
+| tests/EnvBands.spec (template, verbatim) | — | 124 / 0 | 124 / 0 | 124 / 0 |
+| tests/Hazards.spec (template, verbatim) | — | 102 / 0 | 102 / 0 | 102 / 0 |
+| tests/Rest.spec (template, verbatim) | — | 55 / 0 | 55 / 0 | 55 / 0 |
+| tests/Wings.spec | — | 213 / 0 | **256 / 0** | **264 / 0** |
+| tests/EnvConfig.spec | — | 265 / 0 | **268 / 0** | **273 / 0** |
+| tests/Pacing.spec | — | 100 / 0 | **115 / 0** | 115 / 0 |
+| tests/StateCache.spec | — | 10 / 0 | 10 / 0 | 10 / 0 |
+| **spec + walk total** | **553 / 0** | **1 422 / 0** | **1 483 / 0** | **1 496 / 0** |
+| check_lostfounddepot | 238 / 0 | 238 / 0 | 238 / 0 | 238 / 0 |
+| check_lostfounddepot_spawn | 29 / 0 | 29 / 0 | 29 / 0 | 29 / 0 |
+| check_lostfounddepot_save | 111 / 0 | 111 / 0 | 111 / 0 | 111 / 0 |
+| check_lostfounddepot_hudflow | 44 / 0 | 44 / 0 | 44 / 0 | 44 / 0 |
+| check_lostfounddepot_view | 17 / 0 (front/pad taps 99.4%) | 17 / 0 (99.4%) | 17 / 0 (99.4%, 3169 of 3187, unchanged) | 17 / 0 (99.4%) |
+| check_lostfounddepot_hud | PASS | PASS | PASS | PASS |
+| check_lostfounddepot_rng | 24 / 0 | 24 / 0 | 24 / 0 | 24 / 0 |
+| check_lostfounddepot_firstmin | 67 / 0 | 67 / 0 | 67 / 0 | 67 / 0 |
+| check_lostfounddepot_wings | — | 183 / 0 | **217 / 0** | 217 / 0 |
+| check_lostfounddepot_wingview | — | 66 / 0 | 66 / 0 | 66 / 0 |
+| check_lostfounddepot_hud_wings | — | PASS + PASS (text rows) | **PASS + PASS** (10 modes; the title card on 10 viewports; the launch holds) | **PASS + PASS** (10 viewports x 10 modes; 22 viewports for the wings' own placements; the drawer's 15 s wait) |
+| check_lostfounddepot_compile | — | 21 sources, 42 / 0 | 21 sources, 42 / 0 | 21 sources, 42 / 0 |
+| check_lostfounddepot_sitdrop (new, REVIEW-3) | — | — | — | **22 / 0** |
+| check_lostfounddepot_budget (new, REVIEW-3) | — | — | — | **16 / 0** |
+| **headless check total** | **530 / 0 + PASS** | **821 / 0 + PASS + PASS + PASS** | **855 / 0 + PASS + PASS + PASS** | **893 / 0 + PASS + PASS + PASS** |
+| `luau-compile` / `luau-analyze` | 14 / 14 clean | **not available**: both binaries were wiped from this machine on 2026-09-23 (only `luau.exe` survived). The compile half is `check_lostfounddepot_compile` (loadstring over all 21 sources); **luau-analyze was not run**. | still not available; not run | still not available; not run |
+
+**Since then** (§14, §15): the board added Board.spec, Ledger.spec and `_board`, and pass 2 of the complete-game
+standard moved `EnvConfig.spec` to 299 / 0 and `_wings` to 231 / 0, and runs `_hud` on 12 viewports (72
+measurements). The current totals are at the end of §15.
 
 The new glue checks pin the emulator's unseeded `Random` (as the older checks do), so they are deterministic: `_wings`, `_wingview` and `_hud_wings` were each run 3 more times on the final bundle with identical results (after REVIEW-2: `_wings` three runs and `_hud_wings` two, byte-identical output). `_view` still reports the front-row tap figure of 99.4% (3169 of 3187): the view check itself is untouched, and `_wingview` shows the wings change none of its numbers.
 
-**REVIEW-2's fixes had their own sweep: 25 of 25 mutations killed, 3 controls survived (§13).** The sweep
+**REVIEW-3's fixes had their own sweep: 23 of 23 mutations killed, 3 controls survived (§14).** **REVIEW-2's
+fixes had their own sweep: 25 of 25 mutations killed, 3 controls survived (§13).** The sweep
 below is the wings' first one, on the source as it was before REVIEW-2.
 
 **Mutation sweep** (scratch tool `scratchpad/lfd_eye2/sweep.py`, final log `sweep_round3_final.log`; the real
@@ -519,14 +563,19 @@ be in the air when the shift ends, and each landmark's biggest part measured ove
 11. **The wing panel on a phone**: stacked above-left of the hotbar on most phones; on a short landscape
     phone the row layout gives the wing name about 96 screen px: legible?
 12. **The BREAK**: `Humanoid.Sit = true` without a seat from the client: does it sit, replicate, wake on the
-    thumbstick, unsit on jump? The depth-of-field blur beyond ~28 studs: pleasant or muddy?
+    thumbstick, unsit on jump? The depth-of-field blur beyond ~28 studs: pleasant or muddy? +1 Jump's Studio
+    trace (the sit's own drop woke its rest) is now replayed here and fixed with a 1.0 s settle (REVIEW-3
+    finding 1, `check_lostfounddepot_sitdrop`); verify in Studio that the depot's break sits and STAYS seated, on
+    the bay floor, pressed between shifts and as a break booked for the end of a shift.
 13. **Title cards**: `YOU MADE IT TO SPACE!` with the flash and FOV punch: celebratory, not annoying; placed
     between the HUD's text rows and the hotbar where they fit.
 14. **Other players**: a knocked player stumbling with nothing hitting them (hazards are local); a neighbour's
     bay has no roof in your view (every client decorates only its own bay).
-15. **Frame time** on a mid/low phone at the densest seam (train › park, 134 parts) with the depot's 12 bays.
+15. **Frame time** on a mid/low phone at the densest seam (train › park, 135 parts at peak) with the depot's 12 bays.
 16. **Weather in the bay**: confetti (0.35 studs) and motes (0.18) drifting through the tray area: charming or
-    in the way of the tags?
+    in the way of the tags? Since pass 2 also the city's leaves (0.45, drifting sideways) and the airport's ticket
+    stubs (0.3): every emitter uses Roblox's default particle texture (no assets), so do leaves and tickets read as
+    leaves and paper, or as generic sparkles? If not, a texture id per kind is the fix (choose and verify ids).
 17. **The join**: `StateCache` rests on Roblox delivering the queued join payload to the HUD (the first and
     only State listener). On a real phone join, a returning veteran should see their own wing at once, with
     no city flash first. The client-created `DepotSky`: any visible pop at join?
@@ -539,10 +588,35 @@ be in the air when the shift ends, and each landmark's biggest part measured ove
     and the jump button. Readable there, at a glance, with a thumb on the stick?
 21. **The title card on a phone** (REVIEW-2): the title alone in the free band on 800x360; both lines beside
     the hotbar, on its right, on 640x300. Celebratory enough there, and legible at those sizes?
+22. **A hazard under an open phone drawer** (REVIEW-3): after 15 s of running clock a held hazard comes with the
+    drawer still open, its banner beside the drawer and its `!` marker behind it. Is it seen in time? Do taps
+    and prompts in the world work under an open drawer on a real phone?
+23. **568x320** (REVIEW-3, re-laid out in pass 2): the clock off-centre in the top row between the cash panel and
+    the toggles; the full cart's five slots in ONE row above the thumbstick and the jump button; the wing panel left
+    of it as a row, the wing's name in about 48 screen px (`THEME PARK` at that width: legible?), the warning and the
+    title card right of it. On a real iPhone SE 1: reachable with thumbs, nothing under the touch controls?
+24. **The gulls** (pass 2, the city's own life): the wing flap axis and the slow glide with an odd beat, white
+    against the afternoon sky; do they read as gulls, and not as the train station's pigeons?
+25. **The Top Sorters board** (complete-game standard §3, on the wall behind the pad, left of it): the title, the
+    mode line and ten rows on a 12 x 8 stud one-sided SurfaceGui, read from where its prompt shows (within 8
+    studs) and from the pad (about 15 studs) on a phone; the ProximityPrompt's tap button; switching EVERYONE /
+    FRIENDS; the `(you)` row in gold.
+26. **The board on a live server only**: the OrderedDataStore write after a shift-end save, `GetSortedAsync` once a
+    minute for the server, `Players:GetFriendsAsync` paging up to 200 and its throttle, `GetNameFromUserIdAsync`
+    for offline names, the request budget reserve. The emulator stands in for all of these (`_board` supplies its
+    own GetFriendsAsync); none has run against Roblox.
+27. **The board's travel ledger on a real connection** (`Ledger.luau`): `Ledger.spec` models 4 studs and 1.4 s of
+    server-view error as a bad phone connection (at most 1% of honest Perfects uncounted). Measure the real spread
+    of the server's root-part position against a phone player's on a live server before trusting that figure.
 
 ---
 
 ## 9. Thumbnail shot list (for the night Studio session)
+
+**Every thumbnail is 1920x1080 (16:9, Roblox's experience thumbnail size).** Set the Studio viewport to exactly
+that before capturing (Test > Device emulator: a custom 1920x1080 device at DPI scale 1, or a window whose 3D view
+measures 1920x1080), and check the saved image's size: a capture that is not 1920x1080 is not a thumbnail.
+Clips are a different format (vertical 1080x1920) and are listed in `MARKETING.md`.
 
 **Getting there without touching real saves.** *Not tried in Studio yet: verify step 1-3 before relying on
 the rest.*
@@ -589,7 +663,8 @@ Shots, best first:
    only stumbles you; the next one comes 8-10 s of clock later.
 5. **"Arrivals"** — AIRPORT, bright noon. Camera (106, 9, 18) looking at (90, 22, -60): the glass terminal
    roof on its white ribs, the departures board `ARRIVALS / LOST PROPERTY B3 ON TIME` over the arc, the
-   control tower's red beacon over the back-left wall, an airliner crossing; a suitcase on the tray.
+   control tower's red beacon over the back-left wall, an airliner crossing, ticket stubs drifting down; a
+   suitcase on the tray.
 6. **"Beyond the galaxy"** — BEYOND THE GALAXY from above (OverheadFade raised, step 3). Freecam at
    (140, 60, 60) looking at (-50, 420, -1600): the bay small in the lower frame (the dome's ribs, the tray and
    the arc of bins), **the spiral galaxy** with its bright core and curved arms high in the sky, the nebula at
@@ -630,7 +705,9 @@ Shots, best first:
 
 * **One adversarial review so far (REVIEW-2, §13)**; its fixes have been tested by their author and the
   mutation sweep, not yet re-reviewed by a fresh reviewer.
-* **Owner decisions surfaced, not taken:** (a) hazards cost the player a stumble (about 1.6 s of their own
+* **Owner decisions: DECIDED 2026-09-30 (owner: take recommended)**, each recorded in §14: (a) hazards stay on
+  in every shift, the personal best is not made hazard-free; (b) the second wing (hazards on) starts at career
+  shift 4, as built. The text below is the question as it was surfaced. (a) hazards cost the player a stumble (about 1.6 s of their own
   shift clock per knock; since REVIEW-2 a knock needs a full second in the red ring, so a player who ignores
   every warning is knocked once per 21 minutes and loses 0.16% of the clock, one who reacts never). They never touch pay,
   items, misfiles or the backlog, but they can cost a personal best (fastest Perfect Shift). If the personal
@@ -639,7 +716,10 @@ Shots, best first:
   first memo have each had a calm shift.
 * **luau-analyze was not run** (the binary is gone from this machine); luau-compile is replaced by the
   loadstring compile check.
-* Not committed, not pushed, not published. Studio not opened. §8 in full.
+* Committed with the wings (62550b2); the REVIEW-3 pass is not committed. Not published. Studio not opened. §8 in full.
+* The highscore board found in the tree on 2026-10-01 (end of §14) has had no independent review. Pass 2 of the
+  standard (§15) wrote its notes (`CLAUDE.md`, "The highscore board"), measured what it does not close, and
+  mutation-tested its assertions for the first time.
 
 ---
 
@@ -747,3 +827,207 @@ overlap on any of the four phone sizes (was 3 of 4); `probe_stress` peak 151 par
 **Not done / open after REVIEW-2:** no fresh reviewer has looked at these fixes yet; the look of a spared pass,
 the warning under a phone drawer and the title card on a phone are Studio items 19-21; luau-analyze is still
 not available on this machine.
+
+---
+
+## 14. REVIEW-3 (2026-09-30): the second review of the wings, and the owner's decisions
+
+A second independent reviewer (probes in `scratchpad/lfdr3/robloxemu/`) reported six findings. Every one was
+**reproduced first** on the unchanged source (the reviewer's own probes, re-run on a fresh bundle), turned into
+a gate that was watched fail, and then the GAME was fixed (finding 4 is a defect in a gate and 6 a missing pin,
+so there the gate itself is the fix). Numbers are this session's measurements.
+
+| # | finding (severity) | reproduced on the unchanged source | fix | proven by (red before, green now) |
+|---|---|---|---|---|
+| 1 | **BREAK stands the player back up on the first frame of the sit's own drop** (medium). The same rule +1 Jump fixed from a Studio trace (ad62955) | reviewer's `probe_sitdrop` (the Studio trace replayed through the real server, HUD and `Wings.client`): TAKE A BREAK **seated 0 of 120 frames**, the button back to TAKE A BREAK; a break booked mid-shift **seated 1 frame** when the shift ran out | the first `Config.Rest.SitSettleSeconds` (1.0) after the client sits the player are not a fall (`satAt`, +1 Jump's fix); a sustained fall while seated still ends the break | new `check_lostfounddepot_sitdrop`: red 12 / 10 on the unchanged source; now 22 / 0: seated **120 of 120** frames through the drop, 20 s later still sitting, walking wakes it, a 1.5 s fall wakes it, the first pickup mid-drop still ends it at once, a booked break **seated 453 of 453** frames after the shift ran out. `EnvConfig.spec` pins SitSettleSeconds to 0.5-1.5 s. Reviewer's probe re-run: 120 of 120, the booked break seated 317 frames and still sitting |
+| 2 | **a phone drawer was a total hazard shield** (low); EYECANDY's "delays, never skips" was false | reviewer's `probe_ds_*` (800x360 touch, the real 120-180 s interval, 3 shifts): drawer closed **990 s of running clock, 6 launches**; MANUAL open before the first pickup and kept open **991 s, 0 launches**; opened 3 frames after the pickup: 1 | a due hazard waits for a covered screen **at most `Config.Hazards.MaxCoverHoldSeconds` (15 s) of running clock** (`Wings.holdForCover`); then it comes with its warning beside the drawer (as one already flying does). The wait does not restart when the drawer is closed and re-opened, does not run while the clock is stopped, and a hazard never launches where its warning has no room beside the drawer | `Wings.spec` (+8): the cap by unit test (the promise as a literal, 15 s) and in the rarity model: a drawer **never closed meets 129 hazards against 142** in 6 h of working clock (0 before); open 25 s of every 60: 138. `_hud_wings`: in **18 of 18** phone runs the held hazard came under the open drawer **15.0 s** after it opened, its warning up every time (red on the unchanged client: none came). `EnvConfig.spec` pins 10-15 s. Reviewer's probes re-run: closed 6, open 6, open-after-pickup 6 |
+| 3 | **wing panel, warning and title card over the HUD** on phone sizes outside the 10 tested viewports (low) | reviewer's 12 viewports: **568x320**: the panel on the memo, hint and toast rows, the warning on memo and hint, the card on hint and memo, its sub line on the toast; **667x375**: the space card on the BREAK panel (6x14 px) | on a phone too short for the panel beside the hotbar, it goes into the **pocket under the cash panel**, above the memo row, left of the clock and the hotbar (below the HUD's "not saving" line; with no pocket it is not shown); the warning beside the hotbar is **never above the foot of the HUD's rows**; the card in the band is **kept clear of a panel that rises into it**, beside the hotbar only **below the rows**, else the title alone in the pocket right of the clock | `_hud_wings` now sweeps **22 viewports** (the 10 + the reviewer's 12) with a hazard in flight: panel shown on 22, warning on 22, **0 clashes** (red on the unchanged client: 5 panel/warning clashes, 4 card clashes); the card shown on 10 + 12, 0 clashes; BREAK >= 44 px and clear of the thumbstick and jump button on every touch size; 568x320 in a session that is not saving: the panel steps away from the HUD's red line |
+| 4 | **`_wings` measured "knocked outside the drawn ring" one step late** (low): a cosmetic Config edit turned it red | the reviewer's control edit (train pigeons 8 -> 40): `_wings` **1 "outside" knock** (the player was 3.0 studs from a 3.4-stud ring when the client tested; 3.6 after the check's own step) | the walker's hook measures what the player was shown FIRST, at the position the client just tested, then walks | the same edit: 0 outside knocks. The fixed assertion still catches a real one: mutation K1 (the client knocks with a 1.5-stud larger reach) killed. The real run's numbers are unchanged (43 hazards, 15 knocks, >= 2.13 / 1.00 / 1.00 s) |
+| 5 | **budgets enforced only by a test** (low); the standard asks for "capped in code" | train pigeons 8 -> 40 (Config only): **228 local parts** against 220, nothing refused | a **ledger in `WingArt`** counts the parts, lights, beams, trails, emitters and particles/s of everything shown; scenery and life are shown only while they fit under `Config.Budget` less `Budget.HazardReserve` (8 parts, 1 light) and the weather's own emitters; the hazard's model, lane and ring are counted apart and always drawn; a piece that does not fit waits, a critter that does not fit is let go; the weather's rate cap is what the pieces' emitters leave | new `check_lostfounddepot_budget`: the real client with an over-budget config (40 pigeons, 60 balloons, 20 satellites, 12 comets, weather at 50/s, hazards every 3-4 s): red on the unchanged source (**329 parts, 12 trails**); now every frame of 15 157 inside the budget (peak **218 / 220 parts**, 3 / 4 emitters, 50.2 / 60 particles/s, 4 / 8 beams, 8 / 8 trails, 1 / 3 lights, 1 hazard), every wing still shows its roof and landmark, all 10 hazard kinds drawn (at most 7 parts of their 8 reserved), no hazard warned of without being drawn. With the real config nothing changes: `_wings` prints the same numbers, line for line |
+| 6 | **"any movement wakes you" was not pinned** (low): `WakeGraceSeconds` 0.4 -> 5 survived every gate | the reviewer's mutant | `EnvConfig.spec` pins it as a literal (<= 0.5 s) and measures it through the template's own `Rest` with this game's Config: walking from the first frame of an idle rest ends it within 0.5 s | mutations W1 (5) and W2 (0.6) killed |
+
+**Measured, not built (open):**
+
+* ~~**The HUD's OWN hotbar overlaps its clock at 568x320**~~ **Closed in pass 2 of the standard (§15)**, by a
+  smaller change than the redesign feared below: the clock stays in the top row whenever the gap between the cash
+  panel and the toggles holds it, and a wrapped hotbar that would reach the text rows takes one wide row above the
+  touch controls. hudcheck's full run now covers 568x320 and 667x375 (`_hud`). As it was measured:
+  at carry 5 the hotbar wraps to two rows and reaches up over the clock (120x38 screen px) and the memo, hint
+  and toast rows. hudcheck with the overlap rule fails there on the HUD alone, so hudcheck's full run stays on
+  the standard 10 viewports; the wings' own placements are swept on all 22. A 568x320 screen (iPhone SE 1,
+  iPod touch 7) is too short for the HUD's rows, a two-row hotbar and the touch controls at the 0.6 minimum
+  scale: fixing it is a HUD redesign for the smallest phones, left for a later pass.
+* ~~On 568x320, in a session that is NOT saving (the HUD's red line is up), there is no pocket for the wing
+  panel: it is not shown, so BREAK is not available there.~~ Closed with the item above: on 568x320 the panel now
+  sits beside the one-row hotbar, not in the pocket, so the red line no longer takes its place (§15). The clock still only starts at the first pickup.
+* A hazard that comes under an open drawer after its 15 s shows its `!` marker behind the drawer; the banner
+  beside the drawer and the hit rule (1 s inside the red ring, 2 s of warning) are what make it fair. How that
+  reads on a real phone is Studio item 22.
+
+### The owner's decisions (2026-09-30: "take the recommended option for all")
+
+* **(a) Hazards and the personal best.** DECIDED 2026-09-30 (owner: take recommended): **hazards stay on in every
+  shift; the personal best is not made hazard-free.** No option was marked recommended, so this is the one that
+  best serves the brief: it is FAIR (a knock needs a full second inside the red ring and 2 s of warning, by
+  construction), NEVER PUNISHING (the model's sorter who reacts 0.4 s late is knocked 0 times in 348 hazards;
+  one who ignores every warning loses 0.16% of the shift clock, and a knock never touches pay, items, misfiles
+  or the backlog), FUN and never monotonous (switching hazards off on a shift that is on pace for a best would
+  take them away from exactly the best shifts, and needs a client-side pace guess), and NOT EXPLOITABLE (nothing
+  new to game). Pinned by the existing gates: `Pacing.spec` (0 knocks for the reacting sorter; stumbles cost an
+  ignoring sorter at most 2% of the clock) and `EnvConfig.spec` (a knock is a stumble: <= 30 studs/s, <= 0.8 s).
+* **(b) Where hazards begin.** DECIDED 2026-09-30 (owner: take recommended): **the second wing, and with it the
+  first hazards, starts at career shift 4**, as built: the tutorial, torn tags and the first memo each get a calm
+  shift. Pinned by `EnvConfig.spec` (the first hazard wing opens only after `MemoUnlockShift`) and `Pacing.spec`
+  (a normal player's first new wing inside 10 minutes): mutations O1 (`from = 2`) and O2 (`from = 4`) are killed.
+* **(c) The launch code in the store description** (README). DECIDED 2026-09-30 (owner: take recommended):
+  **print it** (`Code: SORTED` stays in the store copy, 873 characters measured). The README's own reasoning
+  (codes are usually published this way; the table is server-only, so unreleased codes stay secret) and the
+  complete-game standard ("promo codes are public by design"). Pinned by the main check: SORTED grants 250,
+  once, and the grant is refused when it cannot be saved.
+
+**Mutation sweep of the REVIEW-3 fixes** (scratch tool `scratchpad/lfdp1/sweep.py`, log `lfdp1/sweep/sweep.log`;
+three workers, each mutation on its own scratch copy of the game and of robloxemu's `emu/`, `wrap.py` and every
+`check_lostfounddepot*`; exactly one occurrence replaced (line endings matched), the bundle rebuilt and proved to
+carry the mutant, all 30 suites run; a spec that prints a failure counts as red even though it exits 0; the real
+tree's 68 files had the same sha256 before and after every sweep run):
+
+| id | mutation | result: killed by |
+|---|---|---|
+| C0 | HARNESS CONTROL: no change at all | **SURVIVED** (as it must) |
+| C1 | CONTROL: the train wing's pigeons 8 -> 40 (the reviewer's MEASURE_P7; red on the reviewed source through findings 4 and 5) | **SURVIVED** (as it must, now) |
+| C2 | CONTROL: the BREAK button a shade lighter (the reviewer's control) | **SURVIVED** (as it must) |
+| S1 | F1: a seated player is supported only while \|vy\| < 2 (as reviewed) | KILLED: `_sitdrop` |
+| S2 | F1: SitSettleSeconds 1.0 -> 0.2 (shorter than the drop) | KILLED: EnvConfig.spec, `_sitdrop` |
+| S3 | F1: the sit time is never recorded | KILLED: `_sitdrop` |
+| S4 | F1: SitSettleSeconds 1.0 -> 5 (a real fall ignored) | KILLED: EnvConfig.spec, `_sitdrop` |
+| W1 | F6: WakeGraceSeconds 0.4 -> 5 (the reviewer's P5) | KILLED: EnvConfig.spec |
+| W2 | F6: WakeGraceSeconds 0.4 -> 0.6 (a quiet retune) | KILLED: EnvConfig.spec |
+| K1 | F4: the client knocks with a 1.5-stud longer reach (a real knock outside the ring) | KILLED: `_wings` |
+| B1 | F5: the ledger never refuses | KILLED: `_budget` |
+| B2 | F5: the hazard's items are refused like scenery (no reserve) | KILLED: `_budget` |
+| B3 | F5: HazardReserve 0 | KILLED: `_budget` |
+| D1 | F2: a covered screen holds a due hazard for good (as reviewed) | KILLED: Wings.spec, `_hud_wings` |
+| D2 | F2: the client ignores the cap | KILLED: `_hud_wings` |
+| D3 | F2: MaxCoverHoldSeconds 15 -> 30 | KILLED: EnvConfig.spec, `_hud_wings` |
+| D4 | F2: closing and re-opening the drawer restarts the wait | KILLED: Wings.spec |
+| D5 | F2: the wait runs while the clock is stopped | KILLED: `_hud_wings` (**survived the first sweep**; the assertion "a stopped clock does not use up the drawer's wait" was added and watched kill it: the held hazard came 0.03 s after the clock restarted instead of >= 10 s) |
+| L1 | F3: no pocket, the stacked panel as before | KILLED: `_hud_wings` |
+| L2 | F3: the warning not kept below the HUD's rows | KILLED: `_hud_wings` |
+| L3 | F3: the card not narrowed around the panel (667x375) | KILLED: `_hud_wings` |
+| L4 | F3: the card beside the hotbar may rise above the rows | KILLED: `_hud_wings` |
+| L5 | F3: no top-right pocket for the card (568x320) | KILLED: `_hud_wings` |
+| L6 | F3: the pocket ignores the HUD's "not saving" line | KILLED: `_hud_wings` |
+| O1 | decision (b): the first hazard wing from 3 -> 2 completed shifts | KILLED: EnvConfig.spec |
+| O2 | decision (b): from 3 -> 4 | KILLED: Pacing.spec |
+
+**23 of 23 real mutations KILLED (D5 only after its assertion was added); the harness control and both
+controls SURVIVED.**
+
+### Re-verified 2026-10-01 (pass 1, run a second time)
+
+The workflow ran pass 1 again on 2026-10-01 with the same six REVIEW-3 findings. Every fix above was already
+in the tree, so this run changed **no game code and no gate**: it reproduced each finding again on the reviewed
+source and measured it on the current tree. The reviewed source is HEAD (62550b2), which is the reviewer's
+snapshot `scratchpad/lfdr3` apart from line endings (compared with CRs stripped). Everything ran on scratch
+copies (`scratchpad/lfdp1r`); the reviewer's own probes were run unchanged on both.
+
+| # | reviewed source (HEAD) | current tree |
+|---|---|---|
+| 1 | `probe_sitdrop`: TAKE A BREAK seated **0 of 120** frames, stood up on frame 1, the button back to TAKE A BREAK; the booked break seated **1 frame**. Today's `_sitdrop` on that source: **12 passed, 10 failed** | `probe_sitdrop`: **120 of 120** frames, the booked break seated 317 frames and still sitting. `_sitdrop` 22 / 0 (120 of 120; the booked break 453 of 453) |
+| 2 | `probe_ds_open2` (MANUAL open before the first pickup, kept open): **0 launches in 991 s** of running clock; `probe_ds_open`: 1 in 990 s; drawer closed: 6 in 990 s. Today's `Wings.spec` on it stops with an error (no `holdForCover`); `EnvConfig.spec` 271 passed, 2 failed (`MaxCoverHoldSeconds`, `SitSettleSeconds` nil) | `probe_ds_open2` **6 in 991 s**, `probe_ds_open` 6 in 990 s, closed 6 in 990 s. `_hud_wings`: the held hazard came under the open drawer 15.0 s after it opened in 18 of 18 phone runs, its warning up in 18 |
+| 3 | `probe_hud_more2`: 10 clashes at 568x320 (WingPanel on Memo 95x14, Hint 95x13, Toast 95x14; WarningPanel on Memo 158x12, Hint 158x8; idle and warning alike); `probe_hud_more`: 4 card clashes (568x320: Hint 158x11, Memo 158x14, the sub line on Toast 158x14; 667x375: on WingPanel 6x14). Today's `_hud_wings` on that source: red, the same 4 card clashes | the reviewer's three probes: **0 clashes**. `_hud_wings` PASS on all 22 viewports |
+| 4 | the reviewer's control edit (train pigeons 8 -> 40) through `_wings`: 215 passed, 2 failed, one of them **1 knock "outside the ring"** | the same edit: `_wings` **217 / 0** |
+| 5 | the same edit: the flurry peaks at **228 parts** (budget 220), nothing refuses. Today's `_budget` on that source: peak 330 / 220 parts and 12 / 8 trails, then an error (no ledger) | the same edit: flurry 212, stress 217 parts; `_budget` 16 / 0 (peak 218 / 220 parts, 8 / 8 trails, 1 / 3 lights, 1 hazard) |
+| 6 | `WakeGraceSeconds = 5` (the reviewer's P5): **all 28 suites of the reviewed source green** | the same edit: `EnvConfig.spec` 271 passed, 2 failed |
+
+(The reviewer's `probe_hud_more*` scripts also end on asserts copied from the 10-viewport check, such as "the
+sub line on all but two viewports"; those stop the probes identically on both sources and are not findings.
+What is compared above is each probe's clash list.)
+
+**The REVIEW-3 sweep, re-run on the current tree** (`scratchpad/lfdp1r/sweep.py`, the same 26 entries, now 33
+suites per entry because the tree also carries the highscore board): **23 of 23 KILLED by the same suites as on
+2026-09-30** (S1-S4 `_sitdrop`, S2/S4 also EnvConfig.spec; W1, W2 EnvConfig.spec; K1 `_wings`; B1-B3 `_budget`;
+D1 Wings.spec + `_hud_wings`; D2, D3, D5 `_hud_wings`, D3 also EnvConfig.spec; D4 Wings.spec; L1-L6
+`_hud_wings`; O1 EnvConfig.spec; O2 Pacing.spec), every mutant proved in the rebuilt bundle; the harness
+control C0 and the controls C1 (train pigeons 8 -> 40, the reviewer's) and C2 (the BREAK button a shade
+lighter) **SURVIVED**; the real tree's 73 files had the same sha256 before and after (`lfdp1r/sweep/sweep.log`).
+
+**Owner decisions, searched again** (EYECANDY.md, CLAUDE.md, REVIEW-1.md, README.md): (a), (b) and (c) above are
+the only owner decisions; all three are recorded as DECIDED 2026-09-30 (owner: take recommended), none is newly
+open. Their pins were re-measured: O1 and O2 killed in the re-run sweep; the store copy in README.md is 873
+characters and carries `Code: SORTED`. The highscore board that later reached the tree (below) counts Perfect
+Shifts on the server's own clock and travel ledger; the BREAK cannot start mid-shift and the server never hears
+of the wings, so decision (a) stands as written.
+
+**Found in the tree, not part of this pass: the highscore board.** Between 00:37 and 00:49 on 2026-10-01 an
+interrupted session added the public + friends board of the complete-game standard §3 (`src/shared/Board.luau`,
+`src/shared/Ledger.luau`, a board on each bay's back wall, `tests/Board.spec`, `tests/Ledger.spec`,
+`check_lostfounddepot_board`, and changes to `Main.server`, `Hud.client`, `Config`, `Economy`, the walk and the
+main check's State allowlist). It left no notes. Its gates are green (table below); it has had no review.
+
+**Every gate, 2026-10-01** (the current tree, bundle rebuilt; 33 suites):
+
+| gate | result | | gate | result |
+|---|---|---|---|---|
+| Board.spec | 84 / 0 | | check_lostfounddepot | 238 / 0 |
+| Codes.spec | 16 / 0 | | _board | 106 / 0 |
+| Economy.spec | 172 / 0 | | _budget | 16 / 0 |
+| EnvBands.spec | 124 / 0 | | _compile | 23 sources, 46 / 0 |
+| EnvConfig.spec | 273 / 0 | | _firstmin | 67 / 0 |
+| Hazards.spec | 102 / 0 | | _hud | PASS |
+| Layout.spec | 32 / 0 | | _hud_wings | PASS + PASS |
+| Ledger.spec | 28 / 0 | | _hudflow | 44 / 0 |
+| Pacing.spec | 115 / 0 | | _rng | 24 / 0 |
+| Rest.spec | 55 / 0 | | _save | 111 / 0 |
+| Rng.spec | 32 / 0 | | _sitdrop | 22 / 0 |
+| Rules.spec | 95 / 0 | | _spawn | 29 / 0 |
+| Seed.spec | 24 / 0 | | _view | 17 / 0 |
+| Shift.spec | 79 / 0 | | _wings | 217 / 0 |
+| StateCache.spec | 10 / 0 | | _wingview | 66 / 0 |
+| Wings.spec | 264 / 0 | | | |
+| responsive.spec | 70 / 0 | | | |
+| walk | 68 / 0 | | | |
+| **specs + walk** | **1 643 / 0** | | **checks** | **1 003 / 0 + PASS + PASS + PASS** |
+
+---
+
+## 15. Pass 2 of the complete-game standard (2026-10-01)
+
+Every item of `docs/complete-game-standard.md` was checked against the game; what was missing was built test
+first, and the rest re-measured. Full table and mutation list: `CLAUDE.md`, "Pass 2 of the complete-game standard".
+
+**Every wing has its own weather and life** (§2: "each with its own light, colour, scenery, critters and weather").
+Measured before: CITY DEPOT and AIRPORT had no weather (4 of 6 wings had any), and the city's only life was the
+train station's pigeons. `EnvConfig.spec` now asserts that every wing has weather, that no two wings share a weather
+kind and that each wing has a critter no other wing has (watched fail: 4 failures); `_wings` asserts, through the real
+client at every wing, that the wing's own weather emitter is on and each of its critters is drawn. The city got
+**gulls** (white, long grey wings, a slow glide with an odd beat; `WingArt` `CRITTERS.gull`) and **autumn leaves**
+blowing in under the trusses (orange to brown, drifting sideways as they fall); the airport **ticket stubs**
+fluttering down from the glass roof. Rates 4 and 4 particles/s; the budget peaks are unchanged (§6).
+
+**The smallest phones** (§2, rule 4b; REVIEW-3's two open 568x320 items, §14). `_hud` now runs hudcheck with the
+overlap rule on 568x320 and 667x375 too: red on the old source (ClockPanel and Hotbar 120x38 px). Making only the
+hotbar one row then put it on the HUD's hint and toast rows (236x13, 236x14 px), which hudcheck cannot see (it
+compares Frames), so `_hud_wings` now also measures the HUD's own full hotbar against its own text rows on all 22
+viewports. The fix is two layout rules, in `Hud.client` and mirrored in `Wings.client`: the clock stays in the top
+row whenever the gap between the cash panel and the toggles holds it (as near the centre as the gap allows), and a
+wrapped hotbar that would reach the text rows takes one row as wide as the margins allow, still wholly above the
+touch controls. At 568x320 the screen now lays out like 640x300: clock x 189-309 in the top row, rows y 74-119, the
+five slots in one row at y 131-188, the wing panel left of them (BREAK available, also in a session that is not
+saving), the warning and the title card right of them. `_hud` PASS (72 viewport x mode measurements), `_hud_wings`
+PASS on all 22 with 0 clashes. How it reads on a real iPhone SE 1 is §8 item 23. A consequence, measured: the two
+568x320 pockets of REVIEW-3 (the panel under the cash panel, the card right of the clock) are no longer reached on
+any of the 22 viewports, so their mutations L5 and L6, killed on 2026-09-30, now survive: they are untested
+fallbacks for a screen shorter than any measured.
+
+**Store copy, clips, thumbnails** (§4): `README.md`'s store copy is rewritten for the wings, the hazards, the BREAK
+and the board (940 characters); `MARKETING.md` lists eight clips with their staging; §9 states 1920x1080; §8 has
+items 24-27.
+
+**The board** (§3) is unchanged in code. Its notes are written (`CLAUDE.md`), its assertions were mutation-tested
+for the first time (12 of 12 killed), and what it does not close is measured: a script that walks at WalkSpeed with
+zero reading time needs 33 s of server clock per counted Perfect Shift, the design model's regular about 134 s.
+
+**Every gate, 2026-10-01 after pass 2** (the current tree, bundle rebuilt; 33 suites): specs + walk **1 669 / 0**
+(EnvConfig.spec 299, the rest as in §14's table); the 13 counting checks **1 017 / 0** (`_wings` 231, the rest as in
+§14's table); `_hud` PASS; `_hud_wings` PASS + PASS.
