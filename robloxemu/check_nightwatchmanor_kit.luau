@@ -17,10 +17,99 @@ local Enum, Vector3, CFrame = DT.Enum, DT.Vector3, DT.CFrame
 
 local Kit = {}
 
+--==================================================================== the Servants' Exit, the way a player uses it
+-- Since the highscore board (2026-10-01) the exit opens only to a character whose root stands within the prompt's
+-- reach of the door, once the night has run the shortest possible walk there (Crossing.luau). These helpers let a
+-- check extract honestly: rebuild the manor standing now from the server's own ServerStorage record, work out that
+-- minimum, stand at the door, press.
+
+-- The plan of `userId`'s manor standing now ("night:a:b" = Salt.new(a, b); "night:public" = the public seed).
+function Kit.planOf(h: any, userId: number): any
+	local secrets = h.game:GetService("ServerStorage"):FindFirstChild("NightwatchSecrets")
+	local rec = secrets and secrets:GetAttribute("u_" .. userId)
+	if type(rec) ~= "string" then return nil end
+	local RS = h.ReplicatedStorage
+	local Config = h:_require(RS:FindFirstChild("Config"))
+	local Manor = h:_require(RS:FindFirstChild("Manor"))
+	local night, a, b = string.match(rec, "^(%d+):(%d+):(%d+)$")
+	if night then
+		local Salt = h:_require(RS:FindFirstChild("Salt"))
+		return Manor.plan(Salt.new(tonumber(a) :: number, tonumber(b) :: number), Config, tonumber(night) :: number)
+	end
+	local pn = string.match(rec, "^(%d+):public$")
+	if pn then
+		local Rng = h:_require(RS:FindFirstChild("Rng"))
+		return Manor.plan(Rng.new(Manor.seedFor(Config, tonumber(pn) :: number)), Config, tonumber(pn) :: number)
+	end
+	return nil
+end
+
+-- The server's crossing minimum for that manor, in seconds of night.
+function Kit.crossSeconds(h: any, userId: number): number
+	local plan = Kit.planOf(h, userId)
+	if not plan then return 0 end
+	local RS = h.ReplicatedStorage
+	local Crossing = h:_require(RS:FindFirstChild("Crossing"))
+	return Crossing.minSeconds(h:_require(RS:FindFirstChild("Config")), plan, h:_require(RS:FindFirstChild("Manor")))
+end
+
+-- Where a player stands to use the exit: 4 studs from the door toward the exit room's middle, at root height.
+function Kit.exitStand(manor: any): any
+	local door = manor and manor:FindFirstChild("ExitDoor")
+	if not door then return nil end
+	local best, bestD = nil, nil
+	for _, c in manor:GetChildren() do
+		local f = string.match(tostring(c.Name), "^Room%d+_") and c:FindFirstChild("Floor")
+		if f then
+			local d = math.abs(f.Position.X - door.Position.X) + math.abs(f.Position.Z - door.Position.Z)
+			if bestD == nil or d < bestD then best, bestD = f, d end
+		end
+	end
+	if not best then return nil end
+	local flat = Vector3.new(best.Position.X - door.Position.X, 0, best.Position.Z - door.Position.Z)
+	local p = door.Position + flat.Unit * 4
+	return Vector3.new(p.X, best.Position.Y + best.Size.Y / 2 + 3, p.Z)
+end
+
+-- Wait until `userId`'s night (entered at virtual time `since`) has run the crossing minimum, then press ESCAPE.
+-- `advance(seconds)` drives time the caller's way (frames or h:advance). It waits STANDING AT THE EXIT, with the
+-- Nightwatcher blinded in memory (Config.Watcher SightRange 0 and CatchRadius 0: both then need the watcher exactly on
+-- the player's point, and the stand point is on the exit's outer face, which no patrol walks toward), and puts both
+-- back before the press. These checks are about everything BUT the chase (check_walk and Chase.spec are the chase).
+-- Pass 2 (2026-10-01): the first version waited at the night's start point with CatchRadius -1, which squares to a
+-- 1-stud catch; the foyer's start point lies ON the patrol line to the foyer's +Z doorway, so night 7 was caught every
+-- time (measured: "IT SEES YOU", "IT CAUGHT YOU" at 5.9 s). Returns whether ESCAPE was pressed on a standing door.
+function Kit.extract(h: any, plr: any, userId: number, since: number, advance: (number) -> ()): boolean
+	local zone = h.workspace:FindFirstChild("Zone_" .. userId)
+	local manor = zone and zone:FindFirstChild("Manor")
+	local door = manor and manor:FindFirstChild("ExitDoor")
+	if not door then return false end
+	local at = Kit.exitStand(manor)
+	local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+	local W = h:_require(h.ReplicatedStorage:FindFirstChild("Config")).Watcher
+	local sight, catch = W.SightRange, W.CatchRadius
+	W.SightRange, W.CatchRadius = 0, 0
+	if at and hrp then hrp.CFrame = CFrame.new(at) end
+	local left = Kit.crossSeconds(h, userId) + 0.25 - (h.scheduler:now() - since)
+	if left > 0 then advance(left) end
+	W.SightRange, W.CatchRadius = sight, catch
+	if door.Parent == nil then
+		return false -- the night ended while waiting (it is the caller's to notice: the night does not advance)
+	end
+	if at and hrp then hrp.CFrame = CFrame.new(at) end -- a hazard may have knocked us off the spot
+	local prompt = door:FindFirstChildOfClass("ProximityPrompt")
+	if not prompt then return false end
+	prompt.Triggered:Fire(plr)
+	return true
+end
+
 -- opts = { name, userId, profile = { night, stash, best, levels } | nil, viewport = {w,h}, touch,
 --          beforeClient = function(ctx) end (runs after the server boots and the player joins, before
 --          the client scripts load: the place to change Config in memory), slowLoad = seconds | nil,
---          noSpawn = true | nil }
+--          noSpawn = true | nil, publicLayouts = true | nil }
+-- publicLayouts: plan every night from the old public seed (the server's ServerStorage switch, the one the
+-- thumbnail recipe uses), for checks that find their rooms through Manor.plan(Rng.new(Manor.seedFor(...))). Without
+-- it every night is a fresh server-salted manor, as in the game (Salt.luau); ctx.plan() rebuilds the one standing.
 function Kit.boot(opts: any)
 	local h = Harness.new({
 		bundle = require("./build/nightwatch-manor"),
@@ -54,6 +143,11 @@ function Kit.boot(opts: any)
 	end
 
 	assert(h:tryRun("server/Main.server"))
+	ctx.secrets = h.game:GetService("ServerStorage"):FindFirstChild("NightwatchSecrets")
+	if opts.publicLayouts then
+		assert(ctx.secrets ~= nil, "the server made no ServerStorage.NightwatchSecrets folder")
+		ctx.secrets:SetAttribute("PublicLayouts", true)
+	end
 	h:advance(1)
 	ctx.RS = h.ReplicatedStorage
 	ctx.Config = h:_require(ctx.RS:FindFirstChild("Config"))
@@ -183,20 +277,35 @@ function Kit.boot(opts: any)
 		end
 		return nil
 	end
+	ctx.nightSince = 0 -- virtual time of the last ctx.pressDoor (where the crossing guard's clock starts)
 	function ctx.pressDoor()
+		ctx.nightSince = h.scheduler:now()
 		ctx.house().ManorDoor:FindFirstChildOfClass("ProximityPrompt").Triggered:Fire(me)
 	end
-	function ctx.pressExit()
-		local m = ctx.manor()
-		local door = m and m:FindFirstChild("ExitDoor")
-		if door then door:FindFirstChildOfClass("ProximityPrompt").Triggered:Fire(me) end
+	-- The plan of the manor standing now, and the server's crossing minimum for it (Kit.planOf / crossSeconds).
+	function ctx.plan()
+		return if ctx.manor() then Kit.planOf(h, ME) else nil
 	end
-	-- Extract `n` nights through the real server: door, exit, wait out the beat. Frames run throughout.
+	function ctx.crossSeconds(): number
+		return Kit.crossSeconds(h, ME)
+	end
+	function ctx.exitStand(): Vector3?
+		return Kit.exitStand(ctx.manor())
+	end
+	-- Press ESCAPE the way a player does: standing at the door (the server measures the root's distance to it), once
+	-- the night has run the crossing guard's minimum since the last ctx.pressDoor (Kit.extract; frames run while it
+	-- waits). Returns whether ESCAPE was pressed.
+	function ctx.pressExit(dt: number?): boolean
+		if not ctx.manor() then return false end
+		return Kit.extract(h, me, ME, ctx.nightSince, function(s) ctx.seconds(s, dt) end)
+	end
+	-- Extract `n` nights through the real server: door, then (once the night has run the crossing guard's minimum,
+	-- Kit.extract) the exit, then wait out the beat. Frames run throughout.
 	function ctx.surviveNights(n: number, dt: number?)
 		for _ = 1, n do
 			ctx.pressDoor()
 			ctx.seconds(0.6, dt)
-			ctx.pressExit()
+			ctx.pressExit(dt)
 			ctx.seconds(ctx.Config.BeatSeconds + 0.4, dt)
 		end
 	end

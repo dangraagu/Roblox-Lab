@@ -18,7 +18,7 @@
 --   * HOW HARD: horizontal knock away from the lane plus a small, capped lift. A hit can push a
 --     player off a ledge; it can never launch them upward onto something.
 --
--- Nightwatch Manor's copy (2026-09-23/24) adds four things, each pinned in tests/Hazards.spec.luau:
+-- Nightwatch Manor's copy (2026-09-23/24) adds five things, each pinned in tests/Hazards.spec.luau:
 --   * ElevationMin / ElevationMax: a hard clamp on where a lane may START (degrees above the player).
 --     A manor has a floor and a 15-stud ceiling; with the camera pitched down the template's window
 --     would start lanes under the floor. When the view and the clamp do not overlap, the clamp wins.
@@ -30,6 +30,9 @@
 --     night, and still never launches into a chase. One waiting hazard, never a backlog.
 --   * Hazards.cancel: call off the hazard in flight with no hit and no knock. The client calls it the
 --     moment the Nightwatcher sees the player, so a knock never lands during a chase.
+--   * Hazards.threatLive (second review, 2026-09-30; the same function +1 Jump's copy gained for the same finding):
+--     can the rest of the flight still hit anyone standing in the zone? The client keeps the ring and the warning
+--     up exactly that long, instead of taking them down at the arrival time while checkHit still ran.
 --
 -- What it does NOT do: build Parts, read Roblox, grant or remove anything. Vectors are plain
 -- { x, y, z } tables and randomness is an injected `rand(): number in [0, 1)`, so the whole
@@ -296,6 +299,26 @@ function Hazards.checkHit(plan: any, t0: number, t1: number, playerPos: Vec, pla
 	if a1 < a0 then return false end
 	local d = Hazards.segmentDistance(Hazards.positionAt(plan, a0), Hazards.positionAt(plan, a1), playerPos)
 	return d <= plan.hitRadius + playerRadius
+end
+
+-- Can the rest of the flight (from fromT, default plan.t) still hit ANYONE standing inside the zone, at any height?
+-- The client keeps the ring and the warning up exactly this long. They used to go at arriveAt, but checkHit runs
+-- until `duration`, and the lane is aimed at a point up to AimJitter from the zone's centre, so a player on the far
+-- side of the ring is reached after arriveAt (measured through the client: hit up to 0.067 s after the ring had
+-- gone). Conservative on purpose: it ignores height, so a ring may stay up a little longer than strictly needed (a
+-- steep lane), never shorter.
+function Hazards.threatLive(plan: any, playerRadius: number, fromT: number?): boolean
+	if plan.hit then return false end -- a hazard hits once
+	local t0 = math.max(0, fromT or plan.t or 0)
+	if t0 > plan.duration then return false end
+	local z = Hazards.zone(plan, playerRadius)
+	local a = Hazards.positionAt(plan, t0)
+	local b = Hazards.positionAt(plan, plan.duration)
+	-- a point in the zone is at most z.radius from its centre, and a hit needs the hazard within
+	-- hitRadius + playerRadius of that point: in the ground plane, the rest of the flight has to pass
+	-- within the sum of the two of the centre
+	local d = Hazards.segmentDistance(v(a.x, 0, a.z), v(b.x, 0, b.z), v(z.x, 0, z.z))
+	return d <= z.radius + plan.hitRadius + playerRadius
 end
 
 -- One frame. Returns nil or an event { type = "spawn" | "done" | "skip", plan = ... }.

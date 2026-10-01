@@ -25,6 +25,9 @@ local plr = Players.LocalPlayer
 -- actually charged or granted.
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 local FxClient = require(ReplicatedStorage:WaitForChild("FxClient"))
+-- "fewer flashes" (owner decision 2026-09-30): Roblox's Reduced Motion setting or the in-game ⚡ toggle in the
+-- safehouse turns off this HUD's one-off effects too; the toasts still say what happened
+local Calm = require(ReplicatedStorage:WaitForChild("Calm"))
 local Remotes = ReplicatedStorage:WaitForChild("ManorRemotes")
 local StateRemote = Remotes:WaitForChild("State") :: RemoteEvent
 local NoticeRemote = Remotes:WaitForChild("Notice") :: RemoteEvent
@@ -481,19 +484,22 @@ NoticeRemote.OnClientEvent:Connect(function(n)
 	local text = tostring(n.text or "")
 	local detail = if n.detail ~= nil then tostring(n.detail) else nil
 
+	local calm = Calm.on()
 	if kind == "CAUGHT" then
 		showToast(text, WARN, detail, 3)
-		FxClient.flash(Color3.fromRGB(150, 20, 20), 0.55, 0.6)
-		FxClient.shake(0.6, 2.2)
+		if not calm then
+			FxClient.flash(Color3.fromRGB(150, 20, 20), 0.55, 0.6)
+			FxClient.shake(0.6, 2.2)
+		end
 	elseif kind == "EVICTED" then
 		showToast(text, WARN, detail, 3)
-		FxClient.flash(Color3.fromRGB(90, 40, 130), 0.4, 0.7)
+		if not calm then FxClient.flash(Color3.fromRGB(90, 40, 130), 0.4, 0.7) end
 	elseif kind == "EXTRACTED" then
 		showToast(text, GOOD, detail, 3)
-		FxClient.fovPunch(-6, 0.15, 0.5)
+		if not calm then FxClient.fovPunch(-6, 0.15, 0.5) end
 	elseif kind == "SPOTTED" then
 		showToast(text, WARN, detail, 1.4)
-		FxClient.shake(0.35, 1.2)
+		if not calm then FxClient.shake(0.35, 1.2) end
 	elseif kind == "NEAR" then
 		showToast(text, ACCENT, detail, 1.2)
 	elseif kind == "NIGHT" then

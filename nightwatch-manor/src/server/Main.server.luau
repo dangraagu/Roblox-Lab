@@ -6,11 +6,12 @@
 --   DAY   — you stand in the safehouse. Every upgrade is an in-world pad with a ProximityPrompt;
 --           walking up and pressing E buys a level. There is no client -> server remote for
 --           buying at all, so there is nothing for a client to lie to.
---   NIGHT — the server builds the manor from Manor.plan (seeded by WorldSeed + night only, so
---           night 7 is the same manor for everyone), fills it with relics, starts the
---           Nightwatcher on its patrol, and teleports you into the foyer. Take relics, reach
---           the servants' exit before dread fills. Getting caught or running out of night costs
---           you the haul but never the night you are on.
+--   NIGHT — the server builds the manor from Manor.plan (planned from a server-only salt, one per
+--           player, night and session, sized by the night: see the secrets block), fills it with relics,
+--           starts the Nightwatcher on its patrol, and teleports you into the foyer. Take relics,
+--           reach the servants' exit before dread fills. Getting caught or running out of night
+--           costs you the haul but never the night you are on. The exit opens only to a walk a
+--           person could have made (Crossing.luau): the best night is the highscore board's metric.
 --
 -- Everything the player can do is an in-world ProximityPrompt whose `.Triggered` handler checks
 -- `who == plr`; the only remotes are server -> client (State, Notice). No chase AI, no
@@ -37,6 +38,10 @@ local Watcher = require(Shared:WaitForChild("Watcher"))
 local Upgrades = require(Shared:WaitForChild("Upgrades"))
 local Night = require(Shared:WaitForChild("Night"))
 local Fx = require(Shared:WaitForChild("Fx"))
+local Board = require(Shared:WaitForChild("Board"))
+local Crossing = require(Shared:WaitForChild("Crossing"))
+local Salt = require(Shared:WaitForChild("Salt"))
+local ServerStorage = game:GetService("ServerStorage")
 
 -- Visuals from the first build, not as a later pass: this is a horror game, and without the
 -- rig the manor reads as grey boxes in daylight.
@@ -79,7 +84,8 @@ type Profile = {
 	loaded: boolean, -- the DataStore round-trip has landed; nothing may be SPENT before it does
 	lockToken: string, -- STABLE per session; never a timestamp (a timestamp fires against itself)
 	closing: boolean, -- set before the releasing save, blocks any further renewal
-	publishedBest: number,
+	bestAt: number, -- unix time the best night was FIRST reached (the board's tie-break); saved
+	boardBest: number, -- the best night last written to the board; saved, so a rejoin does not write it again
 	lastPublishAt: number,
 }
 
@@ -99,11 +105,52 @@ type Run = {
 	spotted: boolean,
 	near: boolean, -- the Alarm Bell heard it (independent of sight)
 	ending: boolean, -- a resolution is already in flight; ignore further triggers
+	crossSeconds: number, -- Crossing.minSeconds for this night's plan: the exit stays barred until the clock passes it
 }
 
 local profiles: { [Player]: Profile } = {}
 local runs: { [Player]: Run } = {}
 local zones: { [Player]: Model } = {}
+
+-- One clock for the board's caches and write throttle. os.clock() is CPU time in Roblox (a quiet server barely
+-- counts), so it is wrong here. GetServerTimeNow is the wall clock; tick() is the fallback for engines (and the
+-- headless harness) that do not have it. Checked once at boot (the pattern plus1-jump and fork-tower use).
+local clock: () -> number
+do
+	local ok, t = pcall(function()
+		return (workspace :: any):GetServerTimeNow()
+	end)
+	clock = if ok and type(t) == "number" then function()
+		return (workspace :: any):GetServerTimeNow()
+	end else tick
+end
+
+-- ------------------------------------------------------------------ manor secrets (server-only)
+-- docs/complete-game-standard.md §1, Salt.luau. Every manor is planned from two 32-bit halves drawn here, never from
+-- the public WorldSeed: Config and Manor ship to every client, so a public seed let anyone compute every night's
+-- rooms, relics, exit and patrol ahead of time. One pair per player, per night, per SESSION (`manorSalt`): a retry
+-- after being caught is the same manor, so you learn it the way a person does (and the pacing model's first-time
+-- player, who remembers what it walked, is this game); the next night, a rejoin or another player draws new halves,
+-- and so does the same night after Config.Manor.ShiftAfterFails failures in a row there ("the manor has shifted": a
+-- player is never stuck in halls they cannot get out of) (check_nightwatchmanor_guard). `saltSource` is a local of this
+-- script, seeded by the engine, and a fresh Random is XORed into every draw, so predicting the next manor needs the
+-- internal state of both. The halves are recorded in ServerStorage (which never replicates) as "night:a:b" under the
+-- player's key, so the server's own tools and the headless checks can rebuild the plan; nothing about them reaches
+-- a client: no attribute outside ServerStorage, no remote, no Instance name.
+-- `PublicLayouts`: an attribute on the same folder, unset unless somebody sets it from Studio's command bar (Server
+-- context). While it is true, nights are planned from the old public seed, which is what the thumbnail recipe in
+-- EYECANDY.md §12 finds its rooms by. A client cannot set it.
+local secrets = Instance.new("Folder")
+secrets.Name = "NightwatchSecrets"
+secrets.Parent = ServerStorage
+local saltSource = Random.new()
+local manorSalt: { [Player]: { night: number, a: number, b: number, fails: number } } = {}
+local function drawHalf(): number
+	local fresh = Random.new()
+	local hi = bit32.bxor(saltSource:NextInteger(0, 65535), fresh:NextInteger(0, 65535))
+	local lo = bit32.bxor(saltSource:NextInteger(0, 65535), fresh:NextInteger(0, 65535))
+	return hi * 65536 + lo
+end
 
 -- ------------------------------------------------------------------ zone indices
 -- Recycled through a free list, so a long-lived server never marches out to a hundred thousand
@@ -436,7 +483,8 @@ local function defaultProfile(): Profile
 		loaded = false,
 		lockToken = "",
 		closing = false,
-		publishedBest = 0,
+		bestAt = 0,
+		boardBest = 0,
 		lastPublishAt = -math.huge,
 	}
 end
@@ -474,6 +522,15 @@ local function claimProfile(plr: Player, token: string): { got: boolean, data: a
 	return result
 end
 
+-- OWNERSHIP (second review, 2026-09-30; docs/complete-game-standard.md §1). A write lands only while the stored
+-- record still carries THIS session's token. It used to land whenever the stored lock was nil or older than
+-- SessionLockSeconds, whoever's token it carried: a server whose saves stalled past 45 s lost the lock, the player
+-- carried on on another server, that server released the lock on leaving, and the stale server's next autosave
+-- rolled the player back (robloxemu/check_nightwatchmanor_save.luau). A lock of ours that merely went stale is still
+-- ours: nobody else wrote since. The first refused write turns canSave off for good and tells the player once.
+-- Releasing keeps the token and sets `at` to 0 (claimProfile treats that as expired, so the next session takes it),
+-- so a second releasing write of ours (BindToClose, then PlayerRemoving) still recognises the record as its own.
+-- `lost` is assigned on every invocation: Roblox may run the transform more than once, and the last run decides.
 local function saveProfile(plr: Player, releasing: boolean?)
 	local prof = profiles[plr]
 	if not prof or not profileStore or not prof.canSave then
@@ -483,40 +540,57 @@ local function saveProfile(plr: Player, releasing: boolean?)
 		night = prof.night,
 		stash = prof.stash,
 		best = prof.best,
+		bestAt = prof.bestAt,
+		boardBest = prof.boardBest,
 		levels = prof.levels,
 	}
+	local lost = false
 	pcall(function()
 		(profileStore :: any):UpdateAsync(profileKey(plr), function(old)
 			old = old or {}
 			local lock = old.lock
-			-- Somebody else took the lock while we were playing: do NOT clobber their data.
-			if lock and lock.token ~= prof.lockToken and (os.time() - (tonumber(lock.at) or 0)) <= Config.Save.SessionLockSeconds then
-				return nil
+			if type(lock) ~= "table" or lock.token ~= prof.lockToken then
+				lost = true
+				return nil -- another session has taken (or released) this profile since we loaded it: leave it alone
 			end
-			local newLock = nil
-			if not releasing and not prof.closing then
-				newLock = { token = prof.lockToken, at = os.time() }
-			end
-			return { data = payload, lock = newLock }
+			lost = false
+			local at = if releasing or prof.closing then 0 else os.time()
+			return { data = payload, lock = { token = prof.lockToken, at = at } }
 		end)
 	end)
+	if lost then
+		prof.canSave = false
+		if not prof.closing then
+			NoticeRemote:FireClient(plr, { kind = "READONLY", text = "Progress is no longer being saved",
+				detail = "This profile was opened in another session since you joined. Rejoin to carry on from there." })
+		end
+	end
 end
 
-local function publishBest(plr: Player, force: boolean?)
+-- THE HIGHSCORE BOARD's write (docs/complete-game-standard.md §3, Board.luau). The value is the best night survived,
+-- encoded so a tie goes to whoever reached it first (Board.encode, stamped with prof.bestAt, the unix time of the
+-- extraction that first set it). Written only when the night improves on what this profile last wrote, only while
+-- this session holds the profile's lock (a read-only session plays on, but its nights are not saved, so they must not
+-- reach the board either), and through UpdateAsync + Board.keepHigher, so nothing, not even a stale server, can lower
+-- or re-stamp what is stored. At most one write per PUBLISH_MIN_INTERVAL; the autosave and PlayerRemoving catch up.
+local function writeBoard(plr: Player, force: boolean?)
 	local prof = profiles[plr]
-	if not prof or not bestBoard or prof.best <= prof.publishedBest then
+	if not prof or not bestBoard or not prof.canSave or prof.best <= prof.boardBest then
 		return
 	end
-	local now = os.clock()
+	local now = clock()
 	if not force and (now - prof.lastPublishAt) < PUBLISH_MIN_INTERVAL then
 		return
 	end
+	prof.lastPublishAt = now
+	local value = Board.encode(prof.best, prof.bestAt, Config.Board)
 	local ok = pcall(function()
-		(bestBoard :: any):SetAsync("u_" .. plr.UserId, prof.best)
+		(bestBoard :: any):UpdateAsync(Board.key(plr.UserId), function(old)
+			return Board.keepHigher(old, value)
+		end)
 	end)
 	if ok then
-		prof.publishedBest = prof.best
-		prof.lastPublishAt = now
+		prof.boardBest = prof.best -- also when keepHigher aborted: what is stored is at least as high
 	end
 end
 
@@ -566,6 +640,324 @@ end
 local function notice(plr: Player, kind: string, text: string, detail: string?)
 	NoticeRemote:FireClient(plr, { kind = kind, text = text, detail = detail })
 end
+
+-- ------------------------------------------------------------------ the highscore board (public + friends)
+-- docs/complete-game-standard.md §3, Board.luau. The metric is the best night survived, measured by the server
+-- (resolveNight, behind the crossing guard on the Servants' Exit). Stored encoded in Config.Save.LeaderStore
+-- (writeBoard: ties to whoever got there first, written only when it improves). The public top 10 is read at most
+-- once per PublicCacheSeconds, and only while somebody is on the server. Friends are read only when a player asks
+-- for them at the board, capped at FriendsCap, cached, and throttled (Board.newLimiter + Roblox's own budget). Names
+-- come from players on the server, the friends list or GetNameFromUserIdAsync, kept in memory and never stored.
+-- The board itself stands in every safehouse (buildBoard). The server draws it: a safehouse is its player's alone,
+-- so there is nothing for a client to draw, and no remote.
+local BC = Config.Board
+local BOARD_GOLD = Color3.fromRGB(255, 205, 90)
+local BOARD_TEXT = Color3.fromRGB(225, 222, 235)
+local BOARD_DIM = Color3.fromRGB(160, 150, 175)
+local BOARD_SIZE = Vector3.new(12, 8, 0.6) -- 480 x 320 px at 40 px per stud
+
+type BoardUi = { mode: TextLabel, rows: { TextLabel }, note: TextLabel }
+local boardUi: { [Player]: BoardUi } = {}
+local boardMode: { [Player]: string } = {} -- "public" | "friends", per player
+local publicView: any = { rows = {}, note = BC.Text.Loading }
+
+local nameCache: { [number]: string } = {}
+-- A player on this server is asked first (their current name, free); then the cache; then one lookup, cached.
+local function nameOf(userId: number): string
+	local here = Players:GetPlayerByUserId(userId)
+	if here then
+		nameCache[userId] = here.Name
+		return here.Name
+	end
+	local cached = nameCache[userId]
+	if cached then return cached end
+	local ok, res = pcall(function()
+		return Players:GetNameFromUserIdAsync(userId)
+	end)
+	if ok and type(res) == "string" then
+		nameCache[userId] = res
+		return res
+	end
+	return "#" .. tostring(userId) -- not cached: the next view tries again
+end
+
+local function withNames(rows: { any }): { any }
+	local out = {}
+	for i, r in rows do
+		out[i] = { rank = r.rank, userId = r.userId, night = r.night, you = r.you, name = nameOf(r.userId) }
+	end
+	return out
+end
+
+local function renderBoard(plr: Player, mode: string, view: any)
+	local ui = boardUi[plr]
+	if not ui then return end
+	local friends = mode == "friends"
+	ui.mode.Text = if friends then "👥 FRIENDS" else "🌍 PUBLIC"
+	ui.mode.TextColor3 = if friends then Color3.fromRGB(150, 220, 255) else BOARD_GOLD
+	local rows = if type(view.rows) == "table" then view.rows else {}
+	for i, label in ui.rows do
+		local r = rows[i]
+		if r then
+			local you = r.you == true or r.userId == plr.UserId
+			label.Text = Board.rowText({ rank = r.rank, name = r.name, night = r.night, you = you }, BC)
+			label.TextColor3 = if you then BOARD_GOLD else BOARD_TEXT
+			label.Visible = true
+		else
+			label.Text = ""
+			label.Visible = false
+		end
+	end
+	if type(view.note) == "string" and view.note ~= "" then
+		ui.note.Text = view.note
+		ui.note.Position = UDim2.new(0, 20, 0, 76 + #rows * 21)
+		ui.note.Visible = true
+	else
+		ui.note.Text = ""
+		ui.note.Visible = false
+	end
+end
+
+local function refreshPublic()
+	if not bestBoard then
+		publicView = Board.publicView({}, BC)
+		return
+	end
+	local ok, page = pcall(function()
+		return (bestBoard :: any):GetSortedAsync(false, BC.PublicRows)
+	end)
+	if not ok or not page then return end -- keep the last list
+	local okPage, items = pcall(function()
+		return page:GetCurrentPage()
+	end)
+	if not okPage or type(items) ~= "table" then return end
+	local entries = {}
+	for _, e in ipairs(items) do
+		local uid = Board.userIdOf(tostring(e.key))
+		if uid and type(e.value) == "number" then
+			table.insert(entries, { userId = uid, value = e.value })
+		end
+	end
+	local view = Board.publicView(entries, BC)
+	publicView = { rows = withNames(view.rows), note = view.note }
+end
+
+-- A player's own value, from memory (fresher than the store, which is written at the save after a new best).
+local function liveValue(prof: Profile?): number
+	if not prof or not prof.loaded or prof.best <= 0 then return 0 end
+	return Board.encode(prof.best, prof.bestAt, BC)
+end
+
+local friendsCache = Board.newCache(BC.FriendsCacheSeconds)
+local friendsFailed = Board.newCache(60)
+local scoreCache = Board.newCache(BC.ScoreCacheSeconds)
+local readLimiter = Board.newLimiter(BC.ReadsBurst, BC.ReadsPerSecond, clock())
+local fetching: { [Player]: boolean } = {}
+
+-- A player's friends, capped at FriendsCap, cached; a failed fetch is retried after a minute, not on every press.
+local function friendIdsOf(plr: Player): ({ number }, boolean)
+	local now = clock()
+	local hit = Board.cacheGet(friendsCache, plr.UserId, now)
+	if hit then return hit, false end
+	if Board.cacheHas(friendsFailed, plr.UserId, now) then return {}, true end
+	local ok, pages = pcall(function()
+		return (Players :: any):GetFriendsAsync(plr.UserId)
+	end)
+	local ids = {}
+	local broken = not ok or pages == nil
+	-- The cap is held by the two checks inside (an id only while under it; stop paging at it). The loop condition used
+	-- to repeat it, and a mutation deleting that copy changed nothing (pass 2 sweep, B5): a guard nothing can reach.
+	while not broken do
+		local okPage, items = pcall(function()
+			return pages:GetCurrentPage()
+		end)
+		if not okPage or type(items) ~= "table" then
+			broken = #ids == 0
+			break
+		end
+		for _, item in ipairs(items) do
+			local id = tonumber(item.Id)
+			if id and #ids < BC.FriendsCap then
+				table.insert(ids, id)
+				if type(item.Username) == "string" then nameCache[id] = item.Username end
+			end
+		end
+		if pages.IsFinished or #ids >= BC.FriendsCap then break end
+		if not pcall(function() pages:AdvanceToNextPageAsync() end) then break end
+	end
+	if broken then
+		Board.cachePut(friendsFailed, plr.UserId, true, now)
+		return {}, true
+	end
+	Board.cachePut(friendsCache, plr.UserId, ids, now)
+	return ids, false
+end
+
+-- Always leave BudgetReserve GetAsync in Roblox's own budget (when it cannot be read, only the limiter applies).
+local function budgetLeft(): boolean
+	local ok, budget = pcall(function()
+		return DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetAsync)
+	end)
+	return not (ok and type(budget) == "number" and budget < BC.BudgetReserve)
+end
+
+-- A friend's stored value (0 = never got out), or nil when the read is throttled (try again later). A failed read
+-- counts as 0 and is not cached, so one bad key does not stop the list.
+local function friendValue(userId: number): number?
+	local here = Players:GetPlayerByUserId(userId)
+	if here and profiles[here] then return liveValue(profiles[here]) end
+	local now = clock()
+	if Board.cacheHas(scoreCache, userId, now) then return Board.cacheGet(scoreCache, userId, now) end
+	if not bestBoard then return 0 end
+	if not budgetLeft() or not Board.take(readLimiter, now) then return nil end
+	local ok, v = pcall(function()
+		return (bestBoard :: any):GetAsync(Board.key(userId))
+	end)
+	if not ok then return 0 end
+	local value = if type(v) == "number" then v else 0
+	Board.cachePut(scoreCache, userId, value, now)
+	return value
+end
+
+local function showFriends(plr: Player)
+	if fetching[plr] then
+		renderBoard(plr, "friends", { rows = {}, note = BC.Text.Loading }) -- the one running will draw soon
+		return
+	end
+	fetching[plr] = true
+	task.spawn(function()
+		renderBoard(plr, "friends", { rows = {}, note = BC.Text.Loading })
+		local ids, failedList = friendIdsOf(plr)
+		local values: { [number]: number } = {}
+		local status = { friendCount = #ids, checked = 0, failed = failedList }
+		local function push()
+			values[plr.UserId] = liveValue(profiles[plr])
+			local view = Board.friendsView(plr.UserId, values, status, BC)
+			renderBoard(plr, "friends", { rows = withNames(view.rows), note = view.note })
+		end
+		local i, lastPush = 1, -math.huge
+		while i <= #ids and plr.Parent == Players and boardMode[plr] == "friends" do
+			local v = friendValue(ids[i])
+			if v == nil then
+				status.checked = i - 1
+				if clock() - lastPush >= 0.5 then
+					push()
+					lastPush = clock()
+				end
+				task.wait(1) -- throttled: wait for the limiter
+			else
+				values[ids[i]] = v
+				i += 1
+			end
+		end
+		status.checked = i - 1
+		if plr.Parent == Players and boardMode[plr] == "friends" then push() end
+		fetching[plr] = nil
+	end)
+end
+
+-- The board in one safehouse: on the east wall by the north-east corner, about 29 studs from the spawn pad and in
+-- sight of it, clear of the pads (x 19.5-26.5), the hearth, the props and the way to the manor door. Its prompt is F
+-- (gamepad Y), so it never fights an upgrade pad's E.
+local function buildBoard(plr: Player, house: Folder, origin: Vector3)
+	local half = Config.Hub.Size / 2
+	local centre = origin
+		+ Vector3.new(half - 0.5 - 0.2 - BOARD_SIZE.Z / 2, 0.5 + 2 + BOARD_SIZE.Y / 2, half - 0.5 - 0.1 - BOARD_SIZE.X / 2)
+	local frame = CFrame.lookAt(centre, centre + Vector3.new(-1, 0, 0)) -- the Front face (-Z local) looks into the room
+	local board = newPart({
+		Name = "NightsBoard", Size = BOARD_SIZE, CFrame = frame,
+		Color = Color3.fromRGB(22, 18, 28), Material = Enum.Material.SmoothPlastic, Parent = house,
+	})
+	-- a gold frame behind it, against the wall: anything interactive reads as interactive (new-game-checklist §2)
+	newPart({
+		Name = "NightsBoardTrim", Size = Vector3.new(BOARD_SIZE.X + 0.8, BOARD_SIZE.Y + 0.8, 0.2),
+		CFrame = frame * CFrame.new(0, 0, BOARD_SIZE.Z / 2 + 0.1), CanCollide = false, CastShadow = false,
+		Color = BOARD_GOLD, Material = Enum.Material.Neon, Parent = house,
+	})
+	local at = Instance.new("Attachment")
+	at.Name = "PromptAt"
+	at.Position = Vector3.new(0, -3, -0.8)
+	at.Parent = board
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "BoardPrompt"
+	prompt.ActionText = BC.Text.Prompt
+	prompt.ObjectText = "🏆 " .. BC.Text.Title
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = BC.PromptDistance
+	prompt.RequiresLineOfSight = false
+	prompt.KeyboardKeyCode = Enum.KeyCode.F
+	prompt.GamepadKeyCode = Enum.KeyCode.ButtonY
+	prompt.Parent = at
+
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = "NightsBoardGui"
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 40
+	gui.LightInfluence = 0
+	gui.ClipsDescendants = true
+	gui.Parent = board
+	local function label(name: string, y: number, h: number, size: number, color: Color3, font: Enum.Font): TextLabel
+		local l = Instance.new("TextLabel")
+		l.Name = name
+		l.BackgroundTransparency = 1
+		l.Position = UDim2.new(0, 20, 0, y)
+		l.Size = UDim2.new(1, -40, 0, h)
+		l.Font = font
+		l.TextSize = size
+		l.TextColor3 = color
+		l.TextXAlignment = Enum.TextXAlignment.Left
+		l.Text = ""
+		l.Parent = gui
+		return l
+	end
+	local title = label("Title", 8, 36, 30, BOARD_GOLD, Enum.Font.GothamBlack)
+	title.Text = "🏆 " .. BC.Text.Title
+	local mode = label("Mode", 44, 26, 22, BOARD_GOLD, Enum.Font.GothamBold)
+	local rows = {}
+	for i = 1, math.max(BC.PublicRows, BC.FriendsRows) do
+		rows[i] = label("Row" .. i, 76 + (i - 1) * 21, 21, 18, BOARD_TEXT, Enum.Font.GothamMedium)
+		rows[i].Visible = false
+	end
+	local note = label("Note", 76, 84, 18, BOARD_DIM, Enum.Font.GothamMedium)
+	note.TextWrapped = true
+	note.TextYAlignment = Enum.TextYAlignment.Top
+	note.Visible = false
+	local hint = label("Hint", 290, 24, 15, BOARD_DIM, Enum.Font.Gotham)
+	hint.Text = BC.Text.Hint
+	boardUi[plr] = { mode = mode, rows = rows, note = note }
+	boardMode[plr] = "public"
+	renderBoard(plr, "public", publicView)
+
+	prompt.Triggered:Connect(function(who)
+		if who ~= plr then
+			return
+		end
+		boardMode[plr] = if boardMode[plr] == "friends" then "public" else "friends"
+		if boardMode[plr] == "friends" then
+			showFriends(plr)
+		else
+			renderBoard(plr, "public", publicView)
+		end
+	end)
+end
+
+-- The public top 10: read at most once per PublicCacheSeconds, and only while somebody is here to see it. Checked
+-- every second, so the first player on a fresh server sees the list within a second instead of "Loading..." for up to
+-- a minute (check_nightwatchmanor_board, pass 2). A failed read waits out the same minute and keeps the last list.
+local publicReadAt = -math.huge
+task.spawn(function()
+	while true do
+		if #Players:GetPlayers() > 0 and clock() - publicReadAt >= BC.PublicCacheSeconds then
+			publicReadAt = clock()
+			refreshPublic()
+			for plr, mode in boardMode do
+				if mode == "public" then renderBoard(plr, "public", publicView) end
+			end
+		end
+		task.wait(1)
+	end
+end)
 
 -- ------------------------------------------------------------------ the safehouse
 local upgradePads: { [Player]: { [string]: BasePart } } = {}
@@ -643,6 +1035,9 @@ local function buildSafehouse(plr: Player, zone: Model, index: number)
 	spawnPad.Enabled = true -- explicit: Roblox will not respawn anyone at a disabled SpawnLocation
 	spawnPad.Parent = house
 	plr.RespawnLocation = spawnPad
+
+	-- the highscore board, a few steps from the spawn pad (docs/complete-game-standard.md §3)
+	buildBoard(plr, house, origin)
 
 	-- the door into the manor
 	local door = newPart({
@@ -845,32 +1240,53 @@ local function buildManor(plr: Player, zone: Model, plan: any, index: number)
 	-- the way out, standing in the vestibule
 	local exitRoom = Manor.roomById(plan, plan.exitId)
 	if exitRoom then
-		local cx, cz = Manor.roomCenter(Config, exitRoom)
-		local centre = origin + Vector3.new(cx, 0, cz)
 		-- WHICH WALL. The slab is exactly DoorWidth wide and stands six studs inside a face, so a
 		-- face that has a doorway in it gets the slab planted squarely in the gap — which is the only
 		-- way into the room the player has to reach. It used to be hard-coded to +Z and landed in a
 		-- live doorway on 249 of nights 1-500. `Manor.exitFace` picks an OUTER face instead.
+		-- WHERE on it: Crossing.exitDoorAt, the same point the crossing guard measures the walk to.
 		local fx, fz = Manor.exitFace(Config, plan)
 		fx, fz = fx or 0, fz or 1
-		local inset = M.RoomSize / 2 - 6
+		local dx, dz = Crossing.exitDoorAt(Config, plan, fx, fz)
 		local size = if fx ~= 0
 			then Vector3.new(1.2, 12, M.DoorWidth)
 			else Vector3.new(M.DoorWidth, 12, 1.2)
 		local door = newPart({
 			Name = "ExitDoor", Size = size,
-			CFrame = CFrame.new(centre + Vector3.new(fx * inset, 6.5, fz * inset)),
+			CFrame = CFrame.new(origin + Vector3.new(dx, 6.5, dz)),
 			Color = Color3.fromRGB(40, 90, 60), Material = Enum.Material.Neon, Transparency = 0.15,
 			Parent = manor,
 		})
 		candle(door, 3, 30, Color3.fromRGB(120, 220, 140))
 		local prompt = makePrompt(door, "ESCAPE", "Servants' Exit", Enum.KeyCode.E)
+		prompt.MaxActivationDistance = Config.Guard.ExitPromptDistance
 		prompt.Triggered:Connect(function(who)
 			if who ~= plr then
 				return
 			end
 			local r = runs[plr]
 			if not r or r.phase ~= "NIGHT" or r.ending then
+				return
+			end
+			-- THE CROSSING GUARD (Crossing.luau). Surviving the night is the highscore board's metric, and the client
+			-- moves its own character, so a script could stand here a second into the night. The server measures both
+			-- halves itself: the root within the prompt's reach (+ slack), and the night clock past the shortest walk
+			-- here at WalkSpeed. A player walking the perfect line is never refused (Crossing.spec); a refusal says why.
+			local char = plr.Character
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			local dist = if hrp and hrp:IsA("BasePart") then (hrp.Position - door.Position).Magnitude else math.huge
+			-- and in the exit room: the prompt needs no line of sight, so it reaches through a wall into the next room
+			local inRoom = hrp ~= nil and hrp:IsA("BasePart")
+				and Manor.roomAtWorld(plan, Config, hrp.Position.X - origin.X, hrp.Position.Z - origin.Z) == plan.exitId
+			local ok, why, wait = Crossing.verdictFor(Config, r.crossSeconds, r.elapsed, dist, inRoom)
+			if not ok then
+				-- the HUD shows a DENIED notice's text only, so the reason is in the text
+				if why == "far" then
+					notice(plr, "DENIED", "Stand at the Servants' Exit to use it.")
+				else
+					notice(plr, "DENIED", string.format("The Servants' Exit is still barred: it opens in %.1f s", wait),
+						"Nobody crosses the manor that fast.")
+				end
 				return
 			end
 			resolveNight(plr, Night.EXTRACTED)
@@ -1214,7 +1630,13 @@ resolveNight = function(plr: Player, outcome: string)
 	end
 
 	if res.newBest then
-		publishBest(plr)
+		prof.bestAt = os.time() -- the board's tie-break: when this night was FIRST survived
+	end
+
+	-- a failure in these halls counts toward the manor shifting (beginNight)
+	local held = manorSalt[plr]
+	if outcome ~= Night.EXTRACTED and held and held.night == res.night then
+		held.fails += 1
 	end
 
 	if outcome == Night.EXTRACTED then
@@ -1229,6 +1651,9 @@ resolveNight = function(plr: Player, outcome: string)
 			string.format("Thrown out with %d relics of %d.", res.gained, res.gained + res.lost))
 	end
 
+	if res.newBest then
+		writeBoard(plr) -- before the save, so the profile records what the board now holds
+	end
 	saveProfile(plr)
 	pushState(plr)
 
@@ -1258,9 +1683,30 @@ beginNight = function(plr: Player)
 
 	run.effects = Upgrades.effects(Config, prof.levels)
 
-	-- Seeded by WorldSeed and the night, and nothing else: night 7 is night 7 for everybody. The
-	-- player's hub level is deliberately NOT passed — see Manor.roomCount.
-	local plan = Manor.plan(Rng.new(Manor.seedFor(Config, prof.night)), Config, prof.night)
+	-- Planned from server-only halves (the secrets block above, Salt.luau): one pair per player per night per
+	-- session, so a retry is the manor you were caught in and nobody can compute any manor ahead of time. Its SIZE is
+	-- still the night's (Manor.roomCount, relicCount, patrolCount and the dread clock read the night and nothing
+	-- else), so night 14 is equally hard for everybody and the best night stays comparable. The player's hub level is
+	-- deliberately NOT passed — see Manor.roomCount.
+	local plan
+	local shifted = false
+	local key = "u_" .. plr.UserId
+	if secrets:GetAttribute("PublicLayouts") == true then
+		plan = Manor.plan(Rng.new(Manor.seedFor(Config, prof.night)), Config, prof.night)
+		secrets:SetAttribute(key, string.format("%d:public", prof.night))
+	else
+		local held = manorSalt[plr]
+		if held ~= nil and held.night == prof.night and held.fails >= Config.Manor.ShiftAfterFails then
+			shifted = true
+			held = nil
+		end
+		if held == nil or held.night ~= prof.night then
+			held = { night = prof.night, a = drawHalf(), b = drawHalf(), fails = 0 }
+			manorSalt[plr] = held
+		end
+		plan = Manor.plan(Salt.new(held.a, held.b), Config, prof.night)
+		secrets:SetAttribute(key, string.format("%d:%d:%d", prof.night, held.a, held.b))
+	end
 
 	clearManor(zone)
 	run.phase = "NIGHT"
@@ -1274,6 +1720,8 @@ beginNight = function(plr: Player)
 	run.dreadTotal = Night.dreadSeconds(Config, prof.night, run.effects)
 	run.relicsTotal = #plan.relics
 	run.relicsLeft = #plan.relics
+	-- the Servants' Exit stays barred until the clock passes the shortest walk to it (Crossing.luau)
+	run.crossSeconds = Crossing.minSeconds(Config, plan, Manor)
 
 	buildManor(plr, zone, plan, index)
 
@@ -1292,15 +1740,14 @@ beginNight = function(plr: Player)
 	run.points = Watcher.loopPoints(pts)
 	run.watcher = Watcher.newState(run.points)
 
-	local entrance = Manor.roomById(plan, plan.entranceId)
-	if entrance then
-		local x, z = Manor.roomCenter(Config, entrance)
-		teleport(plr, origin + Vector3.new(x, 4, z + 12))
-	end
+	-- where the crossing guard measures the night from (Crossing.start: the entrance's centre, 12 studs in)
+	local sx, sz = Crossing.start(Config, plan)
+	teleport(plr, origin + Vector3.new(sx, 4, sz))
 	lightPlayer(plr)
 
 	notice(plr, "NIGHT", string.format("NIGHT %d", prof.night),
-		string.format("%d relics inside. Reach the Servants' Exit before the manor wakes.", run.relicsTotal))
+		(if shifted then "The manor has shifted: these are new halls. " else "")
+			.. string.format("%d relics inside. Reach the Servants' Exit before the manor wakes.", run.relicsTotal))
 	pushState(plr)
 	startNightLoop(plr)
 end
@@ -1365,6 +1812,7 @@ local function onPlayerAdded(plr: Player)
 		spotted = false,
 		near = false,
 		ending = false,
+		crossSeconds = 0,
 	}
 
 	buildSafehouse(plr, zone, index)
@@ -1391,14 +1839,10 @@ local function onPlayerAdded(plr: Player)
 		end
 		local idx = tonumber(z:GetAttribute("Index")) or 0
 		if run.phase == "NIGHT" and run.plan then
-			local entrance = Manor.roomById(run.plan, run.plan.entranceId)
-			if entrance then
-				local mo = manorOrigin(idx)
-				local x, z2 = Manor.roomCenter(Config, entrance)
-				teleport(plr, mo + Vector3.new(x, 4, z2 + 12))
-				lightPlayer(plr) -- the light lived on the old character; respawning replaced it
-				return
-			end
+			local sx, sz = Crossing.start(Config, run.plan)
+			teleport(plr, manorOrigin(idx) + Vector3.new(sx, 4, sz))
+			lightPlayer(plr) -- the light lived on the old character; respawning replaced it
+			return
 		end
 		teleport(plr, zoneOrigin(idx) + Vector3.new(0, 4, Config.Hub.Size / 2 - 10))
 	end
@@ -1459,7 +1903,14 @@ local function onPlayerAdded(plr: Player)
 	prof.levels = Upgrades.sanitize(Config, claim.data and claim.data.levels)
 	prof.lockToken = token
 	prof.canSave = claim.got
-	prof.publishedBest = prof.best
+	-- A save from before the board existed has a best night and no time it was reached: it is stamped with the session
+	-- it came back in, so it still gets on the board (behind anybody who got there earlier). boardBest says what this
+	-- profile last wrote to the board, so a rejoin does not write it again.
+	prof.bestAt = math.floor(tonumber(claim.data and claim.data.bestAt) or 0)
+	if prof.best > 0 and prof.bestAt <= 0 then
+		prof.bestAt = os.time()
+	end
+	prof.boardBest = math.clamp(math.floor(tonumber(claim.data and claim.data.boardBest) or 0), 0, prof.best)
 	prof.loaded = true
 
 	local run = runs[plr]
@@ -1493,8 +1944,8 @@ local function onPlayerAdded(plr: Player)
 			if not profiles[plr] then
 				break
 			end
+			writeBoard(plr)
 			saveProfile(plr)
-			publishBest(plr)
 		end
 	end)
 end
@@ -1503,7 +1954,7 @@ local function onPlayerRemoving(plr: Player)
 	local prof = profiles[plr]
 	if prof then
 		prof.closing = true
-		publishBest(plr, true)
+		writeBoard(plr, true)
 		saveProfile(plr, true)
 	end
 	local run = runs[plr]
@@ -1520,6 +1971,11 @@ local function onPlayerRemoving(plr: Player)
 	runs[plr] = nil
 	profiles[plr] = nil
 	upgradePads[plr] = nil
+	boardUi[plr] = nil
+	boardMode[plr] = nil
+	fetching[plr] = nil
+	manorSalt[plr] = nil
+	secrets:SetAttribute("u_" .. plr.UserId, nil)
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)

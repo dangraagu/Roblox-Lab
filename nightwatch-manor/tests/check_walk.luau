@@ -45,6 +45,11 @@ local store = h.services.DataStoreService:GetDataStore("NightwatchManor_v1")
 store:SetAsync("u_" .. ME, { data = { night = 1, stash = 0, best = 0, levels = {} } })
 
 assert(h:tryRun("server/Main.server"))
+-- The game plans every manor from a server-only salt (Salt.luau; robloxemu/check_nightwatchmanor_guard.luau). This walk
+-- was written for, and is asserted on, the PUBLIC manors of nights 1-3, so it flips the server's own ServerStorage
+-- switch (the one the thumbnail recipe uses). Salted manors are the same generator, drawn from 64 bits instead of 32;
+-- the guard check walks a salted one's rooms against its plan.
+h.game:GetService("ServerStorage"):FindFirstChild("NightwatchSecrets"):SetAttribute("PublicLayouts", true)
 h:advance(1)
 
 local Config = h.modules["shared/Config"].value

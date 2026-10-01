@@ -26,6 +26,7 @@ local Watcher = require("../src/shared/Watcher")
 local Upgrades = require("../src/shared/Upgrades")
 local Night = require("../src/shared/Night")
 local Rng = require("../src/shared/Rng")
+local Salt = require("../src/shared/Salt")
 local Hazards = require("../src/shared/Hazards")
 local Nightfall = require("../src/shared/Nightfall")
 
@@ -143,6 +144,7 @@ NightModel.lcg = lcg
 --     wantRelics = n            -- "normal": relics to take before heading out (default: all)
 --     hazards = { cfg = Config.Hazards, gate = Config.Env.HazardGate, bands = Config.Env.Bands,
 --                 react = true|false, seed = n }
+--     plan = a Manor plan to play instead of the night's public one (a salted manor: session's `salted`)
 --       react = true : the player reads the ring and walks out of it (what the warning asks)
 --       react = false: the player ignores every warning
 -- Returns { caught, out, at, spotted, spottedTicks, cleared, outside, plan, hz = {...} }.
@@ -150,7 +152,7 @@ function NightModel.simulate(night: number, levels: any, policy: string, opts: a
 	opts = opts or {}
 	local seconds, ignoreCatch = opts.seconds, opts.ignoreCatch
 	local effects = Upgrades.effects(Config, levels)
-	local plan = Manor.plan(Rng.new(Manor.seedFor(Config, night)), Config, night)
+	local plan = opts.plan or Manor.plan(Rng.new(Manor.seedFor(Config, night)), Config, night)
 	local blocked = NightModel.wallModel(plan)
 	local half = Config.Manor.RoomSize / 2
 
@@ -221,11 +223,45 @@ function NightModel.simulate(night: number, levels: any, policy: string, opts: a
 	local taken: { [number]: boolean } = {}
 	local outside = 0
 	local spottedNow = false
+	-- opts.search ("normal" only): a person who has not walked this manor before. They know the rooms they have
+	-- stood in and the rooms they have seen through a doorway (a relic's glow, the exit's green lamp), nothing
+	-- else, and explore the nearest room they have seen but not entered until they find what they want.
+	-- opts.visited carries what an earlier attempt at the same night already walked (a retry remembers).
+	local search = normal and opts.search == true
+	local visited: { [number]: boolean } = {}
+	for id in (opts.visited or {}) do visited[id] = true end
+	local seen: { [number]: boolean } = {}
+	local function see(id: number)
+		visited[id] = true
+		seen[id] = true
+		for _, nb in Manor.neighbours(plan, id) do seen[nb] = true end
+	end
+	for id in visited do see(id) end
+	local function known(id: number): boolean
+		return not search or seen[id] == true
+	end
+	local function frontier(from: number): number?
+		local best, bestLen
+		for id in seen do
+			if not visited[id] then
+				local path = Manor.pathBetween(plan, from, id)
+				if path and (bestLen == nil or #path < bestLen) then best, bestLen = id, #path end
+			end
+		end
+		return best
+	end
+	local function exitDest(from: number?, current: number?): number?
+		if known(plan.exitId) then return plan.exitId end
+		if current ~= nil and current ~= plan.exitId and seen[current] and not visited[current] then return current end
+		return if from then frontier(from) else current
+	end
 	while t < limit do
 		local myRoom = Manor.roomAtWorld(plan, Config, px, pz)
 		local wRoom = Manor.roomAtWorld(plan, Config, w.x, w.z)
 		if myRoom == nil then
 			outside += 1
+		elseif search and not visited[myRoom] then
+			see(myRoom)
 		end
 
 		if myRoom then
@@ -249,7 +285,7 @@ function NightModel.simulate(night: number, levels: any, policy: string, opts: a
 					end
 					if policy == "exit" or all or (normal and leaving) then
 						return { caught = false, out = true, at = t, spotted = everSpotted,
-							spottedTicks = spottedTicks, cleared = got, outside = outside, plan = plan, hz = hzStats }
+							spottedTicks = spottedTicks, cleared = got, outside = outside, plan = plan, hz = hzStats, visited = visited }
 					end
 				end
 			end
@@ -271,10 +307,10 @@ function NightModel.simulate(night: number, levels: any, policy: string, opts: a
 		local steer = policy
 		if normal then
 			steer = if t < fleeUntil then "flee" elseif leaving then "exit" else "loot"
-			if leaving then dest = plan.exitId end
+			if leaving then dest = exitDest(myRoom, dest) end
 			-- late in the night a person stops hiding and runs for the exit whatever is in the way
 			if Watcher.dread(t, dreadTotal) >= (human.dashAtDread or math.huge) then
-				leaving, dest, steer = true, plan.exitId, "exit"
+				leaving, dest, steer = true, exitDest(myRoom, dest), "exit"
 			end
 		end
 
@@ -282,16 +318,16 @@ function NightModel.simulate(night: number, levels: any, policy: string, opts: a
 		if myRoom and steer ~= "flee" then
 			if dest == nil or dest == myRoom then
 				if steer == "exit" then
-					dest = plan.exitId
+					dest = if normal then exitDest(myRoom, nil) else plan.exitId
 				else
 					local best, bestLen
 					for i, r in plan.relics do
-						if not taken[i] then
+						if not taken[i] and known(r.roomId) then
 							local path = Manor.pathBetween(plan, myRoom, r.roomId)
 							if path and (bestLen == nil or #path < bestLen) then best, bestLen = r.roomId, #path end
 						end
 					end
-					dest = best or plan.exitId
+					dest = best or (if search then frontier(myRoom) else nil) or exitDest(myRoom, nil)
 				end
 			end
 			-- "normal": a person who knows where it is does not walk into it. If the Nightwatcher stands
@@ -565,7 +601,8 @@ function NightModel.simulate(night: number, levels: any, policy: string, opts: a
 				local d = math.sqrt((hp.x - px) ^ 2 + (hp.z - pz) ^ 2)
 				local k = math.max(hzStats.spawned, 1)
 				if d < (hzStats.minDist[k] or math.huge) then hzStats.minDist[k] = d end
-				if Hazards.checkHit(plan2, before or 0, plan2.t, me, PLAYER_RADIUS) then
+				-- a knock only from the earliest-hit time on (Nightfall.hitFrom), as Haunt.client does
+				if Hazards.checkHit(plan2, math.max(before or 0, Nightfall.hitFrom(plan2, PLAYER_RADIUS)), plan2.t, me, PLAYER_RADIUS) then
 					plan2.hit = true
 					hzStats.hits += 1
 					knockLeft = hz.cfg.KnockSeconds
@@ -586,14 +623,14 @@ function NightModel.simulate(night: number, levels: any, policy: string, opts: a
 			local got = 0
 			for _ in taken do got += 1 end
 			return { caught = true, at = t, spotted = everSpotted, spottedTicks = spottedTicks,
-				ambushed = ambushed, room = myRoom, outside = outside, plan = plan, hz = hzStats, cleared = got }
+				ambushed = ambushed, room = myRoom, outside = outside, plan = plan, hz = hzStats, cleared = got, visited = visited }
 		end
 	end
 	local got = 0
 	for _ in taken do got += 1 end
 	local _ = spottedNow
 	return { caught = false, at = limit, spotted = everSpotted, spottedTicks = spottedTicks,
-		cleared = got, outside = outside, plan = plan, hz = hzStats, evicted = true }
+		cleared = got, outside = outside, plan = plan, hz = hzStats, evicted = true, visited = visited }
 end
 
 -- Near-hits in a finished night: hazards whose closest pass came within `studs` of the player.
@@ -606,7 +643,12 @@ function NightModel.nearCount(hzStats: any, studs: number): number
 end
 
 -- Plays nights back to back from a fresh profile for `minutes` of play.
---   opts = { human = profile, hazards = {...} or nil, minutes = n, nightCap = n }
+--   opts = { human = profile, hazards = {...} or nil, minutes = n, nightCap = n, search = true|nil, salted = seed|nil }
+--   salted: play the game as it ships since 2026-10-01: every night's manor is planned from Salt halves of this
+--   session's own (drawn from `seed`), once per night, so a retry is the same manor (Main.server's `manorSalt`), until
+--   Config.Manor.ShiftAfterFails failures in a row there: then the manor shifts (new halves; what was walked is
+--   forgotten, the person's caution is not).
+--   Without it, every night is its public manor (Manor.seedFor), as the model always played.
 -- Returns { reachedAt = { [night] = minutes }, nights = n, attempts = n, caught = n, evicted = n,
 --           hz = { spawned, hits, near, cancelled }, manorSeconds, daySeconds }
 function NightModel.session(opts: any)
@@ -623,6 +665,15 @@ function NightModel.session(opts: any)
 	local hzRand = opts.hazards and lcg(opts.hazards.seed or 104729) or nil
 	local hzState = opts.hazards and Hazards.newScheduler(opts.hazards.cfg, hzRand) or nil
 	local limit = (opts.minutes or 120) * 60
+	local memory: { [number]: { [number]: boolean } } = {} -- rooms already walked, per night (a retry remembers)
+	-- the halves come from a Salt stream of their own, not from an LCG: two consecutive outputs of one 32-bit LCG are
+	-- one number (the second is the first's successor), which is not what the server's Random draws
+	local saltSrc = if opts.salted then Salt.new(opts.salted % 4294967296, (opts.salted * 2654435761) % 4294967296) else nil
+	local halves: { [number]: { number } } = {} -- the session's salt per night (a retry is the same manor)
+	local failsHere = 0 -- failures in a row in the current night's halls (the shift's counter)
+	local saltedNights = 0 -- salts drawn (one per night, one more per shift)
+	local saltedPlays = 0 -- attempts that really played the salted plan (simulate hands back the plan it played)
+	local onNight, worstNightAttempts, worstNight = 0, 0, 0 -- attempts at the current night; the most any night took
 	while tSec < limit and state.night < (opts.nightCap or Config.Night.MaxNight) do
 		-- DAY: walk to the door, look around, buy what can be bought (cheapest first)
 		local day = human.daySeconds or 0
@@ -644,7 +695,25 @@ function NightModel.session(opts: any)
 		daySeconds += day
 
 		attempts += 1
-		local plan = Manor.plan(Rng.new(Manor.seedFor(Config, state.night)), Config, state.night)
+		onNight += 1
+		if onNight > worstNightAttempts then worstNightAttempts, worstNight = onNight, state.night end
+		local plan
+		if saltSrc then
+			local hv = halves[state.night]
+			if hv ~= nil and failsHere >= (Config.Manor.ShiftAfterFails or math.huge) then
+				hv = nil -- the manor shifts: new halls, and nothing walked in the old ones helps
+				memory[state.night] = nil
+			end
+			if hv == nil then
+				failsHere = 0
+				hv = { Salt.step(saltSrc), Salt.step(saltSrc) }
+				halves[state.night] = hv
+				saltedNights += 1
+			end
+			plan = Manor.plan(Salt.new(hv[1], hv[2]), Config, state.night) -- planned afresh: simulate may mark it
+		else
+			plan = Manor.plan(Rng.new(Manor.seedFor(Config, state.night)), Config, state.night)
+		end
 		local want = math.max(1, math.min(human.relicsPerNight or #plan.relics, #plan.relics) - careful)
 		-- after a few failures on the same night a person stops being careful and makes a dash for the
 		-- Servants' Exit, grabbing only what is on the way (Chase.spec's "exit" walker; 25 of 30 get out)
@@ -652,7 +721,10 @@ function NightModel.session(opts: any)
 		if dash then dashes += 1 end
 		local r = NightModel.simulate(state.night, levels, if dash then "exit" else "normal", {
 			human = human,
+			search = opts.search,
+			visited = memory[state.night],
 			wantRelics = want,
+			plan = if saltSrc then plan else nil,
 			-- a retry starts at a different moment of the patrol, the way a person's retry does
 			startDelay = (careful * 1.7) % 6,
 			hazards = opts.hazards and {
@@ -660,6 +732,12 @@ function NightModel.session(opts: any)
 				react = opts.hazards.react, state = hzState, rand = hzRand,
 			} or nil,
 		})
+		if saltSrc and r.plan == plan then saltedPlays += 1 end
+		if r.visited then
+			local mem = memory[state.night] or {}
+			for id in r.visited do mem[id] = true end
+			memory[state.night] = mem
+		end
 		tSec += r.at + Config.BeatSeconds
 		manorSeconds += r.at
 		if r.hz then
@@ -686,15 +764,19 @@ function NightModel.session(opts: any)
 		local newState = Night.resolve(state, outcome, Config, Upgrades.effects(Config, levels))
 		if newState.night > state.night then
 			careful = 0
+			onNight = 0
+			failsHere = 0
 			reachedAt[newState.night] = tSec / 60
 		else
 			careful += 1 -- caught or evicted: the same night again, taking one relic fewer
+			failsHere += 1
 		end
 		state = { night = newState.night, stash = newState.stash, best = newState.best, carried = {} }
 	end
 	return {
 		reachedAt = reachedAt, nights = state.night, attempts = attempts, caught = caught, evicted = evicted, dashes = dashes,
 		hz = hzTot, manorSeconds = manorSeconds, daySeconds = daySeconds, totalSeconds = tSec, levels = levels,
+		saltedNights = saltedNights, saltedPlays = saltedPlays, worstNightAttempts = worstNightAttempts, worstNight = worstNight,
 	}
 end
 

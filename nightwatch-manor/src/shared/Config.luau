@@ -52,6 +52,13 @@ Config.Manor = {
 	RoomsPerNight = 0.5,
 	MaxRooms = 18,
 
+	-- Every manor is planned from a server-only salt, one per player per night per session (Main.server), so a retry
+	-- after being caught is the manor you were caught in, to learn. Not forever: after this many failures in a row in
+	-- the same halls (caught or thrown out), the manor SHIFTS (new halves, same night) and the night's notice says so.
+	-- Measured (tests/Pacing.spec.luau): with a retry always the same manor, 2 of 31 model players were stuck on one
+	-- night for the rest of their 200 minutes (one of them 418 attempts at night 36) and never reached the last band.
+	ShiftAfterFails = 3,
+
 	-- Chance of a doorway through each wall a new room shares with an ALREADY-BUILT room other
 	-- than the one it grew from. This is what puts circuits in the manor. At 0 the generator
 	-- makes a pure tree, every branch of which ends in a dead end — and a dead end against a
@@ -110,6 +117,19 @@ Config.Relics = {
 -- was losing that race from 0.8 seconds into night one.
 Config.Player = {
 	WalkSpeed = 20, -- studs/second on foot
+}
+
+-- ------------------------------------------------------------------ The crossing guard (keeps the board honest)
+-- Crossing.luau. The Servants' Exit opens only to a character whose root the SERVER measures inside the exit room and
+-- within the prompt's reach of the door (+ ReachSlack), after the night has run at least the shortest possible walk
+-- from the foyer to that reach at WalkSpeed (- ClockSlack). A player never meets it (the shortest crossing is 2.9-8.9 s
+-- on the public manors of nights 1-150 and 1.85-10.44 s on 3000 salted ones, Crossing.spec; a real night out takes
+-- minutes); a script that teleports to the door is told why it has to wait, and waits as long as a perfect runner
+-- would. The best night survived is the highscore board's metric, so this is what stops a script inflating it.
+Config.Guard = {
+	ExitPromptDistance = 12, -- the ESCAPE prompt's MaxActivationDistance (the server builds it with this)
+	ReachSlack = 4, -- studs: 0.2 s of latency at WalkSpeed
+	ClockSlack = 0.5, -- seconds: the night clock steps every TickSeconds (0.1), plus replication
 }
 
 -- ------------------------------------------------------------------ The Nightwatcher
@@ -200,9 +220,44 @@ Config.ZoneSpacing = 3000
 -- ------------------------------------------------------------------ Persistence
 Config.Save = {
 	Store = "NightwatchManor_v1",
-	LeaderStore = "NightwatchManorBest_v1", -- OrderedDataStore, best night survived
+	-- OrderedDataStore of the highscore board (Config.Board, Board.luau): the best night survived, ENCODED
+	-- (night * 2e9 + (2e9 - reachedAt)). The old "NightwatchManorBest_v1" held the raw night; the game was never
+	-- published, so no live data sits there, and the new encoding gets a store of its own rather than a mix.
+	LeaderStore = "NightwatchManorBoard_v1",
 	AutosaveSeconds = 20,
 	SessionLockSeconds = 45,
+}
+
+-- ------------------------------------------------------------------ The highscore board (public + friends)
+-- docs/complete-game-standard.md §3. The metric is the best night the SERVER credited you with surviving; a
+-- script cannot raise it, because the only way to survive a night is the Servants' Exit, and the exit opens only
+-- to a character standing at it after a walk no faster than Config.Player.WalkSpeed allows (Config.Guard,
+-- Crossing.luau). Ties go to whoever reached the night first. A physical board stands in every safehouse, a few
+-- steps from the spawn pad; its prompt switches Public / Friends. Names are looked up and kept in memory, never
+-- stored.
+Config.Board = {
+	PublicRows = 10, -- GetSortedAsync(false, 10)
+	PublicCacheSeconds = 60, -- the server asks the store for the top 10 at most once a minute
+	FriendsRows = 10,
+	FriendsCap = 200, -- Players:GetFriendsAsync is never read past this many friends
+	FriendsCacheSeconds = 300, -- a player's friends list
+	ScoreCacheSeconds = 120, -- a friend's stored best, per server (a friend on night 0 too)
+	ReadsBurst = 40, -- GetAsync on the board store for friends: 40 at once ...
+	ReadsPerSecond = 1, -- ... then 1 a second (Roblox allows 60 + 10 per player a minute)
+	BudgetReserve = 10, -- always leave this many GetAsync in Roblox's own request budget
+	MaxMetric = 500, -- = Config.Night.MaxNight (Board.spec asserts it); night * 2e9 stays exact far past this
+	PromptDistance = 9, -- studs; the prompt hangs at the board's foot, so you walk over to it
+	Text = {
+		Title = "NIGHTS SURVIVED",
+		EmptyPublic = "Nobody has got out of the manor yet. Survive a night and be the first name here!",
+		FriendsFailed = "Couldn't load your Roblox friends right now. Try again in a minute.",
+		NoFriends = "No Roblox friends yet. Friends you add show up here, ranked against you.",
+		FriendsNoScores = "None of your %d friends has survived a night yet. Invite one and see who lasts longer!",
+		FriendsChecking = "Checking your friends: %d of %d so far...",
+		Loading = "Loading...",
+		Prompt = "Public / Friends",
+		Hint = "Walk up and press F (or tap) to switch Public / Friends",
+	},
 }
 
 -- ------------------------------------------------------------------ Server loop
@@ -259,6 +314,11 @@ Config.Env = {
 	EyeShift = 0.14, -- studs a pupil slides across its canvas toward the player
 
 	-- ---------------------------------------------------------------- the bands (by NIGHT)
+	-- 2026-10-01 (pass 2): the Blood Moon moved from night 20 to 26 and the Witching Hour from 40 to 50. Every manor is
+	-- now planned from a server-only salt (Main.server, Salt.luau), and on salted manors the pacing model's first-time
+	-- player reached night 20 at a median of 25.8 minutes (31 players; 10 of 31 inside 30-45). Night 26: median 33.2,
+	-- 22 of 31 inside (tests/Pacing.spec.luau asserts it). The public manors of nights 1-20 had simply been harder than
+	-- the average manor.
 	-- Band 1 IS the server's Horror preset, so the client's takeover is seamless. `glow` colours are
 	-- checked against WatcherSignature; `outside` is what the windows show (moon size, mist / stars / cloud /
 	-- eclipse as 0..1, rain in drops per second); `inside` is the manor's mood (dust motes per second, flicker
@@ -312,7 +372,7 @@ Config.Env = {
 			hazards = { "crockery", "bats" },
 		},
 		{
-			id = "blood", name = "Blood Moon", emoji = "🩸", from = 20, fade = 0.9, celebrate = true,
+			id = "blood", name = "Blood Moon", emoji = "🩸", from = 26, fade = 0.9, celebrate = true,
 			lighting = { Ambient = { 26, 20, 26 }, OutdoorAmbient = { 24, 14, 20 }, Brightness = 1, ExposureCompensation = -0.13 },
 			atmosphere = { Density = 0.44, Offset = 0.12, Color = { 118, 84, 96 }, Decay = { 56, 24, 34 }, Glare = 0.12, Haze = 1.8 },
 			bloom = { Intensity = 0.8, Size = 30, Threshold = 0.98 },
@@ -324,7 +384,7 @@ Config.Env = {
 			hazards = { "wraith", "crockery" },
 		},
 		{
-			id = "witching", name = "The Witching Hour", emoji = "🕯️", from = 40, fade = 0.9,
+			id = "witching", name = "The Witching Hour", emoji = "🕯️", from = 50, fade = 0.9,
 			lighting = { Ambient = { 20, 26, 24 }, OutdoorAmbient = { 14, 22, 18 }, Brightness = 1, ExposureCompensation = -0.12 },
 			atmosphere = { Density = 0.45, Offset = 0.14, Color = { 84, 110, 96 }, Decay = { 24, 44, 34 }, Glare = 0.1, Haze = 1.9 },
 			bloom = { Intensity = 0.9, Size = 32, Threshold = 0.95 },
@@ -357,20 +417,24 @@ Config.Env = {
 --   * one every IntervalMin..IntervalMax seconds of NIGHT: the clock is frozen in the day, and while the
 --     Nightwatcher sees you (and for QuietAfterSpottedSeconds after, longer than its HuntSeconds, validated)
 --     it keeps running but HOLDS the launch (Nightfall.hazardClock). Review 4: with the clock frozen for chases
---     too, the old 25-40 s came to one hazard per 1.2 minutes in the manor, more for a player who hid well; now
---     it is one per 2.5 manor-minutes for every player profile (tests/Pacing.spec.luau);
+--     too, the old 25-40 s came to one hazard per 1.2 minutes in the manor, more for a player who hid well.
+--     Second review (2026-09-30): the owner's standard counts NEAR-MISSES, one per 2-3 minutes, and at 120-180 s
+--     with a 1 s lead they came one per 4.5-5.6 manor-minutes. At 90-130 s with a 0.5 s lead: one near-miss per
+--     2.6-2.9 manor-minutes and one hazard shown per 1.9-2.0, for every player profile (tests/Pacing.spec.luau);
 --   * a hazard in flight is called off the moment it sees you, and a knock ends at that moment too;
 --   * a knock is slower than walking (KnockSpeedFractionMax x WalkSpeed, validated) and never lifts;
 --   * the ring on the floor is where it will land, placed where you are walking (LeadSeconds ahead):
---     stop, turn or step out of it and it misses. Stepping out works in every direction;
+--     stop, turn or step out of it and it misses. Stepping out works in every direction. Half a second ahead,
+--     not a whole one (second review): a ring 20 studs ahead of a walker who then turned was a hazard passing
+--     far away, not the close call the owner asked for;
 --   * the warning covers the EARLIEST hit, not the arrival: telegraph - (hitRadius + PlayerRadius) / speed
 --     is at least 3 s for every kind (Nightfall.validateHazards; the headless check measured a 3.0 s
 --     crockery telegraph landing its hit 2.87 s after the warning, which is why these are 3.2-3.6).
 -- Validated by Hazards.validate (template) and Nightfall.validateHazards (the chase rules); an invalid
 -- config switches hazards OFF with a warning. Rarity is measured in tests/Pacing.spec.luau.
 Config.Hazards = {
-	IntervalMin = 120, -- seconds of NIGHT time (frozen in the day; held, not frozen, while hunted)
-	IntervalMax = 180,
+	IntervalMin = 90, -- seconds of NIGHT time (frozen in the day; held, not frozen, while hunted)
+	IntervalMax = 130,
 	MinTelegraphSeconds = 3,
 	MinCommitSeconds = 1.3,
 	MaxRetargetSpeed = 1.6,
@@ -384,7 +448,7 @@ Config.Hazards = {
 	KnockLift = 0,
 	KnockSeconds = 0.8,
 	KnockSpeedFractionMax = 0.8,
-	LeadSeconds = 1.0,
+	LeadSeconds = 0.5,
 	QuietAfterSpottedSeconds = 10,
 	Kinds = {
 		bats = { speed = 18, telegraph = 3.3, commit = 1.5, pass = 1.5, hitRadius = 1.8, knock = 14, pitch = 6, pitchSpread = 4 },

@@ -388,6 +388,11 @@ function Nightfall.validateHazards(cfg: any): (boolean, string?)
 	if num(hz.MinTelegraphSeconds, 0) < H.TelegraphMin then
 		return false, "MinTelegraphSeconds under " .. H.TelegraphMin .. " s: a hazard must be easy to see coming"
 	end
+	-- the scheduler flies one hazard at a time, which is the cap for any Budget.MaxHazards >= 1 (second review:
+	-- the number was read by nothing); a budget of none switches hazards off rather than being ignored
+	if type(cfg.Budget) == "table" and cfg.Budget.MaxHazards ~= nil and num(cfg.Budget.MaxHazards, 0) < 1 then
+		return false, "Budget.MaxHazards is under 1: no hazard can be shown, so hazards are off"
+	end
 	for name, k in hz.Kinds or {} do
 		if num(k.knock, math.huge) > walk * frac + 1e-9 then
 			return false, string.format("hazard kind %s: knock %.1f is over %.0f%% of WalkSpeed (%.1f): a knock must never be a speed boost",
@@ -413,6 +418,25 @@ end
 
 -- Where to aim a hazard at a walking player: where they will be when it arrives, at most `leadSeconds`
 -- ahead, on the ground plane. `maxSpeed` (optional) clamps a velocity that is not walking (a knock).
+-- The earliest time into its flight at which a hazard may knock you down: its arrival minus its reach
+-- (hitRadius + playerRadius) over the KIND's speed (plan.baseSpeed), the moment validateHazards keeps at least
+-- HARD.TelegraphMin s after the warning begins. The client (and tests/NightModel) clip the hit test to start here
+-- (2026-09-30): before it, and in particular before the lane locks, a ring that follows you cannot be stepped out of,
+-- and a player who walked up to a slow ghost and stopped in its path was knocked down 1.5-2 s early, with the warning
+-- still saying INCOMING. The kind's speed, not the lane's: re-aiming at a player who walked up slows the lane right
+-- down, which would move this forward to the very moment it must not.
+function Nightfall.hitFrom(plan: any, playerRadius: number): number
+	local v = plan.velocity or {}
+	local speed = num(plan.baseSpeed, 0)
+	if speed <= 0 then
+		speed = math.sqrt(num(v.x, 0) ^ 2 + num(v.y, 0) ^ 2 + num(v.z, 0) ^ 2)
+	end
+	local reach = num(plan.hitRadius, 0) + num(playerRadius, 0)
+	local arrive = num(plan.arriveAt, 0)
+	if speed <= 1e-6 then return arrive end
+	return math.max(0, arrive - reach / speed)
+end
+
 function Nightfall.leadAim(pos: any, vel: any, remaining: number, leadSeconds: number, maxSpeed: number?): any
 	local lead = math.clamp(num(remaining, 0), 0, math.max(num(leadSeconds, 0), 0))
 	local vx, vz = num(vel.x, 0), num(vel.z, 0)

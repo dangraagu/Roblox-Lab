@@ -6,8 +6,12 @@
 -- down in Config.Pacing. The owner's brief, as numbers:
 --   * the big milestone (the Blood Moon) in about 30-45 minutes of play for a normal player; the last
 --     band is the long-term goal;
---   * hazards: about one near-hit per 2-3 minutes, easy to see coming and avoid (counted strictly since review 4:
---     every hazard SHOWN, per minute IN THE MANOR, for every profile and for a player who is rarely seen);
+--   * hazards: about one near-miss per 2-3 minutes, easy to see coming and avoid (docs/complete-game-standard.md §2).
+--     Counted per minute IN THE MANOR (hazards never run in the safehouse), for every profile and for a player who
+--     is rarely seen, pooled over three hazard seeds (second review, 2026-09-30: a single session's count is one
+--     chaotic trajectory). A near-miss is a pass within NearHitStuds of a player who reads the ring; the hazards
+--     SHOWN (near-misses, wide passes, and those called off by a sighting) must stay rare: never more often than one
+--     per 1.5 manor-minutes;
 --   * the chase was tuned carefully (ambushed runner caught 0/40, ignoring it caught 19/30) and the eye
 --     candy must not change it.
 local NightModel = require("./NightModel")
@@ -96,8 +100,111 @@ do
 	truthy(flagIdx ~= nil, "the flagship band exists")
 	local flag = flagIdx and bands[flagIdx]
 	local at = flag and minutesTo(runs.normal, flag.from)
-	truthy(at ~= nil and at >= 30 and at <= 45, string.format(
-		"a normal player first sees the %s in 30-45 minutes of play (got %s)", flag and flag.name or "?", tostring(at and string.format("%.1f", at))))
+	print(string.format("  the single normal session above reaches the %s at %s min", flag and flag.name or "?", tostring(at and string.format("%.1f", at))))
+
+	-- The brag moment, measured on a POPULATION, not one trajectory (second review, 2026-09-30: the old gate asserted
+	-- one session, and moving the model's start-of-night pause by 0-30 s put the Blood Moon anywhere from 26.7 to
+	-- 47.5 min, 12 of 31 outside 30-45). 31 normal players, each 0-30 s slower to get their bearings every night,
+	-- both as the model always played (it knows every manor's layout) and as a FIRST-TIME player, who knows only the
+	-- rooms they have entered or seen through a doorway and explores until they find the relics and the exit (a
+	-- retry of the same night remembers what it walked). The median must land in 30-45 minutes, and so must at
+	-- least half of the players.
+	local function population(search: boolean): { number }
+		local out = {}
+		for k = 0, 30 do
+			local human = table.clone(Config.Pacing.Profiles.normal)
+			human.startSeconds += k
+			local s = NightModel.session({ human = human, minutes = 90, nightCap = flag.from, search = search,
+				hazards = { cfg = HZ.cfg, gate = HZ.gate, bands = HZ.bands, react = true } })
+			table.insert(out, s.reachedAt[flag.from] or math.huge)
+		end
+		return out
+	end
+	-- CONTROL: the first-time player really searches. On nights 1-12, the nights both players get out of take the
+	-- searcher longer in all (it has to find the relics and the exit), and it does not walk every room every night.
+	do
+		local knowT, searchT, partial = 0, 0, 0
+		for n = 1, 12 do
+			local o = NightModel.simulate(n, {}, "normal", { human = Config.Pacing.Profiles.normal })
+			local s = NightModel.simulate(n, {}, "normal", { human = Config.Pacing.Profiles.normal, search = true })
+			if o.out and s.out then
+				knowT += o.at
+				searchT += s.at
+			end
+			local v = 0
+			for _ in s.visited or {} do v += 1 end
+			if v > 0 and v < #s.plan.rooms then partial += 1 end
+		end
+		print(string.format("  a first-time player on nights 1-12: %.0f s to get out where the one who knows the layout takes %.0f s; it walked only part of the manor on %d nights",
+			searchT, knowT, partial))
+		truthy(searchT > knowT, string.format("CONTROL: a first-time player takes longer to find its way out (%.0f vs %.0f s)", searchT, knowT))
+		truthy(partial >= 6, string.format("CONTROL: ...and explores rooms one by one, rarely all of them (%d of 12 nights partial)", partial))
+	end
+	for _, search in { false, true } do
+		local mins = population(search)
+		local sorted = table.clone(mins)
+		table.sort(sorted)
+		local inside = 0
+		for _, m in mins do
+			if m >= 30 and m <= 45 then inside += 1 end
+		end
+		local median = sorted[16]
+		local who = if search then "first-time players (they search each manor)" else "players who know each manor's layout"
+		print(string.format("  %s, 31 normal players: the %s at %.1f-%.1f min, median %.1f, quartiles %.1f / %.1f; %d of 31 inside 30-45",
+			who, flag.name, sorted[1], sorted[31], median, sorted[8], sorted[24], inside))
+		truthy(median >= 30 and median <= 45, string.format("%s: the median normal player first sees the %s in 30-45 minutes of play (%.1f)",
+			who, flag.name, median))
+		truthy(inside >= 16, string.format("%s: ...and at least half of them do (%d of 31)", who, inside))
+	end
+
+	-- THE GAME AS IT SHIPS (2026-10-01): every manor is planned from a server-only salt, one per player per night per
+	-- session (Main.server, check_nightwatchmanor_guard). Nobody knows a manor before entering it, and a retry after
+	-- being caught is the same manor, remembered: the first-time player above, on salted manors. 31 normal players,
+	-- each with salts of their own (NightModel.session's `salted`), each 0-30 s slower to get their bearings every night.
+	-- The brag moment is asserted on THEM. The long-term goal too: the median of the same 31 players reaches the last
+	-- band well after the flagship, inside three hours.
+	do
+		local mins, lasts, played, worst, worstWho = {}, {}, 0, 0, ""
+		local lastBand = bands[#bands].from
+		for k = 0, 30 do
+			local human = table.clone(Config.Pacing.Profiles.normal)
+			human.startSeconds += k
+			local s = NightModel.session({ human = human, minutes = 200, nightCap = lastBand, search = true, salted = 7919 * (k + 1),
+				hazards = { cfg = HZ.cfg, gate = HZ.gate, bands = HZ.bands, react = true } })
+			table.insert(mins, s.reachedAt[flag.from] or math.huge)
+			table.insert(lasts, s.reachedAt[lastBand] or math.huge)
+			if (s.saltedNights or 0) >= flag.from and s.saltedPlays == s.attempts then played += 1 end
+			if (s.worstNightAttempts or 0) > worst then
+				worst, worstWho = s.worstNightAttempts, string.format("player %d, night %d", k, s.worstNight or -1)
+			end
+		end
+		eq(played, 31, "CONTROL: all 31 salted sessions drew a salt for every night they entered and played every attempt on it")
+		-- A salted manor can be one this player keeps getting caught in (pass 2 measured 2 of 31 sessions stuck on one
+		-- night for the rest of the 200 minutes, 418 attempts at night 36 for one, when a retry was always the same
+		-- manor). After
+		-- Config.Manor.ShiftAfterFails failures in a row the manor shifts: new halves, same night.
+		print(string.format("  the most attempts any of them needed for one night: %d (%s)", worst, worstWho))
+		truthy(worst <= 12, string.format("SALTED manors: nobody is stuck on a manor: at most 12 attempts at any one night (%d, %s)", worst, worstWho))
+		local sorted = table.clone(mins)
+		table.sort(sorted)
+		local inside = 0
+		for _, m in mins do
+			if m >= 30 and m <= 45 then inside += 1 end
+		end
+		local sl = table.clone(lasts)
+		table.sort(sl)
+		print(string.format("  SALTED manors, first-time players, 31 normal players: the %s at %.1f-%.1f min, median %.1f, quartiles %.1f / %.1f; %d of 31 inside 30-45",
+			flag.name, sorted[1], sorted[31], sorted[16], sorted[8], sorted[24], inside))
+		print(string.format("  ...and %s (night %d) at %.1f-%.1f min, median %.1f, quartiles %.1f / %.1f",
+			bands[#bands].name, lastBand, sl[1], sl[31], sl[16], sl[8], sl[24]))
+		truthy(sorted[16] >= 30 and sorted[16] <= 45, string.format(
+			"SALTED manors: the median normal player first sees the %s in 30-45 minutes of play (%.1f)", flag.name, sorted[16]))
+		truthy(inside >= 16, string.format("SALTED manors: ...and at least half of them do (%d of 31)", inside))
+		truthy(sl[16] >= 1.6 * sorted[16], string.format("SALTED manors: %s is a long-term goal, at least 1.6x the flagship's median time (%.1f vs %.1f)",
+			bands[#bands].name, sl[16], sorted[16]))
+		truthy(sl[16] <= 180, string.format("SALTED manors: ...but reachable inside 3 hours (median %.1f)", sl[16]))
+		truthy(sl[31] < math.huge, string.format("SALTED manors: every one of the 31 reaches %s inside 200 minutes (slowest %.1f)", bands[#bands].name, sl[31]))
+	end
 
 	-- every band lasts long enough to be a place, not a flicker
 	local prev = 0
@@ -116,52 +223,105 @@ do
 	truthy(last ~= nil and at ~= nil and last >= 1.6 * at, string.format(
 		"%s is a long-term goal: at least 1.6x the flagship's time (%.1f vs %.1f)", bands[#bands].name, last or -1, at or -1))
 	truthy(last ~= nil and last <= 180, string.format("...but reachable inside 3 hours (%.1f)", last or -1))
+
+	-- DECIDED 2026-09-30 (owner: take recommended): the bands, like the night counter, reward leaving early, and that
+	-- stays. A night is a full crossing to the deepest room whatever you carry, so leaving early is a strategy, not an
+	-- exploit, and it has a price: the cautious player reaches the Blood Moon sooner but POORER (fewer upgrades, a
+	-- barer safehouse). Measured on 11 players of each kind (0-10 s slower to get their bearings every night), by median.
+	local Upgrades = require("../src/shared/Upgrades")
+	local function atFlag(profile: string): (number, number)
+		local mins, hubs = {}, {}
+		for k = 0, 10 do
+			local human = table.clone(Config.Pacing.Profiles[profile])
+			human.startSeconds += k
+			local s = NightModel.session({ human = human, minutes = 90, nightCap = flag.from,
+				hazards = { cfg = HZ.cfg, gate = HZ.gate, bands = HZ.bands, react = true } })
+			table.insert(mins, s.reachedAt[flag.from] or math.huge)
+			table.insert(hubs, Upgrades.hubLevel(s.levels))
+		end
+		table.sort(mins)
+		table.sort(hubs)
+		return mins[6], hubs[6]
+	end
+	local nMin, nHub = atFlag("normal")
+	local sMin, sHub = atFlag("slow")
+	print(string.format("  leaving early: the cautious player reaches the %s at %.1f min with hub level %d; the greedy one at %.1f min with hub level %d (medians of 11)",
+		flag.name, sMin, sHub, nMin, nHub))
+	-- (how much sooner moves with the trajectory: 29.4 vs 37.3 min in the single sessions above, 29.8 vs 31.2 by these
+	-- medians; the price does not: it is asserted)
+	truthy(sHub + 5 <= nHub, string.format("leaving early costs the upgrades: the cautious player reaches the %s with a hub level at least 5 lower (%d vs %d)",
+		flag.name, sHub, nHub))
 end
 
 --================================================================ hazards: the measured rarity
 
--- Review 4 (2026-09-24) found the old count flattering, three ways: it divided by ALL of play (hazards never run in
--- the safehouse, which is 10-34% of it), it counted only hazards that passed within 8 studs (every hazard homes on
--- you with a banner and a ring at your feet, whether it then passes close, is dodged wide or is called off), and it
--- measured one profile. With the clock frozen during chases, a player who hid well got a hazard every 33 s of
--- unhunted time: 1.2 per manor-minute for the normal profile, 1.35 for a stealthier one. So now:
---   * the unit is every hazard SHOWN, per minute IN THE MANOR, and it must be one per 2-3 minutes (the brief);
---   * for every profile, and for a player who is rarely seen, and the rate must not depend on how often you are seen;
---   * near-hits (within NearHitStuds) are a subset and are reported, never more often than one per 2 manor-minutes.
-local function hazardRate(label: string, s: any): number
-	local manorMin = s.manorSeconds / 60
-	local per = manorMin / math.max(s.hz.spawned, 1)
-	local perNear = manorMin / math.max(s.hz.near, 1)
-	local hunted = 1 - s.hz.huntFree / math.max(s.manorSeconds, 1)
-	print(string.format("  %-9s %d hazards shown in %.0f min in the manor (%.0f min of play): one per %.2f manor-min (%.2f play-min); "
-		.. "%d near-hits within %d studs (one per %.1f manor-min); %d called off by a sighting; hunted %.0f%% of manor time; caught %d",
-		label, s.hz.spawned, manorMin, s.totalSeconds / 60, per, s.totalSeconds / 60 / math.max(s.hz.spawned, 1),
-		s.hz.near, Config.Pacing.NearHitStuds, perNear, s.hz.cancelled, 100 * hunted, s.caught))
-	truthy(per >= 2 and per <= 3, string.format("%s: one hazard shown per 2-3 minutes in the manor (one per %.2f)", label, per))
-	truthy(perNear >= 2, string.format("%s: a near-hit never more often than one per 2 minutes in the manor (one per %.1f)", label, perNear))
+-- Review 4 (2026-09-24) found the old count flattering: it divided by ALL of play (hazards never run in the
+-- safehouse, which is 10-34% of it) and measured one profile. The second review (2026-09-30) found the opposite gap:
+-- with every hazard SHOWN held to one per 2-3 manor-minutes, the near-misses the owner asked for came one per 4.5-6.5
+-- (a third of the shown hazards are called off when the Nightwatcher sees you, and the ring was aimed a whole second
+-- ahead of a walking player, so a player who turned passed it wide), and nothing asserted a floor. The owner's
+-- standard (docs/complete-game-standard.md §2) names the near-miss, so now:
+--   * a NEAR-MISS (a pass within NearHitStuds of a player who reads the ring) comes one per 2-3 minutes in the manor;
+--   * every hazard SHOWN stays rare: never more often than one per 1.5 manor-minutes;
+--   * for every profile, and for a player who is rarely seen, and the shown rate must not depend on how often you are
+--     seen; each pooled over three hazard seeds.
+local SEEDS = { 104729, 7919, 31337 } -- 104729 is the seed of the sessions above
+local function pooled(profile: string, react: boolean, first: any?): any
+	local agg = { manorSeconds = 0, totalSeconds = 0, caught = 0, spawned = 0, near = 0, cancelled = 0, hits = 0, huntFree = 0, knockedFor = 0, each = {} }
+	for i, seed in SEEDS do
+		local s = if i == 1 and first then first else NightModel.session({
+			human = Config.Pacing.Profiles[profile], minutes = 200,
+			hazards = { cfg = HZ.cfg, gate = HZ.gate, bands = HZ.bands, react = react, seed = seed },
+		})
+		agg.manorSeconds += s.manorSeconds
+		agg.totalSeconds += s.totalSeconds
+		agg.caught += s.caught
+		agg.spawned += s.hz.spawned
+		agg.near += s.hz.near
+		agg.cancelled += s.hz.cancelled
+		agg.hits += s.hz.hits
+		agg.huntFree += s.hz.huntFree
+		agg.knockedFor += s.hz.knockedFor
+		table.insert(agg.each, string.format("%.2f", (s.manorSeconds / 60) / math.max(s.hz.near, 1)))
+	end
+	return agg
+end
+local function hazardRate(label: string, a: any): number
+	local manorMin = a.manorSeconds / 60
+	local per = manorMin / math.max(a.spawned, 1)
+	local perNear = manorMin / math.max(a.near, 1)
+	local hunted = 1 - a.huntFree / math.max(a.manorSeconds, 1)
+	print(string.format("  %-9s %d hazards shown in %.0f min in the manor (%.0f min of play, %d seeds): one per %.2f manor-min; "
+		.. "%d near-misses within %d studs: one per %.2f manor-min (per seed %s); %d called off by a sighting; hunted %.0f%% of manor time; caught %d",
+		label, a.spawned, manorMin, a.totalSeconds / 60, #SEEDS, per, a.near, Config.Pacing.NearHitStuds, perNear,
+		table.concat(a.each, " / "), a.cancelled, 100 * hunted, a.caught))
+	truthy(perNear >= 2 and perNear <= 3, string.format("%s: one near-miss per 2-3 minutes in the manor (one per %.2f)", label, perNear))
+	truthy(per >= 1.5 and per <= 3, string.format("%s: hazards shown stay rare, one per 1.5-3 manor-minutes (one per %.2f)", label, per))
 	return per
 end
 
 do
-	local s = runs.normal
-	local rates = {}
+	local rates, all = {}, {}
 	for _, prof in { "normal", "fast", "slow" } do
-		rates[prof] = hazardRate(prof, runs[prof])
+		all[prof] = pooled(prof, true, runs[prof])
+		rates[prof] = hazardRate(prof, all[prof])
 	end
+	local s = all.normal
 	-- a player who is rarely seen: the reviewer's stand-in, the Nightwatcher's sight cut to 30 studs, IN MEMORY
 	local keep = Config.Watcher.SightRange
 	Config.Watcher.SightRange = 30
-	local ok, stealthy = pcall(session, "normal")
+	local ok, stealthy = pcall(pooled, "normal", true)
 	Config.Watcher.SightRange = keep
 	assert(ok, tostring(stealthy))
 	truthy(stealthy.caught * 2 < s.caught, string.format("CONTROL: the stand-in really is seen less (caught %d vs %d)", stealthy.caught, s.caught))
-	local huntedN = 1 - s.hz.huntFree / s.manorSeconds
-	local huntedS = 1 - stealthy.hz.huntFree / stealthy.manorSeconds
+	local huntedN = 1 - s.huntFree / s.manorSeconds
+	local huntedS = 1 - stealthy.huntFree / stealthy.manorSeconds
 	truthy(huntedS < huntedN - 0.2, string.format("CONTROL: ...and hunted for much less of its manor time (%.0f%% vs %.0f%%)", 100 * huntedS, 100 * huntedN))
 	local rs = hazardRate("stealthy", stealthy)
 	truthy(math.abs(rs - rates.normal) <= 0.15 * rates.normal, string.format(
 		"the rate does not depend on how often the Nightwatcher sees you: stealthy one per %.2f vs normal one per %.2f manor-min", rs, rates.normal))
-	eq(s.hz.hits, 0, "a player who reads the ring and steps out of it is never hit")
+	local reactHits = s.hits + all.fast.hits + all.slow.hits + stealthy.hits
+	eq(reactHits, 0, "a player who reads the ring and steps out of it is never hit (every profile, every seed)")
 
 	local ig = session("normal", false)
 	local im = ig.manorSeconds / 60

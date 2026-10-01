@@ -15,6 +15,14 @@
 --          same night has NO lightning (no flash light, no bolt, no grade boost) while the rain still falls, a
 --          knock flashes nothing, and the hazard's light and marker hold steady. Then the setting is switched
 --          off in the safehouse and the lightning comes back: the setting is read live, and it is what did it.
+-- Owner decision 2026-09-30 ("take the recommended option"): an in-game ⚡ toggle in the safehouse, next to ☕ Rest,
+-- for players who never open Roblox's settings (and in case the property's name is not what Roblox calls it), and
+-- the HUD's own one-off effects (the red flash and shake when CAUGHT, the purple flash when EVICTED, the FOV punch on
+-- EXTRACTED, the shake on SPOTTED) obey both:
+--   storm: CONTROL, the HUD flashes on CAUGHT. Then ⚡ Off in the safehouse: 30 s of the storm band without a strike,
+--          and CAUGHT / EVICTED flash nothing. ⚡ On again: the lightning is back;
+--   calm:  CAUGHT and EVICTED flash nothing, EXTRACTED punches no FOV; the toggle reads "⚡ Off", and pressing it
+--          (to turn flashes on) says why it cannot instead of doing nothing.
 
 local Kit = require("./check_nightwatchmanor_kit")
 
@@ -22,10 +30,13 @@ local CASE = ...
 if CASE ~= "storm" and CASE ~= "calm" then
 	error("usage: luau check_nightwatchmanor_flash.luau -a storm|calm (got " .. tostring(CASE) .. ")", 0)
 end
-local NIGHT = 43
+local NIGHT = 53 -- the Witching Hour: night 43 until it moved to 50 on 2026-10-01 (Config.Env.Bands)
 
 local ctx = Kit.boot({
 	name = "nwm-flash-" .. CASE,
+	-- this check finds its rooms through the public Manor.plan, so the server plans from the public seed too
+	-- (its ServerStorage switch; the game itself salts every night: check_nightwatchmanor_guard.luau)
+	publicLayouts = true,
 	profile = { night = NIGHT, stash = 0, best = NIGHT - 1, levels = {} },
 	beforeClient = function(c)
 		-- hazards often enough to watch their warning blink (in memory only)
@@ -115,6 +126,44 @@ ctx.onFrame = function()
 	end
 	if screen and not lastScreen then W.screenFlashes += 1 end
 	lastScreen = screen
+end
+
+-- The HUD's one-off effects, driven the way the server drives them (its Notice remote), counted by colour.
+local function hudFlashes(kind: string, rgb: { number }): number
+	local seen = 0
+	ctx.noticeRemote:FireClient(ctx.me, { kind = kind, text = "notice " .. kind })
+	for _ = 1, 6 do
+		ctx.frame(1 / 30)
+		for _, g in (pg and pg:GetChildren() or {}) do
+			local f = g.Name == "FxFlash" and g:FindFirstChildOfClass("Frame")
+			if f then
+				local c = f.BackgroundColor3
+				if math.abs(c.R * 255 - rgb[1]) < 2 and math.abs(c.G * 255 - rgb[2]) < 2 and math.abs(c.B * 255 - rgb[3]) < 2 then seen += 1 end
+			end
+		end
+	end
+	ctx.seconds(1, 1 / 30)
+	return seen
+end
+local CAUGHT_RED, EVICTED_PURPLE = { 150, 20, 20 }, { 90, 40, 130 }
+-- Standing still for Config.Rest.IdleSeconds in the safehouse dozes you off by the fire, and no lightning flashes
+-- while you rest (by design, check_nightwatchmanor_rest): a step before each lightning window keeps the player awake.
+local function fidget()
+	ctx.hum.MoveDirection = Vector3.new(1, 0, 0)
+	ctx.frames(2)
+	ctx.hum.MoveDirection = Vector3.zero
+	ctx.frames(1)
+end
+local function fovAfter(kind: string): number
+	local base = ctx.cam.FieldOfView or 70
+	ctx.noticeRemote:FireClient(ctx.me, { kind = kind, text = "notice " .. kind })
+	local most = 0
+	for _ = 1, 12 do
+		ctx.frame(1 / 30)
+		most = math.max(most, math.abs((ctx.cam.FieldOfView or 70) - base))
+	end
+	ctx.seconds(1, 1 / 30)
+	return most
 end
 
 -- The most rising edges inside any one second.
@@ -223,6 +272,44 @@ else
 	eq(W.markerOffFrames, 0, string.format("and its locked marker too (off on %d of %d locked frames)", W.markerOffFrames, W.lockedFrames))
 end
 
+--================================================================ the in-game toggle, and the HUD's own flashes
+
+local flashBtn = ctx.root and ctx.root:FindFirstChild("FlashButton")
+if CASE == "storm" then
+	ctx.seconds(Config.BeatSeconds + 0.6, 0.1)
+	eq((ctx.lastState() or {}).phase, "DAY", "back in the safehouse")
+	ctx.hrp.CFrame = CFrame.new(ctx.house().Floor.Position + Vector3.new(0, 4, -20))
+	truthy(hudFlashes("CAUGHT", CAUGHT_RED) > 0, "CONTROL: with flashes on, the HUD flashes red when you are caught")
+	truthy(fovAfter("EXTRACTED") > 0, "CONTROL: ...and punches the FOV when you get out")
+	fidget()
+	local s0 = #W.strikes
+	ctx.seconds(30, 1 / 30)
+	truthy(#W.strikes > s0, string.format("CONTROL: the storm band's lightning flashes the safehouse (%d strikes in 30 s)", #W.strikes - s0))
+	truthy(flashBtn ~= nil and flashBtn.Visible, "in the safehouse there is a ⚡ toggle")
+	eq(flashBtn and flashBtn.Text, "⚡ On", "...reading ⚡ On")
+	if flashBtn then flashBtn.Activated:Fire() end
+	ctx.frames(2)
+	eq(flashBtn and flashBtn.Text, "⚡ Off", "pressing it turns flashes off")
+	fidget()
+	local s1 = #W.strikes
+	ctx.seconds(30, 1 / 30)
+	eq(#W.strikes, s1, "⚡ Off: 30 s of the storm band without one lightning flash")
+	eq(hudFlashes("CAUGHT", CAUGHT_RED), 0, "⚡ Off: being caught flashes nothing (the HUD's red flash obeys it too)")
+	eq(hudFlashes("EVICTED", EVICTED_PURPLE), 0, "...nor being evicted")
+	eq(fovAfter("EXTRACTED"), 0, "...and getting out punches no FOV")
+	if flashBtn then flashBtn.Activated:Fire() end
+	ctx.frames(2)
+	eq(flashBtn and flashBtn.Text, "⚡ On", "pressing it again turns them back on")
+	fidget()
+	local s2 = #W.strikes
+	ctx.seconds(30, 1 / 30)
+	truthy(#W.strikes > s2, string.format("...and the lightning is back (%d strikes in 30 s)", #W.strikes - s2))
+else
+	eq(hudFlashes("CAUGHT", CAUGHT_RED), 0, "Reduced Motion on: being caught flashes nothing (the HUD's red flash obeys it)")
+	eq(hudFlashes("EVICTED", EVICTED_PURPLE), 0, "...nor being evicted")
+	eq(fovAfter("EXTRACTED"), 0, "...and getting out punches no FOV")
+end
+
 --================================================================ calm: switch the setting off, live
 
 if CASE == "calm" then
@@ -232,6 +319,16 @@ if CASE == "calm" then
 	local before = #W.strikes
 	ctx.seconds(30, 1 / 30)
 	eq(#W.strikes, before, "still calm in the safehouse: 30 s without a flash")
+	truthy(flashBtn ~= nil and flashBtn.Visible, "in the safehouse there is a ⚡ toggle")
+	eq(flashBtn and flashBtn.Text, "⚡ Off", "...reading ⚡ Off while Roblox's Reduced Motion is on")
+	local cardsBefore = #ctx.cards
+	if flashBtn then flashBtn.Activated:Fire() end
+	ctx.frames(3)
+	truthy(#ctx.cards > cardsBefore and string.find(ctx.cards[#ctx.cards] or "", "FLASHES", 1, true) ~= nil, string.format(
+		"pressing it to turn flashes on says why it cannot (%s), instead of doing nothing", tostring(ctx.cards[#ctx.cards])))
+	eq(flashBtn and flashBtn.Text, "⚡ Off", "...and flashes stay off")
+	ctx.seconds(5, 1 / 30)
+	fidget()
 	h.game:GetService("GuiService").ReducedMotionEnabled = false
 	ctx.seconds(30, 1 / 30)
 	truthy(#W.strikes > before, string.format("Reduced Motion switched off: the lightning comes back at once (%d strikes in 30 s): the setting is read live",

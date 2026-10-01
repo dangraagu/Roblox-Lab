@@ -54,14 +54,15 @@ end
 if CASE == "light" then
 	local ctx = Kit.boot({
 		name = "nwm-fairgate-light",
-		profile = { night = 20, stash = 0, best = 19, levels = {} },
+		profile = { night = 26, stash = 0, best = 25, levels = {} },
 		beforeClient = function(c)
 			c.Config.Env.Bands[5].colorCorrection.TintColor = { 255, 170, 170 }
 		end,
 	})
 	local eq, truthy = ctx.eq, ctx.truthy
 	local bands = ctx.Config.Env.Bands
-	eq(bands[5].id, "blood", "CONTROL: band 5 is the Blood Moon, where night 20 is")
+	eq(bands[5].id, "blood", "CONTROL: band 5 is the Blood Moon, where night 26 is")
+	eq(bands[5].from, 26, "CONTROL: ...and it begins on night 26 " .. "(the Blood Moon moved from night 20 to 26 and the Witching Hour from 40 to 50 on 2026-10-01: Config.Env.Bands)")
 	truthy(takeWarning(ctx, "not fair to the chase"), "the client warns that the config is not fair to the chase")
 	ctx.seconds(6, 0.1)
 	local L = ctx.h.Lighting

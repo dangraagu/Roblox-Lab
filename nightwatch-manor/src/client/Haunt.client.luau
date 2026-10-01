@@ -7,13 +7,15 @@
 --   * blends the bands in Config.Env (EnvBands): lighting, fog and grade inside the fairness envelope,
 --     the windows' sky, moon, mist and rain, lightning, dust, candle flicker, curtain sway, the portraits'
 --     eyes, and the safehouse's cosiness by hub level. Everything glides; nothing hard-cuts;
---   * runs the rare hazards (Hazards + Nightfall.hazardClock) at night only: one every 2-3 minutes of night,
+--   * runs the rare hazards (Hazards + Nightfall.hazardClock) at night only: one every 90-130 s of night (a near-miss
+--     every 2-3 minutes in the manor; a knock only from Nightfall.hitFrom on, after the lock and 3 s of warning),
 --     the clock frozen in the day and HELD (running, no launch) while the Nightwatcher sees you and for
 --     QuietAfterSpottedSeconds after; calls a hazard off and ends a knock the moment it sees you;
 --   * offers rest in the safehouse (the break room between rounds); never inside the manor. No lightning
 --     flashes while you rest;
---   * honours Roblox's own Reduced Motion setting (GuiService.ReducedMotionEnabled, read live): no lightning
---     flashes, no screen flash or shake on a hit or a card, and the hazard's warning light holds steady.
+--   * honours "fewer flashes" (Calm: Roblox's own Reduced Motion setting, read live, or the in-game ⚡ toggle in
+--     the safehouse, owner decision 2026-09-30): no lightning flashes, no screen flash or shake on a hit or a card,
+--     and the hazard's warning light holds steady. Hud.client's own effects obey the same switch.
 --
 -- Why it is client-side, and why that is safe:
 --   * it is cosmetic, or it only ever harms the local player (a knock), whose character physics the
@@ -40,7 +42,6 @@ local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local GuiService = game:GetService("GuiService")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local EnvBands = require(ReplicatedStorage:WaitForChild("EnvBands"))
@@ -50,6 +51,7 @@ local Nightfall = require(ReplicatedStorage:WaitForChild("Nightfall"))
 local HauntArt = require(ReplicatedStorage:WaitForChild("HauntArt"))
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 local FxClient = require(ReplicatedStorage:WaitForChild("FxClient"))
+local Calm = require(ReplicatedStorage:WaitForChild("Calm"))
 local Remotes = ReplicatedStorage:WaitForChild("ManorRemotes")
 local StateRemote = Remotes:WaitForChild("State") :: RemoteEvent
 local NoticeRemote = Remotes:WaitForChild("Notice") :: RemoteEvent
@@ -98,22 +100,12 @@ local function rand(): number
 	return rng:NextNumber()
 end
 
--- Roblox's own accessibility setting (Settings > Reduced Motion), read live. Review 4: lightning flashed every
--- 2.7-3.5 s late in a storm night and there was no way to opt out. With it on, nothing of ours flashes: no
--- lightning (the rain, the windows and the rest of the band stay), no screen flash or shake on a hit or a title
--- card, and a hazard's warning light and marker hold steady. pcall: an engine without the property reads as off.
-local function readCalm(): boolean
-	local ok, on = pcall(function()
-		return (GuiService :: any).ReducedMotionEnabled
-	end)
-	return ok and on == true
-end
-local calm = readCalm()
-pcall(function()
-	GuiService:GetPropertyChangedSignal("ReducedMotionEnabled"):Connect(function()
-		calm = readCalm()
-	end)
-end)
+-- "Fewer flashes" (Calm): Roblox's own accessibility setting (Settings > Reduced Motion), read live every frame, or
+-- the in-game ⚡ toggle in the safehouse (owner decision 2026-09-30). Review 4: lightning flashed every 2.7-3.5 s late
+-- in a storm night and there was no way to opt out. With it on, nothing of ours flashes: no lightning (the rain, the
+-- windows and the rest of the band stay), no screen flash or shake on a hit or a title card, and a hazard's warning
+-- light and marker hold steady. An engine without the property reads as off; the toggle still works.
+local calm = Calm.on()
 
 -- ── local world + lighting rig ────────────────────────────────────────────────
 local folder = Instance.new("Folder")
@@ -192,8 +184,14 @@ end
 -- day and night, with the phone drawers open and the HUD's banner and toasts forced on.
 local MARGIN, GAP = Responsive.MARGIN, 8
 local HUD_STATUS_W, HUD_HOUSE_W = 250, 300
-local ROW_W, ROW_H, REST_W = 440, 32, 118
+local ROW_W, ROW_H, REST_W, FLASH_W = 440, 32, 118, 64
 local MIN_TAP = 44
+-- Second review (2026-09-30): on a 568x320 phone the chip was 94 screen px wide beside the Rest button, for texts of
+-- up to 40 characters, so TextScaled shrank them to a few pixels. On a phone the chip now wraps onto two lines and is
+-- never narrower than CHIP_MIN_PX or shorter than CHIP_MIN_H_PX (screen px); the warning gets two lines too.
+-- robloxemu/check_nightwatchmanor_layout.luau estimates every label's font on nineteen viewports (11 px at least).
+local CHIP_MIN_PX, CHIP_MIN_H_PX, WARN_MIN_H_PX = 170, 40, 36
+local TEXT_MAX_PX = 16 -- the largest text, in SCREEN px (the constraint is written in design px, before the UIScale)
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "NightwatchHaunt"
@@ -217,10 +215,11 @@ local function corner(inst: Instance, r: number)
 	c.CornerRadius = UDim.new(0, r)
 	c.Parent = inst
 end
-local function maxText(inst: Instance, size: number)
+local function maxText(inst: Instance, size: number): UITextSizeConstraint
 	local c = Instance.new("UITextSizeConstraint")
 	c.MaxTextSize = size
 	c.Parent = inst
+	return c
 end
 
 local chip = Instance.new("TextLabel")
@@ -230,11 +229,12 @@ chip.BackgroundTransparency = 0.25
 chip.Font = Enum.Font.GothamBold
 chip.TextColor3 = Color3.fromRGB(226, 220, 236)
 chip.TextScaled = true
+chip.TextWrapped = true
 chip.Text = ""
 chip.Visible = false
 chip.Parent = root
 corner(chip, 10)
-maxText(chip, 16)
+local chipMax = maxText(chip, TEXT_MAX_PX)
 do
 	local pad = Instance.new("UIPadding")
 	pad.PaddingLeft = UDim.new(0, 8)
@@ -253,7 +253,21 @@ restBtn.AutoButtonColor = true
 restBtn.Visible = false
 restBtn.Parent = root
 corner(restBtn, 10)
-maxText(restBtn, 16)
+local restMax = maxText(restBtn, TEXT_MAX_PX)
+
+-- the ⚡ toggle (owner decision 2026-09-30): fewer flashes for this session, in the safehouse next to ☕ Rest
+local flashBtn = Instance.new("TextButton")
+flashBtn.Name = "FlashButton"
+flashBtn.BackgroundColor3 = Color3.fromRGB(58, 52, 92)
+flashBtn.Font = Enum.Font.GothamBlack
+flashBtn.TextColor3 = Color3.fromRGB(236, 232, 255)
+flashBtn.TextScaled = true
+flashBtn.Text = "⚡ On"
+flashBtn.AutoButtonColor = true
+flashBtn.Visible = false
+flashBtn.Parent = root
+corner(flashBtn, 10)
+local flashMax = maxText(flashBtn, TEXT_MAX_PX)
 
 local warning = Instance.new("TextLabel")
 warning.Name = "HazardWarning"
@@ -262,6 +276,7 @@ warning.BackgroundTransparency = 0.15
 warning.Font = Enum.Font.GothamBlack
 warning.TextColor3 = Color3.fromRGB(255, 226, 120)
 warning.TextScaled = true
+warning.TextWrapped = true
 warning.Text = ""
 warning.Visible = false
 warning.Parent = root
@@ -311,6 +326,14 @@ local function applyLayout()
 	local rowH = tapSize(ROW_H)
 	local btnW = tapSize(REST_W)
 	local restShown = restBtn.Visible
+	-- the text cap is meant on SCREEN: under a UIScale of 0.6 a 16 design-px cap draws 9.6 px text
+	chipMax.MaxTextSize = math.max(TEXT_MAX_PX, math.ceil(TEXT_MAX_PX / layout.scale))
+	restMax.MaxTextSize = chipMax.MaxTextSize
+	flashMax.MaxTextSize = chipMax.MaxTextSize
+	local flashW = tapSize(FLASH_W)
+	local flashShown = flashBtn.Visible
+	-- what the day's buttons take from the chip's line, gaps included (the ⚡ toggle sits left of ☕ Rest)
+	local buttonsW = (if restShown then btnW + GAP else 0) + (if flashShown then flashW + GAP else 0)
 
 	if not compact then
 		-- DESKTOP / TABLET: a row under the HUD's help line, between its two side panels
@@ -318,15 +341,12 @@ local function applyLayout()
 		local side = math.max(16 + Responsive.sideWidth(HUD_STATUS_W, vx, layout), 16 + Responsive.sideWidth(HUD_HOUSE_W, vx, layout)) + GAP
 		local rowW = math.min(ROW_W, rootW - 2 * side)
 		local left = (rootW - rowW) / 2
-		if restShown then
-			chip.Position = UDim2.fromOffset(left, rowTop)
-			chip.Size = UDim2.fromOffset(rowW - btnW - GAP, rowH)
-		else
-			chip.Position = UDim2.fromOffset(left, rowTop)
-			chip.Size = UDim2.fromOffset(rowW, rowH)
-		end
+		chip.Position = UDim2.fromOffset(left, rowTop)
+		chip.Size = UDim2.fromOffset(rowW - buttonsW, rowH)
 		restBtn.Position = UDim2.fromOffset(left + rowW - btnW, rowTop)
 		restBtn.Size = UDim2.fromOffset(btnW, rowH)
+		flashBtn.Position = UDim2.fromOffset(left + rowW - (if restShown then btnW + GAP else 0) - flashW, rowTop)
+		flashBtn.Size = UDim2.fromOffset(flashW, rowH)
 		-- the hazard warning under the HUD's "IT SEES YOU" banner (THE BELL RINGS uses the same banner and
 		-- can be up at the same time as a hazard)
 		local warnW = math.min(420, rootW - 2 * side)
@@ -346,37 +366,60 @@ local function applyLayout()
 	-- PHONE: the top of the screen belongs to the HUD (its toggles, help line, drawers, the "IT SEES YOU"
 	-- banner and its toasts), so everything of ours stacks up from the BOTTOM CENTRE, in the gap between
 	-- Roblox's own thumbstick (left 35%) and jump button (right 25%): chip row at the bottom, the warning
-	-- above it, the card above that. check_nightwatchmanor_layout.luau measures it on ten viewports.
+	-- above it, the card above that. check_nightwatchmanor_layout.luau measures it on nineteen viewports.
+	-- The chip keeps CHIP_MIN_PX: beside the button only if it keeps that width, on its own line under the button
+	-- otherwise; and on a phone held upright, where the gap itself is narrower than that, the whole stack moves up
+	-- above Roblox's touch controls and takes the width of the screen.
+	local chipMin = CHIP_MIN_PX / layout.scale
+	local chipH = math.max(rowH, math.ceil(CHIP_MIN_H_PX / layout.scale))
+	local warnH = math.max(30, math.ceil(WARN_MIN_H_PX / layout.scale))
 	local colL = rootW * 0.35 + GAP
 	local colR = rootW * 0.75 - GAP
 	local colW = math.max(80, colR - colL)
 	local y = rootH - MARGIN
-	if restShown and colW < btnW + 120 then
-		-- too narrow for both on one line: the chip at the bottom, the button on its own line above it
-		y -= rowH
-		chip.Position = UDim2.fromOffset(colL, y)
-		chip.Size = UDim2.fromOffset(colW, rowH)
-		y -= rowH + GAP
-		restBtn.Position = UDim2.fromOffset(colR - btnW, y)
-		restBtn.Size = UDim2.fromOffset(btnW, rowH)
-	else
-		y -= rowH
-		chip.Position = UDim2.fromOffset(colL, y)
-		chip.Size = UDim2.fromOffset(if restShown then colW - btnW - GAP else colW, rowH)
-		restBtn.Position = UDim2.fromOffset(colR - btnW, y)
-		restBtn.Size = UDim2.fromOffset(btnW, rowH)
+	if colW < chipMin then
+		colL, colR = MARGIN, rootW - MARGIN
+		colW = colR - colL
+		y = rootH - layout.controlPad / layout.scale - GAP
 	end
-	y -= GAP + 30
-	warning.Position = UDim2.fromOffset(colL, y)
-	warning.Size = UDim2.fromOffset(colW, 30)
+	local flashX = colR - (if restShown then btnW + GAP else 0) - flashW
+	if buttonsW > 0 and colW - buttonsW < chipMin then
+		-- too narrow for all on one line: the chip at the bottom, the buttons on their own line above it. The
+		-- buttons are the day's and the warning the night's (hazards fly only at night), so they share that line.
+		y -= chipH
+		chip.Position = UDim2.fromOffset(colL, y)
+		chip.Size = UDim2.fromOffset(colW, chipH)
+		local slotH = math.max(rowH, warnH)
+		y -= GAP + slotH
+		restBtn.Position = UDim2.fromOffset(colR - btnW, y + slotH - rowH)
+		restBtn.Size = UDim2.fromOffset(btnW, rowH)
+		flashBtn.Position = UDim2.fromOffset(flashX, y + slotH - rowH)
+		flashBtn.Size = UDim2.fromOffset(flashW, rowH)
+		warning.Position = UDim2.fromOffset(colL, y + slotH - warnH)
+		warning.Size = UDim2.fromOffset(colW, warnH)
+	else
+		y -= chipH
+		chip.Position = UDim2.fromOffset(colL, y)
+		chip.Size = UDim2.fromOffset(colW - buttonsW, chipH)
+		restBtn.Position = UDim2.fromOffset(colR - btnW, y + chipH - rowH)
+		restBtn.Size = UDim2.fromOffset(btnW, rowH)
+		flashBtn.Position = UDim2.fromOffset(flashX, y + chipH - rowH)
+		flashBtn.Size = UDim2.fromOffset(flashW, rowH)
+		y -= GAP + warnH
+		warning.Position = UDim2.fromOffset(colL, y)
+		warning.Size = UDim2.fromOffset(colW, warnH)
+	end
 	local subH = math.min(24, rootH * 0.045)
 	local cardH = math.min(46, rootH * 0.08)
+	-- the card sits highest, so it is inset from the column's edges: on a short phone it reaches the height of the
+	-- HUD's side drawers, which end at the column's edge
+	local cardW = math.max(80, colW - 2 * GAP)
 	y -= GAP + subH
 	cardSub.Position = UDim2.fromOffset(colL + colW / 2, y)
-	cardSub.Size = UDim2.fromOffset(colW, subH)
+	cardSub.Size = UDim2.fromOffset(cardW, subH)
 	y -= 4 + cardH / 2
 	card.Position = UDim2.fromOffset(colL + colW / 2, y)
-	card.Size = UDim2.fromOffset(colW, cardH)
+	card.Size = UDim2.fromOffset(cardW, cardH)
 end
 applyLayout()
 camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
@@ -449,6 +492,12 @@ local announcer = EnvBands.newAnnouncer()
 local scheduler = Hazards.newScheduler(Hz, rand)
 local rest = Rest.new()
 local sat = false
+-- When this script sat the character down. A Humanoid sat without a seat drops onto the floor first (real Studio,
+-- 2026-09-27, found in +1 Jump: root vy -3 .. -26, a bounce, settled in about 0.3 s, FloorMaterial Air throughout),
+-- so the first SIT_SETTLE_SECONDS after the sit are not a fall. Without this the drop's first frame ended the rest:
+-- the ☕ Rest button stood you straight back up (robloxemu/check_nightwatchmanor_sitdrop.luau).
+local satAt = -math.huge
+local SIT_SETTLE_SECONDS = 1.0
 local knockUntil: number? = nil
 local lastSpottedAt = -math.huge
 local lastPhase: string? = nil
@@ -516,9 +565,22 @@ restBtn.Activated:Connect(function()
 	local result = Rest.request(rest, RestCfg, { moving = false, grounded = grounded, threat = scheduler.active ~= nil })
 	if result == "resting" then
 		sat = true
+		satAt = now
 		restFocus.Enabled = true
 		if hum then pcall(function() (hum :: Humanoid).Sit = true end) end
 	end
+end)
+
+-- ⚡: fewer flashes for this session. Under Roblox's Reduced Motion setting flashes are off whatever the toggle
+-- says, so turning them ON is refused, and the player is told why (never a silent no-op).
+flashBtn.Activated:Connect(function()
+	if Calm.reducedMotion() then
+		showCard("⚡ FLASHES STAY OFF", "Roblox's Reduced Motion setting is on", false)
+		return
+	end
+	Calm.toggled = not Calm.toggled
+	calm = Calm.on()
+	flashBtn.Text = if calm then "⚡ Off" else "⚡ On"
 end)
 
 local function myZone(): Instance?
@@ -528,6 +590,7 @@ end
 -- ── the frame ─────────────────────────────────────────────────────────────────
 local function frame(dt: number)
 	now += dt
+	calm = Calm.on() -- read every frame: Roblox's setting switches live
 	if character and (hrp == nil or hrp.Parent == nil) then
 		hrp = (character :: Model):FindFirstChild("HumanoidRootPart") :: BasePart?
 		hum = (character :: Model):FindFirstChildOfClass("Humanoid")
@@ -641,7 +704,7 @@ local function frame(dt: number)
 		local best, bd = nil, math.huge
 		for _, w in art.houseWindows do
 			local d = (w.pos - focus).Magnitude
-			if d < bd then best, bd = w, d end
+			if w.shown and d < bd then best, bd = w, d end
 		end
 		rainWindow = best
 	end
@@ -670,9 +733,11 @@ local function frame(dt: number)
 
 	local fm = (humanoid :: any).FloorMaterial
 	local grounded = fm ~= nil and fm ~= Enum.Material.Air and knockUntil == nil
+	-- A seated Humanoid reports FloorMaterial = Air. A player we sat down is supported while not actually falling,
+	-- and for the whole of the sit's own drop (SIT_SETTLE_SECONDS); a sustained fall while seated still wakes them.
 	local supported = grounded
 	if sat and not grounded and knockUntil == nil then
-		supported = math.abs((root.AssemblyLinearVelocity or Vector3.zero).Y) < 2
+		supported = math.abs((root.AssemblyLinearVelocity or Vector3.zero).Y) < 2 or (now - satAt) < SIT_SETTLE_SECONDS
 	end
 	local md = (humanoid :: any).MoveDirection
 	local moving = (md ~= nil and md.Magnitude > 0.05) or (humanoid :: any).Jump == true
@@ -683,6 +748,7 @@ local function frame(dt: number)
 		local ev = Rest.update(rest, RestCfg, dt, { moving = moving, grounded = supported, threat = false })
 		if ev == "started" and rest.source == "manual" then
 			sat = true
+			satAt = now
 			restFocus.Enabled = true
 			pcall(function() humanoid.Sit = true end)
 		elseif ev == "woke" or ev == "dropped" or ev == "expired" then
@@ -725,8 +791,13 @@ local function frame(dt: number)
 		if plan then
 			local hp = Hazards.positionAt(plan, plan.t)
 			local floorY = root.Position.Y - 3
-			art:showHazard(plan, hp, now, Hazards.zone(plan, Hz.PlayerRadius), floorY, calm)
-			if Hazards.checkHit(plan, before or 0, plan.t, pos, Hz.PlayerRadius) then
+			-- the ring and the warning stay up while a hit can still land (Hazards.threatLive), not just to the arrival
+			local live = Hazards.threatLive(plan, Hz.PlayerRadius)
+			art:showHazard(plan, hp, now, Hazards.zone(plan, Hz.PlayerRadius), floorY, calm, live)
+			-- A knock only from the hazard's earliest-hit time on (Nightfall.hitFrom: after the lock, and at least 3 s into
+			-- the warning). Before that the ring follows you and cannot be stepped out of: walking up to a slow ghost and
+			-- stopping in its path knocked 8 of 8 players down 1.5-2 s early (check_nightwatchmanor_hazards 4c).
+			if Hazards.checkHit(plan, math.max(before or 0, Nightfall.hitFrom(plan, Hz.PlayerRadius)), plan.t, pos, Hz.PlayerRadius) then
 				plan.hit = true
 				local kv = Hazards.knockVelocity(Hz, plan, pos)
 				pcall(function() humanoid.PlatformStand = true end)
@@ -737,7 +808,7 @@ local function frame(dt: number)
 					FxClient.flash(Color3.fromRGB(230, 236, 240), 0.25, 0.3)
 				end
 			end
-			if plan.t <= plan.arriveAt and not plan.hit then
+			if live and not plan.hit then
 				local b = Hazards.bearing(vec(camPos), vec(lookV), hp)
 				local label = HauntArt.HAZARD_NAMES[plan.kind] or string.upper(plan.kind)
 				local text = if plan.locked then "⚠️ DODGE THE RING! " .. label .. " " .. ARROWS[b] else "⚠️ " .. label .. " INCOMING " .. ARROWS[b]
@@ -753,10 +824,14 @@ local function frame(dt: number)
 
 	-- the chip, the button, the cards
 	local wantRest = restOn and srv.loaded and phase == "DAY"
-	if restBtn.Visible ~= wantRest then
+	local wantFlash = srv.loaded and phase == "DAY"
+	if restBtn.Visible ~= wantRest or flashBtn.Visible ~= wantFlash then
 		restBtn.Visible = wantRest
+		flashBtn.Visible = wantFlash
 		applyLayout()
 	end
+	local flashText = if calm then "⚡ Off" else "⚡ On"
+	if flashBtn.Text ~= flashText then flashBtn.Text = flashText end
 	chip.Visible = srv.loaded
 	local chipText
 	if resting then
@@ -789,6 +864,9 @@ end
 
 RunService.RenderStepped:Connect(function(dt)
 	local ok, err = pcall(frame, dt)
+	-- Config.Budget.MaxLights, capped in code after everything else has had its say this frame (second review)
+	local okCap, errCap = pcall(art.capLights, art)
+	if not okCap then ok, err = false, errCap end
 	if not ok and not frameError then
 		frameError = true -- once: a broken frame must not flood the output
 		warn("[Nightwatch] haunt frame error: " .. tostring(err))

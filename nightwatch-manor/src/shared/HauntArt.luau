@@ -23,6 +23,15 @@
 -- UNPARENTED when far; at most MaxWindowsShown / MaxPortraitsShown are parented; one model per hazard kind;
 -- one dust host, one rain host, one flash light, one bolt. robloxemu/check_nightwatchmanor_budget.luau
 -- counts what is parented every frame.
+-- CAPPED IN CODE (second review, 2026-09-30: MaxParts / MaxLights / MaxHazards were read by nothing in src/):
+--   * parts: the hazard (its largest model + lane + ring) and the six hosts are RESERVED first, so a warning is
+--     never dropped for scenery; windows, portraits and the safehouse's props and windows get what is left of
+--     MaxParts, nearest (or lowest tier) first, and what does not fit is not parented;
+--   * lights: HauntArt:capLights (the client calls it after every frame) keeps at most MaxLights on, in the
+--     order hazard warning, fire, lightning;
+--   * hazards: one model at a time (showHazard hides any other); the scheduler flies one at a time, and
+--     Nightfall.validateHazards switches hazards off below MaxHazards = 1.
+--   robloxemu/check_nightwatchmanor_caps.luau cuts the budget to 50 parts and 1 light in memory and holds it.
 --
 -- Dependencies arrive as arguments (a bare `require("./X")` is invalid in Roblox):
 --   HauntArt.new(folder, rand, Config, Nightfall, EnvBands)
@@ -92,7 +101,42 @@ function HauntArt.new(folder: Instance, rand: () -> number, Config: any, Nightfa
 	self.housePieces = nil
 	self.lastSort = -math.huge
 	self.flashT = 0
+	-- the parts budget's reserve: the largest hazard model + its lane and ring, and the hosts (dust, rain, flash, a
+	-- 3-segment bolt). The hazard models are built up front (unparented) so the reserve is measured, not guessed.
+	local biggest = 0
+	for kind in HauntArt.hazardKinds() do
+		local item = self:hazardModel(kind)
+		if item then biggest = math.max(biggest, #item.parts) end
+	end
+	self.reserve = biggest + 2 + HauntArt.HOST_PARTS
 	return self
+end
+
+-- dust host, rain host, flash host, three bolt segments
+HauntArt.HOST_PARTS = 6
+
+-- Parts left for scenery (windows, portraits, the safehouse's props and windows) once the hazard and the hosts
+-- are reserved. Zero when the budget cannot even hold those: the warning still shows (fairness beats polish).
+function HauntArt:sceneryBudget(): number
+	return math.max(0, (self.cfg.Budget.MaxParts or math.huge) - self.reserve)
+end
+
+-- At most Budget.MaxLights of this module's lights on, in order: a hazard's warning light, the fire, lightning.
+-- Called by the client after every frame, once everything has had its say.
+function HauntArt:capLights()
+	local max = self.cfg.Budget.MaxLights or math.huge
+	local order = {}
+	for _, item in self.hazardModels do
+		if item.shown then table.insert(order, item.light) end
+	end
+	if self.fireLight then table.insert(order, self.fireLight) end
+	if self.flashLight then table.insert(order, self.flashLight) end
+	local on = 0
+	for _, l in order do
+		if l.Enabled then
+			if on < max then on += 1 else l.Enabled = false end
+		end
+	end
 end
 
 --============================================================================ windows
@@ -344,14 +388,23 @@ function HauntArt:updateManor(ctx: any)
 			if d <= Env.WindowRange then table.insert(near, { f = f, d = d }) end
 		end
 		table.sort(near, function(a, b) return a.d < b.d end)
+		-- windows, then portraits, nearest first, as long as they fit what the budget leaves for scenery
+		local budget = self:sceneryBudget()
+		local used = 0
 		local want = {}
+		local nearestShown = nil
 		for i = 1, math.min(#near, B.MaxWindowsShown) do
 			local f = near[i].f
-			want[f.key] = true
 			if self.windows[f.key] == nil then
 				local w = buildWindow(self, f.key, f.pos, f.n, "manor")
 				self.windows[f.key] = w
 				table.insert(self.windowList, w)
+			end
+			local n = #self.windows[f.key].parts
+			if used + n <= budget then
+				want[f.key] = true
+				used += n
+				nearestShown = nearestShown or self.windows[f.key]
 			end
 		end
 		for key, w in self.windows do
@@ -361,7 +414,7 @@ function HauntArt:updateManor(ctx: any)
 				w.shown = on
 			end
 		end
-		self.nearest = near[1] and self.windows[near[1].f.key] or nil
+		self.nearest = nearestShown
 
 		local pnear = {}
 		for _, s in self.portraitSpots do
@@ -372,9 +425,13 @@ function HauntArt:updateManor(ctx: any)
 		local pwant = {}
 		for i = 1, math.min(#pnear, B.MaxPortraitsShown) do
 			local s = pnear[i].s
-			pwant[s.key] = true
 			if self.portraits[s.key] == nil then
 				self.portraits[s.key] = buildPortrait(s)
+			end
+			local n = #self.portraits[s.key].parts
+			if used + n <= budget then
+				pwant[s.key] = true
+				used += n
 			end
 		end
 		for key, pt in self.portraits do
@@ -655,22 +712,30 @@ end
 function HauntArt:updateSafehouse(shown: boolean, ctx: any)
 	if self.housePieces == nil then return end
 	local tier = ctx.tier or 1
+	-- the props by tier, then the two windows, as long as they fit what the budget leaves for scenery
+	local budget = self:sceneryBudget()
+	local used = 0
+	local kindledShown = false
 	for _, pc in self.housePieces do
-		local on = shown and tier >= pc.tier
+		local on = shown and tier >= pc.tier and used + #pc.parts <= budget
+		if on then used += #pc.parts end
+		if on and pc.tier == 2 then kindledShown = true end
 		if on ~= pc.shown then
 			setParent(pc.parts, if on then self.folder else nil)
 			pc.shown = on
 		end
 	end
 	for _, w in self.houseWindows do
-		if shown ~= w.shown then
-			setParent(w.parts, if shown then self.folder else nil)
-			w.shown = shown
+		local on = shown and used + #w.parts <= budget
+		if on then used += #w.parts end
+		if on ~= w.shown then
+			setParent(w.parts, if on then self.folder else nil)
+			w.shown = on
 		end
-		if shown then paintWindow(w, ctx.look, ctx.flash or 0, ctx.now, (ctx.look.inside or {}).sway or 0) end
+		if on then paintWindow(w, ctx.look, ctx.flash or 0, ctx.now, (ctx.look.inside or {}).sway or 0) end
 	end
-	-- the fire: its light and embers exist only while it is lit (tier 2+), and grow with the haven
-	local lit = shown and tier >= 2 and self.fire ~= nil
+	-- the fire: its light and embers exist only while it is lit (tier 2+, and drawn), and grow with the haven
+	local lit = shown and tier >= 2 and self.fire ~= nil and kindledShown
 	if lit and self.fireLight == nil then
 		local l = Instance.new("PointLight")
 		l.Name = "FireLight"
@@ -790,10 +855,21 @@ end
 
 -- Draw the hazard for this frame. `zone` = Hazards.zone(plan, PlayerRadius): the ring IS the hit rule.
 -- `floorY` is the floor under the player (the ring lies on it). `calm` (Roblox's Reduced Motion setting): the
--- amber light and the marker stay steady instead of blinking.
-function HauntArt:showHazard(plan: any, pos: any, now: number, zone: any, floorY: number, calm: boolean?)
+-- amber light and the marker stay steady instead of blinking. `live` = Hazards.threatLive(plan, PlayerRadius): the
+-- ring and the lane stay drawn for as long as a hit can still land (second review: they went at the arrival time,
+-- and a player on the far side of the ring was hit a frame or two after it had gone).
+function HauntArt:showHazard(plan: any, pos: any, now: number, zone: any, floorY: number, calm: boolean?, live: boolean?)
 	local item = self:hazardModel(plan.kind)
 	if item == nil then return end
+	-- one hazard model at a time (Budget.MaxHazards; the scheduler flies one): any other one still up goes
+	for k, other in self.hazardModels do
+		if k ~= plan.kind and other.shown then
+			other.billboard.Enabled = false
+			other.light.Enabled = false
+			setParent(other.parts, nil)
+			other.shown = false
+		end
+	end
 	if not item.shown then
 		setParent(item.parts, self.folder)
 		item.shown = true
@@ -820,16 +896,20 @@ function HauntArt:showHazard(plan: any, pos: any, now: number, zone: any, floorY
 	local target = Vector3.new(plan.target.x, plan.target.y, plan.target.z)
 	local beyond = target + (if v.Magnitude > 0 then v.Unit * 12 else Vector3.zero)
 	local len = (beyond - p).Magnitude
-	if plan.t > plan.arriveAt or len < 1 then
+	if live ~= true then
 		l.lane.Parent = nil
 		l.ring.Parent = nil
 		return
 	end
 	local colour = if plan.locked then self.cfg.Env.Glow.ringLocked else self.cfg.Env.Glow.ringTrack
-	l.lane.Color = rgb(colour)
-	l.lane.Size = Vector3.new(0.3, 0.3, len)
-	l.lane.CFrame = CFrame.lookAt(p:Lerp(beyond, 0.5), beyond)
-	l.lane.Parent = self.folder
+	if len >= 1 then
+		l.lane.Color = rgb(colour)
+		l.lane.Size = Vector3.new(0.3, 0.3, len)
+		l.lane.CFrame = CFrame.lookAt(p:Lerp(beyond, 0.5), beyond)
+		l.lane.Parent = self.folder
+	else
+		l.lane.Parent = nil
+	end
 	local d = 2 * zone.radius
 	l.ring.Color = rgb(colour)
 	l.ring.Size = Vector3.new(0.2, d, d)

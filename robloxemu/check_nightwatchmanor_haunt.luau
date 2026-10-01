@@ -9,7 +9,8 @@
 --      that only within the flicker floor; the Nightwatcher, the exit, the relics are untouched. In Lighting
 --      (review 4: the docs said "only room lights", which was wrong) it writes only the bands' own keys on the
 --      Lighting service and on the server's FxAtmosphere / FxBloom / FxColorCorrection, never FxDoF or any
---      other key, and adds exactly one effect of its own (the rest focus);
+--      other key, and adds exactly one effect of its own (the rest focus). Second review (2026-09-30): every WRITE is
+--      checked, not only the end state (a flash-time write to FxDoF put back after the flash passed before);
 --   §3 windows stand only on OUTER walls, never on the exit's wall, and always in front of a solid,
 --      opaque server wall (closed picture-boxes: nothing is ever seen through them);
 --   §4 the portraits' eyes follow the PLAYER, and nothing the Nightwatcher does moves them;
@@ -24,8 +25,12 @@ local Kit = require("./check_nightwatchmanor_kit")
 
 local snapshotDay = nil
 local lightingSnap = nil
+local lightingWrites = {} -- "<name>.<key>" -> assignments made to the Lighting service or a child the server made
 local ctx = Kit.boot({
 	name = "nwm-haunt",
+	-- this check finds its rooms through the public Manor.plan, so the server plans from the public seed too
+	-- (its ServerStorage switch; the game itself salts every night: check_nightwatchmanor_guard.luau)
+	publicLayouts = true,
 	profile = { night = 1, stash = 40000, best = 0, levels = {} },
 	beforeClient = function(c)
 		-- a short night so dread can be driven to the top in a few seconds of simulated time (§7);
@@ -40,6 +45,22 @@ local ctx = Kit.boot({
 		lightingSnap = { props = table.clone(L.__emu.props), children = {} }
 		for _, ch in L:GetChildren() do
 			lightingSnap.children[ch] = { name = ch.Name, props = table.clone(ch.__emu.props) }
+		end
+		-- §2 (second review, 2026-09-30): every ASSIGNMENT from here on, whatever it is later put back to. Comparing
+		-- only the end state let a write to FxDoF at each lightning flash, restored when the flash ended, pass every
+		-- gate. The hook wraps the emulator's shared Instance metatable and records writes to the Lighting service
+		-- and to each child the server made; everything else passes straight through.
+		local watched = { [L] = "Lighting" }
+		for _, ch in L:GetChildren() do watched[ch] = ch.Name end
+		local mt = getmetatable(L)
+		local inner = mt.__newindex
+		mt.__newindex = function(self, key, value)
+			local name = watched[self]
+			if name ~= nil and type(key) == "string" and string.sub(key, 1, 2) ~= "__" then
+				local k = name .. "." .. key
+				lightingWrites[k] = (lightingWrites[k] or 0) + 1
+			end
+			return inner(self, key, value)
 		end
 	end,
 })
@@ -599,7 +620,7 @@ do
 		prevTint, prevDensity = t, atm.Density
 	end
 	local nights = 0
-	while (ctx.lastState() or {}).night < 40 and nights < 60 do
+	while (ctx.lastState() or {}).night < 50 and nights < 70 do -- the Witching Hour: night 40 until 2026-10-01, now 50
 		ctx.surviveNights(1, 0.1)
 		nights += 1
 		local s = ctx.lastState()
@@ -637,7 +658,7 @@ do
 			lastBandIdx = idx
 		end
 	end
-	eq((ctx.lastState() or {}).night, 40, string.format("%d survived nights later the player is on night 40", nights))
+	eq((ctx.lastState() or {}).night, 50, string.format("%d survived nights later the player is on night 50", nights))
 	eq(chipOk, chipTotal, string.format("the chip named the right band and night after every one of %d nights", chipTotal))
 	print("  cards shown: " .. table.concat(ctx.cards, " | "))
 	local want = { "QUIET NIGHT", "THE MIST RISES", "RAIN ON THE GLASS", "THUNDERSTORM", "THE BLOOD MOON RISES", "THE WITCHING HOUR" }
@@ -670,18 +691,21 @@ end
 --================================================================ portraits on a night that has a hall
 
 do
-	-- night 40's manor, walked by the same tour: every hall portrait seen gets eyes
+	-- night 50's manor (three Portrait Halls), walked by the same tour: every hall portrait seen gets eyes. The
+	-- Nightwatcher is blinded in memory for the tour (SightRange 0, CatchRadius 0), so every hall can be visited: the
+	-- old rule (only halls more than 60 studs from it) visited none of night 50's three, and "0 visited" passed.
 	ctx.pressDoor()
 	ctx.seconds(0.4, 0.1)
 	local m = ctx.manor()
 	local halls, eyes = 0, 0
+	local W = Config.Watcher
+	local sight, catch = W.SightRange, W.CatchRadius
+	W.SightRange, W.CatchRadius = 0, 0
 	if m then
-		local w = m:FindFirstChild("Nightwatcher")
 		for _, f in m:GetChildren() do
 			if string.match(tostring(f.Name), "_hall$") and ctx.manor() ~= nil then
 				local floor = f:FindFirstChild("Floor")
-				local wp = w and w:GetPivot().Position
-				if floor and (wp == nil or (Vector3.new(wp.X, 0, wp.Z) - Vector3.new(floor.Position.X, 0, floor.Position.Z)).Magnitude > 60) then
+				if floor then
 					halls += 1
 					ctx.hrp.CFrame = CFrame.new(floor.Position + Vector3.new(0, 4, 0))
 					ctx.frames(10)
@@ -692,8 +716,10 @@ do
 			end
 		end
 	end
-	print(string.format("  night 40: %d Portrait Halls visited, %d pupils seen in all", halls, eyes))
-	truthy(halls == 0 or eyes >= 2 * halls, "every Portrait Hall visited had watching eyes")
+	W.SightRange, W.CatchRadius = sight, catch
+	print(string.format("  night 50: %d Portrait Halls visited, %d pupils seen in all", halls, eyes))
+	truthy(halls >= 1, "CONTROL: the tour visited a Portrait Hall (" .. halls .. ")")
+	truthy(halls >= 1 and eyes >= 2 * halls, "every Portrait Hall visited had watching eyes")
 	ctx.pressExit()
 	ctx.seconds(Config.BeatSeconds + 0.6, 0.1)
 end
@@ -845,6 +871,22 @@ do
 		truthy(wrote >= 4, "CONTROL: the bands really did write Lighting (" .. wrote .. " keys)")
 		eq(#bad, 0, "the client wrote only the bands' own keys of Lighting and of FxAtmosphere / FxBloom / FxColorCorrection; nothing else (" .. table.concat(bad, ", ") .. ")")
 		eq(table.concat(added, ","), "NightwatchRestFocus", "and added exactly one effect of its own to Lighting, the rest focus")
+
+		-- every assignment during the session, not only what differs at its end (second review)
+		local writes, keys, outside = 0, 0, {}
+		for k, n in lightingWrites do
+			writes += n
+			keys += 1
+			local name, key = string.match(k, "^([^%.]+)%.(.+)$")
+			local allow = allowed[name or ""] or {}
+			if not allow[key or ""] then table.insert(outside, k .. " x" .. n) end
+		end
+		table.sort(outside)
+		print(string.format("  Lighting writes over the session: %d assignments to %d keys, %d of those keys outside the bands (%s)",
+			writes, keys, #outside, table.concat(outside, ", ")))
+		truthy(writes >= 100, "CONTROL: the write hook saw the bands being written, again and again (" .. writes .. " assignments)")
+		eq(#outside, 0, "no assignment during the whole session touched a Lighting key outside the bands, even one put back later ("
+			.. table.concat(outside, ", ") .. ")")
 	end
 end
 do

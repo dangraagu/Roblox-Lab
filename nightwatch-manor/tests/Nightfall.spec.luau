@@ -368,6 +368,17 @@ do
 		"a quiet window shorter than the hunt lets a hazard fire into a live chase: rejected")
 	hbreaks(function(c) c.Hazards.KnockLift = 6 end, "KnockLift", "a knock that lifts: rejected (there is nothing to fall off in a manor)")
 	hbreaks(function(c) c.Hazards.MinTelegraphSeconds = 2 end, "MinTelegraphSeconds", "less than 3 s of warning: rejected")
+	-- second review (2026-09-30): Budget.MaxHazards was read by nothing. The scheduler flies one hazard at a time,
+	-- which is the cap for any MaxHazards >= 1; a budget of none switches hazards off instead of being ignored.
+	hbreaks(function(c) c.Budget = { MaxHazards = 0 } end, "MaxHazards", "a budget with room for no hazard at all: hazards are switched off")
+	do
+		local c = {
+			Player = { WalkSpeed = 20 }, Watcher = { HuntSeconds = 7 }, Budget = { MaxHazards = 1 },
+			Hazards = { QuietAfterSpottedSeconds = 10, KnockSpeedFractionMax = 0.8, KnockLift = 0, MinTelegraphSeconds = 3,
+				Kinds = { bats = { knock = 14, telegraph = 3.2 } } },
+		}
+		truthy((Nightfall.validateHazards(c)), "CONTROL: a budget of one hazard at a time is accepted")
+	end
 	-- A hit lands when the hazard's REACH (hitRadius + PlayerRadius) touches you, a little before its centre
 	-- arrives. The headless check measured a crockery hit 2.87 s after its 3.0 s warning began. The rule is
 	-- therefore on the earliest possible HIT, not on the arrival: telegraph - reach / speed >= 3 s.
@@ -458,6 +469,31 @@ do
 	eq(Nightfall.chipText(bands, 2), "🌙 Quiet Night · Night 2 · 🌫️ in 1", "night 2: 1 away")
 	eq(Nightfall.chipText(bands, 3), "🌫️ The Mist · Night 3 · 🩸 in 17", "night 3")
 	eq(Nightfall.chipText(bands, 25), "🩸 Blood Moon · Night 25", "the last band has no next")
+end
+
+do
+	-- hitFrom (2026-09-30): a hazard may knock you down only from its earliest-hit time on, the arrival minus its
+	-- reach (hitRadius + PlayerRadius) over its speed. That is the time validateHazards keeps at least 3 s after the
+	-- warning begins. Without it a player who walked up to a slow ghost and stopped in its path while its ring still
+	-- followed them was knocked down 1.5-2 s before the lock (check_nightwatchmanor_hazards 4c).
+	local plan = { arriveAt = 3.6, commitAt = 1.9, hitRadius = 1.6, baseSpeed = 12, velocity = { x = 12, y = 0, z = 0 } }
+	approx(Nightfall.hitFrom(plan, 2), 3.6 - 3.6 / 12, "the earliest hit is the arrival minus the reach over the kind's speed")
+	-- re-aiming at a player who walked up to it slows the lane right down (it keeps its arrival time); that must not
+	-- move the earliest hit forward, which is exactly how the walk-in knock came 1.5-2 s early
+	local slowed = { arriveAt = 3.6, commitAt = 1.9, hitRadius = 1.6, baseSpeed = 12, velocity = { x = 0.8, y = 0, z = 0 } }
+	approx(Nightfall.hitFrom(slowed, 2), 3.6 - 3.6 / 12, "a lane slowed by re-aiming keeps the kind's earliest hit")
+	local nobase = { arriveAt = 3.2, commitAt = 1.8, hitRadius = 2.0, velocity = { x = 0, y = -9, z = 24.4 } }
+	approx(Nightfall.hitFrom(nobase, 2), 3.2 - 4 / math.sqrt(81 + 24.4 * 24.4), "with no baseSpeed, the lane's own speed, in 3D")
+	local still = { arriveAt = 3, commitAt = 1.5, hitRadius = 1, velocity = { x = 0, y = 0, z = 0 } }
+	truthy(Nightfall.hitFrom(still, 2) <= 3 and Nightfall.hitFrom(still, 2) >= 0, "a lane with no speed never divides by zero")
+	-- for the shipped kinds at their own speed: after the lock, and at least 3 s into the warning
+	local Cfg = require("../src/shared/Config")
+	for name, k in Cfg.Hazards.Kinds do
+		local p = { arriveAt = k.telegraph, commitAt = k.telegraph - k.commit, hitRadius = k.hitRadius, baseSpeed = k.speed, velocity = { x = 0, y = 0, z = 1 } }
+		local from = Nightfall.hitFrom(p, Cfg.Hazards.PlayerRadius)
+		truthy(from > p.commitAt, string.format("%s: its earliest hit (%.2f s) comes after its lane locks (%.2f s)", name, from, p.commitAt))
+		truthy(from >= 3 - 1e-9, string.format("%s: ...and at least 3 s into the warning (%.2f s)", name, from))
+	end
 end
 
 print(string.format("Nightfall: %d passed, %d failed", passed, failed))

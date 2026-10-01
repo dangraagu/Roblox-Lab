@@ -25,6 +25,9 @@ local Kit = require("./check_nightwatchmanor_kit")
 local maxed = {}
 local ctx = Kit.boot({
 	name = "nwm-budget",
+	-- this check finds its rooms through the public Manor.plan, so the server plans from the public seed too
+	-- (its ServerStorage switch; the game itself salts every night: check_nightwatchmanor_guard.luau)
+	publicLayouts = true,
 	profile = { night = 1, stash = 0, best = 0, levels = { lanterns = 5, wardstones = 5, beartraps = 5, relicvault = 5, alarmbell = 3, lockbox = 3, floodlights = 4 } },
 	beforeClient = function(c)
 		local Hz = c.Config.Hazards

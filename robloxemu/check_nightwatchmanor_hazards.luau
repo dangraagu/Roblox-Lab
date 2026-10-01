@@ -10,6 +10,13 @@
 --   3. the ring is the danger zone, drawn where the player stands; a player who stays in it is knocked
 --      DOWN (PlatformStand) sideways and slower than walking, never up; the knock wears off;
 --   4. stepping out of the ring as the warning says, in any of 8 directions, is never a hit;
+--      4c. (2026-09-30) a hazard can knock you down only from its earliest-hit time on (arrival minus its reach over
+--      its speed, the time Nightfall.validateHazards keeps 3 s after the warning): walking straight at a ghost while
+--      its ring still follows you and stopping in its path is not a hit before the lock, and the "DODGE THE RING"
+--      warning is always up first;
+--      4b. (second review, 2026-09-30) the ring and the warning stay up for as long as the hazard can still hit
+--      someone inside the ring: a player standing on the far side of the ring, along the lane, is reached a little
+--      AFTER the arrival time, and was knocked down 0.02-0.05 s after the ring and the banner had gone;
 --   5. the Nightwatcher seeing you calls the hazard off at once (no hit, warning gone) and ends a knock;
 --      no hazard launches for QuietAfterSpottedSeconds after it last saw you; but the clock RAN through the
 --      chase (review 4: it is held, not frozen), so the hazard that fell due during it comes as soon as the
@@ -23,10 +30,16 @@ local Kit = require("./check_nightwatchmanor_kit")
 
 local ctx = Kit.boot({
 	name = "nwm-hazards",
+	-- this check finds its rooms through the public Manor.plan, so the server plans from the public seed too
+	-- (its ServerStorage switch; the game itself salts every night: check_nightwatchmanor_guard.luau)
+	publicLayouts = true,
 	profile = { night = 12, stash = 0, best = 11, levels = {} },
 	beforeClient = function(c)
 		c.Config.Hazards.IntervalMin = 6
 		c.Config.Hazards.IntervalMax = 8
+		-- a long night (the server reads Config.Night at the start of each one), so every section fits inside it
+		c.Config.Night.DreadSeconds = 900
+		c.Config.Night.DreadPerNight = 0
 	end,
 })
 local h, eq, truthy = ctx.h, ctx.eq, ctx.truthy
@@ -200,6 +213,148 @@ do
 	eq(dodged, tried, "walking out of the ring in any direction is never a hit")
 end
 eq(maxAtOnce, 1, "never two hazards at once")
+
+--================================================================ 4c. no knock before the lock and the warning
+
+do
+	-- Walk straight at the incoming hazard (its ring, which tracks you until the lock, runs ahead of you), then stop
+	-- dead in its path while the warning still says INCOMING. A ring that follows you cannot be stepped out of, so a
+	-- ghost that meets you then passes through; if you are still standing in its LOCKED ring when its earliest-hit
+	-- time comes, it knocks you down as usual. Measured with the will-o'-wisp (IN MEMORY for this section: the
+	-- slowest and lowest kind, so you can reach it): before the rule 8 of 8 walkers were knocked down with the
+	-- warning still saying INCOMING, 1.5-2 s before the lock.
+	local keepKinds = band.hazards
+	band.hazards = { "wisp" }
+	local tried, early, hits, short = 0, 0, 0, 0
+	local minWarn = math.huge
+	for _ = 1, 8 do
+		ctx.hrp.CFrame = CFrame.new(spot)
+		local before = #launches
+		local t1 = ctx.time
+		while #launches == before and ctx.time - t1 < 30 do ctx.frame(1 / 30) end
+		local l = launches[#launches]
+		if l and #launches > before and cur == l then
+			tried += 1
+			local function hazardPos(): Vector3?
+				local sum, n = Vector3.zero, 0
+				for _, d in ctx.folder:GetChildren() do
+					if string.match(tostring(d.Name), "^Hazard_") then sum += d.Position; n += 1 end
+				end
+				return if n > 0 then sum / n else nil
+			end
+			local stopped = false
+			local dodgeSeen = false
+			while cur == l and not l.hit and ctx.time - l.at < 12 do
+				local hp = hazardPos()
+				local to = hp and Vector3.new(hp.X - ctx.hrp.Position.X, 0, hp.Z - ctx.hrp.Position.Z)
+				if not stopped and to and to.Magnitude > 1.5 and not string.find(ctx.warning.Text, "DODGE", 1, true) then
+					local v = to.Unit * Config.Player.WalkSpeed
+					ctx.hum.MoveDirection = to.Unit
+					ctx.hrp.CFrame = ctx.hrp.CFrame + v / 30
+					ctx.hrp.AssemblyLinearVelocity = v
+				else
+					stopped = true
+					ctx.hum.MoveDirection = Vector3.zero
+					ctx.hrp.AssemblyLinearVelocity = Vector3.zero
+				end
+				-- the warning as it stood BEFORE this frame's scripts: a hit this frame hides it
+				if ctx.warning.Visible and string.find(ctx.warning.Text, "DODGE", 1, true) then dodgeSeen = true end
+				ctx.frame(1 / 30)
+			end
+			if l.hit then
+				hits += 1
+				if not dodgeSeen then early += 1 end
+				local warned = l.hitAt - (l.warnedAt or l.at)
+				minWarn = math.min(minWarn, warned)
+				if warned < Hz.MinTelegraphSeconds - 0.05 then short += 1 end
+			end
+			ctx.hum.MoveDirection = Vector3.zero
+			ctx.hrp.AssemblyLinearVelocity = Vector3.zero
+			while cur == l and ctx.time - l.at < 12 do ctx.frame(1 / 30) end
+			ctx.seconds(Hz.KnockSeconds + 0.3)
+		end
+	end
+	band.hazards = keepKinds
+	print(string.format("  walking at %d will-o'-wisps before their lock, then stopping in their path: %d knocked down (standing in the locked ring), %d of them before the DODGE warning, %d before %d s of warning (the soonest after %.2f s)",
+		tried, hits, early, short, Hz.MinTelegraphSeconds, minWarn))
+	truthy(tried >= 6, "hazards kept coming for the walk-in test (" .. tried .. ")")
+	truthy(hits >= tried - 1, string.format("CONTROL: a walker who stays put in the locked ring is still knocked down (%d of %d)", hits, tried))
+	eq(early, 0, "no hazard knocks you down before its lane has locked and the warning said DODGE THE RING")
+	eq(short, 0, string.format("...nor before %d s of warning (the soonest after %.2f s)", Hz.MinTelegraphSeconds, minWarn))
+end
+
+--================================================================ 4b. the ring stays until it can no longer hit
+
+do
+	-- For each hazard: wait for the lock, then stand still at the spot inside the ring that the hazard reaches LAST.
+	-- The lane is aimed at a point up to AimJitter from the ring's centre and comes in at a slant, so from the far
+	-- side of the ring it can reach you a little after its arrival time. The spot is found from what is drawn: the
+	-- lane line runs from the hazard to 12 studs past its aim point, the ring is centred on the zone. Every frame,
+	-- note whether the ring is drawn and the warning up; at the frame a knock starts, the ring must have been drawn
+	-- on that frame and the warning up on the one before it.
+	local hits, ringGone, bannerGone, tried, lateSpots = 0, 0, 0, 0, 0
+	local worstLate = 0
+	local TRIES = 12
+	local function latestSpot(r: Instance, lane: Instance, y: number): (Vector3, number)
+		local dir = lane.CFrame.LookVector
+		local target = lane.Position + dir * (lane.Size.Z / 2) - dir * 12
+		local R = r.Size.Y / 2
+		local best, bestS = nil, -math.huge
+		for deg = 0, 355, 5 do
+			local a = math.rad(deg)
+			local p = Vector3.new(r.Position.X + math.cos(a) * R * 0.97, y, r.Position.Z + math.sin(a) * R * 0.97)
+			local q = p - target
+			local b = dir:Dot(q)
+			local disc = b * b - (q:Dot(q) - R * R)
+			if disc >= 0 then
+				local s = b - math.sqrt(disc) -- studs past the aim point at which the hazard first reaches p
+				if s > bestS then best, bestS = p, s end
+			end
+		end
+		return best or Vector3.new(r.Position.X, y, r.Position.Z), bestS
+	end
+	for _ = 1, TRIES do
+		ctx.hrp.CFrame = CFrame.new(spot)
+		local before = #launches
+		local t1 = ctx.time
+		while #launches == before and ctx.time - t1 < 30 do ctx.frame(1 / 30) end
+		local l = launches[#launches]
+		if l and #launches > before then
+			while cur == l and not string.find(ctx.warning.Text, "DODGE", 1, true) and ctx.time - l.at < 6 do ctx.frame(1 / 30) end
+			local r, lane = ring(), ctx.folder:FindFirstChild("HazardLane")
+			if r and lane and cur == l then
+				tried += 1
+				local p, s = latestSpot(r, lane, ctx.hrp.Position.Y)
+				if s > 0 then lateSpots += 1 end
+				ctx.hrp.CFrame = CFrame.new(p)
+				local ringWas, warnWas = true, true
+				local lastRingAt = ctx.time
+				while cur == l and not l.hit and ctx.time - l.at < 12 do
+					ctx.frame(1 / 30)
+					local ringNow = ring() ~= nil
+					if l.hit then
+						hits += 1
+						if not ringNow then ringGone += 1 end
+						if not warnWas then bannerGone += 1 end
+						worstLate = math.max(worstLate, ctx.time - lastRingAt)
+					end
+					if ringNow then lastRingAt = ctx.time end
+					ringWas, warnWas = ringNow, ctx.warning.Visible
+				end
+				local _ = ringWas
+			end
+			ctx.hrp.AssemblyLinearVelocity = Vector3.zero
+			ctx.seconds(Hz.KnockSeconds + 0.3)
+		end
+	end
+	print(string.format("  far side of the ring: %d of %d hazards hit (%d reach that spot after their arrival time); the ring already gone on %d of those hit frames, the warning on %d (the latest hit came %.3f s after the ring was last drawn)",
+		hits, tried, lateSpots, ringGone, bannerGone, worstLate))
+	truthy(tried >= TRIES - 2, "hazards kept coming for the far-side test (" .. tried .. ")")
+	truthy(lateSpots >= 3, string.format("CONTROL: several of them could reach a spot inside the ring after their arrival time (%d of %d)", lateSpots, tried))
+	truthy(hits >= tried - 1, string.format("CONTROL: a player standing still inside the ring, on its far side, is hit (%d of %d)", hits, tried))
+	eq(ringGone, 0, "no one is hit after the ring that promises where a hit can land has gone")
+	eq(bannerGone, 0, "...nor after the warning banner has gone")
+end
 
 --================================================================ 5. the Nightwatcher sees you: called off
 

@@ -20,6 +20,9 @@
 -- they structurally cannot see: whether any of it is parented, prompted and reachable.
 
 local Harness = require("./emu/harness")
+-- The Servants' Exit opens only to a player standing at it after the shortest possible walk (Crossing.luau, 2026-10-01);
+-- the kit's extract does exactly that. Required as a library only: it boots nothing on its own.
+local Kit = require("./check_nightwatchmanor_kit")
 
 local h = Harness.new({
 	bundle = require("./build/nightwatch-manor"),
@@ -49,6 +52,9 @@ store:SetAsync("u_" .. ME, {
 })
 
 assert(h:tryRun("server/Main.server"))
+-- This check was written for the PUBLIC manor of night 1 (its pedestals and the patrol's timing), so it flips the
+-- server's ServerStorage switch for public layouts. The game itself salts every manor (check_nightwatchmanor_guard).
+h.game:GetService("ServerStorage"):FindFirstChild("NightwatchSecrets"):SetAttribute("PublicLayouts", true)
 h:advance(1)
 
 --=========================================== there is a floor before there is a player
@@ -177,9 +183,11 @@ if house then
 end
 print(string.format("  Safehouse: %d BaseParts, %d PointLights", baseParts, lights))
 -- 6 shell parts (floor, ceiling, 3 walls, 2 south segments = 7) + spawn pad + manor door + 7
--- upgrade pads + 2 hub lamps. Spelled out rather than folded into one constant so that if the
--- number moves, the thing that moved is identifiable.
-eq(baseParts, 7 + 1 + 1 + UPGRADES + 2, "the safehouse is exactly the shell, the pads and the lamps")
+-- upgrade pads + 2 hub lamps + the highscore board and its gold trim (2026-10-01). Spelled out rather than folded
+-- into one constant so that if the number moves, the thing that moved is identifiable.
+eq(baseParts, 7 + 1 + 1 + UPGRADES + 2 + 2, "the safehouse is exactly the shell, the pads, the lamps and the board")
+truthy(house and house:FindFirstChild("NightsBoard") ~= nil and house:FindFirstChild("NightsBoardTrim") ~= nil,
+	"...and the two board parts are the board and its trim (check_nightwatchmanor_board)")
 truthy(lights >= 3, "the safehouse is lit (the Horror preset sets ClockTime 0.2 — no sun to fall back on)")
 
 local pads = {}
@@ -288,6 +296,7 @@ truthy(doorPrompt ~= nil, "and the door carries a prompt")
 eq(zone:FindFirstChild("Manor"), nil, "no manor exists while the player is in the safehouse")
 
 doorPrompt.Triggered:Fire(me)
+local nightBegan = h.scheduler:now()
 h:advance(0.5)
 
 local manor = zone:FindFirstChild("Manor")
@@ -427,7 +436,9 @@ end
 local stashBeforeEscape = lastState().stash
 local worthCarried = lastState().carriedWorth
 
-exitDoor:FindFirstChildOfClass("ProximityPrompt").Triggered:Fire(me)
+-- Stand at the door once the night has run the shortest walk there, and press (Kit.extract). `since` is the moment
+-- the door was pressed; everything above ran inside this night, so the wait is usually already over.
+truthy(Kit.extract(h, me, ME, nightBegan, function(s) h:advance(s) end), "escaping: the exit door was standing to press")
 h:advance(0.3)
 
 do

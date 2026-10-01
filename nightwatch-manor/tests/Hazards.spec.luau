@@ -908,5 +908,64 @@ do
 	truthy(gap >= cfg.IntervalMin - 1e-6, string.format("and two hazards are never closer than IntervalMin (%.1f s)", gap))
 end
 
+--================================================================ threatLive: the ring stays while a hit can land
+
+-- Second review (2026-09-30): the client took the ring and the warning down at the arrival time, but checkHit runs
+-- until `duration`, and the lane is aimed at a point up to AimJitter from the ring's centre, so a player on the far
+-- side of the ring was reached a little AFTER the arrival time, with nothing on screen. Hazards.threatLive says
+-- whether the rest of the flight can still hit ANYONE standing in the zone; the client keeps the ring and the
+-- warning up exactly that long. Probe: 600 lanes, a player at a random spot inside each ring, frames of 1/60 s.
+do
+	local rand = lcg(20260930)
+	local PR = cfg.PlayerRadius
+	local names = { "bird", "balloon", "jet" }
+	local hits, late, uncovered = 0, 0, 0
+	for i = 1, 600 do
+		local plan = Hazards.plan(cfg, names[1 + i % 3], { x = 0, y = 3, z = 0 }, rand() * math.pi * 2, rand, math.rad(-30 + 60 * rand()))
+		plan.locked = true
+		local z = Hazards.zone(plan, PR)
+		local a, rr = rand() * math.pi * 2, math.sqrt(rand()) * z.radius * 0.999
+		local p = { x = z.x + math.cos(a) * rr, y = z.y, z = z.z + math.sin(a) * rr }
+		local t = 0
+		while t < plan.duration do
+			local t1 = math.min(t + 1 / 60, plan.duration)
+			local live = Hazards.threatLive(plan, PR, t)
+			if Hazards.checkHit(plan, t, t1, p, PR) then
+				hits += 1
+				if t1 > plan.arriveAt then late += 1 end
+				if not live then uncovered += 1 end
+				break
+			end
+			t = t1
+		end
+	end
+	print(string.format("  threatLive probe: %d of 600 players standing in the ring hit, %d of them after the arrival time; %d on a frame threatLive called over",
+		hits, late, uncovered))
+	-- (not all 600: on a steep lane a player at the very edge of the ring is never within reach in 3D, and the ring
+	-- is the conservative promise: out of it is always safe, in it is danger)
+	truthy(hits >= 570, string.format("CONTROL: nearly every player standing still inside the ring is hit (%d of 600)", hits))
+	truthy(late > 0, "CONTROL: some of them after the arrival time (the lane is aimed up to AimJitter off the ring's centre)")
+	eq(uncovered, 0, "threatLive is true at the start of every frame on which a hit can still land")
+end
+do
+	local PR = cfg.PlayerRadius
+	local plan = Hazards.plan(cfg, "jet", { x = 0, y = 3, z = 0 }, 0, lcg(7), 0)
+	plan.locked = true
+	truthy(Hazards.threatLive(plan, PR, 0), "live at launch")
+	truthy(Hazards.threatLive(plan, PR, plan.arriveAt), "live at the arrival time")
+	eq(Hazards.threatLive(plan, PR, plan.duration + 0.01), false, "not live past its duration")
+	-- once the rest of the flight is farther than zone radius + hitRadius + PlayerRadius from the ring's centre, no
+	-- one in the ring can be reached: with pass = 2 s at 110 studs/s it is long gone before the flight ends
+	local z = Hazards.zone(plan, PR)
+	local reach = z.radius + plan.hitRadius + PR
+	local speed = math.sqrt(plan.velocity.x ^ 2 + plan.velocity.y ^ 2 + plan.velocity.z ^ 2)
+	local gone = plan.arriveAt + (reach + 1 + (cfg.AimJitter or 0)) / speed
+	truthy(gone < plan.duration, "CONTROL: the jet is out of reach before its flight ends")
+	eq(Hazards.threatLive(plan, PR, gone), false, string.format("not live once it is out of reach of the whole ring (%.2f s after arrival)", gone - plan.arriveAt))
+	plan.t = 0
+	plan.hit = true
+	eq(Hazards.threatLive(plan, PR), false, "a hazard hits once: not live after its hit")
+end
+
 print(string.format("Hazards: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Hazards tests failed")

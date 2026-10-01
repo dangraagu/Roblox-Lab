@@ -2,8 +2,11 @@
 
 Context so a fresh session can continue. Sibling of `labyrint-spill/`, `plus1-jump/`,
 `grow-a-crystal/`, `anomaly-observatory/`; same stack (one CONFIG table, deterministic `Rng`,
-DataStore with `canSave` + a soft session lock, pure logic tested from the luau CLI). Built from
-Game-Radar concept #2 (2026-09-09) — the seasonal one, aimed at the Sept–Oct horror window.
+DataStore with `canSave`, a session lock and an owner token on every write, pure logic tested from the luau CLI).
+Built from Game-Radar concept #2 (2026-09-09) — the seasonal one, aimed at the Sept–Oct horror window.
+Measured against `docs/complete-game-standard.md` on 2026-10-01 (pass 2): what is still missing is the night shift's
+(§5) and the genre gaps in "NOT built" below. The store text is `README.md`, the clip list `MARKETING.md`, the
+needs-Studio and thumbnail lists `EYECANDY.md` §11-12.
 
 ## What it is
 
@@ -29,23 +32,36 @@ Built to the owner's brief of 2026-09-17, client-side only (`src/client/Haunt.cl
 * portraits whose eyes follow you;
 * flicker that deepens with dread;
 * a safehouse that grows cosier with the hub level;
-* ghostly hazards, one every 2-3 minutes in the manor;
-* ☕ Rest in the safehouse only.
+* ghostly hazards, a near-miss every 2-3 minutes in the manor;
+* the Blood Moon (night 26) as the brag moment and the Witching Hour (night 50) as the long-term goal (moved from 20
+  and 40 on 2026-10-01: on the salted manors the game now plays, night 20 came at a median of 25.8 minutes);
+* ☕ Rest and the ⚡ "fewer flashes" toggle in the safehouse only.
 
-`Main.server.luau` and `Hud.client.luau` are unchanged. Invariants a future edit must keep:
+`Main.server.luau` and `Hud.client.luau` were untouched by the eye candy; the second review (2026-09-30, below and
+`EYECANDY.md` §15) changed `saveProfile` (ownership) and made the HUD's own flashes obey "fewer flashes". Invariants a
+future edit must keep:
 - **Fair to the chase** (`Nightfall.fairness`, `validateHazards`, `hazardClock`):
   - the lighting stays inside a hard envelope around `Fx.Presets.Horror`;
   - no cosmetic glow within 60 of the Nightwatcher's light colours (`Config.Env.WatcherSignature`) **or of the
     Servants' Exit's green** (`Config.Env.ExitSignature`, review 4). Both are pinned to what the server builds by
     `check_nightwatchmanor_haunt`, and both are scanned on every frame of the worst case by `check_nightwatchmanor_budget`;
-  - hazards: one every 120-180 s of NIGHT. The clock is frozen outside the night, and **held** (running, no launch)
-    while the Nightwatcher sees you and for 10 s after. Review 4: a clock frozen for chases made hazards come more often
-    the better a player hid. A hazard is called off the moment it sees you. A knock is slower than walking and never
-    lifts;
+  - hazards: one every 90-130 s of NIGHT, aimed 0.5 s ahead of a walker: a near-miss (a pass within 8 studs of a
+    player who reads the ring) every 2.7-2.9 minutes in the manor for every player profile, one hazard shown per
+    1.9-2.1 (`Pacing.spec`, pooled over three seeds; second review; re-measured 2026-10-01 after the bands moved). The clock is frozen outside the night, and
+    **held** (running, no launch) while the Nightwatcher sees you and for 10 s after. Review 4: a clock frozen for
+    chases made hazards come more often the better a player hid (DECIDED 2026-09-30: stays held). A hazard is called
+    off the moment it sees you. A knock is slower than walking and never lifts;
+  - a hazard can knock you down only from `Nightfall.hitFrom` on (arrival minus reach over the KIND's speed: after the
+    lane locks, at least 3 s into the warning). Without it, walking up to a slow ghost and stopping in its path was a
+    knock 1.5-2 s early, with the warning still saying INCOMING. The ring and the warning stay up while
+    `Hazards.threatLive` (a hit can still land), not just to the arrival time;
   - an invalid config switches off only its own part (`check_nightwatchmanor_fairgate`).
 - **Nothing strobes** (review 4): lightning never closer than 4 s of real time (`Nightfall.boltGap`), warnings blink at
-  most twice a second, no lightning while resting, and Roblox's Reduced Motion setting (`GuiService.ReducedMotionEnabled`,
-  read live through pcall; the name is unverified in Studio) turns every flash of ours off (`check_nightwatchmanor_flash`).
+  most twice a second, no lightning while resting. **"Fewer flashes"** (`src/shared/Calm.luau`, one switch shared by
+  both client scripts): Roblox's Reduced Motion setting (`GuiService.ReducedMotionEnabled`, read every frame through
+  pcall; the name is unverified in Studio) OR the in-game ⚡ toggle in the safehouse (owner decision 2026-09-30) turns
+  every flash of ours off, and the HUD's own CAUGHT / EVICTED flashes, shakes and the EXTRACTED FOV punch too
+  (`check_nightwatchmanor_flash`). Turning flashes ON under Reduced Motion is refused with a card saying why.
 - **Rest never inside the night.** `Nightfall.validateRest` rejects `Rest.Phases.NIGHT`. The night is a timed round.
 - **The server never hears of any of it**: no remote, no attribute. What the client DOES write outside its own folder
   (review 4 corrected an earlier "only room lights" claim):
@@ -56,17 +72,151 @@ Built to the owner's brief of 2026-09-17, client-side only (`src/client/Haunt.cl
     bands, or extend that check on purpose;
   - its own character's `Humanoid.Sit`, `PlatformStand` and `AssemblyLinearVelocity` (rest, a knock). These are normal
     character state and may replicate. The server reads none of them.
-- **Budgets** (`Config.Budget`) are asserted every frame of a built worst case by `check_nightwatchmanor_budget`.
+  `check_nightwatchmanor_haunt` checks EVERY assignment to Lighting and the server's effects during a session (a write
+  hook on the emulator's Instance metatable), not only the end state (second review: a flash-time FxDoF write put back
+  afterwards passed before).
+- **A seated Humanoid drops.** Sat down without a seat, it falls for about 0.3 s (vy -3 .. -26, FloorMaterial Air;
+  measured in real Studio in +1 Jump). The first `SIT_SETTLE_SECONDS` (1.0) after a sit count as supported, or the
+  drop's first frame ends the rest (`check_nightwatchmanor_sitdrop` replays the Studio trace).
+- **Budgets** (`Config.Budget`) are asserted every frame of a built worst case by `check_nightwatchmanor_budget`, and
+  CAPPED in code (second review): `HauntArt` reserves the largest hazard + lane + ring + six hosts, gives scenery what
+  is left of `MaxParts` (nearest / lowest tier first), `HauntArt:capLights` holds `MaxLights` (hazard, fire, lightning
+  in that order), and `Nightfall.validateHazards` switches hazards off below `MaxHazards` 1.
+  `check_nightwatchmanor_caps` cuts the budget to 50 parts and 1 light in memory and holds it every frame.
+- **The HUD row is readable on phones**: the chip wraps on two lines, is never under 170 screen px wide or 40 tall
+  (stacked under the day's buttons when narrower; on an upright phone the stack moves above the touch controls), and
+  text caps are meant in SCREEN px (`TEXT_MAX_PX / layout.scale`). `check_nightwatchmanor_layout` estimates every
+  label's font on 19 viewports (at least 11 px). On a tablet or desktop the chip sits between the HUD's panels and is
+  narrower (the tablet's day chip is 157 x 44 px, its text estimated at 12.0 px, the smallest of all 57 labels).
 
-Gates for it: 6 more specs (EnvBands, Rest, Hazards, Nightfall, EnvConfig, Pacing) and 8 more headless checks
-(`robloxemu/check_nightwatchmanor_*.luau`, `flash` added by review 4). Counts, the mutation sweeps, review 4's findings
-and fixes (§14), the Studio list and the thumbnail shot list are in `EYECANDY.md`.
+Gates for it: 6 more specs (EnvBands, Rest, Hazards, Nightfall, EnvConfig, Pacing) and 11 more headless checks
+(`robloxemu/check_nightwatchmanor_*.luau`; `flash` added by review 4; `sitdrop`, `save` and `caps` by the second review).
+Counts, the mutation sweeps, review 4's findings and fixes (§14), the second review's (§15), the Studio list and the
+thumbnail shot list are in `EYECANDY.md`.
 
-## State — two adversarial reviews closed. NOT published, NOT committed, NEVER run in Roblox.
+## Secret manors, the exit's guard and the board (2026-10-01, pass 2) — invariants
+
+- **Every manor is planned from a server-only salt** (`src/shared/Salt.luau`: two 32-bit LCG streams mixed, 2^64
+  states; `Manor.plan` takes it like an `Rng`). `Main.server` draws the halves (`drawHalf`: its own `Random` XOR a fresh
+  one) **once per player, per night, per session** (`manorSalt`), and keeps them only in
+  `ServerStorage.NightwatchSecrets` as the attribute `u_<userId>` = `"night:a:b"` (removed when the player leaves). No
+  attribute outside ServerStorage, no remote payload and no Instance name carries them (`check_nightwatchmanor_guard`
+  scans every Instance and every payload). A retry after being caught is the same manor; after
+  `Config.Manor.ShiftAfterFails` (3) failures in a row there the manor **shifts** (new halves, same night, and the
+  NIGHT notice says "The manor has shifted"). Without the shift, 2 of 31 model players were stuck on one night for the
+  rest of their 200 minutes (one of them 418 attempts at night 36; Pacing.spec). The night alone still sets the size, relics, patrol and dread, so the best night is comparable.
+- **`PublicLayouts`** (an attribute on that folder, set only from Studio's command bar, Server context) plans every night
+  from the old public seed. The thumbnail recipe (EYECANDY.md §12), `MARKETING.md` and every layout-bound check use it
+  (`tests/check_walk`, `check_nightwatch`, `budget`, `caps`, `flash`, `haunt`, `hazards`). A client cannot set it.
+- **The Servants' Exit's guard** (`src/shared/Crossing.luau`, `Config.Guard`): ESCAPE works only for a character whose
+  root the server measures **in the exit room** and within the prompt's reach (12 + 4 slack) of the door, once the
+  night has run the shortest possible walk there at WalkSpeed, less 0.5 s. Every prompt in this game has
+  `RequiresLineOfSight = false`, so without the room test ESCAPE worked through a wall from the next room (public
+  night 9 saved 77 studs; a salted night-45 manor was 0.13 s from the start). Shortest crossings: 2.9-8.9 s on public
+  nights 1-150, 1.85-10.44 s on 3000 salted manors. `minDistance` is a LOWER bound on every legal walk (Crossing.spec).
+  A refusal says why in the toast's TEXT (the HUD drops a DENIED notice's detail).
+- **The NIGHTS SURVIVED board** (`src/shared/Board.luau`, `Config.Board`, `buildBoard` in `Main.server`): an
+  OrderedDataStore `NightwatchManorBoard_v1`, key `u_<userId>`, value `night * 2e9 + (2e9 - reachedAtUnix)`
+  (`prof.bestAt`, stamped at the extraction that first set the best), written through `UpdateAsync` +
+  `Board.keepHigher` only when the night improves (`prof.boardBest` is saved, so a rejoin writes nothing), only while
+  `canSave`, at most once per 30 s (the autosave catches up). Public top 10: `GetSortedAsync(false, 10)` at most once a
+  minute while anybody is on, checked every second so a fresh server shows it at once. Friends: `GetFriendsAsync` only
+  when a player asks, capped at 200, cached 5 minutes (a failure 1 minute), scores read through a token bucket (40, then
+  1/s) and Roblox's own budget, a friend on this server read from memory. Names: a player on the server first, then a
+  cache, then one `GetNameFromUserIdAsync`; never stored. The board is a part on the east wall of every safehouse, 29
+  studs from the spawn pad, drawn by the SERVER (a SurfaceGui; no remote), prompt on F so it never fights a pad's E.
+- **Pacing** (`tests/NightModel.luau` `session{ salted = seed }`): the brag moment and the long-term goal are asserted
+  on 31 first-time players on salted manors (a salt per night, the shift after 3 failures), as the game ships.
+
+## State — NOT published, NEVER run in Roblox. Current counts: `EYECANDY.md` §8.
+
+**2026-10-01 (pass 2 of 2).** The unfinished board / salt / crossing-guard work that pass 1 had archived
+(`scratchpad/nwm_p1_1001/wip_board_archive/`) was put back byte-for-byte and finished: its five red suites were the
+layout-bound checks meeting salted manors (now on `PublicLayouts`), the exit presses meeting the guard (now
+`Kit.extract`: stand at the door after the shortest walk), the board's two new safehouse parts, and a kit bug (a
+`CatchRadius` of -1 is a 1-stud catch). Then, test-first: a salt per player, night and session instead of per attempt,
+the manor shift after 3 failures, the exit-room test in the guard, the board read on a fresh server within a second,
+names from players on the server first, the guard's refusal text, the Blood Moon at night 26 and the Witching Hour at
+50 (salted pacing), and a hall tour that had passed with 0 halls visited. New gates: `Board.spec`, `Crossing.spec`,
+`Salt.spec`, `robloxemu/check_nightwatchmanor_board.luau`, `robloxemu/check_nightwatchmanor_guard.luau`. New docs:
+`MARKETING.md` (8 clips), the store text (README), EYECANDY.md §11-12 and §16. Every gate, run twice on the final tree
+with identical counts: **40 of 40 green** (specs 1428 passed; headless 114 in `tests/` + 755 in `robloxemu/` + the HUD
+PASS; 0 failed). Mutation sweep: 29 mutants, 24 of 25 killed (the survivor was an equivalent copy of a check,
+deleted), 4 controls survived all 40 gate runs (EYECANDY.md §16). 57 Luau files compile through
+`loadstring`, 0 errors; luau-analyze was not available.
+
+How to run every gate (luau CLI on the PATH as `luau`; every suite is judged by its exit code; run the set twice, the
+client checks use unseeded randomness):
+
+```
+cd nightwatch-manor
+for f in tests/*.spec.luau; do luau "$f"; done                    # 16 specs, from the game directory
+cd tests && py -3 ../../robloxemu/wrap.py --game .. --out build/nightwatch-manor.luau
+luau check_walk.luau
+luau check_world.luau
+for c in control fraction walkspeed saturated; do luau check_boot_guard.luau -a $c; done
+cd ../../robloxemu && py -3 wrap.py --game ../nightwatch-manor --out build/nightwatch-manor.luau
+for f in check_nightwatch*.luau; do                                # every one except the kit (a library)
+  case $f in
+    check_nightwatchmanor_kit.luau) ;;
+    check_nightwatchmanor_fairgate.luau) for c in light hazards rest; do luau $f -a $c; done ;;
+    check_nightwatchmanor_flash.luau) for c in storm calm; do luau $f -a $c; done ;;
+    *) luau $f ;;
+  esac
+done
+```
+
+The same as a script: `scratchpad/nwm_p2_1001/gates.sh` (one line per suite, exit code first). Rebuild the bundle before
+every headless run: a stale `build/nightwatch-manor.luau` tests yesterday's game.
+
+Traps this game has shown (keep them in mind before trusting a green run):
+- CRLF and LF files side by side (each file is consistent): edit byte-preserving.
+- The emulator's `Random` is unseeded: per-run counts of the client checks move, and every manor is a new salt. Run twice.
+- One Harness per CLI process: a check with many cases uses one server and many players (or `-a <case>`).
+- The pacing model is chaotic: assert on populations or pooled seeds, never one trajectory. Draw a salted session's
+  halves from a Salt stream: two consecutive outputs of one 32-bit LCG are one number, and that correlated subset
+  stuck 4 of 31 sessions within their first three nights (independent halves: the first stuck session, before the
+  shift existed, came at night 36).
+- `Watcher.caught` squares the radius: `CatchRadius = -1` is a 1-stud catch. Blind it in memory with 0 and 0.
+- The foyer's start point (centre + 12 Z) lies on the patrol line to the foyer's +Z doorway.
+- A check that says "every X visited had Y" needs a CONTROL that X was visited (the night-50 hall tour visited 0).
+- Prompts need no line of sight here: anything a prompt guards must check the room on the server.
+- Layout-bound checks set `PublicLayouts`; a check that wants the game as it ships must not.
+
+
+History, newest first.
+
+**2026-10-01 (pass 1 of 2, run again: the 2026-09-30 run was cut off before it reported).** Its pass 1 had left the
+fixes below in the tree. A later pass of that run had started a highscore board, a server-only salt for every manor and
+a "crossing guard" on the exit (new `Board`, `Salt` and `Crossing` with specs; changes to `Main.server`, `Config` and five
+checks) and stopped half-way: its own specs green (Board 70, Crossing 33, Salt 31), five suites red (`check_walk` 46 / 14,
+`check_nightwatch` and `haunt` stopped on errors, `budget` 31 / 1, `save` 66 / 1). **That work is not in the tree.** It
+is archived byte-for-byte in `scratchpad/nwm_p1_1001/wip_board_archive/` (the 14 files, `MANIFEST.sha256`,
+`wip_vs_pass1.patch`, its red gate log), and the seven files it had changed were put back to the 2026-09-30 bytes (58 of
+58 files sha256-identical to that state). Resume the board from there: it is `docs/complete-game-standard.md` §3 (NOT
+built item 9) and §1 (the salt). Then the eight second-review findings were reproduced again on the committed code
+(HEAD) and checked on this tree (`EYECANDY.md` §15, "Re-verified"), one more owner decision recorded (the near-miss is
+the metric, §13), mutation round 4 re-run (30 mutants: 28 killed, 2 controls survived all 35 gate runs, every mutant
+proven in the bundle, workers sha256-restored), and every gate run twice: **35 of 35 green**, the counts below.
+
+**2026-09-30 (second review, pass 1 of 2).** All eight findings of the second reviewer reproduced and fixed
+test-first (`EYECANDY.md` §15), plus one found while fixing (a knock before the lane locked); the owner's open
+decisions taken ("take the recommended option for all", `EYECANDY.md` §13). Every gate, run twice: **35 of 35 green**
+(specs 1280 passed; headless 114 in `tests/` + 598 in `robloxemu/` + the HUD PASS; 0 failed). Mutation round 4: 30
+mutants, 28 killed as expected, 2 controls survived all 35 gate runs. How to run every gate:
+`scratchpad/nwm_p1_0930/gates.sh` (every `tests/*.spec.luau` from the game dir; `tests/check_walk`, `check_world`,
+`check_boot_guard -a control|fraction|walkspeed|saturated` from `tests/` after `wrap.py --game .. --out
+build/nightwatch-manor.luau`; every `robloxemu/check_nightwatch*.luau` except the kit, `fairgate -a light|hazards|rest`,
+`flash -a storm|calm`). Traps this game has shown: CRLF and LF files side by side (edit byte-preserving); the
+emulator's `Random` is unseeded (per-run counts move, so run twice); one Harness per CLI process (a check with many
+cases uses one server and many players); and the Pacing model is chaotic (assert on populations or pooled seeds,
+never one trajectory). The history below is the first two reviews'.
 
 `REVIEW.md` (first pass) returned BLOCK with six findings; `REVIEW-2.md` (second pass) verified the
 fixes independently, closed 8, and returned BLOCK again with six still-open and six broken BY the
 fixes. `REVIEW-3.md` is the resolution of REVIEW-2 and is the file to read next.
+
+The state on 2026-09-10, after REVIEW-3 (history; today's counts are `EYECANDY.md` §8):
 
 - **7 spec files, all green**: Chase 32, Manor 86, Night 64, Rng 32, Upgrades 99, Watcher 87,
   responsive 70 = **470 assertions, 0 failed**. Chase.spec dropped from 91 to 32 because sixty
@@ -100,12 +250,13 @@ fixes. `REVIEW-3.md` is the resolution of REVIEW-2 and is the file to read next.
   faster from 0.8 seconds into night one, so being seen was being caught, every night, forever —
   and the whole suite was green through it, because the player's speed was in no config and no
   test. A pursuer's speed only means anything relative to what it is pursuing.
-- **Determinism**: `Manor.seedFor(cfg, night) = WorldSeed * SeedPrimeA + night * SeedPrimeB`, and
-  `Manor.plan(rng, cfg, night)` takes NOTHING else — no userId, and (since the review) no hub
-  level. Night N is the same manor for everyone, which is the only thing that makes a best-night
-  number comparable. Both products stay far under 2^53, so no low bits are lost to float rounding
-  (the trap that pinned a sibling game to one outcome forever). The trade-off is real and
-  accepted: layouts are memorisable across sessions.
+- **Determinism, and the secret**: `Manor.plan(rng, cfg, night)` takes NOTHING else — no userId, and (since the
+  review) no hub level — so the night alone sets a manor's size, relics, patrol and dread clock, which is what makes a
+  best-night number comparable. Since 2026-10-01 the `rng` the server passes is `Salt.new(a, b)`, two server-only
+  halves per player, night and session (above, "Secret manors"); before that it was the public
+  `Rng.new(Manor.seedFor(cfg, night))` (`WorldSeed * SeedPrimeA + night * SeedPrimeB`, both products far under 2^53),
+  which any client could compute, so every night's layout was memorisable and computable ahead of time. The public
+  seed still exists for `PublicLayouts`, the specs and the layout-bound checks.
 - **Growth, then circuits, then repair**: `Manor.plan` attaches each new room to a random room that
   still has a free orthogonal neighbour, weighting the choice toward cells that already touch built
   rooms so it fills out instead of growing tendrils. It then opens a doorway through every OTHER
@@ -117,7 +268,8 @@ fixes. `REVIEW-3.md` is the resolution of REVIEW-2 and is the file to read next.
   ADDED and rooms only ever attached, so connectivity is still guaranteed by construction.
 - **`roomCount` is a TARGET, not an exact count** — the repair pass may exceed it by up to
   `MaxRepairRooms`. Manor.spec asserts the band rather than equality.
-- **The exit is always the deepest room**, so every night is a full crossing.
+- **The exit is always the deepest room**, so every night is a full crossing, and ESCAPE works only from inside the
+  exit room after the shortest possible walk there (`Crossing.luau`).
 - **Walls block sight with no raycast**: `Watcher.spots` is the cone AND a `roomOk` flag the server
   computes from `Manor.roomAtWorld` + `Manor.linked`. Roblox's `Raycast` is not modelled by the
   headless emulator, and this design does not need it.
@@ -140,7 +292,12 @@ fixes. `REVIEW-3.md` is the resolution of REVIEW-2 and is the file to read next.
 - **DataStore**: `GetDataStore` is pcall'd (it RAISES in an unpublished place and would otherwise
   kill the whole script at load). Soft session lock — always load the real data, save only while we
   hold the lock, and never clobber a lock somebody else took. Ownership is a stable per-session
-  GUID, never a timestamp we also rewrite.
+  GUID, never a timestamp we also rewrite. **A write lands only while the record still carries our
+  token** (second review, 2026-09-30): it used to land whenever the stored lock was nil or older than
+  45 s, whoever's it was, so a server whose saves stalled could roll back a player who had moved on to
+  another server. A refused write turns `canSave` off for good and tells the player once (READONLY);
+  a release keeps the token with `at = 0` (claimable at once, and still ours for a second release).
+  `robloxemu/check_nightwatchmanor_save.luau`.
 - **The hunter uses the same doors you do.** `Manor.chaseStep` steers a pursuer at the DOORWAY
   until it is standing in the gap and only then at the room beyond. Aiming straight at the next
   room's centre — which is what shipped — is wall-safe only FROM a centre, and one hunt tick in,
@@ -178,23 +335,33 @@ fixes. `REVIEW-3.md` is the resolution of REVIEW-2 and is the file to read next.
   `sanitize`, `EFFECT_KEYS`.
 - `src/shared/Night.luau` — `dreadSeconds`, `payout`, `startState`, `resolve` (raises on an
   outcome nobody defined).
+- `src/shared/Salt.luau` — the server-only 64-bit generator every manor is planned from (`new`, `next`, `below`, `step`).
+- `src/shared/Crossing.luau` — the Servants' Exit's guard: `minDistance` (a lower bound on every legal walk),
+  `minSeconds`, `verdictFor` (reach, room, time).
+- `src/shared/Board.luau` — the NIGHTS SURVIVED board's pure rules: `encode` / `decode`, `keepHigher`, `rank`,
+  `publicView`, `friendsView`, `rowText`, a TTL cache and a token bucket.
 - `src/server/Main.server.luau` — world building, the night loop, persistence.
 - `src/client/Hud.client.luau` — display only.
 - `src/client/Haunt.client.luau`, `src/shared/HauntArt.luau`, `src/shared/Nightfall.luau` — the eye candy
   (`EYECANDY.md`). `src/shared/EnvBands.luau` / `Rest.luau` are the plus1-jump template verbatim;
-  `src/shared/Hazards.luau` is the template plus four additions (elevation clamp, `ctx.paused`, `ctx.held`,
-  `cancel`).
+  `src/shared/Hazards.luau` is the template plus five additions (elevation clamp, `ctx.paused`, `ctx.held`,
+  `cancel`, `threatLive`). `src/shared/Calm.luau` is "fewer flashes" (Reduced Motion or the ⚡ toggle), read by
+  both client scripts.
 - `tests/NightModel.luau` — Chase.spec's simulation + a session model, used by `tests/Pacing.spec.luau`.
 - `tests/*.spec.luau` — the pure specs, run straight from the luau CLI.
 - `tests/check_walk.luau` — WALKS the built world. The most important gate in the repo.
 - `tests/check_world.luau` — the join-time guards and the exit door, in the built world.
 - `tests/check_boot_guard.luau` — four hostile-Config boots; takes a case argument.
+- `tests/Board.spec`, `tests/Crossing.spec`, `tests/Salt.spec` — the board's, the guard's and the salt's pure rules.
+- `MARKETING.md` — the clip list (8 clips for `tools/film_game.py`, with staging and honest captions).
 - `tests/_mutate.py` — the mutation driver that produced the table below.
 - `../robloxemu/check_nightwatch.luau`, `../robloxemu/check_nightwatch_hud.luau` — NOT ours to
   edit; the three files above exist in `tests/` for exactly that reason. Whoever owns `robloxemu/`
   may want to fold them in. `../robloxemu/check_nightwatchmanor_*.luau` ARE this game's (the eye-candy
   checks; `_kit` is their shared setup; `_fairgate` takes `-a light|hazards|rest`; `_flash` takes
-  `-a storm|calm`).
+  `-a storm|calm`; `_sitdrop`, `_save` and `_caps` came with the second review; `_board` (the NIGHTS SURVIVED board,
+  public and friends, through the real server) and `_guard` (the salt never leaves ServerStorage, a retry is the same
+  manor until it shifts, the exit's guard) with pass 2).
 
 ## Mutation results (all restored afterwards)
 
@@ -248,8 +415,8 @@ Watcher.spec and the boot audit assert against it.
 
 1. **No environmental puzzles.** The brief says "solve light environmental puzzles". There are
    none. A night is walk, take, avoid, leave.
-2. **One currency, not two.** The brief and the paste-ready description say "relics **& cash**".
-   Cash is folded into relic worth. Either add the second currency or edit the description.
+2. ~~**One currency, not two.**~~ DECIDED 2026-09-30 (owner: take recommended): one currency, relics.
+   The description no longer says "& cash", and was rewritten against the code (README.md).
 3. **No audio at all.** No ambience, no footsteps, no stinger. In a horror game that is the single
    biggest gap, and it needs assets we do not have.
 4. **No real jumpscare.** Being caught is a red screen flash, a camera shake and a toast. There is
@@ -270,8 +437,9 @@ Watcher.spec and the boot audit assert against it.
    as that player's `RespawnLocation`; the character is placed on the frame it appears and the
    CFrame is re-asserted next frame; and the zone is now built BEFORE the blocking `claimProfile`
    call rather than after it, with buying and entering a night gated on `prof.loaded`.
-9. **No leaderboard surface.** Best night is written to an OrderedDataStore but nothing reads it
-   back — there is no in-world board and no HUD ranking.
+9. ~~**No leaderboard surface.**~~ CLOSED 2026-10-01 (pass 2): the NIGHTS SURVIVED board stands in every safehouse,
+   public and friends, ranked on the server's best night, earliest first on a tie (`docs/complete-game-standard.md`
+   §3; "Secret manors, the exit's guard and the board", above). There is still no HUD ranking.
 10. **No codes, no gamepasses, no badges, no cosmetics.**
 11. **Never run in Roblox.** Everything above was verified by the luau CLI and the headless
     emulator. `tests/check_walk.luau` now closes part of that gap by hand: it models wall and
@@ -286,6 +454,9 @@ Watcher.spec and the boot audit assert against it.
 
 ## Next
 
+0. The night shift (standard §5): the Studio list (`EYECANDY.md` §11, item 16 for pass 2), the thumbnails (§12, seven
+   shots), the clips (`MARKETING.md`; `tools/film_game.py` needs Nightwatch scenarios first), creating the experience,
+   the maturity questionnaire, publishing, then marketing. An independent review of pass 2 has not happened.
 1. Open it in Studio and walk a night. Navigability and prompt reach are no longer the open
    questions — `tests/check_walk.luau` walks three nights against the real geometry and reaches
    every relic and the exit — so the things to look at are the ones no gate here can see: whether
@@ -297,8 +468,7 @@ Watcher.spec and the boot audit assert against it.
    `SpeedPerDread` / `HuntSpeedMul` freely if it is not — the ceiling makes that safe, and the
    boot audit will warn in F9 the moment a retune pins the watcher AT the ceiling.
 2. Audio pass (item 3) — the largest genre gap, and it needs marketplace assets.
-4. Decide the currency question (item 2) and fix the description to match the code before the
-   experience is created.
+4. ~~Decide the currency question~~ DECIDED 2026-09-30: one currency; the description matches the code.
 5. Then the usual ship path: create the experience, git-ignored `publish_nightwatch.bat` with the
    Open Cloud key inline, maturity questionnaire (the Preview page is ground truth — a green check
    means "answered", not "No"), then Public. `git push` does NOT update the live game.

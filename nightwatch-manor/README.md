@@ -9,12 +9,12 @@ horror-tycoon is a sub-genre two independent scouts flagged as having almost no 
 
 Sibling of `labyrint-spill/`, `plus1-jump/`, `grow-a-crystal/` and `anomaly-observatory/`, and it
 uses the same stack: one CONFIG table, deterministic `Rng`, pure logic in `src/shared` tested from
-the luau CLI with no Roblox present, and a DataStore layer with a soft session lock.
+the luau CLI with no Roblox present, and a DataStore layer with a session lock and an owner token on every write.
 
 ## The loop
 
 **NIGHT.** The server builds a manor from a modular room kit — foyer, portrait hall, library,
-dining room, nursery, cellar, chapel, servants' exit — laid out on a grid by a seeded generator.
+dining room, nursery, cellar, chapel, servants' exit — laid out on a grid by a generator seeded in secret (below).
 Relics stand on pedestals, weighted toward the deep rooms. One Nightwatcher walks a patrol route
 through the doorways. It sees you inside a view cone, and only in its own room or one directly
 linked to it, so walls actually hide you. Once it has seen you it comes at you along the shortest
@@ -39,24 +39,41 @@ you are on and never the safehouse. The tycoon progress is the thing you are all
 
 **The nights escalate.** The manor changes as you survive. The trigger is the night you are on, nudged by dread,
 never time. There are six looks: 🌙 Quiet Night → 🌫️ The Mist Rises → 🌧️ Rain on the Glass → ⛈️ Thunderstorm →
-🩸 Blood Moon (night 20, about 37 minutes of play) → 🕯️ The Witching Hour (night 40). What changes:
+🩸 Blood Moon (night 26: the brag moment, a median of 33.5 minutes of play for the pacing model's first-time players)
+→ 🕯️ The Witching Hour (night 50, the long-term goal: a median of 66.8 minutes). What changes:
 * windows on the outer walls with moon, stars, mist, rain and lightning;
 * portraits whose eyes follow you;
 * candles that flicker harder as the night wears on;
 * a safehouse that grows cosier as you upgrade it.
 
-Ghostly hazards (bats, a will-o'-wisp, flying crockery, a wraith) come through the walls, one every 2-3 minutes in the
-manor, each with 3 s of warning and a ring to step out of, and never while the Nightwatcher is hunting you. The
-safehouse is the break room: ☕ Rest by the fire, where no lightning flashes. Lightning never comes closer than 4 s
-apart, and Roblox's Reduced Motion setting turns every flash off. All of it is client-side and cosmetic; the server,
+Ghostly hazards (bats, a will-o'-wisp, flying crockery, a wraith) come through the walls, one every 90-130 s of night
+(a close call about every 2-3 minutes in the manor), each with 3 s of warning and a ring to step out of, never while
+the Nightwatcher is hunting you, and never knocking you down before its lane has locked. The safehouse is the break
+room: ☕ Rest by the fire, where no lightning flashes. Lightning never comes closer than 4 s apart, and Roblox's
+Reduced Motion setting or the ⚡ toggle next to ☕ Rest turns every flash off, the HUD's own included. All of it is client-side and cosmetic; the server,
 the chase and the economy are unchanged and measured to stay that way. **`EYECANDY.md`** has the bands, the measured hazard rarity, what rest means here, the budgets, the
 gates, the Studio list and the thumbnail shot list.
 
-**Determinism.** A manor is generated from `WorldSeed` and the night number and nothing else —
-not your userId, and not your hub level. Night 7 is the same manor for every player in the world,
-which is what makes "I got out of night 14" a claim worth comparing.
+**Every manor is a secret, and night N is the same size for everybody.** `Manor.plan(rng, cfg, night)` takes nothing
+else, and the night alone sets the manor's size, its relics, its patrol and its dread clock, so night 14 is equally
+hard for every player and "I got out of night 14" is a claim worth comparing. The LAYOUT comes from two 32-bit halves
+the server draws for you (`Salt.luau`, 2^64 states), kept in `ServerStorage` and never sent to a client: one pair per
+player, per night, per session. A retry after being caught is the manor you were caught in, so you learn it; after
+three failures in a row there it shifts ("The manor has shifted: these are new halls"), so nobody is stuck in halls
+they cannot get out of. Until 2026-10-01 the layout came from the public `WorldSeed` and the night, so any client could
+compute every night's exit before entering (`docs/complete-game-standard.md` §1). The server can still plan from that
+public seed when told to from Studio's command bar (`ServerStorage.NightwatchSecrets` attribute `PublicLayouts`): the
+thumbnail recipe and the layout-bound checks use it.
 
-This claim used to be false. The SEED was only `WorldSeed + night`, but `Manor.roomCount` folded
+**The NIGHTS SURVIVED board.** A board on every safehouse wall, 29 studs from the spawn pad, ranks the best night the
+server credited you with surviving; ties go to whoever got there first. Its prompt (F) switches between everyone
+(the top 10, read at most once a minute) and your Roblox friends (read only when you ask, up to 200, cached and
+throttled), and an empty friends board says what to do about it. Names are looked up, never stored. The only way to
+survive a night is the Servants' Exit, and it opens only to a character the server measures standing in the exit room
+at the door, after the night has run the shortest walk there at walking speed (`Crossing.luau`), so a script that
+teleports gains nothing a person could not. A refusal says why.
+
+The size rule used to be false too. The SEED was only `WorldSeed + night`, but `Manor.roomCount` folded
 in the player's hub level, so the room target, the exit, the relics and the patrol all moved with
 how much safehouse you had built: night 7 was a 9-room manor for a new player and a 13-room one
 at hub level 12. Worse, `Upgrades.hubLevel` sums EVERY upgrade level and the exit is always the
@@ -71,7 +88,11 @@ default.project.json        rojo: src/server -> ServerScriptService
                                   src/client -> StarterPlayerScripts
                                   src/shared -> ReplicatedStorage
 src/shared/Config.luau      every tunable, one table
-src/shared/Manor.luau       the seeded layout generator + room-graph queries   (pure)
+src/shared/Manor.luau       the layout generator + room-graph queries          (pure)
+src/shared/Salt.luau        the server-only 64-bit generator every manor is planned from  (pure)
+src/shared/Crossing.luau    the guard on the Servants' Exit (the shortest walk, the room)  (pure)
+src/shared/Board.luau       the NIGHTS SURVIVED board's rules: encoding, ranking, caches   (pure)
+src/shared/Calm.luau        "fewer flashes": Reduced Motion or the ⚡ toggle (client)
 src/shared/Watcher.luau     patrol movement, sight cone, hunt state, dread     (pure)
 src/shared/Upgrades.luau    costs, levels, aggregated effects                  (pure)
 src/shared/Night.luau       how a night ends and what it pays                  (pure)
@@ -98,7 +119,8 @@ server and client scripts require, and they do it from `ReplicatedStorage` with 
 
 ## Running the tests
 
-From this directory, with the luau CLI on hand:
+From this directory, with the luau CLI on hand (every gate, in order, is in `CLAUDE.md` under State; counts measured
+2026-10-01, twice, identical):
 
 ```
 luau tests/Manor.spec.luau        # 86 passed, 0 failed
@@ -110,10 +132,13 @@ luau tests/responsive.spec.luau   # 70 passed, 0 failed
 luau tests/Chase.spec.luau        # 32 passed, 0 failed
 luau tests/EnvBands.spec.luau     # 124 passed, 0 failed   (template)
 luau tests/Rest.spec.luau         # 55 passed, 0 failed    (template)
-luau tests/Hazards.spec.luau      # 138 passed, 0 failed   (template + the manor's additions)
-luau tests/Nightfall.spec.luau    # 170 passed, 0 failed
+luau tests/Hazards.spec.luau      # 147 passed, 0 failed   (template + the manor's additions)
+luau tests/Nightfall.spec.luau    # 185 passed, 0 failed
 luau tests/EnvConfig.spec.luau    # 244 passed, 0 failed   (the shipped numbers against every rule)
-luau tests/Pacing.spec.luau       # 49 passed, 0 failed    (minutes to each band, hazard rarity, the chase)
+luau tests/Pacing.spec.luau       # 62 passed, 0 failed    (minutes to each band, hazard rarity, the chase)
+luau tests/Salt.spec.luau         # 31 passed, 0 failed    (the server-only generator; salted manors are good manors)
+luau tests/Crossing.spec.luau     # 40 passed, 0 failed    (the exit's guard: a lower bound on every legal walk)
+luau tests/Board.spec.luau        # 70 passed, 0 failed    (the board's encoding, ranking, caches)
 ```
 
 `Chase.spec` reports the smallest number and covers the most ground: one assertion sweeping nights
@@ -147,6 +172,9 @@ luau-compile --binary src/**/*.luau
 luau-analyze src/**/*.luau 2>&1     # clean after filtering Roblox global/type noise
 ```
 
+(On 2026-10-01 neither tool was on hand; all 57 Luau files of this game and its checks compiled through `loadstring`,
+0 errors. luau-analyze was not run.)
+
 ## Booting it headless
 
 Unit tests cannot see the workspace. Grow a Crystal shipped with sockets that were never
@@ -156,8 +184,13 @@ so this game is also booted for real, outside Roblox:
 ```
 cd ../robloxemu
 py -3 wrap.py --game ../nightwatch-manor --out build/nightwatch-manor.luau
-luau check_nightwatch.luau        # 127 passed, 0 failed
+luau check_nightwatch.luau        # 129 passed, 0 failed
 luau check_nightwatch_hud.luau    # PASS — fits every viewport checked
+luau check_nightwatchmanor_board.luau              # the NIGHTS SURVIVED board, public + friends (89)
+luau check_nightwatchmanor_guard.luau              # the salt stays on the server; the exit's guard (64)
+luau check_nightwatchmanor_save.luau               # a save lands only while this session owns the record
+luau check_nightwatchmanor_sitdrop.luau            # the Studio trace of a sit's drop
+luau check_nightwatchmanor_caps.luau               # the budgets held in code
 luau check_nightwatchmanor_haunt.luau              # the eye candy through the real server + client
 luau check_nightwatchmanor_hazards.luau            # hazards: rarity rules, dodging, the chase gate
 luau check_nightwatchmanor_join.luau               # a slow profile load
@@ -216,29 +249,33 @@ passes trivially and says nothing about where it opens.
 
 See `CLAUDE.md` for the full list. The short version: no environmental puzzles, no audio, no
 jumpscare beyond a screen flash, and the upgrades are stat modifiers with visible props rather than
-traps that physically fire.
+traps that physically fire. Never opened in Studio, never published; the clip list is `MARKETING.md`.
 
 ## Paste-ready Roblox description
 
 ```
-🏚️ NIGHTWATCH MANOR — Roblox Horror Tycoon 🔪
-Survive a NEW haunted manor every single night, loot its cursed relics, then ESCAPE before it finds you! 😱
+🏚️ NIGHTWATCH MANOR — Haunted Escape Tycoon 🔪
+Sneak into a haunted manor, take its cursed relics and reach the Servants' Exit before the dread runs out… and before the Nightwatcher finds you! 😱
 
-🕯️ Procedurally-generated haunted house — no two nights are ever the same
-💰 Loot relics & cash from every run
-🛡️ Spend your loot on YOUR safehouse — build traps, alarms, lights & defenses
-👻 Outsmart the Nightwatcher's chase — hide, run, survive
-🎃 New horrors & rooms added all Halloween season
+🕯️ A new manor every night, laid out in secret, bigger the deeper you go
+💰 Bank glowing relics and spend them on upgrades you can see: lanterns, wardstones, bear traps, an alarm bell, a relic vault, a lockbox and floodlights
+👻 The Nightwatcher hunts you through the doorways, but it is never faster than you
+🌧️ The nights escalate: mist, rain on the glass, thunderstorms, a Blood Moon and a total eclipse
+🦇 Ghosts come through the walls: a ring on the floor shows where, so step out of it
+🏆 Climb the NIGHTS SURVIVED board in your safehouse: everyone, or just your friends
+☕ Rest by the fire between nights (⚡ fewer flashes if you need it)
 
-Perfect for fans of Doors, Rooms, Piggy, and horror tycoons who love a good scare AND a good grind.
+How many nights can YOU survive?
 
-Can YOU survive the manor tonight… and build a safehouse strong enough for tomorrow?
-
-👍 LIKE + ⭐ FAVORITE to help Nightwatch Manor grow — new updates weekly!
-#horror #tycoon #haunted #roblox
+👍 LIKE + ⭐ FAVORITE if you made it out!
 ```
 
-Note before this copy is pasted anywhere: it says "relics **& cash**", and this build has one
-currency, not two. Either drop that word or add the second currency before publishing — shipping a
-description that promises something the code does not do is the exact habit this repo is trying to
-break.
+Rewritten 2026-10-01 against the code, as on 2026-09-30, plus what pass 2 built: the manors are planned in secret
+("laid out in secret": `Salt.luau`, a server-only salt per player, night and session) and grow with the night
+(`Manor.roomCount`); the NIGHTS SURVIVED board stands in every safehouse with a Public / Friends prompt
+(`robloxemu/check_nightwatchmanor_board.luau`); the seven upgrades by their names in `Config.Upgrades.Catalog` (props
+you can see; they change numbers, they do not fire in the manor); the Nightwatcher's speed ceiling (`Watcher.speed`,
+0.65 x WalkSpeed); the six bands (the last, the Witching Hour, is the eclipse); the hazards and their ring; rest and
+the ⚡ toggle in the safehouse. One currency, relics (DECIDED 2026-09-30). No promise of updates, new rooms or audio.
+909 characters (Unicode code points; 919 UTF-16 units, 955 UTF-8 bytes; measured 2026-10-01), no coloured-square
+emoji; the store's limit is 1000.
