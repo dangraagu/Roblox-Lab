@@ -47,6 +47,16 @@ local Hz = Config.Hazards
 local Budget = Config.Budget
 local FLOORS = Config.Tower.Floors
 local Lighting = h.Lighting
+-- What the client aims the lighting at, at progress p: the band blend with every layer overlaid
+-- (Ambience.client; a band's second floor is its own phase, Config.Env.Layers: second review 2026-09-30).
+local function envTarget(p, g)
+	local s = EnvBands.sample(bands, p, g)
+	for _, layer in Config.Env.Layers or {} do
+		local lw = EnvBands.layerWeight(layer, p)
+		if lw > 0 and layer[g] then s = EnvBands.overlay(s, layer[g], lw) end
+	end
+	return s
+end
 
 -- Config.Env names what TowerArt builds. Ambience.client guards every lookup (a broken config costs the
 -- polish, never the game), so a piece, critter, weather or hazard kind TowerArt does not know is
@@ -299,11 +309,34 @@ local function readSafe(level)
 	local trap = if inv then 3 - marked else marked
 	return 3 - trap
 end
+-- when each floor's door was chosen, on the server's clock: the section's climb starts there
+local chosenAt = {}
 local function choose(level, slot)
+	chosenAt[level] = h.scheduler:now()
 	doorOf(level, slot):FindFirstChildOfClass("ProximityPrompt").Triggered:Fire(plr)
 	run(0.3)
 end
+-- The server clears a floor only once its section could have been climbed (queued job I, 2026-09-30:
+-- Section.minClimbSeconds at the player's own WalkSpeed; robloxemu/check_forktower_exit.luau). An honest
+-- climber cannot be quicker, so this file, which moves the body by hand, waits out that time where the
+-- player stands before stepping onto the exit, as a climber on their way up would.
+local SectionMod = mod("Section")
+local RngMod = mod("Rng")
+local function climbable(level)
+	local sec = lane:FindFirstChild("Section_" .. level)
+	local pad = padOf(level)
+	local lobby = lane:FindFirstChild("LobbyPad")
+	if sec == nil or pad == nil or lobby == nil or chosenAt[level] == nil then return end
+	local rs = plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Rebirths")
+	local geo = SectionMod.build(Config, (rs and rs.Value or 0) + 1, level, sec:GetAttribute("Theme"), sec:GetAttribute("Penalty") == true,
+		RngMod, pad.Position.X - lobby.Position.X)
+	local need = SectionMod.minClimbSeconds(Config, geo, hum.WalkSpeed)
+	while h.scheduler:now() - chosenAt[level] < need + 0.05 do
+		frame(1 / 30)
+	end
+end
 local function reachExit(level)
+	climbable(level)
 	local exit = exitOf(level)
 	standOn(exit)
 	exit.Touched:Fire(hrp)
@@ -320,6 +353,7 @@ local function bandAtFloor(n) return bands[EnvBands.indexAt(bands, n - 1)] end
 -- first frame at whose end the new fork exists.
 local floorClearLag = {}
 local function reachExitWatched(level)
+	climbable(level)
 	local exit = exitOf(level)
 	standOn(exit)
 	local before = chip.Text
@@ -331,6 +365,9 @@ local function reachExitWatched(level)
 		if movedAt == nil and chip.Text ~= before then movedAt = i end
 	end
 	table.insert(floorClearLag, if builtAt and movedAt then movedAt - builtAt else 99)
+	-- a second on the exit, as the walk used to spend on it before stepping to the next fork (the camera's
+	-- moves stay as far apart as a climber's, so the wall grid's edge fade keeps up with them)
+	run(0.7)
 end
 
 --======================================================================= 1. the takeover glides
@@ -369,6 +406,7 @@ local function lifeNearCamera(): number
 end
 
 local bandTable = {} -- band id -> { parts, emitters, rate } at mid-section
+local forkLook = {} -- level -> what the lighting settled on at that fork
 local floorPeak = {}
 local slotsChosen = {}
 for level = 1, FLOORS do
@@ -379,13 +417,19 @@ for level = 1, FLOORS do
 	local b = bandAtFloor(level)
 	local where = string.format("fork %d (%s)", level, b.id)
 	truthy(string.find(chip.Text, b.name, 1, true) ~= nil, where .. ": the chip names the floor's band (" .. chip.Text .. ")")
-	-- at a fork, progress is exactly floor - 1: the lighting sits at that band sample
-	local target = EnvBands.sample(bands, level - 1, "lighting")
+	-- at a fork, progress is exactly floor - 1: the lighting sits at that band sample, with the band's
+	-- second-floor phase overlaid on a band's second fork
+	local target = envTarget(level - 1, "lighting")
 	near(Lighting.ClockTime, target.ClockTime, 0.05, where .. ": ClockTime settled on the band's value")
 	near(Lighting.Brightness, target.Brightness, 0.02, where .. ": Brightness settled")
-	near(Lighting:FindFirstChild("FxAtmosphere").Density, EnvBands.sample(bands, level - 1, "atmosphere").Density, 0.01, where .. ": atmosphere density settled")
+	near(Lighting:FindFirstChild("FxAtmosphere").Density, envTarget(level - 1, "atmosphere").Density, 0.01, where .. ": atmosphere density settled")
 	local sky = Lighting:FindFirstChild("ForkSky")
-	near(sky and sky.StarCount, EnvBands.sample(bands, level - 1, "sky").StarCount, 1, where .. ": StarCount settled")
+	near(sky and sky.StarCount, envTarget(level - 1, "sky").StarCount, 1, where .. ": StarCount settled")
+	do
+		local cc = Lighting:FindFirstChild("FxColorCorrection")
+		forkLook[level] = { clock = Lighting.ClockTime, bright = Lighting.Brightness, density = Lighting:FindFirstChild("FxAtmosphere").Density,
+			stars = sky and sky.StarCount or 0, fogEnd = Lighting.FogEnd, contrast = cc and cc.Contrast or 0 }
+	end
 	-- the chip counts floors to the next band
 	local nextIdx, remaining = EnvBands.nextBand(bands, level - 1)
 	if nextIdx then
@@ -426,7 +470,7 @@ for level = 1, FLOORS do
 	local plats = platformsOf(level)
 	truthy(#plats >= 5, where .. ": the section was built (" .. #plats .. " platforms)")
 	local mid = math.max(1, math.floor(#plats / 2))
-	for i = 1, #plats do
+	for i = 1, #plats - 1 do -- up to the exit; reachExitWatched steps onto it
 		standOn(plats[i])
 		measureWhere = string.format("floor %d climb", level)
 		run(1)
@@ -437,6 +481,25 @@ for level = 1, FLOORS do
 		end
 	end
 	reachExitWatched(level)
+end
+-- every floor changes the world: a band's second fork (its phase) looks visibly different from its
+-- first (second review 2026-09-30, finding 5: a slow climber could stand in one unchanging band for
+-- 2.5 minutes)
+do
+	local flat = {}
+	for level = 2, FLOORS, 2 do
+		local a, b = forkLook[level - 1], forkLook[level]
+		if a and b then
+			local d = math.abs(a.clock - b.clock) >= 0.5 or math.abs(a.bright - b.bright) >= 0.15
+				or math.abs(a.density - b.density) >= 0.05 or math.abs(a.stars - b.stars) >= 400
+				or math.abs(a.fogEnd - b.fogEnd) >= 60 or math.abs(a.contrast - b.contrast) >= 0.05
+			if not d then table.insert(flat, level) end
+		else
+			table.insert(flat, level)
+		end
+	end
+	eq(#flat, 0, "each band's second fork looks visibly different from its first (the band's phase) (flat at forks "
+		.. table.concat(flat, ",") .. ")")
 end
 do
 	local worst = 0
@@ -573,6 +636,230 @@ do
 	truthy(rate <= Budget.MaxEmitterRate + 0.5, string.format("and keeps their summed rate within %d/s (%.1f)", Budget.MaxEmitterRate, rate))
 	scratch:Destroy()
 end
+-- Every budget is CAPPED in TowerArt, not only measured (second review, 2026-09-30, finding 4):
+-- Config.Budget's parts, beams, trails and lights were read by no source, so any config or content change
+-- that adds parts went past the 200-part phone budget at runtime (the reviewer's mutant, six bats to 60:
+-- 219 local parts, and only this check's measurement noticed). Asked for every band's scenery at full
+-- weight, 60 of every critter, a hazard with its lane and ring, and a lightning bolt, all at once, a
+-- fresh TowerArt must stay inside every budget, counting the climber's lantern (a light the client keeps
+-- on the root, outside this folder), and must still draw the hazard and its ring: the telegraph is never
+-- what the cap cuts.
+do
+	local TowerArt = mod("TowerArt")
+	local HazardsMod = mod("Hazards")
+	local scratch = Instance.new("Folder")
+	scratch.Name = "TowerArtBudgetProbe"
+	scratch.Parent = h.workspace
+	local r = 5
+	local art = TowerArt.new(scratch, function() r = (r * 7 + 3) % 11; return r / 11 end, Config, EnvBands)
+	local camAt = Vector3.new(0, 200, 0)
+	local pieceIds, critterKinds = {}, {}
+	for _, b in bands do
+		-- every far piece, not the walls: a shown wall holds its whole capacity but draws only its filled
+		-- slots, and that slack would hide an overshoot here (the wall rule has its own probe, below)
+		for _, id in b.pieces or {} do
+			if string.sub(id, -5) ~= "Walls" then pieceIds[id] = true end
+		end
+		for _, a in b.ambient or {} do critterKinds[a.kind] = 60 end
+	end
+	local st = 99
+	-- the telegraph at its biggest: the hazard model with the most parts, and a lightning bolt in every
+	-- frame, so the reserve is spent and the decoration has no slack to hide an overshoot in
+	local bigKind, bigParts = "comet", -1
+	do
+		local sizer = TowerArt.new(Instance.new("Folder"), function() return 0.5 end, Config, EnvBands)
+		for k in Hz.Kinds do
+			local n = #sizer:hazardModel(k).entries
+			if n > bigParts or (n == bigParts and k < bigKind) then bigKind, bigParts = k, n end
+		end
+	end
+	local plan = HazardsMod.plan(Hz, bigKind, { x = 0, y = 200, z = 0 }, 0, function() st = (1664525 * st + 1013904223) % 4294967296; return st / 4294967296 end, 0)
+	local peak = { parts = 0, beams = 0, trails = 0, lights = 0 }
+	local hazardDrawn, ringDrawn = true, true
+	for f = 1, 150 do
+		local now = f / 30
+		-- after three seconds the camera climbs, 4 studs a frame: the wall grids re-place their rows, and a
+		-- slot that fills must fit what the critters left (TowerArt's placeWall)
+		if f > 90 then camAt += Vector3.new(0, 1.5, 4) end
+		for id in pieceIds do art:updatePiece(id, 1, camAt, now, 0, camAt) end
+		art:updateCritters(critterKinds, camAt, 1 / 30, now)
+		art:updateWeather({ embers = 6, pollen = 8, sparks = 10, rain = 40, stardust = 10 }, camAt)
+		-- the scene fills first; then a hazard launches into it, with a bolt in every frame (the reserve is
+		-- what lets a telegraph arrive in a scene that is already full)
+		if f > 60 then
+			plan.t = math.min((f - 60) / 30, plan.arriveAt - 0.05)
+			local hp = HazardsMod.positionAt(plan, plan.t)
+			art:showHazard(plan, hp, now, HazardsMod.zone(plan, Hz.PlayerRadius), true)
+			art:flashBolt(camAt, true)
+		end
+		local u = { parts = 0, beams = 0, trails = 0, lights = 1 } -- 1: the lantern on the climber's root
+		local sawHazard, sawRing = false, false
+		for _, d in scratch:GetDescendants() do
+			local cls = d.ClassName
+			if d:IsA("BasePart") then
+				u.parts += 1
+				if string.sub(d.Name, 1, 8 + #bigKind) == "Hazard_" .. bigKind .. "_" then sawHazard = true end
+				if d.Name == "HazardZone" then sawRing = true end
+			elseif cls == "Beam" and d.Enabled then u.beams += 1
+			elseif cls == "Trail" and d.Enabled then u.trails += 1
+			elseif (cls == "PointLight" or cls == "SpotLight" or cls == "SurfaceLight") and d.Enabled then u.lights += 1
+			end
+		end
+		for k, v in u do peak[k] = math.max(peak[k], v) end
+		if f > 62 then
+			hazardDrawn = hazardDrawn and sawHazard
+			ringDrawn = ringDrawn and sawRing
+		end
+	end
+	print(string.format("  budget probe (everything at once): peak %d parts, %d beams, %d trails, %d lights (lantern included)",
+		peak.parts, peak.beams, peak.trails, peak.lights))
+	truthy(peak.parts <= Budget.MaxLocalParts, string.format("TowerArt caps local parts at the budget however much is asked for (%d <= %d)", peak.parts, Budget.MaxLocalParts))
+	truthy(peak.beams <= Budget.MaxBeams, string.format("and beams (%d <= %d)", peak.beams, Budget.MaxBeams))
+	truthy(peak.trails <= Budget.MaxTrails, string.format("and trails (%d <= %d)", peak.trails, Budget.MaxTrails))
+	truthy(peak.lights <= Budget.MaxLights, string.format("and lights, the lantern included (%d <= %d)", peak.lights, Budget.MaxLights))
+	truthy(peak.parts >= Budget.MaxLocalParts - 40, string.format("set-up: the probe did ask for more than the budget holds (%d parts drawn)", peak.parts))
+	truthy(hazardDrawn and ringDrawn, "at the cap the hazard and its red ring are still drawn in every frame (the telegraph is never what the cap cuts)")
+	scratch:Destroy()
+end
+-- The wall grid changes which slots are filled as the camera moves, so a wall shown when few of its slots
+-- were filled could later fill more, past what the budget had left, into the telegraph's reserve. A wall
+-- therefore holds its whole capacity while it is shown. Held here with the budget set, in memory, to
+-- exactly the reserve plus one observatory wall (30 slots), a second wall (the storm's) and fireflies asking
+-- for everything left, and the camera climbing so the grid re-places its rows: decoration never takes the
+-- reserve, and a piece that does not fit is not drawn at all.
+do
+	local TowerArt = mod("TowerArt")
+	local scratch = Instance.new("Folder")
+	scratch.Name = "TowerArtWallProbe"
+	scratch.Parent = h.workspace
+	local r = 3
+	local art = TowerArt.new(scratch, function() r = (r * 7 + 3) % 11; return r / 11 end, Config, EnvBands)
+	local reserve = art:reserve().parts
+	local savedCap = Budget.MaxLocalParts
+	local CAP = 30 -- one observatory wall: 3 x 5 cells a side, one slot each
+	Budget.MaxLocalParts = reserve + CAP
+	local cam = Vector3.new(0, 200, 0)
+	local worst, wallLo, wallHi, flies = 0, math.huge, 0, 0
+	for f = 1, 300 do
+		if f > 60 then cam += Vector3.new(0, 1, 3) end
+		art:updatePiece("observatoryWalls", 1, cam, f / 30, 0, cam)
+		art:updatePiece("stormWalls", 1, cam, f / 30, 0, cam)
+		art:updateCritters({ firefly = 60 }, cam, 1 / 30, f / 30)
+		local n, w = 0, 0
+		for _, d in scratch:GetChildren() do
+			if d:IsA("BasePart") then
+				n += 1
+				if d.Name == "Lantern" then w += 1 end
+				if d.Name == "Firefly" then flies = math.max(flies, 1) end
+			end
+		end
+		worst = math.max(worst, n)
+		if f > 30 then wallLo, wallHi = math.min(wallLo, w), math.max(wallHi, w) end
+	end
+	Budget.MaxLocalParts = savedCap
+	print(string.format("  wall probe: the wall drew %d-%d of its %d slots as the grid moved; decoration peaked at %d parts (budget %d + reserve %d)",
+		wallLo, wallHi, CAP, worst, CAP, reserve))
+	truthy(wallHi > wallLo, "set-up: the moving grid changed how many of the wall's slots were filled")
+	truthy(worst <= CAP, string.format("decoration never takes the telegraph's reserve, even as the wall grid moves (%d <= %d)", worst, CAP))
+	scratch:Destroy()
+end
+-- A wall is costed at every slot it has each time it is asked for, not at the slots it happened to fill the
+-- last time it was drawn (TowerArt's costOf): the grid changes which slots are filled as the camera moves,
+-- so a wall let back in on what it filled before could later grow past the budget into the telegraph's
+-- reserve. The first sweep of the resume session (2026-10-01) found nothing held this. Here the budget is
+-- set, in memory, to the reserve plus exactly what the wall filled when it was last drawn: asked for again
+-- at the same place, it must not be drawn at all.
+do
+	local TowerArt = mod("TowerArt")
+	local scratch = Instance.new("Folder")
+	scratch.Name = "TowerArtWallCostProbe"
+	scratch.Parent = h.workspace
+	local r = 3
+	local art = TowerArt.new(scratch, function() r = (r * 7 + 3) % 11; return r / 11 end, Config, EnvBands)
+	local cam = Vector3.new(0, 200, 0)
+	local function drawn()
+		local n = 0
+		for _, d in scratch:GetChildren() do
+			if d:IsA("BasePart") then n += 1 end
+		end
+		return n
+	end
+	art:updatePiece("observatoryWalls", 1, cam, 1 / 30, 0, cam)
+	local filled = drawn()
+	art:updatePiece("observatoryWalls", 0, cam, 2 / 30, 0, cam)
+	local savedCap = Budget.MaxLocalParts
+	Budget.MaxLocalParts = art:reserve().parts + filled
+	art:updatePiece("observatoryWalls", 1, cam, 3 / 30, 0, cam)
+	local again = drawn()
+	Budget.MaxLocalParts = savedCap
+	truthy(filled > 0 and filled < 30, string.format("set-up: the wall filled some but not all of its 30 slots (%d)", filled))
+	eq(again, 0, "a wall asked for again is costed at its whole capacity: with room only for what it filled before, it is not drawn")
+	scratch:Destroy()
+end
+-- A piece the budget held back enters invisible and fades in once there is room, whatever weight it has
+-- reached meanwhile (resume session, 2026-10-01: with the reviewer's mutant, six bats to 60, the bats filled
+-- the budget through the dungeon, and the garden's wall, held back while its weight rose, came in at
+-- transparency 0.69-0.74 in one frame, 60 parts at once, on the second run). Held here with the budget set,
+-- in memory, to the reserve plus the garden wall's 60 slots and the far blooms' 6 parts: both are shown and
+-- hidden once (as on a first run), fireflies fill the budget, both are asked for again at a weight rising
+-- to 0.8 while there is no room, and then the fireflies go.
+do
+	local TowerArt = mod("TowerArt")
+	local scratch = Instance.new("Folder")
+	scratch.Name = "TowerArtAdmitProbe"
+	scratch.Parent = h.workspace
+	local r = 7
+	local art = TowerArt.new(scratch, function() r = (r * 7 + 3) % 11; return r / 11 end, Config, EnvBands)
+	local savedCap = Budget.MaxLocalParts
+	Budget.MaxLocalParts = art:reserve().parts + 66
+	local cam = Vector3.new(0, 200, 0)
+	local shownFirst, heldBack, entered, enteredLow, worstStep, example = 0, true, 0, 0, 0, nil
+	local last = {}
+	for f = 1, 400 do
+		local now = f / 30
+		local w
+		if f <= 40 then
+			w = 0.3 -- A: shown once
+		elseif f <= 90 then
+			w = 0 -- B: hidden, while the fireflies fill the budget
+		else
+			w = math.min(0.8, (f - 90) / 100 * 0.8) -- C and D: asked for again, rising to 0.8
+		end
+		art:updateCritters({ firefly = if f > 40 and f <= 190 then 200 else 0 }, cam, 1 / 30, now)
+		art:updatePiece("gardenWalls", w, cam, now, 0, cam)
+		art:updatePiece("farBlooms", w, cam, now, 0, cam)
+		local present = {}
+		for _, d in scratch:GetChildren() do
+			if d:IsA("BasePart") and d.Name ~= "Firefly" then
+				present[d] = d.Transparency
+				if f == 40 then shownFirst += 1 end
+				if f > 90 and f <= 190 then heldBack = false end
+				if f > 190 then
+					local prev = last[d]
+					if prev == nil then
+						entered += 1
+						if d.Transparency < 0.9 then
+							enteredLow += 1
+							example = example or string.format("%s entered at %.2f", d.Name, d.Transparency)
+						end
+					else
+						worstStep = math.max(worstStep, math.abs(d.Transparency - prev))
+					end
+				end
+			end
+		end
+		last = present
+	end
+	Budget.MaxLocalParts = savedCap
+	print(string.format("  admit probe: %d parts shown the first time, %d entered after the fireflies went, %d of them below 0.9, worst step %.2f",
+		shownFirst, entered, enteredLow, worstStep))
+	truthy(shownFirst >= 30, string.format("set-up: the wall and the blooms were shown once (%d parts)", shownFirst))
+	truthy(heldBack, "set-up: while the fireflies filled the budget, the wall and the blooms were held back")
+	truthy(entered >= 30, string.format("set-up: once the fireflies went, they were drawn (%d parts entered)", entered))
+	eq(enteredLow, 0, "a piece the budget held back enters invisible and fades in" .. (if example then " (e.g. " .. example .. ")" else ""))
+	truthy(worstStep <= 0.1, string.format("and no part of it changes transparency by more than 0.1 in a frame (worst %.2f)", worstStep))
+	scratch:Destroy()
+end
 
 --======================================================================= 4. a band you are not in costs nothing
 
@@ -611,7 +898,7 @@ local function ringOf()
 end
 -- play floors 1..2 of the new run (the dungeon: no hazards, however long it takes)
 --
--- 14 s on each dungeon platform, 140 s of climbing in all, and not for the look of it. The hazard
+-- 17.5 s on each dungeon platform below the exits, 140 s of climbing in all, and not for the look of it. The hazard
 -- clock carries over from the first run (it is never reset), and the first run climbs ~72.5 s of
 -- sections against a first interval rolled at 70-110 s: about one run in sixteen, a hazard came due
 -- INSIDE the first run and the next was rolled 70-110 s further on, so the garden below waited for it
@@ -625,9 +912,12 @@ do
 		standOn(padOf(level))
 		run(20, function() if hazardModel() then launches += 1 end end)
 		choose(level, readSafe(level))
-		for _, p in platformsOf(level) do
+		local dplats = platformsOf(level)
+		for i = 1, #dplats - 1 do -- up to the exit (standing on it clears the floor); reachExit steps onto it
+			local p = dplats[i]
 			standOn(p)
-			run(14, function() if hazardModel() then launches += 1 end end)
+			-- 17.5 s on each of the 4 + 4 platforms below the two exits: 140 s of climbing, as before
+			run(17.5, function() if hazardModel() then launches += 1 end end)
 		end
 		reachExit(level)
 	end
@@ -723,6 +1013,84 @@ do
 	truthy(launched and dodged, "a hazard came and the player walked out of its red ring when it locked")
 	truthy(not knocked, "walking out of the ring dodges it: no knock")
 end
+-- The red ring and the chip's warning are up in every frame a hit can land (second review, 2026-09-30,
+-- finding 3). They used to go at the hazard's arrival, but a hit can land until the flight ends, and the
+-- lane aims up to AimJitter off the ring's centre, so a player standing still on the far side of the ring
+-- was knocked after both had gone (up to 0.083 s late, 0.84 % of hits, measured on the pure modules). To
+-- see it through the client in a few flights, AimJitter is 3 in memory for this block, and at the lock
+-- the player steps to the point inside the ring that the locked lane reaches LAST (read off the lane the
+-- client draws: the target is 30 studs short of its far end). Every knock must land in a frame in which
+-- the ring is drawn, and the frame before it must carry the warning.
+do
+	local savedJitter = Hz.AimJitter
+	Hz.AimJitter = 3
+	local plat = gardenPlats[4] or gardenPlats[2]
+	standOn(plat)
+	local knocks, lateExpected, ringGone, warnGone, cycles = 0, 0, 0, 0, 0
+	local placed, lastWarned = false, false
+	local wasKnocked = false
+	local expectLate = false
+	run(150, function()
+		local ring, laneP = ringOf(), folder:FindFirstChild("HazardLane")
+		if not placed and not hum.PlatformStand and string.find(chip.Text, "FLYTT DEG", 1, true) and ring and laneP then
+			-- the locked lane, as drawn: from the hazard to 30 studs past its target
+			local u = laneP.CFrame.LookVector
+			local beyond = laneP.Position + u * (laneP.Size.Z / 2)
+			local target = beyond - u * 30
+			local c = Vector3.new(ring.Position.X, target.Y, ring.Position.Z)
+			local R = ring.Size.Y / 2 -- hitRadius + PlayerRadius
+			local best, bestP = -math.huge, nil
+			for i = 0, 71 do
+				for _, f in { 0.3, 0.6, 0.85, 0.97 } do
+					local a = i / 72 * 2 * math.pi
+					local p = c + Vector3.new(math.cos(a), 0, math.sin(a)) * (R * f)
+					-- first contact along the lane: the smallest s with |p - (target + u s)| <= R
+					local w = p - target
+					local along = w:Dot(u)
+					local perp2 = w:Dot(w) - along * along
+					if perp2 <= R * R then
+						local s1 = along - math.sqrt(R * R - perp2)
+						if s1 > best then best, bestP = s1, p end
+					end
+				end
+			end
+			if bestP then
+				hrp.CFrame = CFrame.new(bestP)
+				hrp.AssemblyLinearVelocity = Vector3.zero
+				placed = true
+				cycles += 1
+				local speed = Hz.Kinds.bee.speed
+				for _, c2 in folder:GetChildren() do
+					local k = string.match(c2.Name, "^Hazard_([%a]+)_")
+					if k and Hz.Kinds[k] then speed = Hz.Kinds[k].speed end
+				end
+				expectLate = best / speed > 1.5 / 30
+				if expectLate then lateExpected += 1 end
+			end
+		end
+		if hum.PlatformStand and not wasKnocked then
+			knocks += 1
+			if ringOf() == nil then ringGone += 1 end
+			if not lastWarned then warnGone += 1 end
+		end
+		wasKnocked = hum.PlatformStand
+		lastWarned = string.find(chip.Text, "⚠️", 1, true) ~= nil
+		if placed and hazardModel() == nil and not hum.PlatformStand then
+			placed = false
+			standOn(plat)
+		end
+		if knocks >= 10 and not hum.PlatformStand then return false end
+	end)
+	Hz.AimJitter = savedJitter
+	standOn(plat)
+	run(1)
+	print(string.format("  ring until out of reach: %d flights, %d knocks, %d of them reached after the hazard's arrival (by >= 1.5 frames); ring gone at a knock %d, warning gone the frame before %d",
+		cycles, knocks, lateExpected, ringGone, warnGone))
+	truthy(knocks >= 6, string.format("set-up: standing inside the ring, the player was knocked again and again (%d knocks)", knocks))
+	truthy(lateExpected >= 1, string.format("set-up: some of those knocks landed after the hazard's arrival (%d)", lateExpected))
+	eq(ringGone, 0, "every knock lands in a frame in which the red ring is drawn")
+	eq(warnGone, 0, "and the frame before every knock carries the chip's warning")
+end
 -- a hazard in flight when the player steps onto a fork pad fizzles out, even while they are still
 -- climbing: their own, answered fork's pad lies under the section and a fall can land on it
 do
@@ -747,12 +1115,17 @@ end
 -- fork 4 exists, and a read begun on the exit's edge is the read's own price and nothing more.
 do
 	local exit = exitOf(3)
-	standOn(exit)
+	-- the review's own spot: the platform before the exit (standing ON the exit clears the floor now, as
+	-- landing on it always did in Roblox: the server's poll sees the body there, queued job I)
+	local plats3 = platformsOf(3)
+	standOn(plats3[#plats3 - 1])
 	local launched = false
 	run(12, function()
 		if hazardModel() then launched = true; return false end
 	end)
-	truthy(launched, "a hazard launched at the player on the section's exit")
+	truthy(launched, "a hazard launched at the player on the platform before the section's exit")
+	climbable(3)
+	standOn(exit)
 	exit.Touched:Fire(hrp) -- the server clears floor 3 and builds fork 4
 	local builtAt, goneAt = nil, nil
 	for i = 1, 9 do

@@ -362,6 +362,7 @@ local function placeWall(self, item, cam, laneX)
 							e.home = cf
 							e.part.CFrame = cf
 							if d.spin then e.spinner = d.spin * side end
+							-- (the wall's whole capacity is already counted against the budget: costOf, usage)
 							if item.shown and e.part.Parent ~= self.folder then e.part.Parent = self.folder end
 						end
 					end
@@ -486,15 +487,24 @@ end
 
 -- the summit: a crown of ten golden stars circling the CLIMBER (anchored to them, not to the camera),
 -- turning slowly. It fades in over the last stretch of floor 10 and never exists at a fork.
+-- The crown's stars, laid out evenly for `n` of them (the rest of the pool stays hidden).
+local CROWN_POOL = 18
+local function layCrown(item, n: number)
+	for i, e in item.entries do
+		local a = (i - 1) / n * math.pi * 2
+		e.offset = CFrame.new(math.sin(a) * 4.2, math.sin(a * 3) * 0.35, math.cos(a) * 4.2)
+	end
+end
 PIECES.crownRing = function()
 	local item = newItem("CrownRing")
 	item.anchor = "focus"
 	item.centre = CFrame.new(0, 3.2, 0)
 	item.spin = 0.6
-	for i = 1, 10 do
-		local a = (i - 1) / 10 * math.pi * 2
-		addPart(item, { name = "CrownStar", shape = BALL, size = Vector3.new(1.1, 1.1, 1.1), color = rgb(255, 214, 110), material = Enum.Material.Neon, offset = CFrame.new(math.sin(a) * 4.2, math.sin(a * 3) * 0.35, math.cos(a) * 4.2) })
+	for i = 1, CROWN_POOL do
+		local _, e = addPart(item, { name = "CrownStar", shape = BALL, size = Vector3.new(1.1, 1.1, 1.1), color = rgb(255, 214, 110), material = Enum.Material.Neon })
+		e.hidden = i > 10
 	end
+	layCrown(item, 10)
 	return item
 end
 
@@ -634,6 +644,130 @@ function TowerArt.new(folder, rand, Config, EnvBands)
 	return self
 end
 
+-- ─────────────────────────────────────────────────────────────── the budgets, CAPPED here
+--
+-- Config.Budget used to be measured (robloxemu/check_forktower_env.luau) and read by nothing, so a
+-- config or content change that added parts went straight past the phone budget at runtime (second
+-- review, 2026-09-30: six bats to 60 gave 219 local parts, and only the check's measurement saw it).
+-- Now every optional thing (scenery, far pieces, critters) is drawn only if what is already drawn, plus
+-- its own parts, beams, trails and lights, plus a RESERVE fits the budget. The reserve is the most any
+-- telegraph can need at once: the biggest hazard model, its lane and ring, a lightning bolt, the weather
+-- host, and the climber's lantern (Ambience's, on the root). Those are never refused: the cap cuts
+-- decoration, never the warning. What is drawn is counted from the folder itself, so it cannot drift.
+
+-- What an item costs once it is drawn. A wall costs every slot it has: which slots are filled changes as
+-- the camera moves the grid, so a wall holds its whole capacity for as long as it is shown (usage below
+-- counts it the same way), and the grid can never grow past the budget behind the budget's back.
+local function costOf(item)
+	local parts = 0
+	for _, e in item.entries do
+		if not e.hidden or item.anchor == "walls" then parts += 1 end
+	end
+	return { parts = parts, beams = #item.beams, trails = #item.trails, lights = #item.lights }
+end
+
+-- What this TowerArt has drawn right now, plus every critter that has spawned but is not drawn yet (it is
+-- drawn on its next frame). A shown item's beams, trails and lights count whether or not they are enabled
+-- this frame: they switch on with the item's weight, so they are spoken for.
+function TowerArt:usage()
+	local u = { parts = 0, beams = 0, trails = 0, lights = 0 }
+	for _, d in self.folder:GetDescendants() do
+		local cls = d.ClassName
+		if d:IsA("BasePart") then
+			u.parts += 1
+		elseif cls == "Beam" then
+			u.beams += 1
+		elseif cls == "Trail" then
+			u.trails += 1
+		elseif cls == "PointLight" or cls == "SpotLight" or cls == "SurfaceLight" then
+			u.lights += 1
+		end
+	end
+	for _, list in self.critters do
+		for _, c in list do
+			if c.active and not c.item.shown then
+				local cost = costOf(c.item)
+				for k, v in cost do u[k] += v end
+			end
+		end
+	end
+	-- a shown wall holds every slot it has (costOf), filled or not
+	for _, item in self.pieces do
+		if item.anchor == "walls" and item.shown then
+			for _, e in item.entries do
+				if e.part.Parent ~= self.folder then u.parts += 1 end
+			end
+		end
+	end
+	return u
+end
+
+function TowerArt:reserve()
+	if self.reserved then return self.reserved end
+	-- the lane and the ring (2), a lightning bolt (5), the weather host (1); the climber's lantern (1 light)
+	local r = { parts = 2 + 5 + 1, beams = 0, trails = 0, lights = 1 }
+	local worst = { parts = 0, beams = 0, trails = 0, lights = 0 }
+	for kind in MODELS do
+		local c = costOf(self:hazardModel(kind))
+		for k, v in c do
+			if v > worst[k] then worst[k] = v end
+		end
+	end
+	for k, v in worst do r[k] += v end
+	self.reserved = r
+	return r
+end
+
+-- Room left for decoration, per budget line (negative = over).
+function TowerArt:room()
+	local B = self.cfg.Budget or {}
+	local u, res = self:usage(), self:reserve()
+	return {
+		parts = (B.MaxLocalParts or math.huge) - res.parts - u.parts,
+		beams = (B.MaxBeams or math.huge) - res.beams - u.beams,
+		trails = (B.MaxTrails or math.huge) - res.trails - u.trails,
+		lights = (B.MaxLights or math.huge) - res.lights - u.lights,
+	}
+end
+
+-- How long a piece the budget held back takes to fade in once it fits: at 1/30 s a frame, at most 0.067 of
+-- its weight per frame, under the 0.1 no-cut step check_forktower_env holds every scenery part to.
+local ENTER_SECONDS = 0.5
+
+local function fitsIn(room, item): boolean
+	local c = costOf(item)
+	return c.parts <= room.parts and c.beams <= room.beams and c.trails <= room.trails and c.lights <= room.lights
+end
+
+-- WHICH CROWN circles the climber at the summit (owner decision 2026-09-30: a rarer crown at 5 / 10 / 25
+-- summits, Config.Env.CrownTiers; Ambience reads the public leaderstat Topper). `tier` is one of those
+-- entries. A star that joins the ring enters invisible and fades in with the piece; one that leaves goes.
+function TowerArt:setCrown(tier)
+	if tier == nil or self.crownTier == tier then return end
+	self.crownTier = tier
+	local item = self.pieces.crownRing
+	if item == nil then
+		item = PIECES.crownRing()
+		self.pieces.crownRing = item
+	end
+	local n = math.clamp(tier.stars or 10, 1, CROWN_POOL)
+	layCrown(item, n)
+	for i, e in item.entries do
+		local c = tier.color or { 255, 214, 110 }
+		e.part.Color = if tier.prismatic then Color3.fromHSV((i - 1) / n, 0.55, 1) else rgb(c[1], c[2], c[3])
+		local wantShown = i <= n
+		if wantShown and e.hidden then
+			e.hidden = false
+			e.part.Transparency = 1
+			e.lastT = 1
+			if item.shown then e.part.Parent = self.folder end
+		elseif not wantShown and not e.hidden then
+			e.hidden = true
+			e.part.Parent = nil
+		end
+	end
+end
+
 function TowerArt.hasPiece(id)
 	return PIECES[id] ~= nil or WALLS[id] ~= nil
 end
@@ -656,6 +790,30 @@ function TowerArt:updatePiece(id, w, cam, now, laneX, focus)
 			return
 		end
 		self.pieces[id] = item
+	end
+	-- the part budget: a piece not yet drawn is drawn only if all of it fits (a wall counts every slot)
+	if not item.shown and w > 0.01 then
+		if not fitsIn(self:room(), item) then
+			item.heldBack = true
+			return
+		end
+		-- A piece the budget HELD BACK enters invisible and fades in over ENTER_SECONDS, whatever weight it
+		-- reached meanwhile (resume session 2026-10-01: with six bats raised to 60, the garden's wall came in
+		-- at transparency 0.69 in one frame and the far blooms at 0.2; check_forktower_env's admit probe).
+		if item.heldBack then
+			item.heldBack = nil
+			item.enterAt = now
+		end
+	end
+	if w <= 0.01 then
+		item.enterAt = nil
+	elseif item.enterAt ~= nil then
+		local ramp = (now - item.enterAt) / ENTER_SECONDS
+		if ramp >= 1 then
+			item.enterAt = nil
+		else
+			w = math.min(w, math.max(0.02, ramp))
+		end
 	end
 	setWeight(item, w, self.folder)
 	if not item.shown then return end
@@ -746,6 +904,11 @@ function TowerArt:updateCritters(desired, cam, dt, now)
 					c = { item = buildCritter(self, kind), active = false }
 					table.insert(list, c)
 				end
+				-- the budget: life fills what the scenery leaves, and stops there (an active critter counts from
+				-- the moment it spawns, before it is drawn: TowerArt:usage)
+				if not fitsIn(self:room(), c.item) then
+					break
+				end
 				c.active = true
 				c.leaving = false
 				c.w = 0
@@ -813,8 +976,10 @@ function TowerArt:laneItem()
 end
 
 -- Draw the hazard for this frame. `zone` is Hazards.zone(plan, PlayerRadius): the ring is drawn
--- exactly there, because it IS the hit rule (a hit needs the player inside it).
-function TowerArt:showHazard(plan, pos, now, zone)
+-- exactly there, because it IS the hit rule (a hit needs the player inside it). `live` is
+-- Hazards.threatLive for this frame: the lane and the ring are drawn while a hit can still land, which
+-- runs a little past the hazard's arrival (second review, 2026-09-30), and not a frame longer.
+function TowerArt:showHazard(plan, pos, now, zone, live)
 	local item = self:hazardModel(plan.kind)
 	setWeight(item, 1, self.folder)
 	item.billboard.Enabled = not plan.locked or (math.floor(now * 6) % 2 == 0)
@@ -829,7 +994,7 @@ function TowerArt:showHazard(plan, pos, now, zone)
 	local target = Vector3.new(plan.target.x, plan.target.y, plan.target.z)
 	local beyond = target + (if v.Magnitude > 0 then v.Unit * 30 else Vector3.zero)
 	local len = (beyond - p).Magnitude
-	if plan.t > plan.arriveAt or len < 1 then
+	if not live or len < 1 then
 		setWeight(lane, 0, self.folder)
 		return
 	end

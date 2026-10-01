@@ -294,8 +294,16 @@ local function climb(plr, lane, level)
 	local exit = exitOf(section)
 	local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
 	if exit == nil or hrp == nil then return false end
+	-- The server clears a floor only for a body standing on the exit once the section could have been
+	-- climbed (queued job I, 2026-09-30; check_forktower_exit.luau). Stand on it, touch it, and give the
+	-- server the time the climb takes (its own poll sees the body there).
+	hrp.CFrame = CFrame.new(exit.Position + Vector3.new(0, exit.Size.Y / 2 + 3, 0))
 	exit.Touched:Fire(hrp)
 	h:advance(0.5)
+	for _ = 1, 100 do
+		if lane:FindFirstChild("Fork_" .. (level + 1)) ~= nil or lane:FindFirstChild("Summit") ~= nil then break end
+		h:advance(0.1)
+	end
 	return true
 end
 
@@ -322,11 +330,12 @@ truthy(padOf(readerLane, 1) ~= nil, "...with its inscription pad")
 do
 	local built = partsIn(readerLane)
 	print(string.format("  Lane on join: %d BaseParts", built))
-	-- 1 lobby + 1 spawn marker + 1 fork pad + 1 invisible dust host + 2 doors + 4 sign nubs.
+	-- 1 lobby + 1 spawn + 1 fork pad + 1 invisible dust host + 2 doors + 4 sign nubs + the toplist
+	-- board and its gold rim (pass 2, 2026-10-01: check_forktower_board).
 	-- Spelled out rather than folded into a constant: if a door, a sign or the dust volume ever
 	-- stops parenting, this number is the thing that notices, and the breakdown says which.
-	eq(built, 10,
-		"a fresh lane holds the lobby, the spawn marker, the pad, its dust volume, two doors and four signs")
+	eq(built, 12,
+		"a fresh lane holds the lobby, the spawn, the pad, its dust volume, two doors, four signs and the board with its rim")
 end
 
 do
@@ -1109,7 +1118,19 @@ do
 	h:advance(1)
 	local lane = laneOf(plr)
 
-	local before = store.__calls
+	-- Counted on THIS climber's record, per second of the run. Since queued job I (2026-09-30) the server
+	-- clears a floor only once its section could have been climbed, so a scripted run is no longer 21 s of
+	-- instant climbs but as long as the sections take; over that longer run the other players' autosaves
+	-- (every AutosaveSeconds, for everybody) used to be counted too. The throttle's promise is one write
+	-- per SaveMinInterval at most, and SaveMinInterval's own derivation (Config.Limits) is that it is at
+	-- least 6 s. A run that wrote once per door and once per floor spends 20.
+	local mine = 0
+	local innerUpdate = store.UpdateAsync
+	store.UpdateAsync = function(self, key, fn)
+		if key == "u_" .. SAVER then mine += 1 end
+		return innerUpdate(self, key, fn)
+	end
+	local startedAt = h.scheduler:now()
 	for level = 1, FLOORS do
 		noteUnreadFork(lane, level)
 		local f = readFork(plr, lane, level)
@@ -1118,14 +1139,20 @@ do
 			climb(plr, lane, level)
 		end
 	end
-	local calls = store.__calls - before
+	local elapsed = h.scheduler:now() - startedAt
+	store.UpdateAsync = nil -- back to the class method
 	truthy(lane:FindFirstChild("Summit") ~= nil, "the saver summited (the measurement is not vacuous)")
-	truthy(calls <= 8, string.format(
-		"a whole ten-floor run cost %d DataStore writes, not one per door plus one per floor", calls))
+	local allowed = math.ceil(elapsed / 6) + 2
+	truthy(mine <= allowed and mine < 2 * FLOORS, string.format(
+		"a whole ten-floor run (%.0f s) cost %d writes of the climber's record, at most one per 6 s (+2), not one per door plus one per floor (%d)",
+		elapsed, mine, 2 * FLOORS))
 
 	-- The ordered leaderboard is a SECOND store and a second budget, and bestScore only moves once
 	-- per summit — so re-publishing it on every save was another write per save buying nothing.
-	local lb = h.services.DataStoreService:GetOrderedDataStore("ForkTower_LB_v1")
+	-- The store's name is read from Config (it moved to ForkTower_LB_v2 with the encoded board, pass 2,
+	-- 2026-10-01): a hard-coded old name would count calls on a store nobody writes, and pass vacuously.
+	local lbName = h:_require(h.ReplicatedStorage:FindFirstChild("Config")).Save.Leaderboard
+	local lb = h.services.DataStoreService:GetOrderedDataStore(lbName)
 	local summited = 0
 	for _, other in h.Players:GetPlayers() do
 		local ols = other:FindFirstChild("leaderstats")
@@ -1758,9 +1785,10 @@ do
 
 	-- HOUSE RULE, learned in this repo hours ago: a world whose only spawn points are disabled
 	-- makes Roblox drop the character wherever it likes — the roof of a sealed shell, or in this
-	-- game the empty air at the world origin. Every LANE spawn here is Enabled = false on purpose
-	-- (the server places you on your checkpoint itself), so exactly one real one has to exist
-	-- outside them, standing on something.
+	-- game the empty air at the world origin. So one real spawn stands outside every lane, on the
+	-- waiting pad, for a player who has no tower. Since pass 2 (2026-10-01) each lane's LaneSpawn is
+	-- enabled too and is its owner's RespawnLocation (check_forktower_board), so every ENABLED spawn
+	-- must be one of those two and stand on something: the waiting pad, or its own lane's lobby.
 	local enabled = {}
 	local function scan(x)
 		for _, c in x:GetChildren() do
@@ -1773,13 +1801,27 @@ do
 	local wait = h.workspace:FindFirstChild("Waiting")
 	local pad = wait and wait:FindFirstChild("WaitingPad")
 	truthy(pad ~= nil, "...and a waiting pad outside every lane to put it on")
-	if pad and enabled[1] then
-		local sp = enabled[1]
-		local onPad = math.abs(sp.Position.X - pad.Position.X) <= pad.Size.X / 2
-			and math.abs(sp.Position.Z - pad.Position.Z) <= pad.Size.Z / 2
-			and sp.Position.Y > pad.Position.Y
-		truthy(onPad, "...and the spawn really stands on that pad rather than beside it")
+	local function over(sp, p)
+		return math.abs(sp.Position.X - p.Position.X) <= p.Size.X / 2
+			and math.abs(sp.Position.Z - p.Position.Z) <= p.Size.Z / 2
+			and sp.Position.Y > p.Position.Y
 	end
+	local ws = wait and wait:FindFirstChild("WaitingSpawn")
+	truthy(ws ~= nil and ws.Enabled == true, "...the WaitingSpawn is enabled")
+	if pad and ws then
+		truthy(over(ws, pad), "...and the spawn really stands on that pad rather than beside it")
+	end
+	local stray = nil
+	for _, sp in enabled do
+		if sp ~= ws then
+			local lobby = sp.Parent and sp.Parent:FindFirstChild("LobbyPad")
+			if not (sp.Name == "LaneSpawn" and lobby and over(sp, lobby)) then
+				stray = stray or sp:GetFullName()
+			end
+		end
+	end
+	truthy(stray == nil, string.format("...and every other enabled spawn is a LaneSpawn on its own lane's lobby (%d enabled%s)",
+		#enabled, if stray then "; stray " .. stray else ""))
 end
 
 --============================================================================ done

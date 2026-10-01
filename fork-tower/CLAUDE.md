@@ -5,6 +5,75 @@ in, what must stay true, and what bit us building it.
 
 ---
 
+## State (2026-10-01, pass 2 of 2: the complete-game standard — EYECANDY.md §16)
+
+Every item of `docs/complete-game-standard.md` was checked against pass 1's tree (EYECANDY §16.1 is the list) and
+what was missing was built test first, mutation-swept (29 of 29 killed, the control survived all 27 suites) and
+documented. Not seen in Studio, not re-reviewed, not committed or published.
+
+1. **§3 the highscore board, public + friends** (`Board.luau`, +1 Jump's template verbatim; `Board.client.luau`; the
+   board section of Main.server). The metric is the best Build Reveal score a summit banked, computed by the server.
+   Stored encoded in `ForkTower_LB_v2` (ties to whoever reached it first), written only upward and only by the
+   record's owner (invariant 21). A physical board behind every tower's spawn (`Lane_n.TopBoard`) with an
+   `Offentlig / Venner` prompt; friends on demand, capped at 200, cached, throttled; names looked up by the server
+   and remembered, never saved. It replaced a public-only HUD list that stored the raw score with `SetAsync` and
+   looked every name up on every client on every refresh.
+2. **§1 spawn**: `plr.RespawnLocation` is the player's own `LaneSpawn` (enabled now), or the `WaitingSpawn` until
+   they have a tower (invariant 22). `check_forktower_board` also walks the whole player path once: spawn, earn a
+   skip with FORK, spend it on a trap, ten floors, the summit's card on the board, leave, rejoin, rebirth.
+3. **§2 the brag**: no crown landed in 30-45 min of normal play (the ice crown at 10 summits measured 45.4 min).
+   The ice crown is now at **8 summits, 36.3 min** (`Config.Env.BragCrown`); the star crown at 25 (113.4 min) is the
+   long-term goal. `Pacing.spec` holds both. **The 8 is a change to the owner's 5 / 10 / 25: flagged for him.**
+4. **§4 the documents**: README's store description (977 characters), `MARKETING.md` (8 vertical clips with
+   staging, all `new`: `tools/film_game.py` has no Fork Tower scenarios), the 1920x1080 thumbnail size, needs-Studio
+   items 29-31, and `tests/docs_check.py`, which holds all of it (and this file's gate list) to the source.
+
+```
+specs     1308 / 0   (Board 66 new, Pacing 108; the rest as pass 1)
+world.check 71 / 0   check_forktower 131 / 0   check_forktower_board 115 / 0 (new)   plansecret 96 / 0
+env 235 / 0   env_secret 92 / 0   env_join 37 / 0   exit 30 / 0   sitdrop 15 / 0   crown 15 / 0
+hud PASS (16 viewports, overlap on, Board.client loaded)   hud_open 259 / 0   hud_play 611 / 0
+docs_check.py 94 / 0 (new)
+```
+
+---
+
+## State (2026-10-01, pass 1 of 2: the second review, the owner's decisions, queued job I — EYECANDY.md §15)
+
+The first attempt at this pass was cut off by a usage limit after the code and most tests, before the
+mutation sweep and EYECANDY §15. The resume session (2026-10-01) re-read every changed and new file, ran
+every gate on the tree as found (all green), finished the owner's decisions (one more: no gamepasses), ran
+the mutation sweep and wrote §15. Every count below is from that session's final run.
+
+The second review's six findings all reproduced; each is held by a test that fails with the fix taken out
+(the sweep, EYECANDY §15.4) and is fixed in the game: the ☕ Hvil sit survives its own drop (the +1 Jump
+Studio fix, ported); the HUD fits landscape phones down to 480 px wide (the row goes into the header, the
+counter narrows, then the toggles become glyphs, the drawers narrow beside the inscription; the Rebirth
+drawer is usable at 568x320); the ring and the warning stay up as long as a hit can land
+(`Hazards.threatLive`); the part, beam, trail and light budgets are capped in TowerArt with a reserve the
+telegraph always gets (and, found by the resume session, a piece the cap held back now fades in instead of
+popping in); every band's second floor is its own lighting phase (`Config.Env.Layers`), so the
+world never stands still for more than 53 s in any measured run; README's stale claims are fixed. The
+owner said "take the recommended option for all": the inscription is hidden while climbing on a landscape
+phone and the toast takes its slot; the summit's crown grows rarer at 5 / 10 / 25 SUMMITS (new saved
+`summits`, public leaderstat `Topper`); the dead gamepass placeholders are deleted (no Robux in v1).
+Queued job I is closed: the exit clears a floor only for a body the server sees standing on it, once the
+section could have been climbed (invariant 16). Not seen in Studio, not re-reviewed, not published.
+
+```
+specs     1237 / 0   (Codes 20, Section 57, EnvConfig 505, Pacing 103; the rest unchanged; Pacing ~2 min)
+world.check 71 / 0   check_forktower 129 / 0   check_forktower_plansecret 96 / 0 (helpers only)
+check_forktower_env 235 / 0   env_secret 92 / 0   env_join 37 / 0   hud PASS (16 viewports)
+check_forktower_hud_open 259 / 0   check_forktower_hud_play 611 / 0
+NEW: check_forktower_exit 30 / 0   check_forktower_sitdrop 15 / 0   check_forktower_crown 15 / 0
+```
+
+**Any check that moves a body by hand must now climb like a person**: stand on the exit and give the server
+the section's least time (`Section.minClimbSeconds`), or it will never clear a floor. Every fork-tower
+check's climb helper does this now; copy one.
+
+---
+
 ## State (2026-09-24, after the adversarial review — EYECANDY.md §14)
 
 An independent review of the environment work found three things; all three were reproduced on the tree
@@ -378,6 +447,65 @@ touching `dressFork`, `onReadInscription`, or anything in `Config.Fork`.
     `tests/readcost.measure.luau` never measured. `tests/Pacing.spec.luau` measures the rest: the
     break-even moves only up (a trap's longer climb meets more hazards), 0 for anyone who reacts.
 
+16. **The exit counts only for a body that could have climbed there** (queued job I, 2026-09-30;
+    `lane.tryExit` in Main.server). A client owns its character's physics: a script could choose a door and
+    teleport onto the exit, or fire its Touched from anywhere, and a trap cost it nothing. A floor now clears
+    only when the server's own view puts the root part on the exit platform (Config.Exit) AND
+    `Section.minClimbSeconds` has passed on the server's clock since the server put the player at the
+    bottom of the section (the door choice; a mid-climb rejoin restarts it). The bound is the straight line
+    on the ground from the entry to the exit's reach at the player's own WalkSpeed x SpeedSlack 1.25: nobody
+    moves sideways faster than their WalkSpeed. `tests/Pacing.spec.luau` measures that no honest climber is
+    ever refused (the quickest, a climber who never lines up a hop, took 1.32x the bound); the fall-rescue
+    loop polls the exit every 0.4 s so a limb-first landing is never stranded. Mean bound at base speed
+    (400 seeds): 1.3 s on floor 1 to 3.3 s on floor 10, 22.6 s for ten floors; a trap adds 1.6 s. Measured
+    against the climb model (30 runs, read strategy): a script that moves at WalkSpeed x 1.25 in straight
+    lines climbs 2.35x faster than a perfect bunny-hopper and 12.5x faster than a normal reader. Waiting
+    at the bottom and teleporting once the time is up buys nothing over that walk: both end at the same
+    second. A "seen on the path" rule cannot raise the bound either (a script can teleport along the
+    platforms too); only a per-hop airtime bound would, and that rests on physics only Studio can measure
+    (step-up, limb touches), so it is not built. `robloxemu/check_forktower_exit.luau` is the measurement.
+
+17. **A band's second floor is its own phase, and it is 0 or 1 at every fork** (`Config.Env.Layers`,
+    EnvConfig.spec). Anything else would make the world in front of two unread doors depend on more than the
+    floor number (invariant 14). `Pacing.spec` asserts the world never stands still for more than 90 s.
+
+18. **The budgets are capped in TowerArt, and the telegraph is never what the cap cuts** (`TowerArt:usage`,
+    `reserve`, `room`). Scenery and critters are drawn only if they fit the budget minus the reserve (the
+    biggest hazard model, its lane and ring, a bolt, the weather host, the lantern); a shown wall holds its
+    whole slot capacity, also when it is asked for again. A piece the budget held back enters invisible
+    and fades in over 0.5 s (`ENTER_SECONDS`), whatever weight it reached meanwhile: without that, the cap
+    itself made pop-ins whenever it bit (found 2026-10-01 with six bats raised to 60). `check_forktower_env`'s
+    four probes hold it (everything at once, the moving wall, the wall asked for again, the held-back piece).
+
+19. **The crown counts summits, never rebirths.** Rebirth works from any floor every 3 s; a goal a button
+    can buy is not a goal. `profile.summits` is counted once per run in `reachExit` at the top, saved, and
+    shown as the public leaderstat `Topper`, which is the one thing the ambience reads to pick the crown
+    (`check_forktower_env_secret` allows that name and no other new one).
+
+20. **No Robux in v1** (docs/complete-game-standard.md §3; owner decision 2026-09-30). `Config.Passes` and
+    `profile.passes` are deleted, not left dead: ExtraSkip would have sold the one thing a trap costs.
+    `Codes.spec` holds the config, `check_forktower_crown` holds the saved record. Skips come from the free,
+    public codes only.
+
+21. **The board is written only upward, and only by the record's owner** (pass 2; `writeBoard`). It runs after the
+    profile's own write landed (so a session whose record was taken writes nothing), only when `bestScore` has
+    passed `boardScore` (the last score written, saved with the profile), and through `UpdateAsync` with
+    `Board.keepHigher`. Never `SetAsync` the board: a session holding an older, lower best would overwrite a higher
+    one, and a same score reached later would take the first reach's place. The metric is the server's
+    `Build.reveal` score; a client never sends a number. `check_forktower_board` holds it.
+
+22. **Every player's `RespawnLocation` is an enabled SpawnLocation** (pass 2; docs/complete-game-standard.md §1):
+    their own tower's `LaneSpawn`, set in `buildLane`, or the `WaitingSpawn`, set FIRST in `onPlayerAdded` before the
+    profile load can yield. Every `LaneSpawn` is enabled now, so a player with no `RespawnLocation` could be put in
+    somebody else's tower by the engine; that is why the join sets it before anything else. The checkpoint still
+    climbs with the player, so `onCharacter` still waits for the engine and then moves them (invariant 12).
+    `check_forktower` asserts every enabled spawn is the WaitingSpawn or a LaneSpawn on its own lobby.
+
+23. **The board knows nothing about a fork.** `Board.client` reads only the lane's `Owner` attribute and its
+    `TopBoard` part; the Ambience scan ignores the board by name (invariant 14's audit covers Ambience, TowerArt and
+    Climb). The board's payloads carry user ids, names and decoded scores, which are public (`Best` is a leaderstat);
+    `check_forktower_plansecret`'s wire sweep runs with them on the wire.
+
 11. **The checkpoint sits at the MIDDLE of its clear band.** Hazard clearance and platform-edge
     margin always sum to the width of the feasible interval, so one is bought with the other and
     only the midpoint maximises the smaller. Both `Section.build` and `Section.check` know this.
@@ -459,25 +587,30 @@ touching `dressFork`, `onReadInscription`, or anything in `Config.Fork`.
    both branches) and **no phone has seen it** (the viewport was 2889x1201 throughout). STUDIO.md
    §9 also carries four polish items, the top one being that on the first frame three billboards
    draw on top of each other because `MaxDistance = 220` reaches from a tower to the waiting pad.
-1. **Point `hudcheck` at it.** `robloxemu/emu/hudcheck.luau` measures every panel across six
-   viewports from 414x800 to 1920x1080. The HUD follows the Responsive rules but has never been
-   measured, and the reveal card is a big centred frame — exactly the shape that fails a phone.
+1. ~~**Point `hudcheck` at it.**~~ Done (2026-09-24): `check_forktower_hud`, `_hud_open` and `_hud_play`
+   measure the HUD at sixteen to nineteen viewports, down to 480x270 since 2026-09-30.
 2. **Make choices narrow the tree.** The brief promises it and `Fork.plan` currently draws each
    floor's two traits independently of the picks above it. The plan is already built per run, so
    the history is available; the fairness spec would need a matching "narrowing still leaves every
    trait reachable" assertion.
 3. **Give the trap more than one shape.** Longer-and-busier is the only punishment in the game.
 4. **Make hazards move**, or drop the `kind` field that promises four of them and renders one.
-5. **Wire or delete `Config.Passes` and `profile.passes`.** Dead as shipped.
+5. ~~**Wire or delete `Config.Passes` and `profile.passes`.**~~ **DECIDED 2026-09-30 (owner: take
+   recommended): deleted** (invariant 20; the owner's standard allows no Robux cost in v1).
 6. Adversarial review, then the publish path: experience → git-ignored `publish_*.bat` →
    content-maturity questionnaire (the Preview page is ground truth) → Public.
+7. **For the tools owner** (pass 2): `tools/film_game.py` needs a Fork Tower scenario table for `MARKETING.md`'s
+   eight clips, `tools/studio_open.ps1` a `fork-tower` key, `tools/store_text.py` a Fork Tower entry once there is an
+   experience.
+8. **For the owner**: the ice crown moved from 10 to 8 summits (the brag, 36.3 min); one number puts it back.
 
 ---
 
 ## Commands
 
 ```
-# tests
+# tests (every tests/*.spec.luau: Board.spec, Build.spec, Climb.spec, Codes.spec, EnvBands.spec, EnvConfig.spec,
+# Fork.spec, Hazards.spec, Pacing.spec, Rest.spec, Rng.spec, Section.spec, responsive.spec)
 cd D:/Claude/Roblox/fork-tower && luau tests/<Name>.spec.luau
 
 # where Config.Fork.ReadSeconds comes from — re-run after any tuning change
@@ -498,6 +631,14 @@ luau check_forktower_env_join.luau       # the first title card at a join, slow 
 luau check_forktower_hud.luau            # hudcheck: HUD + ambience row, drawers closed, ten viewports
 luau check_forktower_hud_open.luau       # the drawers and the Build Reveal card OPEN, ten viewports
 luau check_forktower_hud_play.luau       # the HUD and the band card keep off the player's own character
+luau check_forktower_exit.luau           # the exit cannot be teleported to (queued job I)
+luau check_forktower_sitdrop.luau        # the ☕ Hvil sit survives its own drop (the Studio trace)
+luau check_forktower_crown.luau          # summits, the Topper leaderstat and the summit's crown
+luau check_forktower_board.luau          # the toplist board (public + friends), RespawnLocation, and the
+                                         # whole player path: spawn, earn, spend, ten floors, summit, rejoin
+
+# the documents (README store text, MARKETING.md clips, EYECANDY lists, this file naming every gate)
+cd D:/Claude/Roblox/fork-tower && py -3 tests/docs_check.py
 
 # open it in Roblox Studio and play it (see STUDIO.md §"What I ran")
 cd D:/Claude/Roblox/fork-tower && rojo build -o ForkTower.rbxlx

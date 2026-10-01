@@ -13,6 +13,31 @@ Concept brief: `../docs/game-radar/2026-09-09-roblox-game-radar.md`, section "4.
 
 ---
 
+## Store description
+
+The text for the experience page (pass 2, 2026-10-01): 977 characters (the dashboard allows 1000), plain ASCII,
+no emoji at all (Roblox rejected coloured-square emoji, `docs/publishing.md`). It is in English, like the other
+games' pages, and it says the game is in Norwegian, because the inscription a player must read is. Every number
+in it is held to the source by `tests/docs_check.py` (floors, the read, the liar floor, the bands, the hazard
+warning, the crowns, the board). No experience exists yet; the text goes live with the first publish
+(`tools/store_text.py`, night shift), never before.
+
+```
+Fork Tower: a Would You Rather obby where one door is a trap.
+
+Every floor has two doors. Both give you a trait; one also builds a longer, busier climb. The doors tell you nothing. Only the inscription does, and it takes 1.1 seconds to read while you stand still. Read it or gamble, and from floor 4 the warden may lie, and says so.
+
+10 floors make a run. At the summit your picks become a Build Reveal card: a title, a rarity and a score. Rebirth gives you a new tower.
+
+The tower changes as you climb: 6 worlds, from a candle-lit dungeon to an observatory and a crown of stars. Rare hazards give at least 3 seconds of warning and a red ring: step out of it. Every fork pad is safe ground to rest on.
+
+Summit again for rarer crowns at 5, 8 and 25 summits. The board behind your spawn shows the top 10 builds of all servers, or your friends. Ties go to whoever got there first.
+
+Free codes: FORK, WELCOME. Nothing in this game costs Robux. All text in the game is in Norwegian.
+```
+
+---
+
 ## The two promises, and where they are enforced
 
 Everything except these two sentences is presentation.
@@ -83,19 +108,21 @@ never touches a hazard, and 4.5% faster than one who walks into half of them.
 ```
 cd D:/Claude/Roblox/fork-tower
 luau tests/Fork.spec.luau          # 71 passed, 0 failed
-luau tests/Section.spec.luau       # 50 passed, 0 failed
+luau tests/Section.spec.luau       # 57 passed, 0 failed   (+ the exit's least climbing time, queued job I)
 luau tests/Build.spec.luau         # 31 passed, 0 failed
-luau tests/Codes.spec.luau         # 19 passed, 0 failed
+luau tests/Codes.spec.luau         # 20 passed, 0 failed   (+ no gamepasses in v1)
 luau tests/Rng.spec.luau           # 32 passed, 0 failed
 luau tests/responsive.spec.luau    # 70 passed, 0 failed
 luau tests/Climb.spec.luau         # 67 passed, 0 failed   (the environment: EYECANDY.md)
-luau tests/EnvConfig.spec.luau     # 361 passed, 0 failed
-luau tests/Pacing.spec.luau        # 87 passed, 0 failed   (measured hazard rarity + pacing)
+luau tests/EnvConfig.spec.luau     # 505 passed, 0 failed  (+ the bands' phases, the ring's lifetime)
+luau tests/Pacing.spec.luau        # 108 passed, 0 failed  (hazard rarity, pacing, stillness, crowns and the brag, the exit clock; 1-2 min)
+luau tests/Board.spec.luau         # 66 passed, 0 failed   (template: the public + friends board's rules)
 luau tests/EnvBands.spec.luau      # 124 passed, 0 failed  (template)
-luau tests/Hazards.spec.luau       # 102 passed, 0 failed  (template)
+luau tests/Hazards.spec.luau       # 102 passed, 0 failed  (template; Hazards.luau adds threatLive, held by EnvConfig.spec)
 luau tests/Rest.spec.luau          # 55 passed, 0 failed   (template)
 
 luau tests/readcost.measure.luau   # a MEASUREMENT, not a suite: where ReadSeconds comes from
+py -3 tests/docs_check.py          # 94 passed, 0 failed   (store text, MARKETING.md, EYECANDY lists, CLAUDE.md gates)
 ```
 
 `luau` is the CLI at
@@ -118,14 +145,18 @@ A game that has never been booted headless is not finished.
 ```
 cd D:/Claude/Roblox/robloxemu
 py -3 wrap.py --game ../fork-tower --out build/fork-tower.luau
-luau check_forktower.luau              # 129 passed, 0 failed
+luau check_forktower.luau              # 131 passed, 0 failed
+luau check_forktower_board.luau        # 115 passed, 0 failed  (the toplist board, RespawnLocation, the whole player path)
 luau check_forktower_plansecret.luau   # 96 passed, 0 failed   (the plan secret, REVIEW-4)
-luau check_forktower_env.luau          # 215 passed, 0 failed  (the environment through the real client)
+luau check_forktower_exit.luau         # 30 passed, 0 failed   (the exit cannot be teleported to, queued job I)
+luau check_forktower_env.luau          # 235 passed, 0 failed  (the environment through the real client)
 luau check_forktower_env_secret.luau   # 92 passed, 0 failed   (the environment reveals nothing)
 luau check_forktower_env_join.luau     # 37 passed, 0 failed   (the join card, slow loads)
-luau check_forktower_hud.luau          # PASS                  (HUD + ambience row, ten viewports)
-luau check_forktower_hud_open.luau     # 157 passed, 0 failed  (the phone drawers + Build Reveal card, open)
-luau check_forktower_hud_play.luau     # 324 passed, 0 failed  (the HUD keeps off the player's own character)
+luau check_forktower_sitdrop.luau      # 15 passed, 0 failed   (the ☕ Hvil sit survives its own drop)
+luau check_forktower_crown.luau        # 15 passed, 0 failed   (summits, the Topper leaderstat, the crown)
+luau check_forktower_hud.luau          # PASS                  (HUD + ambience row, sixteen viewports)
+luau check_forktower_hud_open.luau     # 259 passed, 0 failed  (the phone drawers + Build Reveal card, open)
+luau check_forktower_hud_play.luau     # 611 passed, 0 failed  (the HUD keeps off the player's own character)
 
 cd D:/Claude/Roblox/fork-tower
 luau tests/world.check.luau        # 71 passed, 0 failed   (needs the bundle above)
@@ -159,6 +190,7 @@ src/shared/Fork.luau      THE game: seed + floor -> which door is the trap  (pur
 src/shared/Section.luau   one themed obby section, clearability-checked     (pure)
 src/shared/Build.luau     the summit card from a pick list                  (pure)
 src/shared/Codes.luau     one-time redeemable codes                         (pure)
+src/shared/Board.luau     the toplist's rules: encode, ties, views, caches   (template from +1 Jump, verbatim)
 src/shared/Rng.luau       deterministic LCG (verbatim from the sibling games)
 src/shared/Responsive.luau  HUD sizing rules (verbatim)
 src/shared/Fx.luau        lighting presets + particles (+ a new `Fork` preset)
@@ -171,9 +203,12 @@ src/shared/TowerArt.luau  the scenery walls, far pieces, life, hazard models (cl
 src/server/Main.server.luau  authoritative: lanes, doors, sections, saving
 src/client/Hud.client.luau   display only (owns the ambience row's and the title card's place; keeps off the character)
 src/client/Ambience.client.luau  the tower changes as you climb (EYECANDY.md)
+src/client/Board.client.luau     draws YOUR view of the toplist on your own tower's board
 tests/*.spec.luau         one per pure module
 tests/world.check.luau    the BUILT world: the read, the lane pool, the saved skip (needs the emu)
 tests/readcost.measure.luau  where Config.Fork.ReadSeconds comes from
+tests/docs_check.py       the store text, the clip list and the Studio lists, held to the source
+MARKETING.md              the clip list for tools/film_game.py (vertical 1080x1920, 7-15 s)
 ```
 
 **Shared modules take their dependencies as ARGUMENTS.** A bare `require("./Rng")` resolves in the
@@ -208,12 +243,14 @@ Honest list. Every one of these is either scoped out of v1 or a gap between the 
 the code.
 
 **Not done at all**
-- **No Roblox experience, no publish, no commit, no push.** The tree is deliberately dirty.
-- **No marketing.** No thumbnail, no `MARKETING.md`, no store copy beyond the brief's paste-ready
-  description, no `marketing/shots/`.
-- **Gamepasses are dead.** `Config.Passes` has `ExtraSkip` and `GoldTrail` with id `0` and
-  `Enabled = false`; nothing reads them. `profile.passes` is loaded and saved and then never
-  consulted by a single code path.
+- **No Roblox experience, never published.** The work is committed to the repo (last: 327aee3, the
+  plan secret and the environment), but no experience exists and nothing has been published.
+- **Nothing filmed or shot.** The store text (above), the clip list (`MARKETING.md`) and the thumbnail
+  shot list (`EYECANDY.md` §11) are written; no thumbnail, no clip, no `marketing/shots/`. That is the night
+  shift's Studio work, and `tools/film_game.py` has no Fork Tower scenarios yet (tools owner).
+- **No gamepasses, on purpose.** The owner's standard allows no Robux cost in v1, so the dead
+  `Config.Passes` placeholders (`ExtraSkip`, `GoldTrail`) and `profile.passes` were deleted on
+  2026-09-30 (CLAUDE.md invariant 20). Extra skips come only from the free, public codes.
 
 **Gaps against the concept brief**
 - **Choices do not narrow the next fork.** The brief says "each pick narrows/reshapes the next
@@ -228,20 +265,24 @@ the code.
   are client-side and themed per band; see EYECANDY.md.) `Section` gives each hazard a `kind` (`spike`/`saw`/`brand`/
   `shard`) and the server writes it to an attribute, but every one of them renders as the same red
   neon cube. Nothing moves; they are static blocks that send you back to your checkpoint.
-- **The leaderboard ranks best build score, not run time.** A speedrun board would need a clock,
-  which does not exist.
+- **The board ranks best build score, not run time.** A speedrun board would need a clock, which does
+  not exist. Since pass 2 (2026-10-01) it is the owner's design: a board behind every tower's spawn with a
+  Public / Friends prompt, ties to whoever reached the score first (`check_forktower_board`).
 
 **Known thin spots**
-- **The inscription's own data still replicates.** `ForkPad.TellKind`, `ForkPad.RuleInverted` and
-  `Door.Marked` are set at build time, so a client running a script can resolve a fork without
-  paying the 1.1 s. A player without one cannot: the billboards, the door colours and the `rule`
-  payload are all gated on the read. Closing it means moving those three attributes behind the
-  read — which breaks `robloxemu/check_forktower.luau`'s `readFork` helper, and that file was
-  read-only to the pass that found this. See REVIEW-3.md.
-- **The HUD has never been measured by `hudcheck`.** The layout follows the same Responsive rules
-  as the sibling games and the panels are authored the same way, but `robloxemu/emu/hudcheck.luau`
-  has not been pointed at it across the six viewports, so "it fits a phone" is an argument here,
-  not a measurement.
+- **A script is still faster than a person.** The exit now counts only for a body standing on it once
+  the section could have been climbed (queued job I: the straight line at the player's own WalkSpeed,
+  CLAUDE.md invariant 16), so a teleport clears nothing and a trap costs a script its extra distance
+  (1.6 s on average at base speed). Measured on the climb model, a script that moves at 1.25x its
+  WalkSpeed in straight lines still climbs 2.35x faster than a perfect bunny-hopper and 12.5x faster
+  than a normal reader; ten floors' sections take it at least 22.6 s. What the server can prove without
+  physics ends there.
+- The inscription's own data no longer replicates while a fork is unread (REVIEW-3, fourth pass;
+  invariant 9), and the trap plan is a server secret (REVIEW-4; invariant 13). `check_forktower`
+  enumerates the unread fork's wire, `check_forktower_plansecret` holds the secret.
+- The HUD IS measured: `check_forktower_hud` (hudcheck, sixteen viewports), `_hud_open` (the drawers
+  and the Build Reveal card open) and `_hud_play` (the HUD against the player's own character). No
+  human has seen it on a real phone.
 - **Ten floors of a ten-floor game is the whole game.** There is no endless mode, no difficulty
   tier beyond the level curve, and reaching the summit leaves you with one button: Rebirth.
 - **One trap shape.** Every trap is "the section is four platforms longer and two hazards busier".

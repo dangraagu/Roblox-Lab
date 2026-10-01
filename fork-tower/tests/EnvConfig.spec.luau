@@ -118,6 +118,65 @@ for _, b in ipairs(bands) do
 	truthy(b.sky.StarCount >= 0 and b.sky.StarCount <= 5000, b.id .. ": StarCount within Roblox's 0..5000")
 end
 
+-- Every floor changes the world (second review, 2026-09-30, finding 5). A band spans two floors, so a slow
+-- climber could stand in one unchanging band for 2.5 minutes. Each band below the summit now has a PHASE
+-- on its second floor: a layer (Config.Env.Layers, EnvBands.layerWeight/overlay, the template's own
+-- mechanism) that glides in over the band's first section, is whole at the band's second fork and hands
+-- over to the next band with it. At every fork it is 0 or 1, so the look at a fork is still a function of
+-- the floor number alone (invariant 14). Pacing.spec measures the result: the longest the world stands
+-- still in a run.
+do
+	local layers = Env.Layers
+	truthy(type(layers) == "table", "Config.Env.Layers exists (the bands' second-floor phases)")
+	local byBand = {}
+	for _, layer in layers or {} do
+		local bi = EnvBands.indexOf(bands, layer.band)
+		truthy(bi ~= nil, tostring(layer.id) .. ": names a band (" .. tostring(layer.band) .. ")")
+		if bi then byBand[bi] = (byBand[bi] or 0) + 1 end
+		truthy(type(layer.feather) == "number" and layer.feather > 0 and layer.feather <= 1, tostring(layer.id) .. ": glides in and out (0 < feather <= 1)")
+		if bi then
+			local b, nb = bands[bi], bands[bi + 1]
+			-- whole at the band's second fork, nothing at any other fork
+			for k = 0, FLOORS do
+				local w = EnvBands.layerWeight(layer, k)
+				if k == b.from + 1 then
+					eq(w, 1, string.format("%s: whole at its band's second fork (floors climbed %d)", layer.id, k))
+				else
+					eq(w, 0, string.format("%s: absent at fork %d (a fork shows its band, or its band's phase, whole)", layer.id, k + 1))
+				end
+			end
+			-- it only touches fields its band defines (a typo would be written to a property that does not exist)
+			local visible = false
+			for _, g in GROUPS do
+				for k, v in layer[g] or {} do
+					truthy(b[g] ~= nil and b[g][k] ~= nil, string.format("%s.%s.%s is a field its band defines", layer.id, g, k))
+					local base = b[g] and b[g][k]
+					if type(v) == "number" and type(base) == "number" then
+						local d = math.abs(v - base)
+						if (k == "ClockTime" and d >= 0.5) or (k == "Brightness" and d >= 0.15) or (k == "Density" and d >= 0.05)
+							or (k == "FogEnd" and d >= 60) or (k == "StarCount" and d >= 400) or (k == "Contrast" and d >= 0.05) then
+							visible = true
+						end
+					end
+				end
+			end
+			truthy(visible, layer.id .. ": the phase is visibly different from its band (a clock, brightness, haze, fog, star or contrast change)")
+			-- the sun keeps moving forward: the phase's time of day lies between its band's and the next band's
+			local ct = layer.lighting and layer.lighting.ClockTime
+			if ct ~= nil and nb then
+				truthy(ct >= b.lighting.ClockTime and ct <= nb.lighting.ClockTime,
+					string.format("%s: ClockTime %.2f lies between %s's %.2f and %s's %.2f (the sun never runs backwards)",
+						layer.id, ct, b.id, b.lighting.ClockTime, nb.id, nb.lighting.ClockTime))
+			end
+		end
+	end
+	for bi = 1, #bands - 1 do
+		if bands[bi + 1].from - bands[bi].from >= 2 then
+			eq(byBand[bi] or 0, 1, bands[bi].id .. " spans two floors, so its second floor has exactly one phase")
+		end
+	end
+end
+
 -- pieces, life and weather name things the art can build, and weather fits the emitter budget
 for _, b in ipairs(bands) do
 	truthy(type(b.pieces) == "table", b.id .. " lists its scenery pieces")
@@ -238,6 +297,84 @@ do
 	print(string.format("  on-screen launches: %d of %d on screen from launch until the lane locks", total - bad, total))
 	eq(bad, 0, "every band's hazards start on screen and stay there until the lane locks (" .. (total - bad) .. "/" .. total
 		.. (if example then "; e.g. " .. example else "") .. ")")
+end
+
+-- The red ring and the chip's warning stay up exactly as long as a hit can still land (second review,
+-- 2026-09-30, finding 3). They used to go at `arriveAt`, but Hazards.checkHit runs until `duration`, and
+-- the lane aims up to AimJitter (1.0) off the ring's centre, so a player standing still on the far side of
+-- the ring was knocked after both had gone: 262 of 31 318 hits, up to 0.083 s late (the reviewer's probe,
+-- real Hazards and Config). The client now draws both while Hazards.threatLive says the rest of the flight
+-- can hit someone inside the ring (Ambience.client, TowerArt:showHazard). This is the reviewer's probe on
+-- Fork Tower's own kinds, 4000 plans each, with the rule the client uses.
+do
+	truthy(type(Hazards.threatLive) == "function", "Hazards.threatLive exists (how long the ring and the warning stay up)")
+	if type(Hazards.threatLive) == "function" then
+		local st = 12345
+		local function rand() st = (1664525 * st + 1013904223) % 4294967296; return st / 4294967296 end
+		local dt = 1 / 60
+		local hits, afterArrival, afterRing, trials, lingerMax, stayedToEnd = 0, 0, 0, 0, 0, 0
+		local unsound = 0
+		local names = {}
+		for name in Hz.Kinds do table.insert(names, name) end
+		table.sort(names)
+		for _, name in names do
+			for _ = 1, 4000 do
+				local aim = { x = 0, y = 10, z = 0 }
+				local plan = Hazards.plan(Hz, name, aim, rand() * math.pi * 2, rand, math.rad(-30 + 60 * rand()))
+				plan.locked = true -- the player stood still, so the lane never moved
+				local z = Hazards.zone(plan, Hz.PlayerRadius)
+				local r, a = z.radius * math.sqrt(rand()) * 0.999, rand() * math.pi * 2
+				local pos = { x = z.x + r * math.cos(a), y = aim.y, z = z.z + r * math.sin(a) }
+				trials += 1
+				local goneAt = nil
+				while plan.t < plan.duration do
+					local t0 = plan.t
+					plan.t += dt
+					-- the client's rule for this frame: the ring and the warning are drawn iff the flight from
+					-- the frame's start can still hit someone inside the ring
+					local shown = Hazards.threatLive(plan, Hz.PlayerRadius, t0)
+					-- when the ring goes by GEOMETRY (after a hit it is over anyway, and that is not "out of reach")
+					local wasHit = plan.hit
+					plan.hit = false
+					if goneAt == nil and not Hazards.threatLive(plan, Hz.PlayerRadius, t0) then goneAt = t0 end
+					plan.hit = wasHit
+					if not plan.hit and Hazards.checkHit(plan, t0, plan.t, pos, Hz.PlayerRadius) then
+						plan.hit = true
+						hits += 1
+						if t0 > plan.arriveAt then afterArrival += 1 end
+						if not shown then afterRing += 1 end
+					end
+				end
+				if goneAt == nil then stayedToEnd += 1 else lingerMax = math.max(lingerMax, goneAt - plan.arriveAt) end
+				-- soundness, at any height a climber reaches: from the frame the ring goes, no point inside it,
+				-- from 10 studs below the aim to a full jump above it, can be hit by the rest of the flight
+				if goneAt ~= nil then
+					local fresh = table.clone(plan)
+					fresh.hit = false
+					for _ = 1, 12 do
+						local qr, qa = z.radius * math.sqrt(rand()), rand() * math.pi * 2
+						local q = { x = z.x + qr * math.cos(qa), y = aim.y - 10 + (10 + Config.Jump.MaxJumpHeight) * rand(), z = z.z + qr * math.sin(qa) }
+						if Hazards.checkHit(fresh, goneAt, fresh.duration, q, Hz.PlayerRadius) then unsound += 1 end
+					end
+				end
+			end
+		end
+		print(string.format("  ring rule: %d stand-still players inside the ring, %d hit, %d of them after arriveAt (the old ring was gone), 0 allowed after the ring goes; the ring goes at most %.2f s after arrival",
+			trials, hits, afterArrival, lingerMax))
+		truthy(afterArrival > 0, string.format("set-up: some players inside the ring ARE reached after arriveAt (%d)", afterArrival))
+		eq(afterRing, 0, "no player standing inside the ring is hit once the ring and the warning have gone")
+		eq(unsound, 0, "and from the frame it goes, no point inside the ring, at any height a climber reaches, can be hit")
+		eq(stayedToEnd, 0, "the ring does not linger to the end of the flight: it goes once the hazard is out of reach")
+		truthy(lingerMax <= 0.5, string.format("and within 0.5 s of arrival for Fork Tower's kinds (%.2f s)", lingerMax))
+		local p2 = Hazards.plan(Hz, "bee", { x = 0, y = 0, z = 0 }, 0, rand)
+		eq(Hazards.threatLive(p2, Hz.PlayerRadius), true, "a hazard just launched is live")
+		p2.hit = true
+		eq(Hazards.threatLive(p2, Hz.PlayerRadius), false, "a hazard that has hit is over (it hits once)")
+		-- and once its flight has ended nothing is live, whatever the lane's geometry (the resume session's
+		-- sweep, 2026-10-01: a threatLive that said "live" past the end survived every gate)
+		local p3 = Hazards.plan(Hz, "bee", { x = 0, y = 0, z = 0 }, 0, rand)
+		eq(Hazards.threatLive(p3, Hz.PlayerRadius, p3.duration + 1 / 60), false, "once the flight is over, nothing is live")
+	end
 end
 
 --================================================================ rest

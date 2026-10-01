@@ -168,8 +168,16 @@ local function climb(plr, lane, level)
 	end
 	local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
 	if exit == nil or hrp == nil then return false end
+	-- The server clears a floor only for a body standing on the exit once the section could have been
+	-- climbed (queued job I, 2026-09-30; robloxemu/check_forktower_exit.luau). Stand on it, touch it,
+	-- and give the server the time the climb takes (its own poll sees the body there).
+	hrp.CFrame = CFrame.new(exit.Position + Vector3.new(0, exit.Size.Y / 2 + 3, 0))
 	exit.Touched:Fire(hrp)
 	h:advance(0.5)
+	for _ = 1, 100 do
+		if lane:FindFirstChild("Fork_" .. (level + 1)) ~= nil or lane:FindFirstChild("Summit") ~= nil then break end
+		h:advance(0.1)
+	end
 	return true
 end
 

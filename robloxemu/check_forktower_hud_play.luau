@@ -52,6 +52,20 @@ for _, v in HudCheck.VIEWPORTS do table.insert(VIEWPORTS, v) end
 table.insert(VIEWPORTS, { name = "phone landscape 844", w = 844, h = 390, touch = true })
 table.insert(VIEWPORTS, { name = "phone landscape 926", w = 926, h = 428, touch = true })
 table.insert(VIEWPORTS, { name = "window 1280", w = 1280, h = 720, touch = false })
+-- NARROW LANDSCAPE PHONES (second review, 2026-09-30, finding 2). Every landscape viewport this file
+-- measured was 640 px wide or more, and the row's move into the header needed about 617 px: below that it
+-- stayed in the centred stack, over the avatar, and the ☰ Meny drawer (the only Rebirth button) came out
+-- 1 px tall. 568x320 is the iPhone SE (1st gen) and iPod touch; 592x360 is a 360x640 dp Android phone
+-- with its navigation bar at the side; 480x270 is the smallest the reviewer measured.
+local NARROW = {
+	{ name = "narrow landscape 610", w = 610, h = 343, touch = true },
+	{ name = "Android landscape, side nav bar", w = 592, h = 360, touch = true },
+	{ name = "iPhone SE landscape", w = 568, h = 320, touch = true },
+	{ name = "narrow landscape 540", w = 540, h = 304, touch = true },
+	{ name = "narrow landscape 520", w = 520, h = 292, touch = true },
+	{ name = "narrow landscape 480", w = 480, h = 270, touch = true },
+}
+for _, v in NARROW do table.insert(VIEWPORTS, v) end
 
 local h = Harness.new({ bundle = require("./build/fork-tower"), name = "fork-tower", viewport = { VIEWPORTS[1].w, VIEWPORTS[1].h }, touch = VIEWPORTS[1].touch })
 assert(h:tryRun("server/Main.server"))
@@ -166,6 +180,10 @@ local TRANSIENT = { Toast = true, Reveal = true }
 -- the game's one indispensable panel and was not moved. It may not end lower than it did at HEAD, and it
 -- is on EYECANDY.md's Studio list. Nothing the environment work draws is exempt from anything here.
 local HEAD_OVERLAP = { ["small phone"] = { Rule = 138.5 } }
+-- The same inscription, at the same place, on the narrow landscape phones: at scale 0.6 (the HUD's floor)
+-- it ends at y 138 whatever the width, and the shorter the screen, the higher the avatar's head. Held
+-- there, not lower, and reported like the 640x300 case (EYECANDY.md §10 item 24).
+for _, v in NARROW do HEAD_OVERLAP[v.name] = { Rule = 138.5 } end
 local exceptionsSeen = {}
 
 --======================================================================= A + C: ordinary play
@@ -208,6 +226,20 @@ for _, v in VIEWPORTS do
 	if v.touch then
 		truthy(c ~= nil and c.sh >= MIN_TAP - 0.5 and b ~= nil and b.sh >= MIN_TAP - 0.5 and b.sw >= MIN_TAP - 0.5,
 			string.format("%s the chip and the ☕ button keep a thumb's height (chip %s, button %s)", where, c and span(c) or "-", b and span(b) or "-"))
+	end
+	-- the narrow landscape phones (second review 2026-09-30): the counter gives up width before the drawer
+	-- toggles give up their words, so from 568 px up they still say "☰ Meny" and "🏆 Topp"; only below that
+	-- are they a thumb's square with the glyph alone, and still a thumb's square
+	local menuT, topT = root:FindFirstChild("MenuToggle"), root:FindFirstChild("TopToggle")
+	if menuT and menuT.Visible and v.touch and v.w < 640 and v.w > v.h then
+		local worded = string.find(menuT.Text, "Meny", 1, true) ~= nil and string.find(topT.Text, "Topp", 1, true) ~= nil
+		if v.w >= 568 then
+			truthy(worded, string.format("%s the drawer toggles keep their words (%s | %s)", where, menuT.Text, topT.Text))
+		else
+			truthy(not worded, string.format("%s the drawer toggles are glyphs (%s | %s)", where, menuT.Text, topT.Text))
+			local mr = byObj[menuT]
+			truthy(mr ~= nil and mr.sw >= MIN_TAP - 0.5 and mr.sh >= MIN_TAP - 0.5, string.format("%s and still a thumb's square (%s)", where, mr and span(mr) or "-"))
+		end
 	end
 end
 
@@ -281,6 +313,127 @@ for _, d in DRAWERS do
 	h:advance(0.1)
 end
 showCard(false)
+
+--======================================================================= D: climbing on a landscape phone
+
+-- OWNER DECISION, 2026-09-30 ("take the recommended option for all"; EYECANDY.md §10 items 22 and 23). On
+-- a landscape phone the inscription panel, centred just above the character, hid 64-74 % of a hazard's
+-- flight frames at pitch -15/-30 (review 2026-09-24), and the server's toast covered the character's
+-- head for 3.5 s after every notice. The inscription only matters at a fork, and hazards fly only while
+-- the player climbs a section. So while the player climbs, on a landscape phone (the layout is compact
+-- and wider than tall), the inscription is not drawn and the toast takes its slot, above the character.
+-- At a fork both are back where they were: nothing the read needs is ever hidden.
+do
+	local Hazards = h:_require(h.ReplicatedStorage:FindFirstChild("Hazards"))
+	local remotes = h.ReplicatedStorage:FindFirstChild("ForkRemotes")
+	local lane = nil
+	for _, f in h.workspace:FindFirstChild("Towers"):GetChildren() do
+		if f:GetAttribute("Owner") == player.UserId then lane = f end
+	end
+	truthy(lane ~= nil, "D set-up: the player has a lane")
+	-- floor 1's door, unread (a guess): the server puts the player on the section, stage "climb"
+	lane:FindFirstChild("Fork_1"):FindFirstChild("Door_1_1"):FindFirstChildOfClass("ProximityPrompt").Triggered:Fire(player)
+	h:advance(0.3)
+	truthy(lane:FindFirstChild("Section_1") ~= nil, "D set-up: the player is climbing floor 1's section")
+	local function landscapePhone(v)
+		return (v.w < 900 or v.h - INSET < 500) and v.w > v.h
+	end
+	-- the hazards' own flights, as the default camera draws them (the reviewer's measurement, 2026-09-24)
+	local st = 12345
+	local function rand() st = (1664525 * st + 1013904223) % 4294967296; return st / 4294967296 end
+	local kinds = {}
+	for k in Config.Hazards.Kinds do table.insert(kinds, k) end
+	table.sort(kinds)
+	local function screenOf(v, pitchDeg, p)
+		local r = project(v, pitchDeg, { Vector3.new(p.x, p.y, p.z) })
+		return r.sx, r.sy
+	end
+	local landscapes, worstShare, strikeHidden = 0, 0, 0
+	local shareOf = {} -- viewport -> the worst share of a flight behind the HUD over the three pitches
+	for _, v in VIEWPORTS do
+		local top, byObj = measure(v)
+		local where = string.format("[%s %dx%d] climbing", v.name, v.w, v.h)
+		local rule = top.Rule
+		if landscapePhone(v) then
+			landscapes += 1
+			truthy(rule == nil or not rule.shown, where .. ": on a landscape phone the inscription is not drawn while climbing")
+			local toast = top.Toast
+			truthy(toast ~= nil, where .. ": set-up: the toast's slot is measured")
+			if toast then
+				for _, box in playBoxes(v) do
+					-- in the inscription's slot it inherits the inscription's one bounded exception on the
+					-- short phones (above: never lower than y 138.5, the crown of a tall avatar's head)
+					local bound = HEAD_OVERLAP[v.name] and HEAD_OVERLAP[v.name].Rule
+					if overlaps(toast, box.r) and bound ~= nil and toast.sy + toast.sh <= bound then
+						exceptionsSeen[string.format("%s Toast (in the inscription's slot) ends at y %.0f, box top %.0f", where, toast.sy + toast.sh, box.r.sy)] = true
+					else
+						truthy(not overlaps(toast, box.r), string.format("%s: the toast's slot keeps off %s (%s, %s)", where, box.what, span(toast), span(box.r)))
+					end
+				end
+			end
+			-- what still stands between the player and a hazard's flight: every always-on panel
+			-- (the AmbienceRow frame itself is a transparent container: what it draws is the chip and the button)
+			local rects = {}
+			for name, r in top do
+				if r.shown and not TRANSIENT[name] and name ~= "AmbienceRow" and r.sw > 1 and r.sh > 1 then table.insert(rects, r) end
+			end
+			for _, o in { chip, restBtn } do
+				local r = byObj[o]
+				if r and r.shown then table.insert(rects, r) end
+			end
+			local function hidden(x, y)
+				for _, r in rects do
+					if x >= r.sx and x <= r.sx + r.sw and y >= r.sy and y <= r.sy + r.sh then return true end
+				end
+				return false
+			end
+			for _, pitch in PITCHES do
+				local frames, behind = 0, 0
+				for i = 1, 160 do
+					local plan = Hazards.plan(Config.Hazards, kinds[1 + (i - 1) % #kinds], { x = 0, y = 0, z = 0 }, 0, rand, math.rad(pitch))
+					local t = 0
+					while t <= plan.arriveAt + 1e-9 do
+						local x, y = screenOf(v, pitch, Hazards.positionAt(plan, t))
+						frames += 1
+						if hidden(x, y) then behind += 1 end
+						t += 1 / 30
+					end
+					local ix, iy = screenOf(v, pitch, Hazards.positionAt(plan, plan.arriveAt))
+					if hidden(ix, iy) then strikeHidden += 1 end
+				end
+				worstShare = math.max(worstShare, behind / frames)
+				shareOf[where] = math.max(shareOf[where] or 0, behind / frames)
+			end
+		else
+			truthy(rule ~= nil and rule.shown, where .. ": everywhere else the inscription stays where it is")
+		end
+	end
+	local list = {}
+	for w, sh in shareOf do table.insert(list, string.format("%s %.0f%%", w, 100 * sh)) end
+	table.sort(list)
+	print(string.format("  climbing on %d landscape phone viewports, the share of a hazard's flight frames behind the HUD (worst of 3 pitches, 160 flights each): %s; strike point hidden %d times",
+		landscapes, table.concat(list, ", "), strikeHidden))
+	truthy(landscapes >= 8, string.format("D set-up: the landscape phones were among those measured (%d)", landscapes))
+	truthy(strikeHidden == 0, string.format("climbing on a landscape phone, no hazard's strike point is ever behind the HUD (%d)", strikeHidden))
+	-- the phones the review measured (64-74 % behind the inscription on 800x360) and the iPhone SE
+	for _, name in { "phone landscape", "small phone", "phone landscape 844", "phone landscape 926", "iPhone SE landscape" } do
+		for w, sh in shareOf do
+			if string.find(w, "[" .. name .. " ", 1, true) == 1 then
+				truthy(sh <= 0.15, string.format("%s: at most 15 %% of any hazard's flight is behind the HUD while climbing (%.0f %%)", w, 100 * sh))
+			end
+		end
+	end
+	truthy(worstShare < 0.5, string.format("and on every landscape viewport, less than half of any flight (worst %.0f %%, a 480x270 screen, behind the band chip in the header)", 100 * worstShare))
+	-- back at a fork (a rebirth puts the player on floor 1's pad): the inscription is back
+	remotes:FindFirstChild("Rebirth"):simulateFireServer(player)
+	h:advance(0.5)
+	for _, v in VIEWPORTS do
+		if landscapePhone(v) then
+			local top = measure(v)
+			truthy(top.Rule ~= nil and top.Rule.shown, string.format("[%s %dx%d] at a fork the inscription is drawn again", v.name, v.w, v.h))
+		end
+	end
+end
 
 local notes = {}
 for w in toastOverAvatar do table.insert(notes, w) end

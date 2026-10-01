@@ -56,6 +56,13 @@ for code, cfgReward in pairs(Config.Codes) do
 end
 eq(#empty, 0, "every configured code grants at least one skip (" .. table.concat(empty, ",") .. ")")
 
+-- NO ROBUX IN V1 (CLAUDE.md "Next" item 5, "wire or delete Config.Passes and profile.passes", decided
+-- 2026-09-30 by the owner's "take the recommended option for all" together with docs/complete-game-standard.md
+-- §3: "Never a Robux cost in v1, and never gambling or pay-to-win"). ExtraSkip would have sold the one thing
+-- a trap costs, so wiring it is ruled out; the placeholders are deleted rather than left dead. Codes are
+-- the only way to more skips, and they are free and public.
+eq(Config.Passes, nil, "no gamepass placeholders: Config.Passes is gone (no Robux cost in v1)")
+
 -- CONTROL: adding a code the player has not redeemed changes nothing about the existing ones.
 local extended = {}
 for k, v in pairs(Config.Codes) do extended[k] = v end

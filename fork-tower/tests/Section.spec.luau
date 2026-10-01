@@ -477,6 +477,53 @@ do
 	truthy(a.theme ~= b.theme, "CONTROL: ...and the theme really did change (the control is not a no-op)")
 end
 
+--============================================================================ the exit cannot be teleported to
+
+-- QUEUED JOB I (found 2026-09-24 by the plan-secret attacker, REVIEW-4.md §9.8 item 5): the exit's
+-- Touched handler checked only who touched it and the profile's floor and stage. A client owns its
+-- character's physics, so a script could choose a door and teleport onto the exit at once: to a script
+-- a trap cost nothing whatever it predicted, and the read-versus-guess economy priced only honest
+-- players. The server now clears a floor only once the section has had time to be climbed:
+-- Section.minClimbSeconds, the straight line in the ground plane from where the door drops the player
+-- (platform 1's respawn point) to where a body can first touch the exit platform (its footprint grown by
+-- the character's half-width), at the player's own WalkSpeed times Config.Exit.SpeedSlack. Nobody
+-- moves sideways faster than their WalkSpeed, so no honest climb can be faster; Pacing.spec measures the
+-- margin against the climb model, including a climber who jumps again the instant they land.
+do
+	truthy(type(Section.minClimbSeconds) == "function", "Section.minClimbSeconds exists (the least time an honest climb of a section takes)")
+	truthy(type(Config.Exit) == "table" and type(Config.Exit.SpeedSlack) == "number" and Config.Exit.SpeedSlack >= 1,
+		"Config.Exit.SpeedSlack exists and never assumes a climber slower than their WalkSpeed (>= 1)")
+	if type(Section.minClimbSeconds) == "function" and type(Config.Exit) == "table" then
+		-- by hand: a section whose exit is 30 studs straight ahead of the entry, at 16 studs/s
+		local slack = Config.Exit.SpeedSlack
+		local half, ch = Config.Tower.TileSize / 2, Config.World.CharacterHalfWidth
+		local fake = { platforms = {
+			{ index = 1, dx = 0, dy = 3, dz = 0, size = Config.Tower.TileSize, safeDx = 0, safeDz = 0 },
+			{ index = 2, dx = 0, dy = 6, dz = 30 + half + ch, size = Config.Tower.TileSize, safeDx = 0, safeDz = 30 + half + ch },
+		} }
+		local t = Section.minClimbSeconds(Config, fake, 16)
+		truthy(math.abs(t - 30 / (16 * slack)) < 1e-9, string.format("30 studs to the exit's reach at 16 studs/s: %.3f s (want %.3f)", t, 30 / (16 * slack)))
+		truthy(math.abs(Section.minClimbSeconds(Config, fake, 32) - t / 2) < 1e-9, "twice the speed, half the time")
+		-- an exit in reach of the entry costs nothing (and never goes negative)
+		fake.platforms[2].dz = half
+		eq(Section.minClimbSeconds(Config, fake, 16), 0, "an exit already in reach of the entry: 0 s")
+		-- every real section: positive, and a trap (a longer section) is never cheaper than the safe door
+		local cheaper, zero, n = 0, 0, 0
+		for seed = 1, 200 do
+			for level = 1, Config.Tower.Floors do
+				local safe = Section.build(Config, seed, level, "fire", false, Rng)
+				local trap = Section.build(Config, seed, level, "fire", true, Rng)
+				local ts, tt = Section.minClimbSeconds(Config, safe, Config.WalkSpeed), Section.minClimbSeconds(Config, trap, Config.WalkSpeed)
+				n += 1
+				if ts <= 0 then zero += 1 end
+				if tt < ts then cheaper += 1 end
+			end
+		end
+		eq(zero, 0, string.format("every real section takes some time to climb (%d sections)", n))
+		truthy(cheaper <= n * 0.1, string.format("a trapped section is rarely quicker to cross than its safe twin (%d of %d)", cheaper, n))
+	end
+end
+
 --============================================================================ done
 
 print(string.format("Section: %d passed, %d failed", passed, failed))

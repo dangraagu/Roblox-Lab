@@ -185,4 +185,121 @@ do
 	truthy(n.minutesPerRun >= 3 and n.minutesPerRun <= 7, string.format("a normal ten-floor run takes 3-7 min (%.2f)", n.minutesPerRun))
 end
 
+--================================================================ the world is never still for long
+
+-- Second review, 2026-09-30 (finding 5): "never more than 150 s for a slow climber" was asserted only on
+-- the 80-run MEAN of band entry times, for readers. One run at a time (200 per row), a slow reader stayed
+-- in one band for more than 150 s in 31 of 1000 band stays and a slow guesser in 198 of 1000, up to
+-- 234 s: a band spans two floors, and a guesser's trapped section is four platforms longer. The world
+-- changes only when the climb moves a band's weight or a layer's weight (the client blends both by the
+-- player's progress), so this measures, per run, the longest stretch from a run's first fork to its
+-- summit in which neither moves (PlayModel: stats.stillMax), for every profile and both strategies. A band
+-- still spans two floors; its second floor is its own phase (Config.Env.Layers), so every floor's climb
+-- changes the world.
+do
+	local STILL_MAX = 90
+	for _, name in { "fast", "normal", "slow" } do
+		for _, strat in { "read", "guess" } do
+			local worst, over, sum = 0, 0, 0
+			for seed = 1, 200 do
+				local s = PlayModel.play({ cfg = Config, profile = Config.Pacing.Profiles[name], runs = 1, seed = seed * 17 + 3,
+					firstRunSeed = seed, strategy = strat, behavior = "dodge", cameraPitch = -15, dt = 0.05 })
+				local m = s.stillMax[1] or math.huge
+				worst = math.max(worst, m)
+				sum += m
+				if m > STILL_MAX then over += 1 end
+			end
+			print(string.format("  %-6s %-5s: the world stood still at most %.0f s in a run (mean of the run maxima %.0f s, 200 runs)", name, strat, worst, sum / 200))
+			eq(over, 0, string.format("%s/%s: in no run does the world stand still for more than %d s (worst %.0f s)", name, strat, STILL_MAX, worst))
+		end
+	end
+end
+
+--================================================================ the long-term goal: a rarer crown
+
+-- OWNER DECISION, 2026-09-30 ("take the recommended option for all"; EYECANDY.md §12 "No progress across
+-- runs", which offered one more star per rebirth or a rarer crown at 5 / 10 / 25 rebirths and left it to
+-- the owner). Taken: a rarer crown of stars at the summit at 5, 10 and 25, counted in SUMMITS reached
+-- (Config.Env.CrownTiers), not rebirths: Rebirth works from any floor every Config.Limits.RebirthCooldown
+-- (3 s), so 25 "rebirths" are 75 s of button presses, and a goal a button can buy is not a goal. Pass 2
+-- (2026-10-01) moved the ice crown from 10 to 8 summits so that it is the brag (below). Measured here in
+-- minutes of normal play (a reader who reacts, the Pacing profile).
+do
+	local tiers = Config.Env.CrownTiers
+	truthy(type(tiers) == "table" and #tiers >= 3, "Config.Env.CrownTiers exists, with at least three crowns (the gold one and two rarer)")
+	if type(tiers) == "table" and #tiers >= 3 then
+		local n = play("normal", "read", "dodge")
+		eq(tiers[1].summits, 0, "the first crown is the one every summit has")
+		local increasing, mins = true, {}
+		for i, t in tiers do
+			if i > 1 and t.summits <= tiers[i - 1].summits then increasing = false end
+			mins[i] = t.summits * n.minutesPerRun
+		end
+		truthy(increasing, "each rarer crown needs more summits than the one before")
+		local parts = {}
+		for i, t in tiers do parts[#parts + 1] = string.format("%s %d summits = %.0f min", t.id, t.summits, mins[i]) end
+		print("  crowns, in minutes of normal play: " .. table.concat(parts, ", "))
+		truthy(mins[2] >= 15 and mins[2] <= 45, string.format("the first rarer crown comes within 15-45 min of normal play (%.0f min)", mins[2]))
+		truthy(mins[#tiers] >= 60, string.format("and the rarest is a long-term goal, over an hour of normal play (%.0f min)", mins[#tiers]))
+		truthy(tiers[#tiers].summits * Config.Limits.RebirthCooldown < mins[#tiers] * 60,
+			"a crown counted in rebirths would have been 3 s of button presses per step; counted in summits it is a climb")
+
+		-- THE BRAG MOMENT (docs/complete-game-standard.md §2: "a brag moment within about 30-45 minutes of
+		-- normal play, and a long-term goal beyond it"; +1 Jump's is reaching space, held the same way in its
+		-- Pacing.spec). Pass 2, 2026-10-01: the summit's Build Reveal card comes after 4.5 min and the crowns
+		-- were measured at 23, 45.4 and 114 min, so no crown landed inside the window (the ice crown at 10
+		-- summits was 0.4 min past it, at the edge, not in it). Config.Env.BragCrown names the crown that is the
+		-- brag; it must land in the window and near its MIDDLE (as +1 Jump's space band must), so a retune
+		-- that drifts a few minutes cannot silently leave it. The rarest crown is the long-term goal: at least
+		-- twice the brag's time, and reachable in a few sessions (under 3 h), as +1 Jump's galaxy.
+		local bragIdx = nil
+		for i, t in tiers do
+			if t.id == Config.Env.BragCrown then bragIdx = i end
+		end
+		truthy(bragIdx ~= nil and bragIdx > 1, "Config.Env.BragCrown names one of the rarer crowns (" .. tostring(Config.Env.BragCrown) .. ")")
+		if bragIdx then
+			local brag = mins[bragIdx]
+			print(string.format("  the brag (%s, %d summits): %.1f min of normal play; the long-term goal (%s, %d summits): %.1f min",
+				tiers[bragIdx].id, tiers[bragIdx].summits, brag, tiers[#tiers].id, tiers[#tiers].summits, mins[#tiers]))
+			truthy(brag >= 30 and brag <= 45, string.format("a normal player wins the brag crown in 30-45 min of play (%.1f)", brag))
+			truthy(math.abs(brag - 37.5) <= 5, string.format("near the MIDDLE of the window, not an edge (%.1f min)", brag))
+			truthy(bragIdx < #tiers and mins[#tiers] >= 2 * brag, string.format(
+				"the rarest crown is a long-term goal beyond the brag: at least twice its time (%.1f vs %.1f min)", mins[#tiers], brag))
+			truthy(mins[#tiers] <= 180, string.format("but reachable in a few sessions, under 3 h of play (%.1f min)", mins[#tiers]))
+		end
+	end
+end
+
+--================================================================ the exit's clock never refuses an honest climber
+
+-- Queued job I (2026-09-30): the server clears a floor only once Section.minClimbSeconds has passed since
+-- the door dropped the player on the section (a teleport to the exit used to clear it at once). It must
+-- never refuse an honest climber. Measured on the climb model, section by section, with each climber's
+-- own speed and jump (their traits so far): the three human profiles, and a "bunny-hopper" who never
+-- lines up a hop and never misses, jumping again the instant they land: every hop is only its airtime.
+-- That climber is faster than any profile in Config.Pacing; the rule must leave room even for them.
+do
+	local Section = require("../src/shared/Section")
+	local hopper = { lineUp = 0, miss = 0, recover = 0, fork = 0, summit = 0 }
+	-- the hopper is the tight case, so it is timed on a finer step (a coarse step only ever lengthens a hop)
+	local rows = { { "fast", P.fast, 0.05 }, { "normal", P.normal, 0.05 }, { "slow", P.slow, 0.05 }, { "bunny-hopper", hopper, 0.01 } }
+	for _, row in rows do
+		local refused, n, tightest = 0, 0, math.huge
+		for _, strat in { "read", "guess" } do
+			for seed = 1, 30 do
+				PlayModel.play({ cfg = Config, profile = row[2], runs = 1, seed = seed * 31 + 5, firstRunSeed = seed,
+					strategy = strat, behavior = "dodge", cameraPitch = -15, dt = row[3],
+					onClimb = function(_, seconds, geo, speed)
+						local need = if type(Section.minClimbSeconds) == "function" then Section.minClimbSeconds(Config, geo.sec, speed) else math.huge
+						n += 1
+						if seconds < need then refused += 1 end
+						tightest = math.min(tightest, seconds / math.max(need, 1e-9))
+					end })
+			end
+		end
+		print(string.format("  exit clock: %-12s %d climbs, the quickest took %.2fx the least time the exit asks for", row[1], n, tightest))
+		eq(refused, 0, string.format("%s: no honest climb reaches the exit before the section could have been climbed (%d climbs)", row[1], n))
+	end
+end
+
 print(string.format("Pacing: %d passed, %d failed", passed, failed))

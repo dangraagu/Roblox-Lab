@@ -35,7 +35,21 @@ local MAX_CONTROL_PAD = 150
 local passed, failed = 0, 0
 local function truthy(c, msg) if c then passed += 1 else failed += 1; print("FAIL: " .. msg) end end
 
-local VIEWPORTS = HudCheck.VIEWPORTS
+-- NARROW LANDSCAPE PHONES (second review, 2026-09-30, finding 2). Every landscape viewport this file
+-- measured was 640 px wide or more, and the row's move into the header needed about 617 px: below that it
+-- stayed in the centred stack, over the avatar, and the ☰ Meny drawer (the only Rebirth button) came out
+-- 1 px tall. 568x320 is the iPhone SE (1st gen) and iPod touch; 592x360 is a 360x640 dp Android phone
+-- with its navigation bar at the side; 480x270 is the smallest the reviewer measured.
+local VIEWPORTS = {}
+for _, v in HudCheck.VIEWPORTS do table.insert(VIEWPORTS, v) end
+for _, v in {
+	{ name = "narrow landscape 610", w = 610, h = 343, touch = true },
+	{ name = "Android landscape, side nav bar", w = 592, h = 360, touch = true },
+	{ name = "iPhone SE landscape", w = 568, h = 320, touch = true },
+	{ name = "narrow landscape 540", w = 540, h = 304, touch = true },
+	{ name = "narrow landscape 520", w = 520, h = 292, touch = true },
+	{ name = "narrow landscape 480", w = 480, h = 270, touch = true },
+} do table.insert(VIEWPORTS, v) end
 local h = Harness.new({ bundle = require("./build/fork-tower"), name = "fork-tower", viewport = { VIEWPORTS[1].w, VIEWPORTS[1].h }, touch = VIEWPORTS[1].touch })
 assert(h:tryRun("server/Main.server"))
 local player = h:join("OpenPanelTester", 5551313)

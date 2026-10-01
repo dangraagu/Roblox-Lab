@@ -11,6 +11,17 @@ REVIEW-4 the trap side comes from a server-only per-floor secret. So everything 
 be identical for both doors of a fork, to reveal nothing, and to leave the read's price where
 `tests/readcost.measure.luau` put it.
 
+**State (2026-10-01, pass 1 of 2: the second review, the owner's decisions, queued job I; §15).** The
+second independent review reported six findings (two medium, four low); all six reproduced, each is held by
+a test that fails with its fix taken out (§15.4), and each is fixed in the game (§15.1). The owner decided
+on 2026-09-30 to "take the recommended option for all": four open decisions were found and taken (§15.2,
+each marked **DECIDED 2026-09-30 (owner: take recommended)**). Queued job I, the exit that a teleport could
+reach, is closed server-side (§15.3). The first attempt at this pass was cut off by a usage limit; the
+resume session re-read and re-ran everything, finished it and ran the mutation sweep. Every gate is green
+(§15.5). Still NOT seen in Studio, not re-reviewed, not published; `Main.server.luau` is no longer
+byte-identical to the plan-secret pass (the exit rule, the summit count, no gamepass field), and
+`check_forktower_plansecret` is still 96 / 0.
+
 **State (2026-09-24, after the adversarial review): built, unit-tested, headless-tested, mutation-tested
 (50 + 17 mutations, 4 + 4 controls; §9, §14), independently reviewed once, all three review findings
 closed (§14). NOT seen in Studio, and the fixes themselves have not been re-reviewed.** Nothing was
@@ -105,11 +116,32 @@ Minutes = minutes into a run at which the band is first stood in, measured by `t
 | 3 | ⚙️ **Urverket** (the clockwork) | 5-6 | 4 / 0.8 | 0.84 | 1.41 | 2.61 | afternoon 16.4, brass-amber, glare | turning brass gears (disc + teeth bar), copper pipes | a great clock face ahead of the climb, hands turning | clockwork moths | sparks 10/s | flung cog, clockwork bird |
 | 4 | ⛈️ **Stormen** (the storm) | 7-8 | 6 / 0.8 | 1.36 | 2.30 | 4.19 | dusk 18.7, blue-grey, high contrast, **lightning** (every 6-12 s, flash) | dark storm-cloud masses | a storm deck of cloud below | blown leaves | rain 40/s | ball lightning, roof tile |
 | 5 | 🔭 **Observatoriet** (the observatory) | 9-10 | 8 / 0.8 | 1.93 | 3.27 | 6.04 | night 23.6, 4 000 stars, **big moon** (angular size 26), clear air | floating star lanterns, brass orrery balls | a ringed planet, a blue planet, a constellation | shooting stars | stardust 8/s | meteor, comet |
-| 6 | 👑 **Stjernekronen** (the star crown) | summit | 10 / 0.6 | 2.58 | 4.37 | 8.12 | 23.95, 5 000 stars, the strongest bloom, golden tint | — | a spiral galaxy far below; **a crown of ten gold stars circling the climber** | shooting stars | stardust 10/s | **none** (the summit is a sanctuary) |
+| 6 | 👑 **Stjernekronen** (the star crown) | summit | 10 / 0.6 | 2.58 | 4.37 | 8.12 | 23.95, 5 000 stars, the strongest bloom, golden tint | — | a spiral galaxy far below; **a crown of stars circling the climber** (ten gold; rarer with summits reached, §15.2) | shooting stars | stardust 10/s | **none** (the summit is a sanctuary) |
 
-A normal ten-floor run takes 4.54 min, fast 2.66, slow 8.37. The environment changes every 38-66 s for a
-normal climber, never less than 20 s for a fast one and never more than 150 s for a slow one (asserted), so
-a run is never one place. Every run walks through all six; a rebirth starts the dungeon again and the
+A normal ten-floor run takes 4.54 min, fast 2.66, slow 8.37. A band lasts 38-66 s for a normal climber
+(the 80-run means) and never less than 20 s for a fast one. **Corrected 2026-09-30 (second review, §15.1
+finding 5):** this used to say "never more than 150 s for a slow one (asserted)", and that was asserted
+only on the 80-run MEAN, for readers. One run at a time, a slow reader stayed in one band longer than 150 s
+in 31 of 1000 band stays and a slow guesser in 198 of 1000, up to 234 s, and the world did not change at all
+for up to 159 s. Now each band's second floor is its own phase (below and §15.1), so every floor's climb
+changes the world, and `Pacing.spec` asserts per run that the world never stands still for more than 90 s
+(measured worst: 12 / 15 s fast read / guess, 16 / 37 s normal, 22 / 53 s slow; 200 runs each). A band by
+NAME can still last ~4 minutes for a slow guesser; the look does not. A run is never one place.
+
+**Every band's second floor is a phase** (`Config.Env.Layers`, the template's own `layerWeight`/`overlay`,
+which +1 Jump uses for its cloud decks; lighting groups only). It glides in over the last 0.8 of the band's
+first section, is whole at the band's second fork, and hands over to the next band with it. At every fork
+its weight is 0 or 1, so the world at a fork is still a function of the floor number alone:
+
+| band | its second floor's phase | what changes |
+|---|---|---|
+| dungeon | `dungeonDeep`, floor 2 | fog closes in (300 -> 190), redder, the torches bloom harder |
+| garden | `gardenNoon`, floor 4 | the sun climbs to noon (8.6 -> 12.2), brighter, stronger rays |
+| clockwork | `clockworkGolden`, floor 6 | golden hour (16.4 -> 17.7), warm glare, long rays |
+| storm | `stormEye`, floor 8 | the storm's eye: darker, denser, harder contrast, colder |
+| observatory | `observatoryAurora`, floor 10 | an aurora tint, 4 800 stars, more bloom |
+
+Every run walks through all six bands and their five phases; a rebirth starts the dungeon again and the
 title cards with it.
 
 **Transitions never cut** (all measured through the real client, `check_forktower_env`):
@@ -185,6 +217,8 @@ player's band once the lane appears (Studio list).
 * **telegraph**: an always-on-top ⚠️ over the hazard, a blinking red light, a lane line through the player
   (yellow while it tracks them, red once it locks), the red ring at their feet, and the band chip turning
   red: `⚠️ TANNHJUL KOMMER ◀`, then `⚠️ FLYTT DEG! TANNHJUL ◀`. The arrival time never moves;
+* **the ring and the warning stay up exactly as long as a hit can land** (`Hazards.threatLive`, §15.1
+  finding 3): they used to go at the hazard's arrival while a hit could land up to 0.083 s later;
 * **the red ring is the rule**: a hit needs the player inside it (the template's round-2 fix). The ring is
   at most 6.8 studs across on a 9-stud tile, so from a tile's centre a step of at most 3.4 studs in any
   direction dodges and still leaves more than a stud of tile (`EnvConfig.spec`). Jumping on to the next
@@ -362,7 +396,16 @@ others, like a player falling with nothing hitting them (hazards are local). On 
 
 ---
 
-## 7. Budgets (measured, `check_forktower_env`)
+## 7. Budgets (measured, `check_forktower_env`, and capped in code)
+
+**Capped in code since 2026-09-30** (§15.1 finding 4): TowerArt draws scenery, far pieces and critters
+only while they fit `Config.Budget` minus a reserve for the telegraph (the biggest hazard model, its lane
+and ring, a lightning bolt, the weather host and the climber's lantern: 11 parts, 1 trail, 2 lights), and
+a wall holds its whole slot capacity while shown. Asked for everything at once (every band's far pieces,
+60 of every critter, the weather, a hazard and a bolt in every frame) it peaks at 199 parts, 4 beams, 5
+trails and 2 lights with the hazard and its ring drawn in every frame; with the critter cap taken out the
+same probe reaches 595 parts and 60 trails (§15.4, B2). The tables below are ordinary play, which the cap
+does not touch (peak parts 144 in the resume session's run, 143-149 before the cap).
 
 Client-built only; the server builds none of this. Measured every frame of the whole check: 6 s at each of
 ten forks, every climbing frame of ten floors (so every seam, both bands live), the summit, the rebirth
@@ -416,6 +459,8 @@ tower itself (every player's lane) is server-built on top of this.
 ---
 
 ## 8. Gates
+
+**The current counts (2026-10-01, after the second review) are in §15.5.** This table is the 2026-09-24 history.
 
 Every gate for this game: before the environment work (2026-09-17 tree), as the resume session found the
 tree (2026-09-24, before any change), at the end of the resume session, and after the review fix (§14).
@@ -487,6 +532,8 @@ The two flakes fixed in the resume session, each shown first on the unchanged tr
 ---
 
 ## 9. Mutation sweep
+
+The second review's fixes have their own two sweeps in §15.4 (52 mutants, 2 controls).
 
 **Final: 50 mutations on the final tree, 46 of 46 killed, 4 of 4 controls survived** (2026-09-24, run 3;
 bundle md5 `e3e48a53905b2bd512c6160fa378a756`). The review-fix session swept its own changes separately:
@@ -606,7 +653,9 @@ fixed). Run 3, after that fix, is the one above. Logs:
    below the checkpoint; a real fall often lands on a lower platform of the same section first)?
 10. **Other players see a knock with nothing hitting** (hazards are local). Glitch or fine?
 11. **Rest's sit**: `Humanoid.Sit = true` from the client without a seat: does it sit and replicate, does walk
-    input wake it, does jump unsit?
+    input wake it, does jump unsit? **+1 Jump answered most of it in Studio (2026-09-27): it sits, it
+    replicates, W wakes it, and the sit's own drop woke the rest on its first frame. Fork Tower had the same
+    rule and now has the same fix (§15.1 finding 1); check it once in Studio here too.**
 12. **The ambience row on a real phone**: notch/safe area, emoji in `TextScaled` labels, chip text length
     (`🌿 Den gjengrodde hagen · ⚙️ om 2 etasjer` is the longest). `hudcheck` passes at ten viewports, but
     it cannot see a notch. On a landscape phone the row is now in the header, between the counter and the
@@ -643,7 +692,10 @@ fixed). Run 3, after that fix, is the one above. Logs:
     on a landscape phone, a 1366x768 laptop, a tablet and a 1280x720 window. Does the small one on the
     chip still feel like arriving somewhere new, or should it be bigger there (nothing on those screens
     has room for it without covering the character or the inscription)?
-22. **Hazards coming from behind the inscription on a landscape phone** (measured, not fixed; §14 finding
+22. **DECIDED 2026-09-30 (owner: take recommended): while climbing on a landscape phone the inscription is
+    not drawn** (§15.2 a). Studio: does it leaving and coming back at a fork read as calm or as a flicker?
+    The original note:
+    **Hazards coming from behind the inscription on a landscape phone** (measured, not fixed; §14 finding
     1). The strike point and the red ring are never covered now (0 of 400 launches, was 400 of 400), but
     the inscription panel, pre-existing and centred just above the character, still hides 64-74 % of a
     hazard's flight frames at camera pitch -15 to -30 on 800x360 (31 % level), and most of the last second
@@ -652,15 +704,45 @@ fixed). Run 3, after that fix, is the one above. Logs:
     phone (it only matters at a fork), or keep hazards' launch angles out from behind it.
 23. **The server's toast covers the character's head on a landscape phone** for 3.5 s after each notice
     (pre-existing; `check_forktower_hud_play` reports it at 800x360, 844x390, 926x428 and 640x300 and does
-    not assert it). Worth moving?
+    not assert it). Worth moving? **DECIDED 2026-09-30 (owner: take recommended): yes, while climbing** (it
+    takes the inscription's empty slot, above the character); at a fork it stays under the inscription
+    (§15.2 b).
+25. **The phases** (§2, §15.1 finding 5): do the dungeon's deep, the garden's noon, the clockwork's golden
+    hour, the storm's eye and the aurora each read as a new place on floors 2, 4, 6, 8 and 10?
+26. **The crowns** (§15.2 c): the rose (12 stars), ice (14) and prismatic star crown (18) at the summit.
+    Readable at the default zoom? The new public leaderstat `Topper` in the player list: fine beside Floor,
+    Best and Rebirths?
+27. **The narrowest landscape phones** (§15.1 finding 2): on 568x320 the counter is 107 px wide; below 568 px
+    the drawer toggles are a glyph in a thumb's square, the drawers 87-117 px wide. Readable?
+28. **The exit's clock under real physics** (§15.3): an honest landing on the exit must clear the floor at
+    once. Climb a section as fast as you can in Studio and watch for the notice "Utgangen teller først når
+    du har klatret opp seksjonen.": it must never appear.
 24. **On a 640x300 phone the inscription's bottom edge crosses the top 7-11 px of a tall avatar's head box**
     (HEAD layout, from before the environment work; 0-8 px for a bare R15 head). Held where it is by
     `check_forktower_hud_play` (it may not sit lower) and not moved: it is the game's one indispensable
     panel.
+29. **The toplist board behind the spawn** (pass 2, §16; `Lane_n.TopBoard`, 14 x 11 studs at the back of the
+    lobby, centre about (-6, 5.5, -15) from the lane's origin, turned to face the spawn on `ForkPad_1`). Is it
+    seen at all from the spawn, or only once a player turns round? Does the lobby's `Welcome` billboard
+    (AlwaysOnTop, 8 studs above the lobby's centre) cover part of it from the fork pad? The board's 40 px per
+    stud SurfaceGui: readable from the fork pad 29 studs away, and on a phone? Does the gold rim read as "you
+    can use this", and does the `Offentlig / Venner` prompt show at the board and never on the fork pad?
+30. **The LaneSpawn is enabled now** (pass 2, §16): every player's `RespawnLocation` is their own tower's
+    `LaneSpawn` (on their lobby), and the WaitingSpawn for a player with no tower. Studio: a death or a reset
+    must bring the player back on their own tower (the checkpoint, after the engine's spawn), never on the
+    waiting pad or in a neighbour's tower; and a SpawnLocation's default 10 s ForceField now plays on the
+    lobby. Fine, or set `Duration = 0`?
+31. **Iskronen is the brag now, at 8 summits** (pass 2, §16; `Config.Env.BragCrown`, about 36 minutes of normal
+    play): its 14 ice-blue stars and the notice `Ny krone: Iskronen`. Is that moment strong enough to brag
+    about, or does it want more (a flash, a sound, the crown seen by the others in the server)?
 
 ---
 
 ## 11. Thumbnail shot list (for the night Studio session)
+
+**Every thumbnail is 1920x1080** (16:9, the experience page's size): set Studio's viewport to 1920x1080 and
+crop nothing; a portrait or square frame is a different asset. The clips are a separate list (`MARKETING.md`,
+vertical 1080x1920).
 
 **Getting there.** *Not yet tried in Studio.* Step 1 was run headless on 2026-09-24: `rojo build` succeeds
 and the place holds `Ambience` (LocalScript, StarterPlayerScripts), `Hud`, `Main` and the new modules.
@@ -716,7 +798,8 @@ x = −105 and +105 (±15).
    x ≈ −105 fills the background**: giant leaves, hanging vines, glowing pink, yellow and violet blooms. In frame: the avatar
    mid-jump with its trail, butterflies and fireflies, pollen, morning sun rays. A giant horizon flower if one
    is in the view (they sit 380 studs out at three fixed bearings; turn the camera to find one).
-3. **"Inside the clockwork" — floor 6, with a flung cog.** **Session B**; climb to floor 6. Avatar on a
+3. **"Inside the clockwork" — floor 6, with a flung cog.** **Session B**; climb to floor 6 (since
+   2026-09-30 floor 6 is the clockwork's golden-hour phase: warmer, lower light than floor 5). Avatar on a
    platform of section 6 above `ForkPad_6` (−34.2, 111.2, 342), e.g. `Plat_6_4` top (−9.8, 128.8, 383.5), stood
    still (the door chosen, off the pad: hazards only run while climbing a section), **normal camera** (a hazard
    starts inside the player's own view; Freecam would take the movement keys): turn it to look along the climb
@@ -756,13 +839,14 @@ x = −105 and +105 (±15).
 
 ## 12. Not done / open
 
-* **Reviewed once; the fixes are not re-reviewed.** An independent adversarial review (2026-09-24) found
-  three things, all closed (§14). The fixes had their own failing tests first, a mutation sweep and every
-  gate, not a second reviewer; the captain-mode default is a review before anything ships.
-* **Found by this session's new check, not fixed** (Studio list items 22-24): hazards approaching from behind
-  the inscription on a landscape phone; the server's toast over the character's head there for 3.5 s after
-  each notice; the inscription's edge over the crown of a tall avatar's head on a 640x300 phone. All three
-  are the pre-existing HUD, measured and reported, not changed.
+* **Reviewed twice; the second review's fixes, and everything pass 2 built (§16), are not re-reviewed.** The
+  first review (2026-09-24) found three things (§14), the second (2026-09-30) six (§15.1); all are closed with
+  failing tests first, mutation sweeps and every gate. Pass 2 (2026-10-01) was the complete-game standard, not a
+  review; the captain-mode default is a review before anything ships.
+* **Studio list items 22-23 are decided and built** (§15.2 a, b: the inscription hides while climbing on a
+  landscape phone and the toast takes its slot). Item 24 stands: the inscription's edge over the crown of
+  a tall avatar's head on the shortest landscape phones (640x300 and, since §15.1 finding 2, 480-610 px
+  wide), held there, not lower.
 * **Not seen in Studio**: all of §10, and the shot list itself (§11) has only been checked headless: the
   positions were re-measured, the place builds with `rojo build` (Ambience lands as a LocalScript in
   StarterPlayerScripts), and both sessions' Config edits pass validation.
@@ -770,16 +854,18 @@ x = −105 and +105 (±15).
   the scratchpad's `luau/` holds only `luau.exe`, nothing on PATH). Every file was compile-checked through
   `luau`'s own `loadstring` instead: 39 of 39 (17 sources, 15 test files, 7 checks). Type analysis is owed.
 * **Hazards per minute rest on the human model** (`Config.Pacing`), not telemetry.
-* **No progress across runs.** Every run walks the same six bands and a rebirth starts the dungeon again;
-  there is no long-term environment goal like +1 Jump's galaxy. A cosmetic one would be easy and safe
-  (driven by the public `Rebirths` leaderstat, e.g. one more star in the summit's crown per rebirth, or a
-  rarer crown at 5 / 10 / 25 rebirths), but it is a design decision for Gustav, so it is not built.
+* ~~**No progress across runs.**~~ **DECIDED 2026-09-30 (owner: take recommended): a rarer crown at 5 / 10 /
+  25 summits** (§15.2 c). Every run still walks the same six bands; what grows across runs is the summit's
+  crown, counted in summits (not rebirths, which work from any floor every 3 s). **Pass 2 moved the ice crown
+  from 10 to 8 summits** so that a crown lands inside the standard's 30-45 minute brag window (§16.3): the
+  owner's 10 measured 45.4 min. Flagged for the owner; one number in `Config.Env.CrownTiers` puts it back.
 * **The template's `setWeight` pop-in** (a hidden part coming back at its old transparency) is fixed in
   `TowerArt` only. +1 Jump's `SkyArt` still has it (read 2026-09-24: its hide resets `lastT` and not
   `Transparency`, and a re-show at a small weight moves `t` by 0.02, under its write threshold). Not
   touched here: another game's directory.
 * The server's red hazard cubes and preset are unchanged (§10 items 14-15).
-* Not committed, not pushed, not published.
+* The environment work and the plan secret are committed (327aee3); passes 1 and 2 of 2026-09-30/10-01 are
+  not. Nothing is published.
 
 ---
 
@@ -1088,3 +1174,433 @@ restored and md5-checked; after the last one every suite was green on the restor
 Nothing else: `robloxemu/emu`, `tools`, `docs`, every `marketing` folder and the other games were not
 touched, nothing was committed, pushed or published, and Studio was not opened. Probes, logs and the
 sweep are in the scratchpad under `ft_rev1/`.
+
+---
+
+## 15. The second review, the owner's decisions and queued job I (2026-09-30 / 2026-10-01, pass 1 of 2)
+
+The first attempt at this pass (the night of 2026-09-30, last write 00:47) was cut off by a usage limit. It had written the
+code and most of the tests, but not this section, the mutation sweep, or the last owner decision, and the
+§2 phase table ran into the next paragraph. The resume session (2026-10-01) took none of it on trust: it
+read every changed and new file (`git diff` against 327aee3: seven sources, five test files, eight checks,
+three new checks, three docs), ran every gate on the tree as found (all green, the counts in CLAUDE.md
+were right except the spec total, 1 235 not 1 250), then finished. Every number below is from the resume
+session's own runs.
+
+### 15.1 The six findings
+
+Each finding was reproduced by taking its fix out again (the sweep, §15.4) and watching its new test fail
+with the reviewer's own symptom; each fix is in the game, never in the test.
+
+**Finding 1 (medium): ☕ Hvil woke its own rest on the first frame of the sit's drop.** Reproduced: with
+the old rule (`supported` only when |vy| < 2, mutant S1) `check_forktower_sitdrop` replays +1 Jump's measured
+Studio trace through the real HUD and Ambience and fails 6: the avatar stands again, the chip never says
+Hviler, the button never offers ▶ Klatre. Fixed by porting +1 Jump's ad62955 line for line
+(`satAt` + `SIT_SETTLE_SECONDS = 1.0`, set on both the button and the idle sit). New
+`robloxemu/check_forktower_sitdrop.luau` (15 / 0): the sit survives the drop and 20 s of standing still,
+walk input still wakes it, and a sustained 1.5 s fall while seated still ends it (mutant S4, "a seated
+player is always supported", is caught by that last block).
+
+**Finding 2 (medium): landscape phones under ~617 px wide.** Reproduced: with the narrow-phone layout
+taken out (mutant H1) `check_forktower_hud_play` fails 72 at 480-610 px wide (at 610x343 the row sits at
+y 192..236, the rows the reviewer measured at 568x320, over the avatar's 145..249), and with the drawer narrowing taken out
+(H3) `check_forktower_hud_open` finds the ☰ Meny drawer 1 screen px tall at 480x270 and 520x292. Fixed in
+`Hud.client`: when the header cannot hold the counter, the row and both worded toggles, the counter first
+gives up width (down to `COUNTER_MIN` 170 design px, "🔀 ETASJE 10/10" still one line), then below 568 px the
+toggles become a glyph in a thumb's square; a phone drawer that would reach into the inscription's column
+narrows to the column beside it (down to `DRAWER_MIN_W` 140); the band card's side slot uses the same
+minimum. All three HUD checks gained six narrow landscape viewports (610x343, 592x360, 568x320, 540x304,
+520x292, 480x270): `check_forktower_hud` PASS at 16 viewports, `_hud_open` 259 / 0, `_hud_play` 611 / 0.
+The inscription's bottom edge still crosses the crown of a tall avatar's head on the shortest phones, as
+on 640x300 (§10 item 24), and is held there, not lower.
+
+**Finding 3 (low): a hit up to 0.083 s after the ring and the warning had gone.** Reproduced on the pure
+modules in `EnvConfig.spec` (32 000 stand-still players inside the ring): 259 of 31 300 hits land after
+`arriveAt`, where the old ring went (the reviewer: 262 of 31 318). Fixed with `Hazards.threatLive(plan,
+playerRadius, fromT)`: can the rest of the flight, in the ground plane, still pass within zone radius +
+hitRadius + playerRadius of the ring's centre? The client draws the ring, the lane and the warning exactly
+while it is true (Ambience, `TowerArt:showHazard`). Measured: 0 hits after the ring goes, 0 points inside
+the ring at any climbable height that the rest of the flight can still hit once it has gone, and the ring
+goes at most 0.38 s after arrival. Through the real client (`check_forktower_env`, AimJitter 3 in memory,
+the player stepped to the point the lane reaches last): 10 flights, 10 knocks, 4 after arrival, the ring
+drawn at every knock and the warning up the frame before. `Hazards.luau` is no longer the verbatim
+template: `threatLive` is the one addition, and +1 Jump's second review found the same gap there.
+
+**Finding 4 (low): the budgets were measured but not capped.** Fixed in `TowerArt`: scenery, far pieces and
+critters are drawn only while they fit `Config.Budget` minus a reserve for the telegraph (the biggest hazard
+model, its lane and ring, a bolt, the weather host and the climber's lantern: 11 parts), and a shown wall
+holds every slot it has, filled or not, so the moving grid cannot grow past the budget. Probes in
+`check_forktower_env` hold it: everything at once (every band's far pieces, 60 of every critter, the
+weather, a hazard and a bolt in every frame) peaks at 199 parts, 4 beams, 5 trails, 2 lights with the
+hazard and its ring drawn in every frame; and a wall probe with the budget set to the reserve plus one wall.
+The reviewer's mutant (six bats to 60, run again as B5) now peaks at 177 local parts in the running client
+(the reviewer measured 219 before the cap), but it failed one other assertion, and that was a real defect
+of the cap itself: **a piece the cap held back popped in** when room freed up, at the weight it had reached
+meanwhile (the garden's wall at transparency 0.69 in one frame, 60 parts at once, on the second run).
+Test first: a new probe in `check_forktower_env` (fireflies fill the budget while the garden wall and the
+far blooms are asked for at a weight rising to 0.8, then the fireflies go) failed on that tree, 30 of 50
+parts entering below 0.9 (the blooms at 0.20-0.28). Fixed in `TowerArt:updatePiece`: a piece the budget
+refused remembers it, and when it is let in it fades in over `ENTER_SECONDS` (0.5 s, at most 0.067 of its
+weight per 1/30 s frame), whatever its weight. The probe now sees 0 of 50 below 0.9 and a worst step of
+0.07, and the reviewer's mutant passes the whole env check (235 / 0, B5demo2). A third new probe holds that
+a wall asked for again is costed at its whole capacity (the first sweep's B4 survived every gate).
+
+**Finding 5 (low): "never more than 150 s in a band for a slow climber" held only on an 80-run mean.**
+Reproduced: with the new phases taken out (mutant L1) Pacing's per-run measure finds the world standing
+still for up to 159 s for a slow reader and 158 s for a slow guesser (the reviewer: 159 s). A band still
+spans two floors, so the fix makes each band's second floor its own phase (`Config.Env.Layers`, the template's `layerWeight`/`overlay`, lighting groups only; §2 table): it is 0
+or 1 at every fork (EnvConfig.spec, so the world in front of two unread doors is still a function of the
+floor number, invariant 14), visibly different from its band (a clock, brightness, haze, fog, star or
+contrast step), and its clock lies between its band's and the next band's (the sun never runs back). The
+claim is now the measurable one, per run: `Pacing.spec` asserts the world never stands still for more than
+90 s in any of 200 runs per profile and strategy (worst: fast 12 / 15 s read / guess, normal 16 / 37 s,
+slow 22 / 53 s). A band by NAME can still last about four minutes for a slow guesser; §2 says so.
+
+**Finding 6 (low): README and a check header contradicted the gates.** README no longer says TellKind /
+RuleInverted / Marked replicate, that the HUD was never measured, or that nothing is committed;
+`check_forktower_hud.luau`'s header names the checks that exist (`_hud_open`, `_hud_play`). The resume
+session also corrected README's gate counts (Codes 20, EnvConfig 505, exit 30, env 235, crown 15), its
+Hazards line (the spec is the verbatim template; `threatLive` is held by EnvConfig.spec), and the §7 probe
+number (199 parts, not 172).
+
+### 15.2 The owner's decisions (2026-09-30: "take the recommended option for all")
+
+Searched: EYECANDY.md, CLAUDE.md, README.md and REVIEW*.md. Four decisions were open; none had a
+recommended option marked, so each took what best serves the brief (fair, fun, never punishing, never
+exploitable).
+
+* **a. Hazards hidden behind the inscription on a landscape phone** (§10 item 22; Gustav's options: fade
+  the inscription while climbing, or keep launch angles out from behind it). **DECIDED 2026-09-30 (owner:
+  take recommended): the inscription is not drawn while climbing on a landscape phone.** The inscription
+  only matters at a fork, and hazards fly only while climbing; restricting launch angles would make the
+  hazards more predictable without making the HUD smaller. Measured (`check_forktower_hud_play` part D, 160
+  flights x 3 pitches): the share of a hazard's flight behind the HUD while climbing fell from 76 % to 0 % on
+  800x360 (61 -> 0 % on 844x390, 41 -> 0 % on 926x428, 76 -> 4 % on 568x320); the strike point is never
+  hidden; at a fork the inscription is back on every landscape viewport.
+* **b. The toast over the character's head on a landscape phone** (§10 item 23, "worth moving?").
+  **DECIDED 2026-09-30 (owner: take recommended): yes, while climbing** it takes the inscription's empty
+  slot above the character; at a fork it stays under the inscription. Held by part D (mutant H6).
+* **c. No progress across runs** (§12; the options were one more star per rebirth, or a rarer crown at 5 /
+  10 / 25 rebirths). **DECIDED 2026-09-30 (owner: take recommended): a rarer crown at 5 / 10 / 25, counted in
+  SUMMITS, not rebirths.** Rebirth works from any floor every 3 s, so 25 rebirths are 75 s of button
+  presses, and a goal a button can buy is exploitable and means nothing. Gold (10 stars), rose at 5 summits
+  (12), ice at 10 (14), a prismatic star crown at 25 (18): 23, 45 and 113 minutes of normal play
+  (`Pacing.spec`). The server counts a summit once per run, saves it (`summits`) and shows it as the public
+  leaderstat `Topper`, which is all the client reads to pick the crown. New `check_forktower_crown.luau`
+  (15 / 0): counted once, a rebirth from the summit or from floor 1 never counts, a new crown is announced
+  once, the crown at the summit has that crown's stars and colour, and the count survives a rejoin.
+* **d. "Wire or delete `Config.Passes` and `profile.passes`"** (CLAUDE.md "Next" item 5). **DECIDED
+  2026-09-30 (owner: take recommended): deleted.** The owner's standard (docs/complete-game-standard.md §3)
+  allows no Robux cost in v1 and nothing pay-to-win, and ExtraSkip would have sold the one thing a trap
+  costs. Test first: `Codes.spec` (Config.Passes gone) and `check_forktower_crown` (the saved record has no
+  `passes`) went red (19 / 1 and 14 / 1), then the placeholders and the saved field were deleted.
+
+Not taken as owner decisions, because they ask what something looks like and only Studio can answer: §10
+items 14 (the join glide from the server's preset), 19 (wall slots vanishing at a teleport), 21 (the band
+card's size on the chip). They stay on the Studio list.
+
+### 15.3 Queued job I: the exit can no longer be teleported to
+
+Found 2026-09-24 by the plan-secret attacker (REVIEW-4 §9.8 item 5): the exit's `Touched` checked only who
+touched it and the profile's floor and stage, so a script could choose a door and teleport onto the exit,
+and to a script a trap cost nothing. Now `lane.tryExit` (Main.server) clears a floor only when both hold on
+the server's own clock and view of the body:
+
+* the root part stands on the exit platform (its footprint grown by the character's half-width and 1 stud,
+  from 4 studs below its top to 12 above), so a `Touched` fired from anywhere else clears nothing;
+* `Section.minClimbSeconds` has passed since the server put the player at the bottom of the section (the
+  door; a mid-climb rejoin restarts it): the straight line on the ground from the entry to the exit's reach
+  at the player's own WalkSpeed x `Config.Exit.SpeedSlack` 1.25.
+
+A refused touch is explained once per section; the fall-rescue loop looks for a body standing on the exit
+every 0.4 s, so an honest landing is never stranded. Latency only helps an honest player (the server's
+clock starts at the door and the landing reaches it late).
+
+**Never refuses an honest climber** (`Pacing.spec`, the climb model, 30 runs x read and guess per row, with
+each climber's own traits): the quickest single climb took 2.97x the bound for a fast climber, 4.11x
+normal, 6.61x slow, and 1.32x for a "bunny-hopper" who never lines up a hop and never misses (timed at 0.01
+s). **What a script still gets** (400 seeds, base speed): the bound is 1.3 s on floor 1 to 3.3 s on floor
+10, 22.6 s for ten floors, and a trap adds 1.6 s. Summed over 30 runs, a perfect bunny-hopper climbs in
+2.35x the bound and a normal reader in 12.5x. Waiting at the bottom and teleporting when the time is up
+gives a script exactly the bound, the same as walking the straight line. The job suggested also requiring a
+recent server-seen position on the section's path; that cannot raise the bound, because a script can
+teleport along the platforms just as well, and the only rule that would (a minimum airtime per hop) rests on
+step-up and limb-touch physics only Studio can measure, so it is not built (CLAUDE.md invariant 16).
+
+New `robloxemu/check_forktower_exit.luau` (30 / 0): a teleport onto the exit the moment the door is chosen
+clears nothing and is told once; held there and touched again and again it still clears nothing until the
+least time, then the server's poll clears it within one poll; a `Touched` fired while the body stands on
+platform 1 clears nothing however late; a straight-line crossing at exactly WalkSpeed clears and one at
+1.5x WalkSpeed is refused; after a rejoin mid-climb the clock restarts, and an honest climb from there
+clears on the first touch. `check_forktower_plansecret` is still 96 / 0 (its climb helpers now stand on the
+exit and wait, as a climber would; its assertions are unchanged). Every fork-tower check that moves a body
+by hand climbs like a person now.
+
+`check_forktower`'s save-throttle assertion was rewritten, not loosened: a scripted run now lasts as long as
+its sections take, so counting every store call over the run also counted other players' autosaves. It
+counts the climber's own record now, against the throttle's own promise (at most one write per 6 s, + 2)
+and below one per door plus one per floor (20). Mutant W1 (no throttle) shows it still bites: a 33 s scripted run then writes the record 32 times (128 / 1).
+
+### 15.4 Mutation sweep
+
+Two sweeps, both with `scratchpad/ft/mut.py`: exactly one replacement per mutant in the real source, the
+bundle rebuilt, then the gates that hold that rule (the control: every gate), then the file restored and
+its sha256 checked. A separate pass (`reach.py`) re-applied every mutant, rebuilt, and found the WHOLE
+mutated file verbatim in the bundle and the unmutated one gone, for all 52; after each sweep every one of
+the 43 source, test and check files matched its pre-sweep sha256 and the bundle was byte-identical.
+
+**Sweep 1** (45 mutants on the tree as resumed plus decision d): 41 of 43 killed, 2 survived, the
+reviewer's mutant failed one assertion, the control survived every gate.
+
+| id | mutation | result |
+|---|---|---|
+| S1 | Ambience: the old sit rule (no settle window) | killed: sitdrop 9 / 6 |
+| S2 | `SIT_SETTLE_SECONDS` 1.0 -> 0.05 | killed: sitdrop 9 / 6 |
+| S3 | the ☕ button does not stamp `satAt` | killed: sitdrop 9 / 6 |
+| S4 | a seated player is always supported | killed: sitdrop 14 / 1 (the sustained fall) |
+| H1 | Hud: `COUNTER_MIN` 170 -> 400 (no narrow header) | killed: hud_play 539 / 72, hud FAIL |
+| H2 | Hud: no glyph toggles below 568 px | killed: hud_play 572 / 39, hud FAIL |
+| H3 | Hud: drawers never narrow beside the inscription | killed: hud_open 256 / 3 (1 px drawers) |
+| H4 | Hud: the card's side slot back to 160 px | killed: hud_open 257 / 2 |
+| H5 | Hud: the inscription never hides while climbing (decision a) | killed: hud_play 566 / 58 |
+| H6 | Hud: the toast never takes its slot (decision b) | killed: hud_play 587 / 37 |
+| H7 | Hud: the stage is never tracked | killed: hud_play 566 / 58 |
+| R1 | Ambience: ring and warning live until `arriveAt` again | killed: env 226 / 2 |
+| R2 | threatLive without the zone radius | killed: EnvConfig 503 / 1, env 227 / 1 |
+| R3 | threatLive "live" after the flight's end | **survived** (unreachable in the client); killed in sweep 2 |
+| R4 | TowerArt: the lane drawn until `arriveAt` | killed: env 227 / 1 |
+| R5 | Ambience: the warning until `arriveAt` | killed: env 227 / 1 |
+| B1 | no cap on pieces | killed: env 227 / 1 (the wall probe, 54 > 30) |
+| B2 | no cap on critters | killed: env 225 / 3 (595 parts, 60 trails) |
+| B3 | no fixed reserve (lane, ring, bolt, weather, lantern) | killed: env 227 / 1 (207 > 200) |
+| B4 | a wall costed at its filled slots only | **survived**; killed in sweep 2 |
+| B5 | the reviewer's mutant: six bats to 60 (meant to pass) | env 227 / 1: **a real pop-in, fixed** (above) |
+| L1 | no `Config.Env.Layers` | killed: EnvConfig 369 / 6, Pacing 101 / 2 (159 s), env 227 / 1 |
+| L2 | Ambience ignores the layers | killed: env 215 / 13 |
+| L3 | dungeonDeep centred at 1.5 (not whole at its fork) | killed: EnvConfig 502 / 2, env 227 / 1 |
+| X1 | tryExit: no least time | killed: exit 21 / 9 |
+| X2 | tryExit: no position check | killed: exit 29 / 1, check_forktower 128 / 1 |
+| X3 | the server's poll never tries the exit | killed: exit 9 / 8, check_forktower errors |
+| X4 | the refusal said on every touch | killed: exit 29 / 1 |
+| X5 | the door does not start the section's clock | killed: exit 13 / 7 |
+| X6 | a rejoin does not restart it | killed: exit 28 / 2 |
+| X7 | `SpeedSlack` 1.25 -> 0.5 | killed: exit 16 / 6, Pacing 102 / 1, Section 56 / 1 |
+| X8 | `minClimbSeconds` returns 0 | killed: exit 20 / 10, Section 55 / 2 |
+| X9 | the exit's reach 4x too big | killed: Section 55 / 2 |
+| C1 | a summit is never counted | killed: crown 7 / 8 |
+| C2 | a rebirth counts a summit | killed: crown 11 / 4 |
+| C3 | `summits` not saved | killed: crown 13 / 2 |
+| C4 | `summits` not loaded | killed: crown 6 / 9 |
+| C5 | Topper shows rebirths | killed: crown 8 / 7 |
+| C6 | the crown always has ten stars | killed: crown 14 / 1 |
+| C7 | Ambience always picks the gold crown | killed: crown 13 / 2 |
+| C8 | the rose crown at 2 summits | killed: crown 14 / 1, Pacing 102 / 1 (9 min) |
+| P1 | `Config.Passes` back | killed: Codes 19 / 1 |
+| P2 | `passes` saved again | killed: crown 14 / 1 |
+| W1 | no save throttle (check_forktower's rewritten assertion) | killed: check_forktower 128 / 1 (32 writes in 33 s) |
+| CTRL | `restFocus.FarIntensity` 0.25 -> 0.3 | **survived every gate** (24 suites) |
+
+**Sweep 2** (7 mutants on the final tree, after the three new assertions and the admit fix): 5 of 5 killed,
+the reviewer's mutant passes, the control survived every gate.
+
+| id | mutation | result |
+|---|---|---|
+| R3b | threatLive "live" after the flight's end | killed: EnvConfig 504 / 1 |
+| B4b | a wall costed at its filled slots only | killed: env 234 / 1 (22 parts drawn, room for 0) |
+| A1 | a held-back piece is not faded in | killed: env 234 / 1 |
+| A2 | `ENTER_SECONDS` 0.5 -> 0.05 | killed: env 234 / 1 (step > 0.1) |
+| A3 | a refusal is not remembered | killed: env 234 / 1 |
+| B5b | the reviewer's mutant: six bats to 60 (meant to pass) | **passes** env 235 / 0, peak 177 parts |
+| CTRL2 | `ENTER_SECONDS` 0.5 -> 0.6 | **survived every gate** (24 suites) |
+
+### 15.5 Gates (the final tree)
+
+The final run, every gate at once on the final tree (bundle sha256 `7dcad37faf840859...`), 2026-10-01.
+"As resumed" is the same run on the tree the cut-off attempt left (before decision d and the admit fix).
+
+| gate | before this pass (§8) | as resumed | **final** |
+|---|---|---|---|
+| `tests/Build.spec` | 31 / 0 | 31 / 0 | **31 / 0** |
+| `tests/Climb.spec` | 67 / 0 | 67 / 0 | **67 / 0** |
+| `tests/Codes.spec` | 19 / 0 | 19 / 0 | **20 / 0** (no gamepasses) |
+| `tests/EnvBands.spec` (template, verbatim) | 124 / 0 | 124 / 0 | **124 / 0** |
+| `tests/EnvConfig.spec` | 361 / 0 | 504 / 0 | **505 / 0** |
+| `tests/Fork.spec` | 71 / 0 | 71 / 0 | **71 / 0** |
+| `tests/Hazards.spec` (template, verbatim) | 102 / 0 | 102 / 0 | **102 / 0** |
+| `tests/Pacing.spec` | 87 / 0 | 103 / 0 | **103 / 0** |
+| `tests/Rest.spec` (template, verbatim) | 55 / 0 | 55 / 0 | **55 / 0** |
+| `tests/Rng.spec` | 32 / 0 | 32 / 0 | **32 / 0** |
+| `tests/Section.spec` | 50 / 0 | 57 / 0 | **57 / 0** |
+| `tests/responsive.spec` | 70 / 0 | 70 / 0 | **70 / 0** |
+| **spec total** | **1 069 / 0** | **1 235 / 0** | **1 237 / 0** |
+| `tests/readcost.measure.luau` | break-even 1.110 s | — | **1.110 s** (unchanged) |
+| `tests/world.check` | 71 / 0 | 71 / 0 | **71 / 0** |
+| `check_forktower` | 129 / 0 | 129 / 0 | **129 / 0** |
+| `check_forktower_plansecret` | 96 / 0 | 96 / 0 | **96 / 0** |
+| `check_forktower_env` | 215 / 0 | 228 / 0 | **235 / 0** |
+| `check_forktower_env_secret` | 92 / 0 | 92 / 0 | **92 / 0** |
+| `check_forktower_env_join` | 37 / 0 | 37 / 0 | **37 / 0** |
+| `check_forktower_hud` | PASS (10 viewports) | PASS (16) | **PASS** (16) |
+| `check_forktower_hud_open` | 157 / 0 | 259 / 0 | **259 / 0** |
+| `check_forktower_hud_play` | 324 / 0 | 611 / 0 | **611 / 0** |
+| `check_forktower_exit` (new) | — | 30 / 0 | **30 / 0** |
+| `check_forktower_sitdrop` (new) | — | 15 / 0 | **15 / 0** |
+| `check_forktower_crown` (new) | — | 14 / 0 | **15 / 0** |
+| **headless total** | **1 121 / 0 + PASS** | **1 582 / 0 + PASS** | **1 590 / 0 + PASS** |
+
+`py -3 tools/find_mojibake.py --root fork-tower`: no double-encoded files. `luau-analyze` and
+`luau-compile` are still not on this machine; every source and test compiled and ran under `luau` itself.
+
+### 15.6 Files, and what is still open
+
+Written in this pass (both sessions): in `fork-tower/`, `src/client/Ambience.client.luau`,
+`src/client/Hud.client.luau`, `src/server/Main.server.luau`, `src/shared/Config.luau`,
+`src/shared/Hazards.luau` (threatLive), `src/shared/Section.luau` (minClimbSeconds),
+`src/shared/TowerArt.luau`, `tests/Codes.spec.luau`, `tests/EnvConfig.spec.luau`, `tests/Pacing.spec.luau`,
+`tests/PlayModel.luau`, `tests/Section.spec.luau`, `tests/world.check.luau`, `EYECANDY.md`, `CLAUDE.md`,
+`README.md`; in `robloxemu/`, the new `check_forktower_exit`, `_sitdrop` and `_crown`, the changed
+`check_forktower`, `_env`, `_env_join`, `_env_secret`, `_hud`, `_hud_open`, `_hud_play`, `_plansecret`, and
+the rebuilt `build/fork-tower.luau`. Nothing in `robloxemu/emu`, `tools`, `docs` or another game was
+touched; nothing was committed, pushed or published; Studio was not opened.
+
+Still open: Studio list items 11 and 22-28 (§10); the fixes are not re-reviewed (pass 2); type analysis is
+still owed (`luau-analyze` is not on this machine); the complete-game standard's public / friends highscore
+board, `MARKETING.md` clip list and store description are not built for this game (all three built in pass 2,
+§16).
+
+---
+
+## 16. Pass 2: the complete-game standard (2026-10-01)
+
+Pass 2 of 2 checked every item of `docs/complete-game-standard.md` against the tree as pass 1 left it (all gates
+green: specs 1237, headless 1590 + hud PASS, bundle `7dcad37faf840859`) and built what was missing, test first. The
+reviewer's list of standard gaps was written before pass 1; three of its items (the ☕ Hvil sit, phones under
+615 px, the budgets) were already closed there (§15.1 findings 1, 2, 4) and were only re-read here.
+
+### 16.1 The standard, item by item
+
+| § | item | before pass 2 | now |
+|---|---|---|---|
+| 1 | core loop walked headless: spawn, first objective, a full loop, earn, spend, rejoin | spread over several checks | one walk in `check_forktower_board` §4/§12: join, spawn on your own tower, redeem FORK (+1 skip), arm it and take floor 1's TRAP (a normal section, the skip spent), nine more floors by the real prompts and exits, Build Reveal banked, on the board, leave, rejoin at the summit, rebirth onto a new tower |
+| 1 | `plr.RespawnLocation` points at a real, enabled SpawnLocation | never set; the LaneSpawn was `Enabled = false`; only the wait-then-teleport | the player's own `LaneSpawn` (enabled now), the `WaitingSpawn` before a tower exists; set first in `onPlayerAdded` |
+| 1 | server-authoritative, nothing secret replicates; DataStore rules; no silent no-ops | held (invariants 9, 13, 16) | unchanged; `check_forktower_plansecret` 96/0 with the board's payloads on the wire |
+| 2 | Fx preset, signature particles; ≥5 bands; rare telegraphed hazards; rest; budgets capped in code | held (§2-§7, §15) | unchanged |
+| 2 | +1 Jump templates verbatim | `EnvBands`, `Rest` md5-identical; `Hazards` differs from +1 Jump's only in comments (both have `threatLive` now) | unchanged; `Board.luau` added, md5-identical to +1 Jump's |
+| 2 | a brag moment in 30-45 min of normal play, a long-term goal beyond it, measured | crowns at 23, 45.4 and 114 min: none inside the window | Iskronen at 8 summits = 36.3 min (`Config.Env.BragCrown`), Stjernekronen at 25 = 113.4 min (§16.3) |
+| 2 | phone first; overlap rule 4b asserted | `check_forktower_hud` runs with `overlap = true` (16 viewports) | unchanged; `Board.client` is now loaded in it too (it draws nothing in PlayerGui) |
+| 3 | public + friends board, server metric, ties to the first, physical board near spawn with a Public/Friends prompt, names cached, empty friends board says something | a public top 10 in a HUD drawer only, raw score by `SetAsync`, no tie-break, each client looking every name up on every refresh | built (§16.2) |
+| 3 | promo codes public; no Robux; no gambling or pay-to-win | held (invariant 20) | unchanged |
+| 4 | README store description ≤1000 characters, honest, no coloured-square emoji | none | 977 characters, held to the source by `tests/docs_check.py` |
+| 4 | EYECANDY needs-Studio list and thumbnail shot list (1920x1080) | both lists, no size stated | the size stated; needs-Studio items 29-31 for what pass 2 built |
+| 4 | `MARKETING.md`: 5-10 clips, 7-15 s, vertical 1080x1920, with staging | none | 8 clips, all `new` (`tools/film_game.py` has no Fork Tower scenarios) |
+| 4 | CLAUDE.md names every gate and the traps | yes | plus the new gates; `docs_check.py` asserts it |
+| 5 | the night shift's Studio work | not done | not done (not this pass's to do) |
+
+### 16.2 The board
+
+`src/shared/Board.luau` is +1 Jump's template, verbatim; `tests/Board.spec.luau` is its spec (66/0). The metric
+is the best Build Reveal score a summit banked: the server computes it from the run's picks (`Build.reveal`), no
+client sends a number, and the exit rule (invariant 16) is what makes a summit a climb.
+
+* **Stored** in `ForkTower_LB_v2` (v1 held raw scores; the game was never published, so v1 is empty) under
+  `u_<userId>` as `score * 2e9 + (2e9 - reachedAt)`. `writeBoard` runs only after the profile write landed for
+  the session that owns the record, only when `bestScore` has passed the last score it wrote (`boardScore`, saved
+  with the profile), and through `UpdateAsync` with `Board.keepHigher`, never `SetAsync`. `bestScoreAt` is stamped
+  when the summit banks a better score; a save from before it existed is stamped with the session it comes back in.
+* **Public**: `GetSortedAsync(false, 10)` once per `PublicCacheSeconds` (60 s), sent to the HUD's top list
+  (decoded scores and names) and to every player looking at Public. Measured: 3 calls in 180 s.
+* **Friends**: `Players:GetFriendsAsync` only when a player presses the prompt, capped at 200, cached 300 s per
+  player (a failure for 60 s), friends' scores read at most 40 at once then 1 a second, leaving 10 GetAsync in
+  Roblox's budget. Measured with 450 friends: 41 reads in the first second, 100 in the first minute, 200 in all.
+  Four different notes: no friends, none summited, still checking (`41 av 200`), the call failed.
+* **The physical board**: every tower has one (`Lane_n.TopBoard`, 14 x 11 studs, a gold Neon rim behind it) at the
+  back of its lobby, centre (-6, 5.5, -15) from the lane's origin, turned to face the spawn on floor 1's fork pad.
+  Its prompt (`Offentlig / Venner`, E, a tap, 8 studs) is 29.7 studs from the spawn, and 30.3 from floor 1's read
+  prompt (reach 16), so no spot reaches both. `Board.client` draws the player's own view on a SurfaceGui under their own
+  tower's board (never in PlayerGui), ignores views addressed to anybody else, and follows the tower when a rebirth
+  rebuilds it.
+* **Names** are looked up by the server, once per user per server (players here, a friends list, then
+  `GetNameFromUserIdAsync`), remembered in memory, never saved. The HUD no longer calls `GetNameFromUserIdAsync`.
+
+### 16.3 The brag, retuned
+
+`Pacing.spec` now holds the brag the way +1 Jump's holds space: `Config.Env.BragCrown` names a crown that a normal
+player (a reader who reacts, 4.54 min a run) wins in 30-45 min, within 5 min of the window's middle; the rarest
+crown is at least twice that and under 3 h. With the owner's 5 / 10 / 25 the test failed: the ice crown came at
+**45.4 min**, past the window. The ice crown is now at **8 summits: 36.3 min**; the rose stays at 5 (22.7 min), the
+star crown at 25 (113.4 min). The owner's decision (counted in summits, not rebirths; three rarer crowns) stands;
+only the number 10 became 8, and that is flagged for the owner.
+
+### 16.4 Gates (the final tree)
+
+```
+specs 1308 / 0: Board 66 (new), Build 31, Climb 67, Codes 20, EnvBands 124, EnvConfig 505, Fork 71,
+                Hazards 102, Pacing 108 (+5: the brag), Rest 55, Rng 32, Section 57, responsive 70
+headless 1707 / 0 + hud PASS: world.check 71, check_forktower 131 (+2: the enabled spawns), board 115 (new),
+                crown 15, env 235, env_join 37, env_secret 92, exit 30, hud_open 259, hud_play 611, plansecret 96,
+                sitdrop 15; check_forktower_hud PASS at 16 viewports, overlap on, Board.client loaded
+docs_check.py   94 / 0 (new)
+```
+
+`check_forktower`'s fresh lane holds 12 parts now (the board and its rim), and its last block no longer assumes the
+only enabled spawn is the WaitingSpawn: every enabled spawn must be it or a LaneSpawn on its own lane's lobby. Its
+leaderboard-calls assertion reads the store's name from Config (a hard-coded `_LB_v1` would have counted calls on
+a store nobody writes and passed vacuously).
+
+### 16.5 Mutation sweep
+
+On a scratch copy of `fork-tower/` and the fork-tower checks; each mutant was proved to differ in, and to be
+present in, the rebuilt bundle; every file was restored and checked by sha256 and the bundle rebuilt to the
+baseline. **29 of 29 killed; the control survived all 27 suites.**
+
+| # | mutation | killed by |
+|---|---|---|
+| S1 | the board written with `SetAsync`, no `keepHigher` | board: Ned's 45 lowered to 30, `SetAsync` used |
+| S2 | a better score is not stamped | board: Ava's reach time |
+| S3 | an old save's score is not stamped | board: Dee's stamp |
+| S4 | the board written on every save | board: 31 writes for 1; check_forktower: 5 calls a round |
+| S5 | `boardScore` not saved | board: the rejoin writes again |
+| S6 | the friends list not cached | board: 2 fetches |
+| S7 | no cap on friends | board: 340 reads, `41 av 450` |
+| S8 | no read limiter | board: 200 reads in the first second |
+| S9 | the public list every 20 s | board: 9 calls in 180 s |
+| S10 | names not remembered | board: static audit |
+| S11 | the HUD looks names up again | board: static audit, and Eve's row says `User_505` |
+| S12 | the client draws on the first tower it finds | board: 11 assertions |
+| S13 | the client draws anybody's view | board: Ava's board shows Kim's friends |
+| S14 | the client does not follow a rebuilt tower | board: 0 lines after the rebirth |
+| S15 | RespawnLocation not set to the LaneSpawn | board: every player on the WaitingSpawn |
+| S16 | the LaneSpawn disabled again | board: 15 assertions |
+| S17 | no WaitingSpawn at join | board: the waiting player's RespawnLocation is nil |
+| S18 | the board on the fork pad | board: placement |
+| S19 | the prompt's reach 30 studs | board: it reaches the spawn |
+| S20 | the board stamped with the save time | board: Bo's and Eli's values |
+| S21 | no board in a tower | board: 28 assertions |
+| S22 | the public refresh overwrites a Friends view | board: Ava's Friends view |
+| P1 | the ice crown back at 10 summits | Pacing (45.4 min), docs (the store says 8) |
+| P2 | the brag named the rose crown | Pacing (22.7 min) |
+| P3 | the star crown at 15 | Pacing (68.1 < 2 x 36.3), docs |
+| P4 | the star crown at 40 | Pacing (181.5 min), docs |
+| B1 | `encode` ranks the LATER reach first | Board.spec, board |
+| B2 | `keepHigher` rewrites the same score | Board.spec |
+| X1 | a LaneSpawn off its lobby | check_forktower: a stray enabled spawn |
+| C1 | CONTROL: the board's rim colour | survived all 27 suites |
+
+The documents' own sweep, on the final docs: **8 of 8 killed by `docs_check.py`, and its control (a caption's
+wording in `MARKETING.md`) survived all 27 suites.** D1 the store says 9 summits (the game says 8); D2 the store
+text at 1019 characters; D3 a clip of 7-16 s; D4b the shot list without its 1920x1080; D5 the needs-Studio list
+without the board; D6 a clip marked `exists` that `film_game.py` does not have; D7 CLAUDE.md not naming
+`Board.spec`; D8 the store text saying the game is in English. A first D4 removed only one of the shot list's
+two mentions of 1920x1080 and survived; that was the mutant's fault (the size was still stated), and D4b removed
+both.
+
+### 16.6 Not done / open after pass 2
+
+* Not seen in Studio: §10 items 11, 22-28 and the new 29-31 (the board, the enabled LaneSpawn and its ForceField,
+  the brag moment).
+* Not re-reviewed: pass 1's fixes and everything in this section. The captain-mode default is a review first.
+* `luau-analyze` and `luau-compile` are not on this machine; type analysis is still owed.
+* `tools/` is not this game's: `film_game.py` needs a Fork Tower scenario table for the eight clips,
+  `studio_open.ps1` a `fork-tower` key, and `store_text.py` a Fork Tower entry when there is an experience.
+* The ice crown's 8 (was the owner's 10) is flagged for the owner.
+* Not committed, pushed or published. Studio was not opened.

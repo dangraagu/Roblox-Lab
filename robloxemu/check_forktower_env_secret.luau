@@ -75,12 +75,14 @@ do
 	local finds = {}
 	for n in string.gmatch(code, "FindFirstChild%(%s*\"([^\"]+)\"") do finds[n] = true end
 	for n in string.gmatch(code, "FindFirstChild%(%s*\"([^\"]+)\" %.%.") do finds[n .. "<n>"] = true end
-	local allowed = { Towers = true, SummitPad = true, leaderstats = true, HumanoidRootPart = true, Reveal = true,
+	-- Topper: the public leaderstat of summits reached, which picks the summit's crown (owner decision
+	-- 2026-09-30); like every leaderstat it is on everyone's player list and says nothing about a fork.
+	local allowed = { Towers = true, SummitPad = true, leaderstats = true, Topper = true, HumanoidRootPart = true, Reveal = true,
 		["ForkPad_"] = true, ["Section_"] = true, ["ForkPad_<n>"] = true, ["Section_<n>"] = true }
 	local stray = {}
 	for n in finds do if not allowed[n] then stray[#stray + 1] = n end end
 	table.sort(stray)
-	eq(#stray, 0, "the ambience looks up nothing by name beyond the pads, a section, the Reveal card and leaderstats ("
+	eq(#stray, 0, "the ambience looks up nothing by name beyond the pads, a section, the Reveal card and leaderstats (with Topper) ("
 		.. table.concat(stray, ", ") .. ")")
 end
 

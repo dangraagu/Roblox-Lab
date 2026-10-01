@@ -265,6 +265,26 @@ function Hazards.checkHit(plan: any, t0: number, t1: number, playerPos: Vec, pla
 	return d <= plan.hitRadius + playerRadius
 end
 
+-- Can the rest of the flight (from fromT, default plan.t) still hit ANYONE standing inside the zone, at any
+-- height? The client draws the ring and the warning exactly this long. They used to go at arriveAt, but
+-- checkHit runs until `duration`, and the lane is aimed at a point up to AimJitter from the zone's centre,
+-- so a player on the far side of the ring is reached after arriveAt (Fork Tower's second review,
+-- 2026-09-30: hit up to 0.083 s after the ring had gone; +1 Jump's second review found the same). A point
+-- in the zone is at most zone.radius from its centre and a hit needs the hazard within hitRadius +
+-- playerRadius of that point, so in the ground plane the rest of the flight must pass within the sum of
+-- the two of the centre. Conservative on purpose: it ignores height, so a ring may stay up a little
+-- longer than strictly needed (a steep lane), never shorter.
+function Hazards.threatLive(plan: any, playerRadius: number, fromT: number?): boolean
+	if plan.hit then return false end -- a hazard hits once
+	local t0 = math.max(0, fromT or plan.t or 0)
+	if t0 > plan.duration then return false end
+	local z = Hazards.zone(plan, playerRadius)
+	local a = Hazards.positionAt(plan, t0)
+	local b = Hazards.positionAt(plan, plan.duration)
+	local d = Hazards.segmentDistance(v(a.x, 0, a.z), v(b.x, 0, b.z), v(z.x, 0, z.z))
+	return d <= z.radius + plan.hitRadius + playerRadius
+end
+
 -- One frame. Returns nil or an event { type = "spawn" | "done" | "skip", plan = ... }.
 --   ctx = { resting: boolean, grounded: boolean, kinds: { string }, aim: Vec?, yaw: number,
 --           pitch: number (camera pitch, radians, + = looking up; nil is read as level) }

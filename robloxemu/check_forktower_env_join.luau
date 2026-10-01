@@ -94,6 +94,12 @@ local function climbTo(uid, floor)
 			end
 		end
 		h:advance(0.3)
+		-- the server clears a floor only once its section could have been climbed (queued job I,
+		-- 2026-09-30): standing on the exit, its own poll sees the body there
+		for _ = 1, 100 do
+			if lane:FindFirstChild("Fork_" .. (level + 1)) ~= nil then break end
+			h:advance(0.1)
+		end
 	end
 	local reached = plr.leaderstats.Floor.Value
 	h:leave(plr) -- the server's releasing write: what the rejoin loads

@@ -227,12 +227,10 @@ Config.Skips = {
 	MaxSkips = 9,
 }
 
--- ── Gamepasses (ekte IDs når de finnes; AV til da) ──────────────────────────
-Config.Passes = {
-	Enabled = false,
-	ExtraSkip = 0,
-	GoldTrail = 0,
-}
+-- ── Ingen gamepasses i v1 ───────────────────────────────────────────────────
+-- Eierens standard (docs/complete-game-standard.md §3): aldri en Robux-kostnad i v1, aldri pay-to-win.
+-- ExtraSkip ville solgt det eneste en felle koster, så plassholderne (ExtraSkip, GoldTrail, id 0, AV) er
+-- slettet 2026-09-30 i stedet for å ligge døde (Codes.spec holder det). Flere skips kommer bare fra kodene.
 
 -- ── Verden (per-spiller bane, som grow-a-crystal sine plots) ────────────────
 Config.World = {
@@ -289,13 +287,62 @@ Config.Limits = {
 	HazardCooldown = 1,
 }
 
+-- ── Utgangen: en etasje klareres bare av en figur som faktisk kunne ha klatret dit ──
+-- Kø-jobb I (funnet 2026-09-24 av plan-secret-angriperen, REVIEW-4 §9.8 punkt 5): klienten eier sin
+-- egen figurs fysikk, så et skript kunne velge en dør og teleportere rett til utgangen, og da kostet en
+-- felle det ingenting. Nå klarerer serveren en etasje bare når (1) figuren står på utgangsplattformen
+-- ifølge serverens egen posisjon (ikke bare en Touched fra et sted), og (2) minst
+-- Section.minClimbSeconds har gått på SERVERENS klokke siden døra satte figuren på seksjonen: den rette
+-- linjen på bakken fra inngangen til utgangens rekkevidde, i spillerens egen WalkSpeed * SpeedSlack.
+-- Ingen beveger seg fortere sidelengs enn WalkSpeed; Pacing.spec måler at ingen ærlig klatrer
+-- (heller ikke en som hopper igjen i det øyeblikket hen lander) noen gang blir avvist.
+Config.Exit = {
+	SpeedSlack = 1.25, -- fysikk-slakk: regn med at en figur kan gå 25 % fortere enn WalkSpeed
+	FootprintMargin = 1, -- studs utenfor plattformen + figurens halve bredde der roten fortsatt «står på» den
+	Below = 4, -- roten kan være så langt under toppen (et bein som tar kanten i et hopp)
+	Above = 12, -- ... og så langt over (midt i et hopp over den)
+	PollSeconds = 0.4, -- serveren ser etter en figur som står på utgangen så ofte (fall-redningens takt)
+}
+
 -- ── Lagring ─────────────────────────────────────────────────────────────────
 Config.Save = {
 	Enabled = true,
 	Store = "ForkTower_v1",
-	Leaderboard = "ForkTower_LB_v1", -- OrderedDataStore på beste build-score
+	-- OrderedDataStore på beste build-score, KODET (Board.encode: score * 2e9 + (2e9 - nåddUnix), uavgjort til den
+	-- som nådde den først). v1 holdt rå score; v2 holder bare kodede verdier, så de to blandes aldri. Spillet er
+	-- aldri publisert, så v1 er tom.
+	Leaderboard = "ForkTower_LB_v2",
 	AutosaveSeconds = 20, -- fornyer også session-låsen; MÅ være < SessionLockSeconds
 	SessionLockSeconds = 45,
+}
+
+-- ── Topplista: offentlig + venner, på en tavle ved spawn (docs/complete-game-standard.md §3) ──────
+-- Metrikken er beste build-score en topp har banket (serveren regner den ut av runets valg, Build.reveal; en
+-- klient sender ingen tall). Board.luau er +1 Jump-malen, ordrett. Hver bane har sin egen tavle bak lobbyen
+-- (TopBoard); prompten bytter mellom Offentlig og Venner for den som trykker.
+Config.Board = {
+	PublicRows = 10, -- GetSortedAsync(false, 10)
+	PublicCacheSeconds = 60, -- serveren spør datastoren om topp 10 høyst én gang i minuttet
+	FriendsRows = 10,
+	FriendsCap = 200, -- Players:GetFriendsAsync leses aldri lenger enn dette
+	FriendsCacheSeconds = 300, -- venne-lista per spiller
+	ScoreCacheSeconds = 120, -- en venns beste, per server (også «har ikke nådd toppen»)
+	ReadsBurst = 40, -- GetAsync på topplista for venner: 40 med en gang ...
+	ReadsPerSecond = 1, -- ... så 1 i sekundet (Roblox gir 60 + 10 per spiller i minuttet)
+	BudgetReserve = 10, -- la alltid så mange GetAsync stå igjen i Roblox-budsjettet
+	MaxMetric = 4000000, -- verdien er eksakt i en double opp hit (4e6 * 2e9 < 2^53); en score er under 100
+	PromptDistance = 8, -- studs; tavla står bak lobbyen, så prompten dukker opp når du går bort til den
+	Text = {
+		Title = "TOPPLISTE · BESTE BUILDS",
+		EmptyPublic = "Ingen på lista ennå. Nå toppen av tårnet og bli den første!",
+		FriendsFailed = "Fikk ikke hentet Roblox-vennene dine akkurat nå. Prøv igjen om et minutt.",
+		NoFriends = "Ingen Roblox-venner ennå. Venner du legger til, dukker opp her, rangert mot deg.",
+		FriendsNoScores = "Ingen av dine %d venner har nådd toppen ennå. Inviter én og slå dem!",
+		FriendsChecking = "Sjekker vennene dine: %d av %d så langt …",
+		Loading = "Laster …",
+		Prompt = "Offentlig / Venner",
+		Object = "Toppliste",
+	},
 }
 
 -- ── Miljøet: tårnet forandrer seg mens du klatrer (EYECANDY.md) ─────────────
@@ -427,6 +474,62 @@ Config.Env = {
 			hazards = {},
 		},
 	},
+
+	-- Hvert bånd spenner over to etasjer, og den ANDRE etasjen er sin egen fase (EnvBands.layerWeight +
+	-- overlay, templatens egen mekanisme, som +1 Jumps skydekker bruker): lyset glir inn i fasen over de
+	-- siste 0.8 etasjene av båndets første seksjon, står ved båndets andre fork, og glir over i neste bånd
+	-- sammen med det. Slik endrer HVER etasje verden. Andre gjennomgang 2026-09-30 (funn 5): en treg
+	-- gjetter sto opptil 234 s i ett bånd, og verden sto stille opptil 159 s (Pacing.spec måler det nå per
+	-- runde). Bare lys-gruppene; ClockTime holder seg mellom båndet og neste bånd (sola går aldri baklengs).
+	-- center/halfWidth/feather i etasjer klatret: full vekt fra båndets andre fork (from + 1) til 0.2 opp.
+	Layers = {
+		{ id = "dungeonDeep", band = "dungeon", center = 1.1, halfWidth = 0.1, feather = 0.8,
+			lighting = { Brightness = 1.0, ExposureCompensation = 0.25, Ambient = { 96, 52, 40 },
+				FogColor = { 44, 20, 22 }, FogStart = 24, FogEnd = 190 },
+			atmosphere = { Density = 0.64, Color = { 90, 44, 40 }, Haze = 2.8 },
+			bloom = { Intensity = 2.1, Size = 40 },
+			colorCorrection = { Contrast = 0.24, TintColor = { 255, 206, 176 } } },
+		{ id = "gardenNoon", band = "garden", center = 3.1, halfWidth = 0.1, feather = 0.8,
+			lighting = { ClockTime = 12.2, Brightness = 2.9, OutdoorAmbient = { 128, 146, 112 }, FogEnd = 850 },
+			atmosphere = { Density = 0.26, Haze = 1.0, Glare = 0.7 },
+			sunRays = { Intensity = 0.3 },
+			colorCorrection = { Saturation = 0.34, TintColor = { 255, 252, 220 } } },
+		{ id = "clockworkGolden", band = "clockwork", center = 5.1, halfWidth = 0.1, feather = 0.8,
+			lighting = { ClockTime = 17.7, Brightness = 2.0, Ambient = { 120, 80, 40 }, OutdoorAmbient = { 150, 104, 60 },
+				FogColor = { 200, 132, 70 } },
+			atmosphere = { Glare = 1.2, Color = { 240, 170, 100 }, Decay = { 170, 90, 40 } },
+			sunRays = { Intensity = 0.32, Spread = 1.0 },
+			colorCorrection = { Saturation = 0.2, TintColor = { 255, 222, 180 } } },
+		{ id = "stormEye", band = "storm", center = 7.1, halfWidth = 0.1, feather = 0.8,
+			lighting = { ClockTime = 19.4, Brightness = 1.1, OutdoorAmbient = { 60, 72, 104 },
+				FogColor = { 56, 64, 90 }, FogEnd = 320 },
+			atmosphere = { Density = 0.58, Haze = 2.9 },
+			colorCorrection = { Brightness = -0.04, Contrast = 0.28, Saturation = -0.18, TintColor = { 200, 214, 255 } } },
+		{ id = "observatoryAurora", band = "observatory", center = 9.1, halfWidth = 0.1, feather = 0.8,
+			lighting = { ClockTime = 23.8, Ambient = { 60, 96, 110 }, OutdoorAmbient = { 70, 110, 130 } },
+			atmosphere = { Color = { 90, 170, 180 }, Haze = 0.7 },
+			sky = { StarCount = 4800 },
+			bloom = { Intensity = 2.0 },
+			colorCorrection = { Saturation = 0.26, TintColor = { 205, 240, 235 } } },
+	},
+
+	-- KRONEN PÅ TOPPEN blir sjeldnere jo flere ganger du har nådd toppen (eierens beslutning 2026-09-30:
+	-- «ta det anbefalte»; EYECANDY §12). Talt i TOPPER (leaderstats «Topper», serverens tall), ikke i
+	-- rebirths: Rebirth virker fra hvilken som helst etasje hvert 3. sekund, så 25 rebirths er 75 s med
+	-- knappetrykk. Pacing.spec måler minuttene. Bare pynt: kronen gir ingenting annet.
+	--
+	-- SKRYTET (docs/complete-game-standard.md §2: et skryte-øyeblikk etter 30-45 min vanlig spill, og et
+	-- langsiktig mål bortenfor). Eierens tall var 5 / 10 / 25; målt i Pacing.spec kom Iskronen ved 10 topper
+	-- etter 45,4 min, utenfor vinduet, og ingen krone lå i det. Iskronen er nå ved 8 topper (36 min, midt i
+	-- vinduet) og er skrytet (BragCrown); Stjernekronen ved 25 (113 min) er det langsiktige målet. Beslutningen
+	-- (topper, ikke rebirths; tre sjeldnere kroner) står; bare tallet 10 ble 8, pass 2 2026-10-01.
+	CrownTiers = {
+		{ id = "gold", name = "Gullkronen", summits = 0, stars = 10, color = { 255, 214, 110 } },
+		{ id = "rose", name = "Rosekronen", summits = 5, stars = 12, color = { 255, 150, 190 } },
+		{ id = "ice", name = "Iskronen", summits = 8, stars = 14, color = { 150, 225, 255 } },
+		{ id = "star", name = "Stjernekronen", summits = 25, stars = 18, prismatic = true, color = { 255, 255, 255 } },
+	},
+	BragCrown = "ice", -- skrytet: Pacing.spec krever 30-45 min vanlig spill, nær midten
 
 	-- Levende ting på en ring rundt kameraet (EnvBands.ambientSpawn): studs relativt til kameraet.
 	Critters = {

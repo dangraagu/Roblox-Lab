@@ -43,6 +43,7 @@ local Fork = require(ReplicatedStorage:WaitForChild("Fork"))
 local Section = require(ReplicatedStorage:WaitForChild("Section"))
 local BuildCard = require(ReplicatedStorage:WaitForChild("Build"))
 local Codes = require(ReplicatedStorage:WaitForChild("Codes"))
+local Board = require(ReplicatedStorage:WaitForChild("Board"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
 
 Fx.applyLighting(Fx.Presets.Fork)
@@ -183,7 +184,8 @@ local NoticeEvent = make("RemoteEvent", remotes, { Name = "Notice" })
 local RevealEvent = make("RemoteEvent", remotes, { Name = "Reveal" })
 local RebirthEvent = make("RemoteEvent", remotes, { Name = "Rebirth" })
 local ArmSkipEvent = make("RemoteEvent", remotes, { Name = "ArmSkip" })
-local LeaderboardEvent = make("RemoteEvent", remotes, { Name = "Leaderboard" })
+local LeaderboardEvent = make("RemoteEvent", remotes, { Name = "Leaderboard" }) -- the HUD's top 10 (public)
+local BoardEvent = make("RemoteEvent", remotes, { Name = "Board" }) -- the board by your spawn: YOUR view of it
 local RedeemFunc = make("RemoteFunction", remotes, { Name = "Redeem" })
 
 local function notice(plr: Player, kind: string, text: string)
@@ -239,10 +241,17 @@ type Profile = {
 	skips: number,
 	armedSkip: boolean, -- runtime only; never saved
 	rebirths: number,
+	-- Summits reached, one per run (reachExit at the top). The summit's crown grows rarer with it
+	-- (Config.Env.CrownTiers; owner decision 2026-09-30). NOT rebirths: Rebirth works from any floor.
+	summits: number,
 	bestScore: number,
+	-- When bestScore was reached (os.time). The board breaks a tie by it: the first to reach a score ranks
+	-- above everyone who reached the same score later (Board.encode).
+	bestScoreAt: number,
+	-- The best score this profile last WROTE to the board. The board is written only when bestScore passes it.
+	boardScore: number,
 	bestTitle: string,
 	redeemed: { [string]: boolean },
-	passes: { [string]: boolean },
 	canSave: boolean, -- load-success sentinel: never write over data we failed to read
 	-- Runtime only. True once a save that RELEASES the lock has been attempted for this session
 	-- (leaving, or BindToClose while the player is still here). From then on nothing on the hidden
@@ -275,10 +284,12 @@ local function defaultProfile(): Profile
 		skips = Config.Skips.StartSkips,
 		armedSkip = false,
 		rebirths = 0,
+		summits = 0,
 		bestScore = 0,
+		bestScoreAt = 0,
+		boardScore = 0,
 		bestTitle = "",
 		redeemed = {},
-		passes = {},
 		canSave = false,
 		released = false,
 		session = nil,
@@ -468,10 +479,12 @@ local function loadProfile(plr: Player): Profile
 				p.skipped = levelSet(d.skipped)
 				p.skips = math.clamp(math.floor(tonumber(d.skips) or 0), 0, Config.Skips.MaxSkips)
 				p.rebirths = math.floor(tonumber(d.rebirths) or 0)
+				p.summits = math.max(0, math.floor(tonumber(d.summits) or 0))
 				p.bestScore = math.floor(tonumber(d.bestScore) or 0)
+				p.bestScoreAt = math.floor(tonumber(d.bestScoreAt) or 0)
+				p.boardScore = math.floor(tonumber(d.boardScore) or 0)
 				p.bestTitle = tostring(d.bestTitle or "")
 				p.redeemed = (type(d.redeemed) == "table") and d.redeemed or {}
-				p.passes = (type(d.passes) == "table") and d.passes or {}
 				-- Only noted here. The transform may run more than once and must not draw anything;
 				-- resolveSecrets runs once, below, after every field it reads is final.
 				savedSecrets = d.floorSecrets
@@ -506,13 +519,38 @@ local function loadProfile(plr: Player): Profile
 	end
 	-- After the clamp, because the migration rule reads p.level.
 	p.floorSecrets = resolveSecrets(p, savedSecrets, p.canSave and recordReleased)
+	-- Saved before 2026-10-01: a best score with no time. When it was reached is unknown, so it is stamped
+	-- with this session; on the board it ranks behind everyone who reached the same score before today.
+	if p.bestScore > 0 and p.bestScoreAt <= 0 then
+		p.bestScoreAt = os.time()
+	end
 	return p
 end
 
--- When each player's profile last actually reached the DataStore, and the score last published to
--- the ordered leaderboard.
+-- When each player's profile last actually reached the DataStore.
 local lastSaveAt: { [Player]: number } = {}
-local lastBanked: { [Player]: number } = {}
+
+-- THE BOARD (OrderedDataStore Config.Save.Leaderboard). Written only when the best score has passed the last one
+-- this profile wrote, and never lower than what is stored: Board.keepHigher cancels the UpdateAsync otherwise, so
+-- a same score reached later never replaces the first one (Board.encode: score * 2e9 + (2e9 - reachedAt)). It
+-- was a raw SetAsync before pass 2 (2026-10-01): no tie-break, and a session holding an older, lower best could
+-- overwrite a higher one. Called only after the profile write landed, so only the session that owns the record
+-- writes the board.
+local function writeBoard(p: Profile, userId: number)
+	if not orderedLB or p.bestScore <= p.boardScore then
+		return
+	end
+	local score = p.bestScore
+	local value = Board.encode(score, p.bestScoreAt, Config.Board)
+	local ok = pcall(function()
+		orderedLB:UpdateAsync(key(userId), function(old)
+			return Board.keepHigher(old, value)
+		end)
+	end)
+	if ok then
+		p.boardScore = score -- also when keepHigher cancelled: what is stored is at least as high
+	end
+end
 
 -- `force` is for the writes that MUST land: leaving, BindToClose, and redeeming a code (which
 -- grants a reward in memory and would otherwise be re-redeemable after a crash).
@@ -547,7 +585,7 @@ local function saveProfile(plr: Player, releaseLock: boolean, force: boolean?)
 	-- writing over the session that took it. `lost` is set on every invocation: the transform may run
 	-- more than once.
 	local lost = false
-	pcall(function()
+	local wrote = pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
 			old = old or {}
 			if old.session ~= p.session then
@@ -563,7 +601,9 @@ local function saveProfile(plr: Player, releaseLock: boolean, force: boolean?)
 				-- the secret it was read under.
 				floorSecrets = p.floorSecrets,
 				rebirths = p.rebirths, bestScore = p.bestScore, bestTitle = p.bestTitle,
-				redeemed = p.redeemed, passes = p.passes,
+				bestScoreAt = p.bestScoreAt, boardScore = p.boardScore,
+				-- no `passes`: no gamepasses in v1 (owner decision 2026-09-30; an old record's empty field is dropped)
+				redeemed = p.redeemed, summits = p.summits,
 			}
 			old.jobId = game.JobId
 			old.lockUntil = releaseLock and 0 or (os.time() + Config.Save.SessionLockSeconds)
@@ -578,17 +618,11 @@ local function saveProfile(plr: Player, releaseLock: boolean, force: boolean?)
 			.. ": en nyere økt har tatt over profilen; progresjon denne økta lagres ikke lenger.")
 		return
 	end
-	-- Only when it has actually MOVED. bestScore changes once per summit, so re-publishing it on
-	-- every autosave was a second write per save buying nothing — the same amplification as above,
+	-- Only when it has actually MOVED (writeBoard). bestScore changes at most once per summit, so re-publishing
+	-- it on every autosave would be a second write per save buying nothing: the same amplification as above,
 	-- one budget over.
-	if orderedLB and p.bestScore > 0 and p.bestScore ~= lastBanked[plr] then
-		local banked = p.bestScore
-		local ok = pcall(function()
-			orderedLB:SetAsync(key(plr.UserId), banked)
-		end)
-		if ok then
-			lastBanked[plr] = banked
-		end
+	if wrote then
+		writeBoard(p, plr.UserId)
 	end
 end
 
@@ -658,12 +692,13 @@ end
 -- that is the roof, and over a tower with no floor at (0,0,0) it is a fall with no bottom. Placed
 -- well behind every lobby pad on Z, so it sits in nobody's corridor.
 local waiting = make("Folder", workspace, { Name = "Waiting" })
+local waitingSpawn: SpawnLocation
 do
 	local pad = slab(waiting, "WaitingPad", Vector3.new(30, 2, 30),
 		Vector3.new(0, -1, -160), Color3.fromRGB(44, 42, 62), Enum.Material.Slate)
 	billboard(pad, "WaitingLabel", "🔀 FORK TOWER\nVenter på et ledig tårn …", 8,
 		Color3.fromRGB(235, 225, 255), Vector2.new(400, 120))
-	make("SpawnLocation", waiting, {
+	waitingSpawn = make("SpawnLocation", waiting, {
 		Name = "WaitingSpawn",
 		Anchored = true,
 		CanCollide = false,
@@ -706,6 +741,7 @@ local function signStrip(door: BasePart, floorData, slot: number)
 end
 
 local onDoorChosen -- forward declaration; the prompt handler needs it
+local onBoardPrompt -- ... and so does the board's (the board section is further down)
 local onReadInscription -- ... and so does the inscription's
 
 --------------------------------------------------------------------- read / unread dressing
@@ -941,6 +977,8 @@ local function buildSection(plr: Player, lane: Lane, level: number, theme: strin
 	local base = lane.forkTop[level] + Vector3.new(0, 0, Config.World.DoorDepth + Config.Tower.TileSize)
 	local folder = make("Folder", lane.folder, { Name = "Section_" .. level })
 	lane.sectionFolder[level] = folder
+	-- kept for the exit rule (lane.tryExit): the geometry the least climbing time is measured on
+	lane.sectionGeo[level] = sec
 	folder:SetAttribute("Level", level)
 	folder:SetAttribute("Penalty", penalty)
 	folder:SetAttribute("Theme", theme)
@@ -958,6 +996,7 @@ local function buildSection(plr: Player, lane: Lane, level: number, theme: strin
 			part.Color = c3(themeCfg.accent)
 			part.Material = Enum.Material.Neon
 			part:SetAttribute("Exit", true)
+			lane.exitPart[level] = part
 			make("PointLight", part, {
 				Name = "ExitGlow", Color = c3(themeCfg.accent), Brightness = 2.4, Range = 26,
 			})
@@ -994,7 +1033,7 @@ local function buildSection(plr: Player, lane: Lane, level: number, theme: strin
 			-- costs you a few platforms rather than the whole climb.
 			lane.checkpoint = checkpoint
 			if pf.index == #sec.platforms and prof.level == level and prof.stage == "climb" then
-				lane.reachExit(level)
+				lane.tryExit(level, char:FindFirstChild("HumanoidRootPart"))
 			end
 		end)
 	end
@@ -1117,6 +1156,8 @@ local function pushState(plr: Player)
 		if f then (f :: IntValue).Value = math.min(p.level, Config.Tower.Floors) end
 		if b then (b :: IntValue).Value = p.bestScore end
 		if r then (r :: IntValue).Value = p.rebirths end
+		local t = ls:FindFirstChild("Topper")
+		if t then (t :: IntValue).Value = p.summits end
 	end
 
 	local jump, speed = traitTotals(p)
@@ -1165,6 +1206,7 @@ local function revealFor(plr: Player, banked: boolean)
 	local card = BuildCard.reveal(Config, p.picks)
 	if banked and card.score > p.bestScore then
 		p.bestScore = card.score
+		p.bestScoreAt = os.time() -- the board's tie-break: who reached this score first
 		p.bestTitle = card.title
 	end
 	card.rebirths = p.rebirths
@@ -1204,7 +1246,7 @@ local function buildLane(plr: Player)
 		-- and the sign is the one that stays on screen. seatWaiting below is what makes the sign
 		-- true.
 		notice(plr, "full", "Alle tårnene er opptatt akkurat nå — du får det første som blir ledig.")
-		return
+		return -- plr.RespawnLocation is still the WaitingSpawn onPlayerAdded set first
 	end
 	local origin = laneOrigin(index)
 	local folder = make("Folder", towers, { Name = "Lane_" .. index })
@@ -1221,6 +1263,10 @@ local function buildLane(plr: Player)
 		entry = {}, -- level -> the checkpoint at the bottom of that floor's section
 		readHoldAt = {}, -- level -> when the player STARTED holding LES, by the server's clock
 		readPending = {}, -- level -> a server-timed read is already counting down
+		sectionGeo = {}, -- level -> Section.build's section (the exit rule measures on it)
+		exitPart = {}, -- level -> the section's exit platform
+		climbFrom = {}, -- level -> when the server put the player at the bottom of that section (its clock)
+		exitTold = {}, -- level -> the player was told once why an early exit did not count
 		checkpoint = origin + Vector3.new(0, Config.World.RespawnLift, -4),
 	}
 	lanes[plr] = lane
@@ -1239,7 +1285,22 @@ local function buildLane(plr: Player)
 			buildSummit(plr, lane)
 			lane.checkpoint = lane.forkTop[prof.level] + Vector3.new(0, Config.World.RespawnLift, 0)
 			revealFor(plr, true)
-			notice(plr, "summit", "Du nådde toppen! Build Reveal er klar.")
+			-- one summit per run: reachExit runs once per floor, and this is the top floor's
+			local function crownAt(n: number)
+				local best = nil
+				for _, t in ipairs(Config.Env.CrownTiers or {}) do
+					if n >= t.summits then best = t end
+				end
+				return best
+			end
+			local was = crownAt(prof.summits)
+			prof.summits += 1
+			local now = crownAt(prof.summits)
+			if now ~= nil and now ~= was then
+				notice(plr, "summit", "Du nådde toppen! 👑 Ny krone: " .. now.name .. " (" .. prof.summits .. " topper)")
+			else
+				notice(plr, "summit", "Du nådde toppen! Build Reveal er klar.")
+			end
 		else
 			buildFork(plr, lane, prof.level)
 			lane.checkpoint = lane.forkTop[prof.level] + Vector3.new(0, Config.World.RespawnLift, 0)
@@ -1249,13 +1310,68 @@ local function buildLane(plr: Player)
 		saveProfile(plr, false)
 	end
 
+	-- THE EXIT COUNTS ONLY FOR A BODY THAT COULD HAVE CLIMBED THERE (queued job I, found 2026-09-24 by
+	-- the plan-secret attacker; REVIEW-4.md §9.8 item 5). A client owns its character's physics, so a
+	-- script could choose a door and teleport onto the exit at once, or fire the exit's Touched from
+	-- anywhere: a trap cost it nothing whatever it predicted, and the read's price bound only honest
+	-- players. So both of these must hold, on the SERVER's clock and the server's view of the body:
+	--   * the root part stands on the exit platform (Config.Exit), not merely somewhere a Touched came from;
+	--   * Section.minClimbSeconds has passed since the server put the player at the bottom of the section
+	--     (the door, or a mid-climb rejoin): the straight line on the ground from the entry to the exit's
+	--     reach at the player's own WalkSpeed * Config.Exit.SpeedSlack. Nobody moves sideways faster than
+	--     their WalkSpeed; tests/Pacing.spec.luau measures that no honest climber is ever refused.
+	-- An early touch is refused and said once per section (trap 3). onCharacter's poll clears the floor
+	-- for a body that is standing on the exit once the time is up, so an honest player whose landing
+	-- came from a limb or a hair early is never left standing on a spent exit.
+	-- robloxemu/check_forktower_exit.luau is the measurement.
+	lane.tryExit = function(level: number, root: Instance?): boolean
+		local prof = profiles[plr]
+		if not prof or prof.level ~= level or prof.stage ~= "climb" then
+			return false
+		end
+		local exit, geo = lane.exitPart[level], lane.sectionGeo[level]
+		if exit == nil or geo == nil or root == nil or not root:IsA("BasePart") then
+			return false
+		end
+		local pos = (root :: BasePart).Position
+		local ex = Config.Exit
+		local reach = exit.Size.X / 2 + Config.World.CharacterHalfWidth + ex.FootprintMargin
+		local reachZ = exit.Size.Z / 2 + Config.World.CharacterHalfWidth + ex.FootprintMargin
+		local top = exit.Position.Y + exit.Size.Y / 2
+		if math.abs(pos.X - exit.Position.X) > reach or math.abs(pos.Z - exit.Position.Z) > reachZ
+			or pos.Y < top - ex.Below or pos.Y > top + ex.Above then
+			return false -- the body is not on the exit: whatever fired the Touched, it was not a climb
+		end
+		if lane.climbFrom[level] == nil then
+			lane.climbFrom[level] = clock() -- no recorded start (should not happen): count from now, fail closed
+		end
+		local _, speed = traitTotals(prof)
+		local need = Section.minClimbSeconds(Config, geo, speed)
+		if clock() - lane.climbFrom[level] < need then
+			if not lane.exitTold[level] then
+				lane.exitTold[level] = true
+				notice(plr, "blocked", "Utgangen teller først når du har klatret opp seksjonen.")
+			end
+			return false
+		end
+		lane.reachExit(level)
+		return true
+	end
+
 	local padSize = Vector3.new(Config.World.LobbyPadSize[1], Config.World.LobbyPadSize[2], Config.World.LobbyPadSize[3])
 	local lobby = slab(folder, "LobbyPad", padSize, origin - Vector3.new(0, padSize.Y / 2, 6),
 		Color3.fromRGB(48, 46, 66), Enum.Material.Slate)
 	billboard(lobby, "Welcome",
 		"🔀 FORK TOWER\nTo dører. Én er en felle.\nLES INNSKRIPSJONEN.", 8,
 		Color3.fromRGB(235, 225, 255), Vector2.new(400, 140))
-	make("SpawnLocation", folder, {
+	-- THE ENGINE'S SPAWN IS THE PLAYER'S OWN TOWER (docs/complete-game-standard.md §1, robloxemu/SPAWN-ORDER.md):
+	-- plr.RespawnLocation points at this real, enabled SpawnLocation on their own lobby, so the frame the engine
+	-- places a character it already stands in its own tower, not on the waiting pad 160 studs away. The game
+	-- then moves it to its checkpoint (onCharacter, which waits for the engine first: the checkpoint climbs with
+	-- the player, so it is not a SpawnLocation). It was Enabled = false, a marker, until pass 2 (2026-10-01).
+	-- Every player's RespawnLocation is set before their character can load (onPlayerAdded), so an enabled
+	-- LaneSpawn is never the engine's pick for anybody else.
+	local laneSpawn = make("SpawnLocation", folder, {
 		Name = "LaneSpawn",
 		Anchored = true,
 		CanCollide = false,
@@ -1263,8 +1379,53 @@ local function buildLane(plr: Player)
 		Size = Vector3.new(6, 1, 6),
 		Position = origin + Vector3.new(0, 0.5, -4),
 		Neutral = true,
-		Enabled = false, -- we place the character ourselves; this is a marker, not a spawn point
+		Enabled = true,
 	})
+	plr.RespawnLocation = laneSpawn
+
+	-- THE TOPLIST BOARD (docs/complete-game-standard.md §3), at the back of this tower's lobby, its front facing
+	-- the spawn on floor 1's fork pad, out of the climb (which runs +Z from that pad). Every tower has its own,
+	-- because every player spawns in their own tower. The server owns every number on it and sends each player
+	-- THEIR view (BoardEvent); Board.client draws it on the player's own board, locally, so two players never
+	-- fight over one sign. The prompt switches Public / Friends for whoever presses it.
+	do
+		local centre = origin + Vector3.new(-6, 5.5, -15)
+		local faceTo = Vector3.new(origin.X, centre.Y, origin.Z + 14)
+		local board = make("Part", folder, {
+			Name = "TopBoard",
+			Anchored = true,
+			CanCollide = true,
+			Size = Vector3.new(14, 11, 1),
+			CFrame = CFrame.lookAt(centre, faceTo), -- the front face (where the board is drawn) looks at the spawn
+			Material = Enum.Material.SmoothPlastic,
+			Color = Color3.fromRGB(24, 22, 40),
+		})
+		-- a gold rim behind it: what is interactive should look interactive (docs/new-game-checklist.md §2)
+		make("Part", folder, {
+			Name = "TopBoardTrim",
+			Anchored = true,
+			CanCollide = false,
+			CanQuery = false,
+			CastShadow = false,
+			Size = Vector3.new(14.8, 11.8, 0.6),
+			CFrame = board.CFrame * CFrame.new(0, 0, 0.35), -- local +Z = behind the board
+			Material = Enum.Material.Neon,
+			Color = Color3.fromRGB(255, 205, 90),
+		})
+		local at = make("Attachment", board, { Name = "PromptAt", Position = Vector3.new(0, -3.5, -0.6) })
+		local prompt = make("ProximityPrompt", at, {
+			Name = "BoardPrompt",
+			ActionText = Config.Board.Text.Prompt,
+			ObjectText = Config.Board.Text.Object,
+			HoldDuration = 0,
+			MaxActivationDistance = Config.Board.PromptDistance,
+			RequiresLineOfSight = false,
+			KeyboardKeyCode = Enum.KeyCode.E,
+		})
+		prompt.Triggered:Connect(function(who: Player)
+			onBoardPrompt(who)
+		end)
+	end
 
 	-- Floor 1's fork sits just in front of the lobby pad; everything above it is placed by the
 	-- section below it, so the tower's geometry is generated rather than tabulated.
@@ -1292,6 +1453,8 @@ local function buildLane(plr: Player)
 
 	local restoreLevel = math.min(p.level, Config.Tower.Floors + 1)
 	if p.stage == "climb" and lane.entry[p.level] then
+		-- the section's clock starts again: the player is put back at its bottom (tryExit)
+		lane.climbFrom[p.level] = clock()
 		-- Mid-climb: put them back at the bottom of the section they were on, not at the fork —
 		-- the fork has already been answered and its prompts are disabled.
 		lane.checkpoint = lane.entry[p.level]
@@ -1480,6 +1643,8 @@ onDoorChosen = function(plr: Player, owner: Player, level: number, slot: number)
 	-- of, with both doors dead and Rebirth the only way out. Only the TELEPORT needs a character;
 	-- the checkpoint is a number on the lane, and CharacterAdded will read it.
 	local target = lane.entry[level]
+	-- the section's clock starts now: the exit counts only once the climb could have been made (tryExit)
+	lane.climbFrom[level] = clock()
 	if target then
 		lane.checkpoint = target
 		local char = plr.Character
@@ -1626,25 +1791,242 @@ RedeemFunc.OnServerInvoke = function(plr, input)
 	return { ok = true, reason = "ok", skips = reward.skips }
 end
 
---============================================================================ leaderboard
+--============================================================================ the board: public + friends
 
-local function refreshLeaderboard()
+-- docs/complete-game-standard.md §3 (owner, 2026-09-16), built on the +1 Jump template (Board.luau, verbatim).
+-- The metric is the best Build Reveal score a summit banked (revealFor): the server computes it from the run's
+-- picks and no client sends a number. Stored encoded (writeBoard, above): ties go to whoever reached the score
+-- first. The public top 10 is read at most once per PublicCacheSeconds. Friends are read only when a player
+-- asks on the board, capped, cached and throttled (Board.newLimiter and Roblox's own budget). Names are looked up
+-- here, remembered in memory and never saved; the HUD used to look every name up itself on every refresh.
+local BC = Config.Board
+
+-- Names: from the players in this server, a friends list, or GetNameFromUserIdAsync; remembered, never saved.
+local nameCache: { [number]: string } = {}
+local function nameOf(userId: number): string
+	local cached = nameCache[userId]
+	if cached then
+		return cached
+	end
+	local here = Players:GetPlayerByUserId(userId)
+	if here then
+		nameCache[userId] = here.Name
+		return here.Name
+	end
+	local ok, res = pcall(function()
+		return Players:GetNameFromUserIdAsync(userId)
+	end)
+	if ok and type(res) == "string" then
+		nameCache[userId] = res
+		return res
+	end
+	return "#" .. tostring(userId) -- not remembered: the next view tries again
+end
+local function withNames(rows: { any }): { any }
+	local out = {}
+	for i, r in rows do
+		out[i] = { rank = r.rank, userId = r.userId, tier = r.tier, you = r.you, name = nameOf(r.userId) }
+	end
+	return out
+end
+
+-- A player's own value, from memory (fresher than the store, which is written at the autosave).
+local function liveValue(p: Profile?): number
+	if not p or p.bestScore <= 0 then
+		return 0
+	end
+	return Board.encode(p.bestScore, p.bestScoreAt, BC)
+end
+
+local boardMode: { [Player]: string } = {} -- "public" | "friends", per player
+local publicView: any = { rows = {}, note = BC.Text.Loading }
+
+local function sendBoard(plr: Player, mode: string, view: any)
+	-- `viewer`: FireClient reaches only this player in Roblox; the field lets a client ignore anything else.
+	BoardEvent:FireClient(plr, { viewer = plr.UserId, mode = mode, rows = view.rows, note = view.note })
+end
+
+local function refreshPublic()
 	if not orderedLB then
+		publicView = Board.publicView({}, BC)
 		return
 	end
 	local ok, page = pcall(function()
-		return orderedLB:GetSortedAsync(false, 10)
+		return orderedLB:GetSortedAsync(false, BC.PublicRows)
 	end)
 	if not ok or not page then
+		return -- keep the last list
+	end
+	local okPage, items = pcall(function()
+		return page:GetCurrentPage()
+	end)
+	if not okPage or type(items) ~= "table" then
 		return
 	end
-	local top = {}
-	for _, entry in ipairs(page:GetCurrentPage()) do
-		local uid = tonumber((string.gsub(entry.key, "^u_", "")))
-		top[#top + 1] = { userId = uid, score = entry.value }
+	local entries = {}
+	for _, e in ipairs(items) do
+		local uid = Board.userIdOf(tostring(e.key))
+		if uid and type(e.value) == "number" then
+			table.insert(entries, { userId = uid, value = e.value })
+		end
 	end
-	for _, plr in ipairs(Players:GetPlayers()) do
-		LeaderboardEvent:FireClient(plr, top)
+	local view = Board.publicView(entries, BC)
+	publicView = { rows = withNames(view.rows), note = view.note }
+end
+
+-- The HUD's top list (decoded scores and the server's names, never a stored value) and, for a player looking
+-- at Public, the board.
+local function sendPublic(plr: Player)
+	local hudRows = {}
+	for i, r in publicView.rows do
+		hudRows[i] = { userId = r.userId, score = r.tier, name = r.name }
+	end
+	LeaderboardEvent:FireClient(plr, hudRows)
+	if (boardMode[plr] or "public") == "public" then
+		sendBoard(plr, "public", publicView)
+	end
+end
+
+-- Friends: only on request, capped at FriendsCap, cached per player. A failed fetch is retried after a minute,
+-- not on every press.
+local friendsCache = Board.newCache(BC.FriendsCacheSeconds)
+local friendsFailed = Board.newCache(60)
+local scoreCache = Board.newCache(BC.ScoreCacheSeconds)
+local readLimiter = Board.newLimiter(BC.ReadsBurst, BC.ReadsPerSecond, clock())
+local fetching: { [Player]: boolean } = {}
+
+local function friendIdsOf(plr: Player): ({ number }, boolean)
+	local now = clock()
+	local hit = Board.cacheGet(friendsCache, plr.UserId, now)
+	if hit then
+		return hit, false
+	end
+	if Board.cacheHas(friendsFailed, plr.UserId, now) then
+		return {}, true
+	end
+	local ok, pages = pcall(function()
+		return (Players :: any):GetFriendsAsync(plr.UserId)
+	end)
+	local ids = {}
+	local broken = not ok or pages == nil
+	while not broken and #ids < BC.FriendsCap do
+		local okPage, items = pcall(function()
+			return pages:GetCurrentPage()
+		end)
+		if not okPage or type(items) ~= "table" then
+			broken = #ids == 0
+			break
+		end
+		for _, item in ipairs(items) do
+			local id = tonumber(item.Id)
+			if id and #ids < BC.FriendsCap then
+				table.insert(ids, id)
+				if type(item.Username) == "string" then
+					nameCache[id] = item.Username
+				end
+			end
+		end
+		if pages.IsFinished or #ids >= BC.FriendsCap then
+			break
+		end
+		if not pcall(function()
+			pages:AdvanceToNextPageAsync()
+		end) then
+			break
+		end
+	end
+	if broken then
+		Board.cachePut(friendsFailed, plr.UserId, true, now)
+		return {}, true
+	end
+	Board.cachePut(friendsCache, plr.UserId, ids, now)
+	return ids, false
+end
+
+-- Always leave BudgetReserve GetAsync in Roblox's budget (if it cannot be read, only the limiter applies).
+local function budgetLeft(): boolean
+	local ok, budget = pcall(function()
+		return DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetAsync)
+	end)
+	return not (ok and type(budget) == "number" and budget < BC.BudgetReserve)
+end
+
+-- A friend's stored value (0 = never summited), or nil when the read is throttled (try again later). A read that
+-- fails counts as 0 without being cached, so one bad key does not stop the list.
+local function friendValue(userId: number): number?
+	local here = Players:GetPlayerByUserId(userId)
+	if here and profiles[here] then
+		return liveValue(profiles[here])
+	end
+	local now = clock()
+	if Board.cacheHas(scoreCache, userId, now) then
+		return Board.cacheGet(scoreCache, userId, now)
+	end
+	if not orderedLB then
+		return 0
+	end
+	if not budgetLeft() or not Board.take(readLimiter, now) then
+		return nil
+	end
+	local ok, v = pcall(function()
+		return orderedLB:GetAsync(key(userId))
+	end)
+	if not ok then
+		return 0
+	end
+	local value = if type(v) == "number" then v else 0
+	Board.cachePut(scoreCache, userId, value, now)
+	return value
+end
+
+local function showFriends(plr: Player)
+	if fetching[plr] then
+		sendBoard(plr, "friends", { rows = {}, note = BC.Text.Loading }) -- the one running sends soon
+		return
+	end
+	fetching[plr] = true
+	task.spawn(function()
+		sendBoard(plr, "friends", { rows = {}, note = BC.Text.Loading })
+		local ids, failedList = friendIdsOf(plr)
+		local values: { [number]: number } = {}
+		local status = { friendCount = #ids, checked = 0, failed = failedList }
+		local function push()
+			values[plr.UserId] = liveValue(profiles[plr])
+			local view = Board.friendsView(plr.UserId, values, status, BC)
+			sendBoard(plr, "friends", { rows = withNames(view.rows), note = view.note })
+		end
+		local i, lastPush = 1, -math.huge
+		while i <= #ids and plr.Parent == Players and boardMode[plr] == "friends" do
+			local v = friendValue(ids[i])
+			if v == nil then
+				status.checked = i - 1
+				if clock() - lastPush >= 0.5 then
+					push()
+					lastPush = clock()
+				end
+				task.wait(1) -- throttled: wait for the limiter
+			else
+				values[ids[i]] = v
+				i += 1
+			end
+		end
+		status.checked = i - 1
+		if plr.Parent == Players and boardMode[plr] == "friends" then
+			push()
+		end
+		fetching[plr] = nil
+	end)
+end
+
+onBoardPrompt = function(plr: Player)
+	if profiles[plr] == nil then
+		return -- still loading: the board says so ("Laster ...") until the first view arrives
+	end
+	boardMode[plr] = if boardMode[plr] == "friends" then "public" else "friends"
+	if boardMode[plr] == "friends" then
+		showFriends(plr)
+	else
+		sendBoard(plr, "public", publicView)
 	end
 end
 
@@ -1698,6 +2080,7 @@ local function onCharacter(plr: Player, char: Model)
 	end
 	applyTraits(plr)
 	pushState(plr)
+	sendPublic(plr) -- the board and the HUD's top list, now that the client is listening (see the note above)
 
 	-- Signature particle #3: a trail on the climber, so a jump reads as a jump in a clip or a
 	-- thumbnail. Parented to the root part, not to the lane, so it costs the lane nothing.
@@ -1714,17 +2097,27 @@ local function onCharacter(plr: Player, char: Model)
 				(hrp :: BasePart).CFrame = CFrame.new(l.checkpoint)
 				;(hrp :: BasePart).AssemblyLinearVelocity = Vector3.zero
 			end
-			task.wait(0.4)
+			-- and a body standing on its section's exit clears the floor once the climb could have been
+			-- made, whether or not a Touched arrived in time (tryExit)
+			local prof = profiles[plr]
+			if l and hrp and l.tryExit and prof and prof.stage == "climb" then
+				l.tryExit(prof.level, hrp)
+			end
+			task.wait(Config.Exit.PollSeconds)
 		end
 	end)
 end
 
 local function onPlayerAdded(plr: Player)
+	-- FIRST, before loadProfile yields: the engine may load the character while the profile loads, and with every
+	-- tower's LaneSpawn enabled a player with no RespawnLocation could be dropped in somebody else's tower for a
+	-- frame. buildLane points it at the player's own LaneSpawn once there is a tower.
+	plr.RespawnLocation = waitingSpawn
 	local p = loadProfile(plr)
 	profiles[plr] = p
 
 	local ls = make("Folder", plr, { Name = "leaderstats" })
-	for _, n in ipairs({ "Floor", "Best", "Rebirths" }) do
+	for _, n in ipairs({ "Floor", "Best", "Rebirths", "Topper" }) do
 		make("IntValue", ls, { Name = n })
 	end
 
@@ -1783,7 +2176,8 @@ local function onPlayerRemoving(plr: Player)
 	teardownLane(plr)
 	profiles[plr] = nil
 	lastSaveAt[plr] = nil
-	lastBanked[plr] = nil
+	boardMode[plr] = nil
+	fetching[plr] = nil
 	gates[plr] = nil
 	seatWaiting()
 end
@@ -1814,8 +2208,11 @@ end)
 
 task.spawn(function()
 	while true do
-		refreshLeaderboard()
-		task.wait(30)
+		refreshPublic() -- at most one GetSortedAsync per PublicCacheSeconds
+		for _, plr in ipairs(Players:GetPlayers()) do
+			sendPublic(plr)
+		end
+		task.wait(BC.PublicCacheSeconds)
 	end
 end)
 

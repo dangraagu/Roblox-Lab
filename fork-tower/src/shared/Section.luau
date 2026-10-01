@@ -288,6 +288,27 @@ function Section.respawn(section, index: number)
 	return { dx = p.safeDx, dy = p.dy, dz = p.safeDz }
 end
 
+-- THE LEAST TIME AN HONEST CLIMB OF THIS SECTION CAN TAKE, at horizontal speed `speed` (the player's
+-- WalkSpeed with their traits). The server clears a floor only once this much of its own clock has
+-- passed since the door dropped the player on the section (queued job I, 2026-09-30: a client owns its
+-- character's physics, so a script could choose a door and teleport onto the exit at once, and a trap
+-- cost it nothing). The bound is the straight line in the ground plane from platform 1's respawn point
+-- (where the door drops you) to the exit platform's footprint grown by the character's half-width
+-- (where a body first touches it), at speed * Config.Exit.SpeedSlack. Nobody moves sideways faster
+-- than their WalkSpeed, so no honest climb is quicker; Pacing.spec measures it against the climb model.
+function Section.minClimbSeconds(cfg, section, speed: number): number
+	local entry = Section.respawn(section, 1)
+	local last = section.platforms[#section.platforms]
+	if entry == nil or last == nil then
+		return 0
+	end
+	local reach = last.size / 2 + cfg.World.CharacterHalfWidth
+	local dx = math.max(0, math.abs(last.dx - entry.dx) - reach)
+	local dz = math.max(0, math.abs(last.dz - entry.dz) - reach)
+	local v = math.max(speed, 1) * cfg.Exit.SpeedSlack
+	return math.sqrt(dx * dx + dz * dz) / v
+end
+
 -- The runtime guard. The server calls this at startup for a spread of levels and warns loudly
 -- rather than shipping a tower somebody cannot climb; Section.spec calls it on a real section and
 -- on two deliberately broken ones, because a checker that passes everything is worse than none.

@@ -83,6 +83,14 @@ local CHIP_MIN_PX = 130
 -- The band title card (Ambience) gets the strip between the stack and the character when that strip is
 -- at least CARD_MIN_PX tall and 160 px wide; otherwise it sits ON the chip for its few seconds.
 local CARD_MIN_PX, CARD_MAX_H = 48, 84
+-- NARROW LANDSCAPE PHONES (second review, 2026-09-30): below ~617 px wide the counter, the row and both
+-- labelled toggles did not fit the header together, so the row stayed in the centred stack, over the
+-- player's avatar, and the ☰ Meny drawer (the only Rebirth button) came out 1 px tall (568x320, the
+-- iPhone SE). There the counter first gives up width (down to COUNTER_MIN design px, "🔀 ETASJE 10/10"
+-- still one readable line), then the toggles drop their words ("☰", "🏆": still a thumb's square), and
+-- a phone drawer narrows to the column beside the inscription rather than hang below it (down to
+-- DRAWER_MIN_W). robloxemu/check_forktower_hud_play.luau and _hud_open.luau measure 480-610 px.
+local COUNTER_MIN, DRAWER_MIN_W = 170, 140
 
 -- Roblox's own guidance and both mobile platform guidelines put the smallest comfortable tap
 -- target at 44 SCREEN px. Design px are not screen px: the UIScale that makes the HUD fit a phone
@@ -513,17 +521,17 @@ local function row(parent, order, text, color)
 	return l
 end
 
+-- The public top 10, as the server sends it: decoded scores and the names the SERVER looked up and remembered
+-- (Main.server nameOf). This used to call GetNameFromUserIdAsync for every row on every refresh, uncached, on
+-- every client. The board by the spawn (Board.client) has the same list and the Friends view.
 local function renderLeaderboard(entries)
 	for _, c in ipairs(lbList:GetChildren()) do
 		if c:IsA("TextLabel") then c:Destroy() end
 	end
 	for i, entry in ipairs(entries) do
-		local name = "Spiller"
-		local ok, res = pcall(function()
-			return Players:GetNameFromUserIdAsync(entry.userId)
-		end)
-		if ok then name = res end
-		row(lbList, i, string.format("%d. %s — %d", i, name, entry.score))
+		local name = if type(entry.name) == "string" then entry.name else "Spiller"
+		local mine = entry.userId == player.UserId
+		row(lbList, i, string.format("%d. %s — %d", i, name, tonumber(entry.score) or 0), if mine then GOLD else nil)
 	end
 end
 
@@ -607,6 +615,25 @@ end)
 
 local layout = Responsive.layout(Responsive.REF_X, Responsive.REF_Y, UserInputService.TouchEnabled)
 local menuOpen, lbOpen = false, false
+-- On the narrowest landscape phones the drawer toggles are a thumb's square with a glyph and no word
+-- (applyLayout decides; refreshDrawers writes the text).
+local glyphToggles = false
+
+-- WHILE CLIMBING ON A LANDSCAPE PHONE (owner decision 2026-09-30, "take the recommended option for all";
+-- EYECANDY.md §10 items 22-23). There the inscription is centred just above the player's character, and
+-- it hid 64-74 % of a hazard's flight (review 2026-09-24); the toast under it covered the character's
+-- head for 3.5 s after every notice. The inscription only matters at a fork, and hazards fly only while
+-- the player climbs a section. So while the stage is "climb" on a compact layout wider than tall, the
+-- inscription is not drawn and the toast takes its slot. At a fork both are where they always were.
+-- robloxemu/check_forktower_hud_play.luau part D measures it.
+local stageNow = "fork"
+local climbHidesRule = false
+local ruleSlotY, toastSlotY = 0, 0
+local function placeForStage()
+	local hide = climbHidesRule and stageNow == "climb"
+	rule.Visible = not hide
+	toast.Position = UDim2.new(0.5, 0, 0, if hide then ruleSlotY else toastSlotY)
+end
 
 -- Design px in, design px out — but the number that comes back is chosen so that what the
 -- player's thumb meets is at least MIN_TAP screen px once the UIScale has had its way.
@@ -643,8 +670,13 @@ local function refreshDrawers()
 	left.Visible = showMenu
 	codeFrame.Visible = showMenu
 	lbFrame.Visible = showLb
-	menuToggle.Text = if menuOpen then "✕ Meny" else "☰ Meny"
-	lbToggle.Text = if lbOpen then "✕ Topp" else "🏆 Topp"
+	if glyphToggles then
+		menuToggle.Text = if menuOpen then "✕" else "☰"
+		lbToggle.Text = if lbOpen then "✕" else "🏆"
+	else
+		menuToggle.Text = if menuOpen then "✕ Meny" else "☰ Meny"
+		lbToggle.Text = if lbOpen then "✕ Topp" else "🏆 Topp"
+	end
 end
 
 menuToggle.Activated:Connect(function()
@@ -732,7 +764,9 @@ local function applyLayout()
 	local toastW = clampNum(rootW - 2 * MARGIN, 120, TOAST_W)
 	local toastH = touchSize(TOAST_H)
 	local toastBottom = headerBottom + ruleH + GAP + toastH
-	toast.Position = UDim2.new(0.5, 0, 0, headerBottom + ruleH + GAP)
+	ruleSlotY, toastSlotY = headerBottom, headerBottom + ruleH + GAP
+	climbHidesRule = compact and vx > vy
+	placeForStage()
 	toast.Size = UDim2.new(0, toastW, 0, toastH)
 
 	-- The ambience row sits under the toast, as wide as the inscription, and the rest button is a
@@ -751,9 +785,13 @@ local function applyLayout()
 	-- `insetPx` is the topbar strip; `playTop` is PLAY_TOP in design px from the root's top.
 	local insetPx = vy - vyDraw
 	local playTop = (PLAY_TOP * vy - insetPx) / layout.scale
+	glyphToggles = false
 	if rowTop + rowH > playTop then
-		local edge = if compact then toggleW + GAP else 0
-		local hdrL, hdrR = MARGIN + edge, rootW - MARGIN - edge
+		local function headerSpan(tw: number): (number, number)
+			local edge = if compact then tw + GAP else 0
+			return MARGIN + edge, rootW - MARGIN - edge
+		end
+		local hdrL, hdrR = headerSpan(toggleW)
 		local rowMin = restW + GAP + CHIP_MIN_PX / layout.scale
 		local centredRight = (rootW + topW) / 2 + GAP
 		if hdrR - centredRight >= rowMin then
@@ -761,7 +799,28 @@ local function applyLayout()
 		elseif hdrR - (hdrL + topW + GAP) >= rowMin then
 			counterX = hdrL
 			rowX0 = hdrL + topW + GAP
+		elseif hdrR - hdrL - GAP - rowMin >= COUNTER_MIN then
+			-- a narrow landscape phone: the counter gives up width, the row keeps what the chip needs
+			topW = hdrR - hdrL - GAP - rowMin
+			counterX = hdrL
+			rowX0 = hdrL + topW + GAP
+		elseif compact then
+			-- narrower still: the toggles drop their words and keep a thumb's square
+			local squareW = touchSize(TOGGLE_H)
+			local l2, r2 = headerSpan(squareW)
+			local w = math.min(TOP_W, r2 - l2 - GAP - rowMin)
+			if w >= COUNTER_MIN then
+				glyphToggles = true
+				toggleW = squareW
+				hdrL, hdrR = l2, r2
+				topW = w
+				counterX = hdrL
+				rowX0 = hdrL + topW + GAP
+			end
 		end
+		menuToggle.Size = UDim2.new(0, toggleW, 0, toggleH)
+		lbToggle.Size = UDim2.new(0, toggleW, 0, toggleH)
+		top.Size = UDim2.new(0, topW, 0, topH)
 		if rowX0 ~= nil then
 			inHeader = true
 			rowW = hdrR - rowX0
@@ -823,6 +882,24 @@ local function applyLayout()
 		-- centred stack already reaches past the controls' line, and `bandBottom` is clamped to at least
 		-- `bandTop + 1`, which would carry a drawer's bottom into the thumbstick (measured: 640x300)
 		local drawerBottom = rootH - MARGIN - padDesign
+		-- On a narrow landscape phone a drawer at its full width reached a few px into the inscription's
+		-- column, so it hung below the whole stack, 1 screen px tall (568x320; second review 2026-09-30).
+		-- It narrows to the column beside the stack instead, where that column is still a usable drawer.
+		local stackX0, stackX1 = math.huge, -math.huge
+		for _, e in stack do
+			if e.bottom > headerBottom then -- the row up in the header is not part of the stack here
+				stackX0 = math.min(stackX0, e.x0)
+				stackX1 = math.max(stackX1, e.x1)
+			end
+		end
+		local roomLeft = math.floor(stackX0 - GAP - MARGIN)
+		if leftW > roomLeft and roomLeft >= DRAWER_MIN_W then
+			leftW = roomLeft
+		end
+		local roomRight = math.floor(rootW - MARGIN - GAP - stackX1)
+		if lbW > roomRight and roomRight >= DRAWER_MIN_W then
+			lbW = roomRight
+		end
 		local leftTop = drawerTop(MARGIN, MARGIN + leftW)
 		local leftBand = math.max(1, drawerBottom - leftTop)
 		local stackH = stackHeight(btnH, codeH)
@@ -875,7 +952,7 @@ local function applyLayout()
 	if compact and padLine - bandTop < cardMinH then
 		local stackHalf = math.max(ruleW, toastW, if inHeader then 0 else rowW) / 2
 		local sideW = rootW / 2 - stackHalf - GAP - MARGIN
-		if sideW >= 160 then
+		if sideW >= DRAWER_MIN_W then -- as narrow as a drawer may get (below ~500 px wide it is 145)
 			cardW = math.min(cardW, sideW)
 			cardTop = headerBottom
 			cardRoom = math.max(1, padLine - headerBottom)
@@ -957,20 +1034,19 @@ StateEvent.OnClientEvent:Connect(function(s)
 		doorsText.Text = string.format("◀ %s  %s      %s  %s ▶",
 			s.rule.doors[1].label, signStrip(s.rule.doors[1].signs),
 			signStrip(s.rule.doors[2].signs), s.rule.doors[2].label)
-		rule.Visible = true
 	elseif s.atFork then
 		ruleText.Text = Config.Fork.UnreadInscription
 		ruleText.TextColor3 = INK
 		doorsText.Text = string.format(
 			"Hold LES på platået i %.1f s — det er det ENESTE som sier hva dørene gir",
 			s.readSeconds or Config.Fork.ReadSeconds)
-		rule.Visible = true
 	else
 		ruleText.Text = "👑 TOPPEN NÅDD"
 		ruleText.TextColor3 = GOLD
 		doorsText.Text = "Rebirth for et nytt tårn og et nytt valgtre"
-		rule.Visible = true
 	end
+	stageNow = s.stage
+	placeForStage()
 end)
 
 NoticeEvent.OnClientEvent:Connect(function(n)

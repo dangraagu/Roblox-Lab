@@ -50,6 +50,7 @@ end
 
 local Env, Hz, RestCfg = Config.Env, Config.Hazards, Config.Rest
 local bands = Env.Bands
+local layers = Env.Layers or {}
 local FLOORS = Config.Tower.Floors
 
 -- A broken config must cost the polish, never the game: warn loudly and switch the part off.
@@ -454,6 +455,13 @@ local announced = 0 -- the highest band index announced this run (0 = nothing ye
 local scheduler = Hazards.newScheduler(Hz, rand)
 local rest = Rest.new()
 local sat = false
+-- When this script sat the player down. A Humanoid sat without a seat drops onto the floor first: +1 Jump
+-- measured it in real Studio on 2026-09-27 (root vy -3 .. -26 studs/s, a bounce, settled in ~0.3 s, and
+-- FloorMaterial Air the whole time it is seated), so the first SIT_SETTLE_SECONDS after the sit are not
+-- a fall. Without this the ☕ button woke its own rest on the first frame of the drop
+-- (robloxemu/check_forktower_sitdrop.luau replays the trace).
+local satAt = 0
+local SIT_SETTLE_SECONDS = 1.0
 local knockUntil: number? = nil
 -- The first title card waits until the profile has LOADED (leaderstats) and the player's lane exists,
 -- then 1.5 s more. There is deliberately no timeout: before the lane exists the floor is unknown, and
@@ -526,6 +534,7 @@ restBtn.Activated:Connect(function()
 	local result = Rest.request(rest, RestCfg, { moving = false, grounded = grounded, threat = scheduler.active ~= nil })
 	if result == "resting" then
 		sat = true
+		satAt = now
 		restFocus.Enabled = true
 		if hum then pcall(function() (hum :: Humanoid).Sit = true end) end
 	end
@@ -571,12 +580,35 @@ local function frame(dt: number)
 		end
 		for _, g in GROUPS do
 			local target = EnvBands.sample(bands, p, g)
+			-- a band's second floor is its own phase (Config.Env.Layers, the template's overlay): every floor's
+			-- climb changes the world (second review, 2026-09-30: a slow climber stood in one unchanging band
+			-- for up to 159 s)
+			for _, layer in layers do
+				local lw = EnvBands.layerWeight(layer, p)
+				if lw > 0 and layer[g] then
+					target = EnvBands.overlay(target, layer[g], lw)
+				end
+			end
 			local cur = (current :: any)[g]
 			if g == "lighting" and cur.ClockTime ~= nil then
 				-- the dial: glide the short way round (a rebirth goes through midnight, not noon)
 				cur.ClockTime = Climb.nearestClock(cur.ClockTime, target.ClockTime)
 			end
-			local props = EnvBands.approachTable(cur, target, step, Env.HalfLife);
+			local props = EnvBands.approachTable(cur, target, step, Env.HalfLife)
+			-- A glide ends: within writeGroup's threshold a value takes its target and stops moving, so nothing
+			-- is written once the glide looks over. Without this the value kept creeping toward the target and
+			-- a write could land seconds later (measured 2026-09-30, check_forktower_env_secret C at a fork:
+			-- ClockTime 16.399 before the read, 16.400 after it).
+			for k, tv in target do
+				local pv = props[k]
+				if type(tv) == "number" and type(pv) == "number" then
+					if math.abs(pv - tv) <= 1e-3 then props[k] = tv end
+				elseif type(tv) == "table" and type(pv) == "table" and #tv == 3 and #pv == 3 then
+					if math.abs(pv[1] - tv[1]) <= 0.5 and math.abs(pv[2] - tv[2]) <= 0.5 and math.abs(pv[3] - tv[3]) <= 0.5 then
+						props[k] = { tv[1], tv[2], tv[3] }
+					end
+				end
+			end;
 			(current :: any)[g] = props
 			if g == "colorCorrection" and flashBoost > 0.001 then
 				props = table.clone(props)
@@ -615,6 +647,19 @@ local function frame(dt: number)
 		end
 	end
 	local laneX = lane.laneX or camPos.X
+	-- the summit's crown is the one this climber has earned: a rarer one at 5 / 10 / 25 summits, counted by
+	-- the server and shown to everyone as the public leaderstat Topper (owner decision 2026-09-30,
+	-- Config.Env.CrownTiers). Pure decoration: nothing here reads anything a fork carries.
+	do
+		local stats = player:FindFirstChild("leaderstats")
+		local topper = stats and stats:FindFirstChild("Topper")
+		local summits = if topper then tonumber((topper :: any).Value) or 0 else 0
+		local crown = nil
+		for _, t in Env.CrownTiers or {} do
+			if summits >= t.summits then crown = t end
+		end
+		art:setCrown(crown)
+	end
 	for id in pieceIds do
 		art:updatePiece(id, pieceW[id] or 0, camPos, now, laneX, rootPos)
 	end
@@ -672,9 +717,12 @@ local function frame(dt: number)
 	-- grounded / moving, from the Humanoid (the client's own character)
 	local fm = (humanoid :: any).FloorMaterial
 	local grounded = fm ~= nil and fm ~= Enum.Material.Air and knockUntil == nil
+	-- A seated Humanoid reports FloorMaterial = Air, so a player we sat down is supported while not
+	-- actually falling, and during the sit's own drop (SIT_SETTLE_SECONDS, see satAt). A sustained fall
+	-- while seated still ends the rest.
 	local supported = grounded
 	if sat and not grounded and knockUntil == nil then
-		supported = math.abs(root.AssemblyLinearVelocity.Y) < 2
+		supported = math.abs(root.AssemblyLinearVelocity.Y) < 2 or (now - satAt) < SIT_SETTLE_SECONDS
 	end
 	local md = (humanoid :: any).MoveDirection
 	local moving = (md ~= nil and md.Magnitude > 0.05) or (humanoid :: any).Jump == true
@@ -684,6 +732,7 @@ local function frame(dt: number)
 		local ev = Rest.update(rest, RestCfg, dt, { moving = moving, grounded = supported, threat = scheduler.active ~= nil })
 		if ev == "started" and rest.source == "manual" then
 			sat = true
+			satAt = now
 			restFocus.Enabled = true
 			pcall(function() humanoid.Sit = true end)
 		elseif ev == "woke" or ev == "dropped" or ev == "expired" then
@@ -723,7 +772,12 @@ local function frame(dt: number)
 		local plan = scheduler.active
 		if plan then
 			local hp = Hazards.positionAt(plan, plan.t)
-			art:showHazard(plan, hp, now, Hazards.zone(plan, Hz.PlayerRadius))
+			-- The ring and the warning stay up exactly as long as the flight from this frame's start can still
+			-- hit someone inside the ring (Hazards.threatLive), not until arrival: the lane aims up to
+			-- AimJitter off the ring's centre, so the far side of the ring is reached after arrival
+			-- (second review, 2026-09-30: knocked up to 0.083 s after both had gone).
+			local live = Hazards.threatLive(plan, Hz.PlayerRadius, before or 0)
+			art:showHazard(plan, hp, now, Hazards.zone(plan, Hz.PlayerRadius), live)
 			if gate.hit and Hazards.checkHit(plan, before or 0, plan.t, pos, Hz.PlayerRadius) then
 				plan.hit = true
 				local kv = Hazards.knockVelocity(Hz, plan, pos)
@@ -735,7 +789,7 @@ local function frame(dt: number)
 				FxClient.shake(0.4, 0.9)
 				FxClient.flash(Color3.fromRGB(255, 255, 255), 0.3, 0.35)
 			end
-			if plan.t <= plan.arriveAt and not plan.hit then
+			if live and not plan.hit then
 				local b = Hazards.bearing(vec(camPos), vec(look), hp)
 				local label = hazardNames[plan.kind] or string.upper(plan.kind)
 				warningText = if plan.locked then "⚠️ FLYTT DEG! " .. label .. " " .. ARROWS[b]

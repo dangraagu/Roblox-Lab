@@ -86,6 +86,7 @@ function PlayModel.floorGeometry(cfg, runSeed: number, level: number, theme: str
 		nextFork = nextFork,
 		exitTop = base.y + sec.platforms[#sec.platforms].dy,
 		count = #sec.platforms,
+		sec = sec,
 	}
 end
 
@@ -113,6 +114,7 @@ function PlayModel.play(opts)
 		runSeconds = 0,
 		spawnGaps = {}, -- climbing seconds between consecutive spawns
 		readSeconds = 0,
+		stillMax = {}, -- per run: the longest the world stayed still between its first fork and its summit (s)
 	}
 	local lastSpawnClock = nil
 
@@ -125,6 +127,42 @@ function PlayModel.play(opts)
 	local pos, grounded, yaw = v(0, 3, 14), true, 0
 	local runStart = 0
 
+	-- HOW LONG THE WORLD STAYS STILL (second review, 2026-09-30, finding 5). The client blends every band
+	-- by the player's progress and overlays every layer (Config.Env.Layers) by it, so the world changes
+	-- exactly when some band weight or layer weight changes. A tick in which none does is a still tick;
+	-- stats.stillMax is the longest run of still ticks from a run's first fork to its summit, per run.
+	local forkYs, exitYs = {}, {}
+	local layers = cfg.Env.Layers or {}
+	local lastLook: { number }? = nil
+	local stillFor = 0
+	local stillRunMax = 0
+	local tracking = false
+	local function look(): { number }
+		local p = Climb.progress(level, summit, pos.y - cfg.Env.FloorBelowRoot, forkYs, exitYs, FLOORS)
+		local w = EnvBands.weights(bands, p)
+		local out = {}
+		for i = 1, #bands do out[i] = w[i] or 0 end
+		for _, layer in layers do table.insert(out, EnvBands.layerWeight(layer, p)) end
+		return out
+	end
+	local function watchStill()
+		if not tracking then return end
+		local now = look()
+		local same = lastLook ~= nil
+		if lastLook then
+			for i, x in now do
+				if math.abs(x - (lastLook :: { number })[i]) > 1e-9 then same = false; break end
+			end
+		end
+		lastLook = now
+		if same then
+			stillFor += dt
+			if stillFor > stillRunMax then stillRunMax = stillFor end
+		else
+			stillFor = 0
+		end
+	end
+
 	local function band(): any
 		return bands[EnvBands.indexAt(bands, Climb.namedFloor(level, summit, FLOORS) - 1)]
 	end
@@ -132,6 +170,7 @@ function PlayModel.play(opts)
 	-- returns true when a hazard hit this tick
 	local function tick(): boolean
 		stats.seconds += dt
+		watchStill()
 		-- the rest probe: a climber who rests `length` seconds every `every` seconds of play, taken only
 		-- when Rest would allow it (grounded, no threat)
 		if opts.rest then
@@ -260,6 +299,8 @@ function PlayModel.play(opts)
 		runsLeft -= 1
 		stats.runs += 1
 		runStart = stats.seconds
+		forkYs, exitYs = {}, {}
+		lastLook, stillFor, stillRunMax, tracking = nil, 0, 0, true
 		local plan = Fork.plan(cfg, runSeed, Rng, Fork.legacySecrets(cfg, runSeed))
 		local picks = {}
 		local forkTop = v(0, 0, 14)
@@ -270,6 +311,7 @@ function PlayModel.play(opts)
 			-- AT THE FORK: a sanctuary. Walk on, (read), think, choose.
 			climbing, sanctuary = false, true
 			pos, grounded, yaw = v(forkTop.x, forkTop.y + cfg.Env.FloorBelowRoot, forkTop.z), true, 0
+			forkYs[L] = forkTop.y
 			local bi = EnvBands.indexAt(bands, Climb.namedFloor(L, false, FLOORS) - 1)
 			if not enteredBand[bi] then
 				enteredBand[bi] = true
@@ -289,11 +331,13 @@ function PlayModel.play(opts)
 			picks[#picks + 1] = floor.doors[slot].traitId
 			local jump, speed = totals(cfg, picks)
 			local geo = PlayModel.floorGeometry(cfg, runSeed, L, floor.doors[slot].theme, penalty, forkTop)
+			exitYs[L] = geo.exitTop
 
 			-- CLIMBING: teleported onto platform 1, then hop by hop to the exit
 			climbing, sanctuary = true, false
 			local i = 1
 			pos = geo.roots[1]
+			local climbStart = stats.seconds
 			while i < geo.count do
 				local here, there = geo.roots[i], geo.roots[i + 1]
 				yaw = math.atan2(there.x - here.x, there.z - here.z)
@@ -331,9 +375,12 @@ function PlayModel.play(opts)
 				end
 			end
 			-- on the exit: the server moves the player to the next floor at once
+			if opts.onClimb then opts.onClimb(L, stats.seconds - climbStart, geo, speed, jump) end
 			forkTop = geo.nextFork
 		end
 		-- THE SUMMIT: a sanctuary; look at the card, then rebirth
+		tracking = false
+		table.insert(stats.stillMax, stillRunMax)
 		summit, climbing, sanctuary = true, false, true
 		level = FLOORS + 1
 		pos = v(forkTop.x, forkTop.y + cfg.Env.FloorBelowRoot, forkTop.z)
