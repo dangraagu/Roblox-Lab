@@ -9,6 +9,8 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService") -- GenerateGUID only (the session token); no HTTP
+local RunService = game:GetService("RunService")   -- IsStudio only: a failed load in Studio means "never saves"
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Rng = require(ReplicatedStorage:WaitForChild("Rng"))
@@ -20,6 +22,8 @@ local Codex = require(ReplicatedStorage:WaitForChild("Codex"))
 local Codes = require(ReplicatedStorage:WaitForChild("Codes"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
 local Cavern = require(ReplicatedStorage:WaitForChild("Cavern"))
+local Board = require(ReplicatedStorage:WaitForChild("Board"))
+local BC = Config.Board
 
 -- Visual polish (code-only, additive): warm glowing cavern lighting + post-fx.
 -- The ambient dust is PER PLOT now (Cavern returns two volumes per cavern). The single global
@@ -39,6 +43,18 @@ local GeodeEvent = mk("RemoteEvent", "Geode")        -- klient -> server: knus g
 local RedeemFunc = mk("RemoteFunction", "Redeem")    -- klient -> server: løs inn kode
 local LeaderboardEvent = mk("RemoteEvent", "Leaderboard")
 local ToastEvent = mk("RemoteEvent", "Toast")        -- server -> klient: kort melding (f.eks. "kjøp en seed")
+
+-- ── Refusals say why ──────────────────────────────────────────────────────────
+-- A refused player action must never be a silent no-op (docs/new-game-checklist.md; the first player report,
+-- "i cant even place a seed", was one). Every refusal sends the player a toast with the reason and, where
+-- money is the reason, the price (robloxemu/check_growacrystal_refused.luau).
+local function refuse(plr, msg: string)
+	ToastEvent:FireClient(plr, msg)
+end
+local function notYourCavern(clicker, owner)
+	-- short enough to read at 12 px on a tablet with a 20-character name (check_growacrystal_refused)
+	refuse(clicker, "That's " .. owner.Name .. "'s cavern, not yours")
+end
 
 -- ── Data ─────────────────────────────────────────────────────────────────────
 -- GetDataStore RAISES in a place that has not been published to the web, and again when
@@ -66,6 +82,10 @@ local selected = {} -- [player] = seedTier currently selected in the shop UI
 -- for Legendary/Mythic) when n grows. Cosmetic only: never saved, never read back, and it describes a
 -- roll that has already been paid, so it tells the player nothing their dust and codex do not.
 local harvests = {}
+-- The refraction roll's salt source (grantHarvest). SERVER-ONLY: a local of this script, seeded by the
+-- engine's own entropy (Random.new() with no seed), never saved, never sent, never an attribute. One stream
+-- for every player on the server, so a client also never sees the draws between two of its own harvests.
+local rollSalt = Random.new()
 
 local function defaultProfile()
 	return {
@@ -77,9 +97,19 @@ local function defaultProfile()
 		codex = {},                       -- [tier]=true
 		redeemed = {},                    -- [CODE]=true
 		lastGeodeWeek = -1,
-		totalDust = 0,                    -- cumulative earned (leaderboard)
+		totalDust = 0,                    -- cumulative dust EARNED FROM HARVESTS (the highscore board's metric)
+		boardAt = 0,                      -- unix time the board points (Board.metricOfDust) last rose: the tie-break
+		boardMetric = 0,                  -- the points last written to the board store (write only when they rise)
 		passes = {},
 		canSave = false,
+		-- Runtime only, never saved: the token this session's load wrote into the record when it took the
+		-- lock. A write lands only while the record still carries it (saveProfile).
+		session = nil,
+		-- Runtime only: "ok" (holds the lock, or lost it later: saveProfile), "locked" (another server's lock was on
+		-- the record at load), "retry" (the load call failed), "nostore" (this session can never save: no DataStore,
+		-- or Studio without API access). "locked" and "retry" try again on every autosave (retryLoad).
+		saveState = "ok",
+		lockSeen = nil, -- "locked": the record's jobId/session/lockUntil as this session read them
 	}
 end
 
@@ -96,48 +126,101 @@ local function numKeys(src)
 	return out
 end
 
+-- The saved fields of a record's `data` onto a profile (load, and a retry that reads a newer record). A record with
+-- no data leaves the profile's defaults.
+local function applyData(p, d)
+	if type(d) ~= "table" then return end
+	p.dust = tonumber(d.dust) or p.dust
+	p.seeds = numKeys(d.seeds)   -- integer tier keys (JSON round-trip → string → number)
+	p.chambers = tonumber(d.chambers) or p.chambers
+	p.luckLevel = tonumber(d.luckLevel) or 0
+	p.growthLevel = tonumber(d.growthLevel) or 0
+	p.plants = numKeys(d.plants) -- integer socketId keys
+	p.codex = numKeys(d.codex)   -- integer tier keys
+	p.redeemed = (type(d.redeemed) == "table") and d.redeemed or {} -- string CODE keys (keep)
+	p.lastGeodeWeek = tonumber(d.lastGeodeWeek) or -1
+	p.totalDust = tonumber(d.totalDust) or 0
+	p.boardAt = tonumber(d.boardAt) or 0
+	p.boardMetric = tonumber(d.boardMetric) or 0
+	p.passes = (type(d.passes) == "table") and d.passes or {}
+	-- Saved before the board (2026-09-30): points without a time. When they were reached is unknown, so they are
+	-- stamped with this session (the player comes back on the board at the next save, behind anyone who reached
+	-- the same points before).
+	if Board.metricOfDust(p.totalDust, BC) > 0 and p.boardAt <= 0 then
+		p.boardAt = os.time()
+	end
+end
+
+local function lockOf(rec)
+	return { jobId = rec.jobId, session = rec.session, lockUntil = rec.lockUntil }
+end
+
 -- Last + soft session-lock (samme robuste mønster som plus1-jump etter review):
 -- last ALLTID ekte data; canSave = eier vi låsen. Kort TTL fornyet av autosave.
+-- A load that cannot take the lock is not the end of the session (standard §1, check_growacrystal_rejoin): the
+-- player is told (onPlayerAdded) and every autosave tries again (retryLoad). Measured before: a rejoin within 45 s
+-- of a server crash, or one failed call, gave a whole session that never saved and never said so.
 local function loadProfile(plr)
 	local p = defaultProfile()
-	if not store then p.canSave = false; return p end
+	if not store then p.canSave = false; p.saveState = "nostore"; return p end
 	local acquired = false
+	local seen = nil
+	local token = HttpService:GenerateGUID(false)
 	local ok, err = pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
 			old = old or {}
 			local now = os.time()
 			local lockedByOther = (tonumber(old.lockUntil) or 0) > now and old.jobId ~= game.JobId
-			local d = old.data
-			if d then
-				p.dust = tonumber(d.dust) or p.dust
-				p.seeds = numKeys(d.seeds)   -- integer tier keys (JSON round-trip → string → number)
-				p.chambers = tonumber(d.chambers) or p.chambers
-				p.luckLevel = tonumber(d.luckLevel) or 0
-				p.growthLevel = tonumber(d.growthLevel) or 0
-				p.plants = numKeys(d.plants) -- integer socketId keys
-				p.codex = numKeys(d.codex)   -- integer tier keys
-				p.redeemed = (type(d.redeemed) == "table") and d.redeemed or {} -- string CODE keys (keep)
-				p.lastGeodeWeek = tonumber(d.lastGeodeWeek) or -1
-				p.totalDust = tonumber(d.totalDust) or 0
-				p.passes = (type(d.passes) == "table") and d.passes or {}
+			applyData(p, old.data)
+			if lockedByOther then
+				acquired = false
+				seen = lockOf(old)
+				return nil -- read only: the record is not this session's to write
 			end
-			if lockedByOther then acquired = false; return old end
 			acquired = true
 			old.jobId = game.JobId
+			old.session = token
 			old.lockUntil = now + Config.Save.SessionLockSeconds
 			return old
 		end)
 	end)
 	if not ok then
 		p.canSave = false
+		-- Studio without API access fails every call for the whole session: retrying would only nag
+		p.saveState = if RunService:IsStudio() then "nostore" else "retry"
 		warn("[Crystal] load failed for " .. plr.Name .. ": " .. tostring(err))
 	else
 		p.canSave = acquired
+		p.session = if acquired then token else nil
 		if not acquired then
-			warn("[Crystal] " .. plr.Name .. " READ-ONLY (locked by another session); progress won't save.")
+			p.saveState = "locked"
+			p.lockSeen = seen
+			warn("[Crystal] " .. plr.Name .. " READ-ONLY (locked by another session); retrying on every autosave.")
 		end
 	end
 	return p
+end
+
+-- The highscore board (standard §3). The stored value is Board.encode(points, reachedAt): a higher score always
+-- ranks higher, and on the same points whoever reached them FIRST ranks higher. It is written only when the points
+-- have risen since the last write, through UpdateAsync + Board.keepHigher, which never lowers what is stored and
+-- aborts rather than rewrite the same value. It used to be SetAsync(raw totalDust) on every autosave: 30 writes
+-- per player in 10 idle minutes with nothing changed (robloxemu/check_growacrystal_board.luau).
+local scoreCache = Board.newCache(BC.ScoreCacheSeconds) -- [userId] = stored value (0 = none), per server
+
+local function writeBoard(p, userId: number)
+	local points = Board.metricOfDust(p.totalDust, BC)
+	if not orderedLB or points <= p.boardMetric then return end
+	local value = Board.encode(points, p.boardAt, BC)
+	local ok = pcall(function()
+		orderedLB:UpdateAsync(Board.key(userId), function(old)
+			return Board.keepHigher(old, value)
+		end)
+	end)
+	if ok then
+		p.boardMetric = points -- also when keepHigher aborted: what is stored is at least as high
+		Board.cachePut(scoreCache, userId, value, tick())
+	end
 end
 
 -- Returnerer true bare hvis dataene faktisk ble persistert (brukes for atomisk flush
@@ -145,23 +228,47 @@ end
 local function saveProfile(plr, releaseLock): boolean
 	local p = profiles[plr]
 	if not p or not p.canSave or not store then return false end
+	-- OWNERSHIP (the fork-tower pattern; standard §1 "an owner token on every write"). The write lands only
+	-- while the record still carries the token this session's load wrote AND this server's jobId (a server
+	-- that predates the token takes the record over by jobId alone). Otherwise it is cancelled, whatever it
+	-- is: an autosave, a leave, a code or geode flush. Without this, a server that stalled past the lock
+	-- overwrote the progress made on the server the player had moved to, and made a used code redeemable
+	-- again (robloxemu/check_growacrystal_lock.luau). `lost` is set on every invocation: UpdateAsync may run
+	-- the transform more than once.
+	local lost = false
 	local ok = pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
 			old = old or {}
+			if old.session ~= p.session or (old.jobId ~= nil and old.jobId ~= game.JobId) then
+				lost = true
+				return nil
+			end
+			lost = false
 			old.data = {
 				dust = p.dust, seeds = p.seeds, chambers = p.chambers,
 				luckLevel = p.luckLevel, growthLevel = p.growthLevel,
 				plants = p.plants, codex = p.codex, redeemed = p.redeemed,
 				lastGeodeWeek = p.lastGeodeWeek, totalDust = p.totalDust, passes = p.passes,
+				boardAt = p.boardAt, boardMetric = p.boardMetric,
 			}
 			old.jobId = game.JobId
 			old.lockUntil = releaseLock and 0 or (os.time() + Config.Save.SessionLockSeconds)
 			return old
 		end)
 	end)
-	if ok and orderedLB and p.totalDust > 0 then
-		pcall(function() orderedLB:SetAsync(key(plr.UserId), math.floor(p.totalDust)) end)
+	if lost then
+		-- Another session owns this profile now. Nothing this one does is kept from here on, so it stops
+		-- writing, and the atomic flushes (codes, geode) refuse because they cannot persist.
+		p.canSave = false
+		warn("[Crystal] " .. plr.Name .. ": another session has taken this profile over; this session no longer saves.")
+		if plr.Parent ~= nil then
+			pcall(function()
+				ToastEvent:FireClient(plr, "Opened on another server — this one won't save")
+			end)
+		end
+		return false
 	end
+	if ok then writeBoard(p, plr.UserId) end
 	return ok
 end
 
@@ -287,7 +394,7 @@ local function makeSocket(plr, socketId)
 	cd.MaxActivationDistance = 32
 	cd.Parent = part
 	cd.MouseClick:Connect(function(clicker)
-		if clicker ~= plr then return end -- only the plot owner interacts
+		if clicker ~= plr then notYourCavern(clicker, plr) return end -- only the plot owner interacts
 		local p = profiles[plr]
 		if not p then return end
 		if p.plants[socketId] then
@@ -314,13 +421,30 @@ local function makeSocket(plr, socketId)
 end
 
 -- A visible crystal model sits on a socket while something grows there.
+--
+-- BUILT ONCE PER PLANT, UPDATED IN PLACE. This used to destroy and rebuild the crystal, its ClickDetector, its
+-- light and its sparkle on every call, and the 5-second loop below calls it for every socket: 144 instances per
+-- plot destroyed and recreated every 5 s at chamber 8, every sparkle restarting at once (review round 2,
+-- finding 4). Now a crystal is made when its plant appears, resized while it grows, and destroyed when the plant
+-- goes. Lights and sparkles are dealt out per plot by applyPlotBudget.
+local crystals = {} -- [player] = { [socketId] = { part = Part, plant = the profile's plant table, tier, ready } }
+
 local function refreshSocketVisual(plr, socketId)
 	local part = socketParts[plr] and socketParts[plr][socketId]
 	if not part then return end
-	local old = part:FindFirstChild("Crystal")
-	if old then old:Destroy() end
 	local p = profiles[plr]
 	local plant = p and p.plants[socketId]
+	local mine = crystals[plr]
+	if mine == nil then
+		mine = {}
+		crystals[plr] = mine
+	end
+	local rec = mine[socketId]
+	if rec and rec.plant ~= plant then
+		rec.part:Destroy()
+		mine[socketId] = nil
+		rec = nil
+	end
 	if not plant then
 		-- empty again: back to the dim Neon "plant here" plate
 		part.Material = Enum.Material.Neon
@@ -328,42 +452,86 @@ local function refreshSocketVisual(plr, socketId)
 		part.Transparency = 0.35
 		return
 	end
-	-- planted: the PLATE goes dark so the crystal is the bright thing on it
-	part.Material = Enum.Material.Slate
-	part.Color = Color3.fromRGB(52, 56, 70)
-	part.Transparency = 0
-	local c = Instance.new("Part")
-	c.Name = "Crystal"
-	c.Anchored = true
-	c.CanCollide = false
-	c.CanTouch = false
 	local prog = Growth.progress(plant.at, os.time(), plant.tier, Config.Growth, growthMultOf(p))
-	c.Size = Vector3.new(1.5, 2 + 4 * prog, 1.5)
-	c.Position = part.Position + Vector3.new(0, c.Size.Y / 2, 0)
-	c.Material = Enum.Material.Neon
-	local rgb = Config.TierColor[plant.tier]
-	local col = Color3.fromRGB(rgb[1], rgb[2], rgb[3])
-	c.Color = col
-	c.Parent = part
-	-- A ClickDetector only fires from the surface of the part it is parented to, so the HUD's
-	-- "click a grown crystal to HARVEST" was false until the crystal got its own.
-	local ccd = Instance.new("ClickDetector")
-	ccd.MaxActivationDistance = 32
-	ccd.Parent = c
-	ccd.MouseClick:Connect(function(clicker)
-		if clicker ~= plr then return end
-		local prof = profiles[plr]
-		if not prof then return end
-		if prof.plants[socketId] then grantHarvest(plr, socketId) else tryPlant(plr, socketId) end
-	end)
-	-- A growing crystal is Neon under a threshold-0.9 Bloom and glows fine unlit. The light is
-	-- gated so it means "ready, and it is a rare one" — without this gate the 10-light budget
-	-- for the whole plot is a lie.
-	if prog >= 1 then
-		if plant.tier >= 3 then
-			Fx.attachGlow(c, col, 1 + 2 * prog, 10 + 6 * plant.tier)
+	local height = 2 + 4 * prog
+	if rec == nil then
+		local stray = part:FindFirstChild("Crystal")
+		if stray then stray:Destroy() end
+		-- planted: the PLATE goes dark so the crystal is the bright thing on it
+		part.Material = Enum.Material.Slate
+		part.Color = Color3.fromRGB(52, 56, 70)
+		part.Transparency = 0
+		local c = Instance.new("Part")
+		c.Name = "Crystal"
+		c.Anchored = true
+		c.CanCollide = false
+		c.CanTouch = false
+		c.Size = Vector3.new(1.5, height, 1.5)
+		c.Position = part.Position + Vector3.new(0, height / 2, 0)
+		c.Material = Enum.Material.Neon
+		local rgb = Config.TierColor[plant.tier]
+		c.Color = Color3.fromRGB(rgb[1], rgb[2], rgb[3])
+		c.Parent = part
+		-- A ClickDetector only fires from the surface of the part it is parented to, so the HUD's
+		-- "click a grown crystal to HARVEST" was false until the crystal got its own.
+		local ccd = Instance.new("ClickDetector")
+		ccd.MaxActivationDistance = 32
+		ccd.Parent = c
+		ccd.MouseClick:Connect(function(clicker)
+			if clicker ~= plr then notYourCavern(clicker, plr) return end
+			local prof = profiles[plr]
+			if not prof then return end
+			if prof.plants[socketId] then grantHarvest(plr, socketId) else tryPlant(plr, socketId) end
+		end)
+		rec = { part = c, plant = plant, tier = plant.tier, ready = false }
+		mine[socketId] = rec
+	elseif math.abs(rec.part.Size.Y - height) > 1e-3 then
+		rec.part.Size = Vector3.new(1.5, height, 1.5)
+		rec.part.Position = part.Position + Vector3.new(0, height / 2, 0)
+	end
+	rec.ready = prog >= 1
+end
+
+-- The plot's crystal lights and sparkles, within Config.PlotBudget (standard §2: budgets capped in code).
+-- * Every READY crystal glints: the sparkle is the "ready to harvest" cue, so it stays true for all of them.
+--   Their summed rate is capped at PlotBudget.SparkleRate particles/s, shared equally; up to
+--   SparkleRate / SparklePerCrystal ready crystals keep the full per-crystal rate.
+-- * A ready crystal of tier 3 and up may cast light, the rarest first (then the lowest socket), at most
+--   PlotBudget.CrystalLights of them. A growing crystal is Neon under a threshold-0.9 Bloom and glows unlit.
+-- Measured before the cap (48 crystals ready at chamber 8, the returning idle player): 58 PointLights,
+-- 50 emitters, 322 particles/s in one plot (robloxemu/check_growacrystal_plotbudget.luau).
+local function applyPlotBudget(plr)
+	local mine = crystals[plr]
+	if mine == nil then return end
+	local B = Config.PlotBudget
+	local ready = {}
+	for sid, rec in mine do
+		if rec.ready then
+			table.insert(ready, { sid = sid, rec = rec })
+		else
+			local glow = rec.part:FindFirstChild("FxGlow")
+			if glow then glow:Destroy() end
+			local sp = rec.part:FindFirstChild("FxSparkle")
+			if sp then sp:Destroy() end
 		end
-		Fx.sparkle(c, col) -- mature crystals glint (ready to harvest)
+	end
+	table.sort(ready, function(a, b)
+		if a.rec.tier ~= b.rec.tier then return a.rec.tier > b.rec.tier end
+		return a.sid < b.sid
+	end)
+	local rate = if #ready > 0 then math.min(B.SparklePerCrystal, B.SparkleRate / #ready) else 0
+	local lights = 0
+	for _, r in ready do
+		local c = r.rec.part
+		local glow = c:FindFirstChild("FxGlow")
+		if r.rec.tier >= 3 and lights < B.CrystalLights then
+			lights += 1
+			if not glow then Fx.attachGlow(c, c.Color, 3, 10 + 6 * r.rec.tier) end
+		elseif glow then
+			glow:Destroy()
+		end
+		local sp = c:FindFirstChild("FxSparkle") or Fx.sparkle(c, c.Color)
+		if sp.Rate ~= rate then sp.Rate = rate end
 	end
 end
 
@@ -377,6 +545,7 @@ local function buildChambers(plr)
 		end
 		refreshSocketVisual(plr, socketId)
 	end
+	applyPlotBudget(plr)
 end
 
 -- Everything a player owns goes in one folder, so teardown is a single :Destroy() and nothing
@@ -500,6 +669,15 @@ local function pushState(plr)
 	})
 end
 
+-- ── Refusals say why (refuse() is defined next to the Toast remote, above) ─────────────────────────────
+local function seedRefusal(tier: number, reason: string): string
+	local name = Config.Tiers[tier] or "that"
+	if reason == "locked" then
+		return name .. " seeds unlock at chamber " .. tostring(Config.Economy.SeedShopUnlockedByChamber[tier])
+	end
+	return "Not enough Gem Dust: a " .. name .. " seed costs " .. tostring(Config.Economy.SeedCost[tier])
+end
+
 -- ── Plant / Harvest ──────────────────────────────────────────────────────────
 tryPlant = function(plr, socketId)
 	local p = profiles[plr]
@@ -511,16 +689,27 @@ tryPlant = function(plr, socketId)
 	-- Auto-buy on click: if you don't own a seed of the selected tier, try to buy one with
 	-- your dust right here so a single click just plants (no hidden buy->select->plant dance).
 	-- This + the free starter seeds fixes the "i cant even place a seed" feedback.
+	local free = false
 	if (p.seeds[tier] or 0) <= 0 then
-		if not Economy.buySeed(p, tier, Config.Economy) then
-			ToastEvent:FireClient(plr, "Not enough Gem Dust for that seed — harvest a crystal first!")
-			return
+		local bought, reason = Economy.buySeed(p, tier, Config.Economy)
+		if not bought then
+			-- a dead end (nothing growing, no seed, less dust than a Shard) is not a refusal: it would be
+			-- forever. A free Shard instead (owner decision 2026-09-30; Economy.needsFreeSeed).
+			if not Economy.needsFreeSeed(p, Config.Economy) then
+				refuse(plr, seedRefusal(tier, reason))
+				return
+			end
+			tier = 1
+			p.seeds[1] = (p.seeds[1] or 0) + 1
+			free = true
 		end
 	end
 	p.seeds[tier] -= 1
 	p.plants[socketId] = { tier = tier, at = os.time() }
 	refreshSocketVisual(plr, socketId)
+	applyPlotBudget(plr)
 	pushState(plr)
+	if free then refuse(plr, "Out of Gem Dust, so here's a free Shard seed 🌱") end
 end
 
 grantHarvest = function(plr, socketId)
@@ -529,19 +718,33 @@ grantHarvest = function(plr, socketId)
 	local plant = p.plants[socketId]
 	if not plant then return end
 	if not Growth.isMature(plant.at, os.time(), plant.tier, Config.Growth, growthMultOf(p)) then
-		return -- not ready
+		local left = math.max(1, math.ceil(Growth.secondsToMature(plant.at, os.time(), plant.tier, Config.Growth, growthMultOf(p))))
+		refuse(plr, "Still growing — ready in " .. tostring(left) .. "s")
+		return
 	end
-	-- Refraction roll: fresh rng per plant (varies each harvest but reproducible)
-	local rng = Rng.new((os.time() * 1000 + socketId * 977 + plr.UserId) % 2147483647)
+	-- Refraction roll: a fresh rng per harvest, seeded with a SALT the client cannot know. The rest of the
+	-- seed (the second, the socket, the UserId) is all in the client's hands, and a probe predicted 48 of 48
+	-- rolls from it, so a script could click only on the second that rolls Mythic and farm the leaderboard.
+	-- The salt is drawn per harvest (a salt fixed for the session is a constant the client could solve for
+	-- from the tiers it sees) from `rollSalt`, which lives only in this script (robloxemu/check_growacrystal_salt).
+	local salt = rollSalt:NextInteger(0, Rarity.SEED_MOD - 1)
+	local rng = Rng.new(Rarity.rollSeed(os.time(), socketId, plr.UserId, salt))
 	local finalTier = Rarity.roll(plant.tier, luckMultOf(p), rng, Config.Refraction, Config.MaxTier)
 	local dust = Economy.harvestDust(finalTier, p.passes.DoubleDust == true, Config.Economy)
+	local pointsBefore = Board.metricOfDust(p.totalDust, BC)
 	p.dust += dust
-	p.totalDust += dust
+	-- The board counts the harvest at its UN-doubled value: a paid pass may double what the player spends, never
+	-- their place on the board (owner decision, DECIDED 2026-09-30 (owner: take recommended); EYECANDY.md §11;
+	-- robloxemu/check_growacrystal_pass.luau).
+	p.totalDust += Economy.harvestDust(finalTier, false, Config.Economy)
+	-- the board's tie-break: when the points last rose (a code's or the Geode's dust never gets here)
+	if Board.metricOfDust(p.totalDust, BC) > pointsBefore then p.boardAt = os.time() end
 	Codex.discover(p.codex, finalTier)
 	p.plants[socketId] = nil
 	local last = harvests[plr]
 	harvests[plr] = { n = (last and last.n or 0) + 1, socket = socketId, seed = plant.tier, tier = finalTier }
 	refreshSocketVisual(plr, socketId)
+	applyPlotBudget(plr)
 	pushState(plr)
 end
 
@@ -549,19 +752,46 @@ end
 BuyEvent.OnServerEvent:Connect(function(plr, kind, arg)
 	local p = profiles[plr]
 	if not p then return end
-	local ok = false
+	local ok, reason = false, nil
 	if kind == "seed" then
 		local tier = tonumber(arg)
-		if tier then ok = Economy.buySeed(p, tier, Config.Economy) end
+		if tier and Config.Tiers[tier] then
+			ok, reason = Economy.buySeed(p, tier, Config.Economy)
+			if not ok then refuse(plr, seedRefusal(tier, reason)) end
+		end
 	elseif kind == "chamber" then
-		ok = Economy.buyChamber(p, Config.Economy)
-		if ok then
+		local cost = Economy.chamberCost(p.chambers, Config.Economy)
+		if p.saveState == "locked" or p.saveState == "retry" then
+			-- this copy may be replaced by the record when the retry lands (retryLoad), and a built terrace cannot be
+			-- taken back down; dust, seeds and plants can
+			ok, reason = false, "wait"
+		else
+			ok, reason = Economy.buyChamber(p, Config.Economy)
+		end
+		if reason == "wait" then
+			refuse(plr, Config.Save.Text.WaitChamber)
+		elseif ok then
 			buildChambers(plr)
 			clearOwnedLocks(plr)      -- the rubble over the new terrace goes
 			refreshChamberLabels(plr) -- and its riser stops advertising a price
+		elseif reason == "max" then
+			refuse(plr, "Every chamber is already open")
+		else
+			refuse(plr, "Not enough Gem Dust: chamber " .. tostring(p.chambers + 1) .. " costs " .. tostring(cost))
 		end
 	elseif kind == "booster" then
-		if arg == "Luck" or arg == "Growth" then ok = Economy.buyBooster(p, arg, Config.Boosters) end
+		if arg == "Luck" or arg == "Growth" then
+			local level = if arg == "Luck" then p.luckLevel else p.growthLevel
+			local cost = Economy.boosterCost(level, Config.Boosters[arg])
+			ok, reason = Economy.buyBooster(p, arg, Config.Boosters)
+			if not ok then
+				if reason == "max" then
+					refuse(plr, arg .. " is already at its max level")
+				else
+					refuse(plr, "Not enough Gem Dust: " .. arg .. " Lv" .. tostring(level + 1) .. " costs " .. tostring(cost))
+				end
+			end
+		end
 	end
 	if ok then pushState(plr) end
 end)
@@ -575,16 +805,25 @@ GeodeEvent.OnServerEvent:Connect(function(plr)
 	local p = profiles[plr]
 	if not p then return end
 	local prevWeek = p.lastGeodeWeek
-	local ok, _, tier = Geode.crack(p, os.time(), Config.Geode) -- deducts dust + sets lastGeodeWeek
-	if not (ok and tier) then return end
+	local ok, reason, tier = Geode.crack(p, os.time(), Config.Geode) -- deducts dust + sets lastGeodeWeek
+	if not (ok and tier) then
+		if reason == "already" then
+			refuse(plr, "This week's Geode is cracked — back next week")
+		else
+			refuse(plr, "Not enough Gem Dust: the Geode costs " .. tostring(Config.Geode.CostDust))
+		end
+		return
+	end
 	p.seeds[tier] = (p.seeds[tier] or 0) + 1 -- grant an exclusive seed of that tier
 	-- Atomic flush: geode is once-per-week — if it didn't persist, roll back everything
-	-- so a crash can't leave dust spent / week burned without the reward.
-	if not saveProfile(plr, false) then
+	-- so a crash can't leave dust spent / week burned without the reward. A session that can NEVER save
+	-- ("nostore") keeps it for the session: nothing from it persists, so there is nothing to duplicate.
+	if p.saveState ~= "nostore" and not saveProfile(plr, false) then
 		p.dust += Config.Geode.CostDust
 		p.lastGeodeWeek = prevWeek
 		p.seeds[tier] -= 1
 		pushState(plr)
+		refuse(plr, "Couldn't save — nothing spent, try again")
 		return
 	end
 	pushState(plr)
@@ -602,8 +841,10 @@ RedeemFunc.OnServerInvoke = function(plr, input)
 	if reward.seedTier then p.seeds[reward.seedTier] = (p.seeds[reward.seedTier] or 0) + 1 end
 	-- Atomic flush: mark redeemed + reward persist together. If the save did NOT persist,
 	-- roll back so a crash can't let the code be redeemed a second time (dupe) or grant a
-	-- phantom reward the DataStore never recorded.
-	if not saveProfile(plr, false) then
+	-- phantom reward the DataStore never recorded. A session that can NEVER save ("nostore": no DataStore, or
+	-- Studio without API access) keeps the grant for the session: nothing from it persists, the reward included,
+	-- so there is nothing to duplicate; the player was told at join (MARKETING.md's clips are staged this way).
+	if p.saveState ~= "nostore" and not saveProfile(plr, false) then
 		p.redeemed[code] = nil
 		if reward.dust then p.dust -= reward.dust end
 		if reward.seedTier then p.seeds[reward.seedTier] -= 1 end
@@ -613,16 +854,337 @@ RedeemFunc.OnServerInvoke = function(plr, input)
 	return { ok = true, reason = "ok", dust = reward.dust, seedTier = reward.seedTier }
 end
 
--- ── Leaderboard ────────────────────────────────────────────────────────────────
-local function refreshLeaderboard()
-	if not orderedLB then return end
-	local ok, page = pcall(function() return orderedLB:GetSortedAsync(false, 10) end)
-	if not ok or not page then return end
-	local top = {}
-	for _, e in ipairs(page:GetCurrentPage()) do
-		top[#top + 1] = { userId = tonumber((string.gsub(e.key, "^u_", ""))), dust = e.value }
+-- ── The highscore board: public + friends (docs/complete-game-standard.md §3) ─────────────────────────
+-- One physical board per cavern, on the entrance wall behind the spawn (Cavern.board), drawn by the server for the
+-- cavern's owner. Its ProximityPrompt switches it between everyone (the store's top 10, read at most once per
+-- Config.Board.PublicCacheSeconds for the whole server) and the owner's Roblox friends (fetched only when asked,
+-- capped, cached, every call pcall'd, the score reads throttled by one token bucket for the whole server). The
+-- HUD's panel gets the same public rows, names included, so no client looks a name up.
+-- Names: resolved here, cached for the life of the server, never saved anywhere.
+local names = {}            -- [userId] = name
+local boards = {}           -- [player] = { part, rows = { TextLabel }, modeLabel, note, prompt, mode, job }
+local publicSorted = nil    -- the last GetSortedAsync page: { { userId, value } }, nil before the first read
+local publicRows = {}       -- the same, drawn: { { rank, userId, name, score } } (also the HUD panel's payload)
+local friendsCache = Board.newCache(BC.FriendsCacheSeconds)  -- [userId] = { ids = { number } }
+local friendsFailed = Board.newCache(BC.FriendsRetrySeconds) -- [userId] = true: a fetch failed, wait before retrying
+local readLimiter = Board.newLimiter(BC.ReadsBurst, BC.ReadsPerSecond, tick())
+
+local function nameOf(uid: number): string
+	local n = names[uid]
+	if n then return n end
+	local online = Players:GetPlayerByUserId(uid)
+	if online then
+		names[uid] = online.Name
+		return online.Name
 	end
-	for _, plr in ipairs(Players:GetPlayers()) do LeaderboardEvent:FireClient(plr, top) end
+	local ok, res = pcall(function() return Players:GetNameFromUserIdAsync(uid) end)
+	if ok and type(res) == "string" then
+		names[uid] = res
+		return res
+	end
+	return "Miner " .. tostring(uid) -- not cached: the next refresh tries again
+end
+
+-- A player on this server is ranked by their live points, never by a store read.
+local function liveValue(plr): number
+	local p = profiles[plr]
+	if not p then return 0 end
+	local points = Board.metricOfDust(p.totalDust, BC)
+	if points <= 0 then return 0 end
+	return Board.encode(points, p.boardAt, BC)
+end
+
+local function drawRows(b, view, you: number?)
+	for i, label in b.rows do
+		local r = view and view.rows[i]
+		if r then
+			local mark = if r.you then "  (you)" else ""
+			label.Text = string.format("%d.  %s%s  —  💎 %s", r.rank, nameOf(r.userId), mark, Board.formatScore(r.metric, BC))
+			label.TextColor3 = if r.userId == you then Color3.fromRGB(255, 215, 90) else Color3.fromRGB(225, 232, 245)
+		else
+			label.Text = ""
+		end
+	end
+	b.note.Text = (view and view.note) or ""
+end
+
+local function drawPublic(plr)
+	local b = boards[plr]
+	if not b or b.mode ~= "public" then return end
+	b.modeLabel.Text = BC.Text.Everyone .. "  ·  " .. BC.Text.Subtitle
+	if not orderedLB then
+		drawRows(b, { rows = {}, note = BC.Text.Offline }, nil)
+	elseif publicSorted == nil then
+		drawRows(b, { rows = {}, note = BC.Text.Loading }, nil)
+	else
+		drawRows(b, Board.publicView(publicSorted, BC), plr.UserId)
+	end
+end
+
+-- One GetSortedAsync for the whole server, at most once per PublicCacheSeconds (the loop at the bottom). A failed
+-- read keeps the rows the boards already show.
+local function refreshPublic()
+	if not orderedLB then return end
+	local ok, page = pcall(function() return orderedLB:GetSortedAsync(false, BC.PublicRows) end)
+	if not ok or not page then return end
+	local okp, entries = pcall(function() return page:GetCurrentPage() end)
+	if not okp or type(entries) ~= "table" then return end
+	local sorted = {}
+	for _, e in entries do
+		local uid = Board.userIdOf(tostring(e.key))
+		if uid and type(e.value) == "number" then table.insert(sorted, { userId = uid, value = e.value }) end
+	end
+	publicSorted = sorted
+	local rows = {}
+	for _, r in Board.publicView(sorted, BC).rows do
+		table.insert(rows, { rank = r.rank, userId = r.userId, name = nameOf(r.userId), score = Board.formatScore(r.metric, BC) })
+	end
+	publicRows = rows
+	for _, plr in Players:GetPlayers() do
+		drawPublic(plr)
+		LeaderboardEvent:FireClient(plr, publicRows)
+	end
+end
+
+-- The owner's friends list: pages of GetFriendsAsync until FriendsCap, names kept from the pages (no lookups).
+local function fetchFriends(uid: number): any
+	local ok, pages = pcall(function() return Players:GetFriendsAsync(uid) end)
+	if not ok or pages == nil then return nil end
+	local ids = {}
+	while #ids < BC.FriendsCap do
+		local okp, page = pcall(function() return pages:GetCurrentPage() end)
+		if not okp or type(page) ~= "table" then
+			if #ids == 0 then return nil end
+			break
+		end
+		for _, f in page do
+			if #ids >= BC.FriendsCap then break end
+			local id = tonumber(f.Id)
+			if id then
+				table.insert(ids, id)
+				if type(f.Username) == "string" then names[id] = f.Username end
+			end
+		end
+		if pages.IsFinished or #ids >= BC.FriendsCap then break end
+		local oka = pcall(function() pages:AdvanceToNextPageAsync() end)
+		if not oka then break end
+	end
+	return { ids = ids }
+end
+
+local function readBudgetLow(): boolean
+	local ok, n = pcall(function()
+		return DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetAsync)
+	end)
+	return ok and type(n) == "number" and n < BC.BudgetReserve
+end
+
+-- One friend's stored value: live if they are on this server, else cached, else ONE throttled store read.
+local function friendValue(fid: number): number
+	local fp = Players:GetPlayerByUserId(fid)
+	if fp and profiles[fp] then return liveValue(fp) end
+	local cached = Board.cacheGet(scoreCache, fid, tick())
+	if cached ~= nil then return cached end
+	if not orderedLB then return 0 end
+	while not Board.take(readLimiter, tick()) or readBudgetLow() do
+		task.wait(1 / BC.ReadsPerSecond)
+	end
+	local ok, v = pcall(function() return orderedLB:GetAsync(Board.key(fid)) end)
+	local value = if ok and type(v) == "number" then v else 0
+	if ok then Board.cachePut(scoreCache, fid, value, tick()) end
+	return value
+end
+
+local function drawFriends(plr)
+	local b = boards[plr]
+	if not b or b.mode ~= "friends" then return end
+	local job = {}
+	b.job = job
+	b.modeLabel.Text = BC.Text.Friends .. "  ·  " .. BC.Text.Subtitle
+	drawRows(b, { rows = {}, note = BC.Text.Loading }, nil)
+	local uid = plr.UserId
+	local list = Board.cacheGet(friendsCache, uid, tick())
+	local failed = false
+	if list == nil then
+		if Board.cacheHas(friendsFailed, uid, tick()) then
+			failed = true
+		else
+			list = fetchFriends(uid) -- yields
+			if list then
+				Board.cachePut(friendsCache, uid, list, tick())
+			else
+				failed = true
+				Board.cachePut(friendsFailed, uid, true, tick())
+			end
+		end
+	end
+	local function current(): boolean
+		return boards[plr] == b and b.mode == "friends" and b.job == job
+	end
+	if not current() then return end
+	local ids = if list then list.ids else {}
+	local values = { [uid] = liveValue(plr) }
+	local checked = 0
+	local function draw()
+		drawRows(b, Board.friendsView(uid, values, { friendCount = #ids, checked = checked, failed = failed }, BC), uid)
+	end
+	draw()
+	for _, fid in ids do
+		local v = friendValue(fid) -- may wait on the read limiter
+		if not current() then return end
+		values[fid] = v
+		checked += 1
+		if checked % 10 == 0 or checked == #ids then draw() end
+	end
+end
+
+local function toggleBoard(plr)
+	local b = boards[plr]
+	if not b then return end
+	b.mode = if b.mode == "public" then "friends" else "public"
+	b.job = nil
+	b.prompt.ActionText = if b.mode == "public" then BC.Text.ShowFriends else BC.Text.ShowEveryone
+	if b.mode == "public" then drawPublic(plr) else task.spawn(drawFriends, plr) end
+end
+
+local function buildBoard(plr)
+	local folder = plotFolders[plr]
+	local idx = playerPlot[plr]
+	if not folder or idx == nil then return end
+	local def = Cavern.board(Config)
+	local part = Instance.new("Part")
+	part.Name = "Leaderboard"
+	part.Anchored = true
+	part.CanTouch = false
+	part.Size = Vector3.new(def.size.x, def.size.y, def.size.z)
+	part.CFrame = CFrame.new(plotOrigin(idx) + Vector3.new(def.position.x, def.position.y, def.position.z))
+	part.Material = Enum.Material.Slate
+	part.Color = Color3.fromRGB(30, 32, 44)
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = "BoardGui"
+	gui.Face = Enum.NormalId.Back -- the part's +Z face: into the cavern, at the spawn (Cavern.board)
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 40
+	gui.LightInfluence = 0
+	local function label(name: string, y: number, h: number, font, color: Color3): TextLabel
+		local l = Instance.new("TextLabel")
+		l.Name = name
+		l.BackgroundTransparency = 1
+		l.Position = UDim2.new(0.05, 0, y, 0)
+		l.Size = UDim2.new(0.9, 0, h, 0)
+		l.Font = font
+		l.TextScaled = true
+		l.TextXAlignment = Enum.TextXAlignment.Left
+		l.TextColor3 = color
+		l.Text = ""
+		l.Parent = gui
+		return l
+	end
+	local title = label("Title", 0.03, 0.11, Enum.Font.GothamBlack, Color3.fromRGB(255, 215, 90))
+	title.Text = "🏆 " .. BC.Text.Title
+	title.TextXAlignment = Enum.TextXAlignment.Center
+	local modeLabel = label("Mode", 0.145, 0.06, Enum.Font.GothamMedium, Color3.fromRGB(170, 200, 230))
+	modeLabel.TextXAlignment = Enum.TextXAlignment.Center
+	local rows = {}
+	for i = 1, BC.PublicRows do
+		rows[i] = label("Row" .. i, 0.22 + (i - 1) * 0.065, 0.058, Enum.Font.GothamMedium, Color3.fromRGB(225, 232, 245))
+	end
+	local note = label("Note", 0.885, 0.09, Enum.Font.Gotham, Color3.fromRGB(190, 205, 225))
+	note.TextXAlignment = Enum.TextXAlignment.Center
+	gui.Parent = part
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "BoardPrompt"
+	prompt.ObjectText = BC.Text.Object
+	prompt.ActionText = BC.Text.ShowFriends
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = BC.PromptDistance
+	prompt.Parent = part
+	-- A cavern is sealed, so only its owner can reach this prompt; anyone else is told why, never ignored.
+	prompt.Triggered:Connect(function(who)
+		if who ~= plr then
+			refuse(who, BC.Text.NotYours)
+			return
+		end
+		toggleBoard(plr)
+	end)
+	part.Parent = folder
+	boards[plr] = { part = part, rows = rows, modeLabel = modeLabel, note = note, prompt = prompt, mode = "public" }
+	drawPublic(plr)
+end
+
+-- ── A load that could not take the lock tries again (standard §1; robloxemu/check_growacrystal_rejoin.luau) ──
+-- "locked": when the other server's lock has expired AND nobody has written the record since this session read it
+-- (same jobId, token and lockUntil: every write of every version of this game sets lockUntil), what was played here
+-- continues that record, so this session takes the lock and saves it. If the record changed, it is newer than the
+-- copy played here: this session loads it and rebuilds the cavern to it. "retry" (the load call failed) loads the
+-- record as soon as a call succeeds. Either way the player is told once while waiting and once when it is over.
+local function reloadInto(plr, p, d)
+	local base = defaultProfile()
+	for _, k in { "dust", "seeds", "chambers", "luckLevel", "growthLevel", "plants", "codex", "redeemed",
+		"lastGeodeWeek", "totalDust", "boardAt", "boardMetric", "passes" } do
+		p[k] = base[k]
+	end
+	applyData(p, d)
+	-- chambers only grow (a chamber is never bought while waiting), so building up is enough
+	buildChambers(plr)
+	clearOwnedLocks(plr)
+	refreshChamberLabels(plr)
+	pushState(plr)
+end
+
+local function retryLoad(plr)
+	local p = profiles[plr]
+	if not p or not store or p.retrying then return end
+	p.retrying = true
+	local token = HttpService:GenerateGUID(false)
+	local outcome, fresh, seen = nil, nil, nil
+	local ok = pcall(function()
+		store:UpdateAsync(key(plr.UserId), function(old)
+			old = old or {}
+			local now = os.time()
+			outcome, fresh, seen = "wait", nil, nil
+			if (tonumber(old.lockUntil) or 0) > now and old.jobId ~= game.JobId then
+				fresh, seen = old.data, lockOf(old) -- still held: a failed load now at least knows the profile
+				return nil
+			end
+			local s = p.lockSeen
+			if p.saveState == "locked" and s and old.jobId == s.jobId and old.session == s.session and old.lockUntil == s.lockUntil then
+				outcome = "resume"
+			else
+				outcome, fresh = "reload", old.data
+			end
+			old.jobId = game.JobId
+			old.session = token
+			old.lockUntil = now + Config.Save.SessionLockSeconds
+			return old
+		end)
+	end)
+	p.retrying = false
+	if not ok then return end
+	if profiles[plr] ~= p then
+		-- left while the call was in flight: give back a lock this session has just taken
+		if outcome ~= "wait" then
+			pcall(function()
+				store:UpdateAsync(key(plr.UserId), function(old)
+					if type(old) ~= "table" or old.session ~= token then return nil end
+					old.lockUntil = 0
+					return old
+				end)
+			end)
+		end
+		return
+	end
+	if outcome == "wait" then
+		if p.saveState == "retry" then
+			reloadInto(plr, p, fresh)
+			p.saveState, p.lockSeen = "locked", seen
+		end
+		return
+	end
+	if outcome == "reload" then reloadInto(plr, p, fresh) end
+	p.session, p.canSave, p.saveState, p.lockSeen = token, true, "ok", nil
+	refuse(plr, if outcome == "resume" then Config.Save.Text.Resumed else Config.Save.Text.Loaded)
+	saveProfile(plr, false)
 end
 
 -- ── Player lifecycle ────────────────────────────────────────────────────────
@@ -650,6 +1212,8 @@ local function onPlayerAdded(plr)
 
 	local idx = claimPlot(plr)
 	buildCavern(plr)
+	buildBoard(plr)
+	LeaderboardEvent:FireClient(plr, publicRows)
 
 	-- SPAWN INSIDE THE CAVERN, and make Roblox agree.
 	--
@@ -720,6 +1284,11 @@ local function onPlayerAdded(plr)
 	if plr.Character then place(plr.Character) end
 
 	pushState(plr)
+	-- a session that cannot save says so at once, never silently (standard §1; check_growacrystal_rejoin)
+	local pj = profiles[plr] -- nil if they left while place() waited for the character
+	local why = pj and ({ nostore = Config.Save.Text.NoStore, locked = Config.Save.Text.Locked,
+		retry = Config.Save.Text.LoadRetry })[pj.saveState]
+	if why then refuse(plr, why) end
 end
 
 local function onPlayerRemoving(plr)
@@ -731,12 +1300,14 @@ local function onPlayerRemoving(plr)
 	plotFolders[plr] = nil
 	if folder then folder:Destroy() end
 	socketParts[plr] = nil
+	crystals[plr] = nil
 	local idx = playerPlot[plr]
 	playerPlot[plr] = nil
 	if idx ~= nil then usedPlots[idx] = nil end
 	profiles[plr] = nil
 	selected[plr] = nil
 	harvests[plr] = nil
+	boards[plr] = nil -- the board itself went with the plot folder
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
@@ -751,7 +1322,14 @@ end)
 task.spawn(function()
 	while true do
 		task.wait(Config.Save.AutosaveSeconds)
-		for _, plr in ipairs(Players:GetPlayers()) do saveProfile(plr, false) end
+		for _, plr in ipairs(Players:GetPlayers()) do
+			local p = profiles[plr]
+			if p and (p.saveState == "locked" or p.saveState == "retry") then
+				task.spawn(retryLoad, plr)
+			else
+				saveProfile(plr, false)
+			end
+		end
 	end
 end)
 task.spawn(function()
@@ -762,12 +1340,13 @@ task.spawn(function()
 		for _, plr in ipairs(Players:GetPlayers()) do
 			if profiles[plr] and socketParts[plr] then
 				for sid in pairs(socketParts[plr]) do refreshSocketVisual(plr, sid) end
+				applyPlotBudget(plr)
 			end
 		end
 	end
 end)
 task.spawn(function()
-	while true do refreshLeaderboard(); task.wait(30) end
+	while true do refreshPublic(); task.wait(BC.PublicCacheSeconds) end
 end)
 
 print("[Crystal] Grow a Crystal lastet. WorldSeed=" .. Config.WorldSeed)

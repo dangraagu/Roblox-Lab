@@ -5,18 +5,23 @@
 -- per profile in Config.Pacing.Profiles and reports the minutes of play to each chamber, hence to
 -- each look. It asserts what EYECANDY.md §2 claims, so a retune that moves them fails loudly.
 --
--- It also pins a FINDING that is not a requirement: at luck level 0 every seed is worth LESS, on
--- average, than it costs, so a player who does not type the advertised codes slowly runs out of Gem
--- Dust and never buys chamber 2. That is an economy decision for the owner (EYECANDY.md §11), not
--- something the cavern's looks can fix. The assertions marked FINDING are here so the note stays
--- true: when the economy is retuned they fail, and EYECANDY.md §2/§11 must be updated with them.
+-- It used to pin a FINDING: at luck level 0 every seed was worth LESS, on average, than it cost, so a
+-- player who did not type the advertised codes ran out of Gem Dust (a dead end: nothing growing, no seed,
+-- too little dust for one) and never bought chamber 2. The owner decided on 2026-09-30 (EYECANDY.md §11):
+-- the Shard seed costs 7 instead of 10, so it pays back on average, and a player at a dead end gets a free
+-- Shard (Economy.needsFreeSeed). Those two FINDING assertions are now requirements: the Shard pays back,
+-- a code-less player owns chamber 2 in the median session, and no session of any profile reaches a dead end.
 local IdleModel = require("./IdleModel")
 local EnvBands = require("../src/shared/EnvBands")
 local Config = require("../src/shared/Config")
+local Board = require("../src/shared/Board")
 
 local passed, failed = 0, 0
 local function truthy(c, msg)
 	if c then passed += 1 else failed += 1; print("FAIL:", msg) end
+end
+local function eq(a, b, msg)
+	if a == b then passed += 1 else failed += 1; print("FAIL:", msg, "-> got", tostring(a), "want", tostring(b)) end
 end
 
 local bands = Config.Env.Bands
@@ -31,15 +36,14 @@ end
 
 --=========================================================================== the economy finding
 do
-	print("  expected Gem Dust per seed at luck 0 (FINDING):")
-	local allNegative = true
+	print("  expected Gem Dust per seed at luck 0:")
 	for t = 1, Config.MaxTier - 1 do
 		local ev = IdleModel.expectedDust(Config, t, 1)
 		local cost = Config.Economy.SeedCost[t]
 		print(string.format("    %-9s costs %6d, returns %9.2f on average (%.0f %%)", Config.Tiers[t], cost, ev, 100 * ev / cost))
-		if ev >= cost then allNegative = false end
 	end
-	truthy(allNegative, "FINDING: at luck 0 no seed tier below Mythic pays back its price on average")
+	local shardEv = IdleModel.expectedDust(Config, 1, 1)
+	truthy(shardEv >= Config.Economy.SeedCost[1], string.format("at luck 0 a Shard seed pays back its price on average (%.2f for %d)", shardEv, Config.Economy.SeedCost[1]))
 end
 
 --=========================================================================== when each chamber, and so each look, arrives
@@ -111,9 +115,52 @@ do
 	local slow = sweeps.slow.chambers
 	truthy(IdleModel.quantile(slow[MAXC], 0.5) > med(MAXC), "a slower player gets there later (the model is sensitive to the human part)")
 
-	-- FINDING: without the codes the cavern never changes, because the economy runs dry (see the top)
+	-- without the codes the cavern still changes: the Shard pays back and a dead end hands out a free Shard
 	local nc = sweeps.nocodes.chambers
-	truthy(IdleModel.quantile(nc[2], 0.9) == math.huge, "FINDING: a player who never types a code does not own chamber 2 after 8 h")
+	truthy(IdleModel.quantile(nc[2], 0.5) <= SECONDS, "a player who never types a code owns chamber 2 in the median 8-hour session ("
+		.. fmt(IdleModel.quantile(nc[2], 0.5)) .. " min)")
+	for _, name in { "normal", "slow", "nocodes" } do
+		local sw = sweeps[name]
+		truthy(sw.deadEnds == 0, string.format("%s: no session ever has nothing growing and nothing to plant (%d of %d did; %d free Shards handed out)",
+			name, sw.deadEnds, sw.runs, sw.freeSeeds))
+	end
+end
+
+--=========================================================================== the brag moment and the long-term goal
+-- docs/complete-game-standard.md §2: "A brag moment within about 30-45 minutes of normal play (+1 Jump: reaching
+-- space), and a long-term goal beyond it. Measure the minutes with a pacing model in tests/." Grow a Crystal's is
+-- Config.Pacing.Brag: the first crystal that refracts all the way to its tier, Mythic, which gets the game's
+-- biggest celebration (magenta flash, beam of light, title card; check_growacrystal_flash) and puts a jump of
+-- 1500 Gem Dust on the highscore board. The long-term goals are the Heart of the Geode (chamber 8) and the board.
+do
+	local brag = Config.Pacing.Brag
+	truthy(type(brag) == "table", "Config.Pacing.Brag names the brag moment")
+	brag = brag or { tier = Config.MaxTier, fromMinutes = 20, byMinutes = 45, name = "?" }
+	local n = sweeps.normal.codex[brag.tier]
+	local p10, med, p90 = IdleModel.quantile(n, 0.1), IdleModel.quantile(n, 0.5), IdleModel.quantile(n, 0.9)
+	print(string.format("  the brag moment, %s (%s): normal p10 %s / median %s / p90 %s min; slow median %s; no codes median %s",
+		brag.name, Config.Tiers[brag.tier], fmt(p10), fmt(med), fmt(p90),
+		fmt(IdleModel.quantile(sweeps.slow.codex[brag.tier], 0.5)), fmt(IdleModel.quantile(sweeps.nocodes.codex[brag.tier], 0.5))))
+	eq(brag.tier, Config.MaxTier, "the brag moment is the top tier, Mythic")
+	truthy(med >= brag.fromMinutes * 60 and med <= brag.byMinutes * 60, string.format(
+		"a normal player's first Mythic comes in %d-%d min of play (median %s min)", brag.fromMinutes, brag.byMinutes, fmt(med)))
+	truthy(brag.fromMinutes >= 20 and brag.byMinutes <= 45, "and that window is the standard's 'about 30-45 minutes'")
+	truthy(p90 <= 2 * brag.byMinutes * 60, "nine in ten normal players have it within " .. (2 * brag.byMinutes) .. " min (p90 " .. fmt(p90) .. ")")
+	local slowMed = IdleModel.quantile(sweeps.slow.codex[brag.tier], 0.5)
+	truthy(slowMed <= SECONDS, "a slower player gets there in the session too (median " .. fmt(slowMed) .. " min)")
+	-- the long-term goal lies well beyond it
+	local heart = IdleModel.quantile(sweeps.normal.chambers[MAXC], 0.5)
+	truthy(heart >= med + 2 * 3600, string.format("the Heart of the Geode comes at least 2 h of play after the brag (%s vs %s min)", fmt(heart), fmt(med)))
+
+	-- the highscore board never runs out of room: hours of normal end-game play to its cap (Config.Board.MaxMetric)
+	local B = Config.Board
+	local run8 = IdleModel.run(Config, Config.Pacing.Profiles.normal, 1031, 8 * 3600)
+	local run24 = IdleModel.run(Config, Config.Pacing.Profiles.normal, 1031, 24 * 3600)
+	local perHour = (run24.final.totalDust - run8.final.totalDust) / 16
+	local hoursToCap = (B.MaxMetric * B.DustPerPoint - run24.final.totalDust) / perHour + 24
+	print(string.format("  board: a normal player earns %.0f dust in 8 h, then %.0f per hour at the end game; the cap (%s) takes %.0f h of play",
+		run8.final.totalDust, perHour, Board.formatScore(B.MaxMetric, B), hoursToCap))
+	truthy(hoursToCap >= 1000, string.format("the board's cap is over 1000 hours of end-game play away (%.0f h)", hoursToCap))
 end
 
 print(string.format("Pacing: %d passed, %d failed", passed, failed))

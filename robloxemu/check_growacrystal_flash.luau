@@ -74,9 +74,11 @@ State.OnClientEvent:Fire(base)
 
 local RunService = h.game:GetService("RunService")
 local peakGuis, peakAlpha = 0, 0
+local T = 0 -- seconds of client frames run so far
 local function frame()
 	RunService.RenderStepped:Fire(1 / 30)
 	h:advance(1 / 30)
+	T += 1 / 30
 	local guis, keep = 0, 1
 	for _, g in plr.PlayerGui:GetChildren() do
 		if g.Name == "FxFlash" then
@@ -122,6 +124,12 @@ for socket = 1, 6 do
 	run(0.25 - 1 / 30)
 end
 eq(bursts, 6, "every harvest of the row burst at its own socket")
+do -- (round 2) equal tiers take the beam over: it stands on the LATEST Mythic's socket
+	local core = folder:FindFirstChild("BeamCore")
+	local sk = h.workspace:FindFirstChild("Socket_" .. ME .. "_6", true)
+	truthy(core ~= nil and sk ~= nil and math.abs(core.CFrame.Position.X - sk.Position.X) < 0.01
+		and math.abs(core.CFrame.Position.Z - sk.Position.Z) < 0.01, "a row of Mythics: the beam follows the latest harvest (socket 6)")
+end
 eq(flashCalls, 1, "six Mythic harvests in 1.5 s flash the screen ONCE")
 eq(shakeCalls, 1, "... and shake it once")
 run(1.5)
@@ -141,6 +149,59 @@ harvest(8, 5, 5)
 truthy(ringAtSocket(8), "a Legendary 1 s later still bursts")
 eq(flashCalls, 2, "... but does not flash inside the cooldown")
 run(3)
+
+-- ── review round 2, finding 2: a Mythic inside a row of LEGENDARY harvests keeps its whole celebration ──
+-- It used to get no flash and no shake (the cooldown held it back), and the next Legendary took its card and its
+-- beam 0.27 s later. For the Mythic at each position 2..6 of a Legendary row at 4 clicks/s: it flashes and shakes,
+-- the older flash is replaced (never two on screen, never more opaque than one), and its MYTHIC card and magenta
+-- beam stay on its socket for their full time while the Legendaries after it burst at their own sockets.
+local mythicColor = Config.TierColor[6]
+local function beamAt(socket: number): (boolean, boolean)
+	local core, halo = folder:FindFirstChild("BeamCore"), folder:FindFirstChild("BeamHalo")
+	local sk = h.workspace:FindFirstChild("Socket_" .. ME .. "_" .. socket, true)
+	if core == nil or halo == nil or sk == nil then return false, false end
+	local p = core.CFrame.Position
+	local here = math.abs(p.X - sk.Position.X) < 0.01 and math.abs(p.Z - sk.Position.Z) < 0.01
+	local c = halo.Color
+	local magenta = math.abs(c.R * 255 - mythicColor[1]) < 1 and math.abs(c.G * 255 - mythicColor[2]) < 1
+		and math.abs(c.B * 255 - mythicColor[3]) < 1
+	return here, magenta
+end
+for k = 2, 6 do
+	run(3)
+	peakGuis, peakAlpha = 0, 0
+	local mf, ms, tm, mSocket = 0, 0, 0, 0
+	local legendaryRings = 0
+	for i = 1, 6 do
+		local socket = 20 + i
+		local tier = if i == k then 6 else 5
+		local fb, sb = flashCalls, shakeCalls
+		harvest(socket, 5, tier)
+		local ringHere = ringAtSocket(socket)
+		if tier == 6 then
+			mf, ms, tm, mSocket = flashCalls - fb, shakeCalls - sb, T, socket
+		elseif ringHere then
+			legendaryRings += 1
+		end
+		run(0.25 - 1 / 30)
+	end
+	eq(mf, 1, "the Mythic as harvest #" .. k .. " of a Legendary row flashes")
+	eq(ms, 1, "the Mythic as harvest #" .. k .. " of a Legendary row shakes")
+	eq(legendaryRings, 5, "(the five Legendaries still burst at their own sockets)")
+	while T < tm + 2.3 do frame() end
+	local here, magenta = beamAt(mSocket)
+	truthy(here and magenta, string.format("Mythic #%d: its magenta beam is still on its socket 2.3 s later", k))
+	while T < tm + 2.9 do frame() end
+	truthy(card.Visible and card.TextTransparency < 0.05 and string.find(card.Text, "MYTHIC", 1, true) ~= nil,
+		string.format("Mythic #%d: its MYTHIC card is still on screen 2.9 s later (%q)", k, card.Text))
+	eq(peakGuis, 1, "Mythic #" .. k .. ": the Legendary's flash is replaced, never two on screen")
+	truthy(peakAlpha <= alpha + 1e-6, string.format("Mythic #%d: never more than one flash opaque (peak %.2f)", k, peakAlpha))
+end
+-- after the Mythic's card has gone, a Legendary shows its own again
+run(3)
+harvest(40, 5, 5)
+frame()
+truthy(card.Visible and string.find(card.Text, "LEGENDARY", 1, true) ~= nil, "once the Mythic's card has ended, a Legendary shows its own")
 
 for _, e in h:errors() do
 	print("scheduler error: " .. e)

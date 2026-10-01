@@ -34,6 +34,18 @@ function Rarity.roll(seedTier: number, luckMult: number, rng: any, rc: any, maxT
 	return final
 end
 
+-- The seed of one harvest's roll. now, socketId and userId are all things the client knows (its State push
+-- carries the server's `now`), so without `salt` a client could compute every roll and click only on the
+-- second that rolls Mythic. The server draws `salt` for EACH harvest from its own entropy-seeded Random and
+-- never saves or sends it (Main.server.luau, grantHarvest). A uniform salt makes every seed in [0, SEED_MOD)
+-- equally likely, so the odds stay exactly Rarity.roll's (tests/Rarity.spec.luau measures them). With salt 0
+-- this is the old formula. Every intermediate stays under 2^53 (a 10-digit UserId is added, never multiplied).
+Rarity.SEED_MOD = 2147483647
+
+function Rarity.rollSeed(now: number, socketId: number, userId: number, salt: number): number
+	return (now * 1000 + socketId * 977 + userId + salt) % Rarity.SEED_MOD
+end
+
 -- luckMult fra booster-nivå (rent, for server + test).
 function Rarity.luckMult(luckLevel: number, boosterCfg: any): number
 	return 1 + (luckLevel or 0) * boosterCfg.Luck.BasePerLevel

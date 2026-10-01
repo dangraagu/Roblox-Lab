@@ -109,6 +109,64 @@ for _, v in HudCheck.VIEWPORTS do
 	end
 end
 
+-- ── the title card (review round 2, finding 3) ────────────────────────────────
+-- The card (a band card, or a Legendary/Mythic harvest's) sat at 40 % of the screen height whatever the row did,
+-- so on a landscape phone it drew over the Relax button and the chip: 50x37 px of the 44-px button at 640x300.
+-- With a Legendary card up, at every viewport: the card and its sub-line are on screen and cover neither the row
+-- nor any of the HUD's own furniture.
+local cardsMeasured = 0
+local nHarvest = 0
+local function measureCard(label, vw, vh)
+	nHarvest += 1
+	local s = table.clone(rec.args[1])
+	s.lastHarvest = { n = nHarvest, socket = 1, seed = 5, tier = 5 }
+	State.OnClientEvent:Fire(s)
+	frames(2)
+	for _, g in player.PlayerGui:GetChildren() do h:settleLayouts(g, vw, vh) end
+	h:advance(0.05)
+	local hud, row, cards = {}, {}, {}
+	for _, r in h:guiRects(player.PlayerGui.CrystalHud, vw, vh) do
+		if r.shown and r.depth == 2 and r.sw > 0 and r.sh > 0 then table.insert(hud, r) end
+	end
+	for _, r in h:guiRects(player.PlayerGui.CrystalGrotto, vw, vh) do
+		if r.shown and r.depth == 2 then
+			if r.name == "BandChip" or r.name == "RelaxButton" then table.insert(row, r) end
+			if r.name == "BandCard" or r.name == "BandCardSub" then cards[r.name] = r end
+		end
+	end
+	for _, cn in { "BandCard", "BandCardSub" } do
+		local c = cards[cn]
+		truthy(c ~= nil, label .. ": the " .. cn .. " is showing")
+		if c then
+			truthy(c.sx >= -1 and c.sy >= 0 and c.sx + c.sw <= vw + 1 and c.sy + c.sh <= vh + 1,
+				string.format("%s: the %s is on screen (x %.0f..%.0f, y %.0f..%.0f)", label, cn, c.sx, c.sx + c.sw, c.sy, c.sy + c.sh))
+			for _, o in row do
+				local hit, ox, oy = overlap(c, o)
+				truthy(not hit, string.format("%s: the %s does not cover the %s (overlap %.0fx%.0f)", label, cn, o.name, hit and ox or 0, hit and oy or 0))
+			end
+			for _, o in hud do
+				local hit, ox, oy = overlap(c, o)
+				truthy(not hit, string.format("%s: the %s does not cover the HUD's %s (%s) (overlap %.0fx%.0f)", label, cn,
+					o.name, o.class, hit and ox or 0, hit and oy or 0))
+			end
+			cardsMeasured += 1
+		end
+	end
+end
+-- plus one screen that is narrow AND short (a portrait phone in split screen), the only kind where the row stacks
+-- the chip under the button and the card's 40 % line is above the chip
+local cardViewports = table.clone(HudCheck.VIEWPORTS)
+table.insert(cardViewports, { name = "split-screen portrait", w = 360, h = 400, touch = true })
+for _, v in cardViewports do
+	h:setTouch(v.touch)
+	h:setViewport(v.w, v.h)
+	h:advance(0.1)
+	closeAll()
+	frames(2)
+	measureCard(v.name .. ", a Legendary card up", v.w, v.h)
+end
+print(string.format("  %d card placements measured against the row and the HUD", cardsMeasured))
+
 print(string.format("  %d element placements measured against the HUD", measured))
 for _, e in h:errors() do
 	print("scheduler error: " .. e)

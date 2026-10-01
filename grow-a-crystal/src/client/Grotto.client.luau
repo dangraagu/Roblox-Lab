@@ -277,23 +277,30 @@ local function applyLayout()
 	local btnW = math.min(tapSize(RELAX_W), rowW)
 	local rowH = tapSize(ROW_H)
 	local chipW = rowW - btnW - GAP
+	local rowBottom
 	if chipW >= CHIP_MIN_W then
 		relaxBtn.Position = UDim2.fromOffset(x0 + rowW - btnW, rowTop)
 		chip.Position = UDim2.fromOffset(x0, rowTop)
 		chip.Size = UDim2.fromOffset(chipW, rowH)
+		rowBottom = rowTop + rowH
 	else
 		-- a narrow screen: the button on its own row, the chip full width under it
+		local chipH = math.max(26, math.floor(ROW_H * 0.8))
 		relaxBtn.Position = UDim2.fromOffset(x0 + (rowW - btnW) / 2, rowTop)
 		chip.Position = UDim2.fromOffset(x0, rowTop + rowH + 6)
-		chip.Size = UDim2.fromOffset(rowW, math.max(26, math.floor(ROW_H * 0.8)))
+		chip.Size = UDim2.fromOffset(rowW, chipH)
+		rowBottom = rowTop + rowH + 6 + chipH
 	end
 	relaxBtn.Size = UDim2.fromOffset(btnW, rowH)
 
+	-- The title card sits at 40 % of the height, but never higher than just under the row: on a landscape phone
+	-- 40 % landed on the Relax button and the chip (review round 2, finding 3; robloxemu/check_growacrystal_row).
 	local cardW = math.min(760, avail)
 	local cardH = math.min(70, rootH * 0.14)
-	card.Position = UDim2.fromOffset(colL + avail / 2, rootH * 0.4)
+	local cardY = math.max(rootH * 0.4, rowBottom + GAP + cardH / 2)
+	card.Position = UDim2.fromOffset(colL + avail / 2, cardY)
 	card.Size = UDim2.fromOffset(cardW, cardH)
-	cardSub.Position = UDim2.fromOffset(colL + avail / 2, rootH * 0.4 + cardH / 2 + 4)
+	cardSub.Position = UDim2.fromOffset(colL + avail / 2, cardY + cardH / 2 + 4)
 	cardSub.Size = UDim2.fromOffset(cardW, math.min(30, rootH * 0.07))
 end
 applyLayout()
@@ -303,8 +310,12 @@ pcall(function()
 end)
 
 local cardToken = 0
+local CARD_HOLD, CARD_FADE = 3, 0.8 -- a card stays for CARD_HOLD s (a celebration 1 s longer), then fades
+local cardStageTier: number? = nil -- the tier of the harvest card on screen (nil: none, or a band card)
+local cardStageUntil = 0
 local function showCard(title: string, sub: string, celebrate: boolean)
 	cardToken += 1
+	cardStageTier = nil
 	local mine = cardToken
 	card.Text = title
 	cardSub.Text = sub
@@ -316,9 +327,9 @@ local function showCard(title: string, sub: string, celebrate: boolean)
 		FxClient.flash(Color3.fromRGB(255, 235, 255), 0.4, 0.9)
 		FxClient.fovPunch(6, 0.12, 0.6)
 	end
-	task.delay(if celebrate then 4 else 3, function()
+	task.delay(if celebrate then CARD_HOLD + 1 else CARD_HOLD, function()
 		if cardToken ~= mine then return end
-		local info = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		local info = TweenInfo.new(CARD_FADE, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 		local tw = TweenService:Create(card, info, { TextTransparency = 1 })
 		TweenService:Create(cardSub, info, { TextTransparency = 1 }):Play()
 		tw.Completed:Connect(function()
@@ -349,6 +360,9 @@ local SETTLE_SECONDS = 1
 local lastHarvestN = 0      -- a per-SESSION counter from the server: anything above what we drew is new
 local pendingBursts = {}    -- harvests that arrived before the plot origin was known
 local lastFlashAt: number? = nil -- when a harvest last flashed the screen (Grotto.flashDue)
+local lastFlashTier: number? = nil -- ... and for which tier (a higher tier skips the cooldown)
+local beamStageTier: number? = nil -- the tier whose beam of light is up, until beamStageUntil (Grotto.outranked)
+local beamStageUntil = 0
 local announcer = EnvBands.newAnnouncer()
 
 local function bandIndex(c: number): number
@@ -649,21 +663,38 @@ local function frame(dt: number)
 				local rule = Grotto.burst(tier, Env.Harvest)
 				local tc = Config.TierColor[tier]
 				local color = Color3.fromRGB(tc[1], tc[2], tc[3])
+				-- the beam belongs to the rarest harvest still playing: a Legendary right after a Mythic keeps its
+				-- shards and ring but leaves the Mythic's beam where it is (review round 2, finding 2)
+				if rule.beam then
+					if Grotto.outranked(beamStageTier, beamStageUntil, now, tier) then
+						rule.beam = false
+					else
+						beamStageTier, beamStageUntil = tier, now + CavernArt.BeamLife
+					end
+				end
 				art:burst(at, rule, color, now)
 				-- the full-screen part waits out a cooldown, so a row of Legendary harvests never stacks flashes
-				-- into a wash; the burst, beam and card above and below play for every harvest
+				-- into a wash; a HIGHER tier than the last flash skips it (a Mythic inside a Legendary row) and
+				-- replaces the older flash, so there is never more than one on screen. The burst and ring play for
+				-- every harvest.
 				local hf = Env.HarvestFlash
-				if (rule.flash or (rule.shake or 0) > 0) and Grotto.flashDue(lastFlashAt, now, hf.cooldown) then
-					lastFlashAt = now
-					if rule.flash then FxClient.flash(color, hf.alpha, hf.fade) end
+				if (rule.flash or (rule.shake or 0) > 0) and Grotto.flashDue(lastFlashAt, now, hf.cooldown, lastFlashTier, tier) then
+					lastFlashAt, lastFlashTier = now, tier
+					if rule.flash then
+						for _, g in player.PlayerGui:GetChildren() do
+							if g.Name == "FxFlash" then g:Destroy() end
+						end
+						FxClient.flash(color, hf.alpha, hf.fade)
+					end
 					if (rule.shake or 0) > 0 then FxClient.shake(0.5, rule.shake) end
 				end
-				if rule.card then
+				if rule.card and not Grotto.outranked(cardStageTier, cardStageUntil, now, tier) then
 					local seed = tonumber(h.seed)
 					local sub = if seed and Config.Tiers[seed] and tier > seed
 						then "refracted from a " .. Config.Tiers[seed] .. " seed ✨"
 						else "a " .. Config.Tiers[tier] .. " crystal"
 					showCard(rule.card, sub, false)
+					cardStageTier, cardStageUntil = tier, now + CARD_HOLD + CARD_FADE
 				end
 			end
 		end

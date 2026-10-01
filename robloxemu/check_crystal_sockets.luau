@@ -121,9 +121,11 @@ if plot0 ~= nil then
 	print(string.format("  Plot_0: %d BaseParts, %d PointLights", baseParts, lights))
 	-- 154 is the empty-plot figure. This player joins with one crystal already grown on socket
 	-- 4 (that is what makes the harvest test below possible), and the plot also holds an
-	-- invisible SpawnLocation, so the expected count is 156. Spelled out rather than folded into
-	-- the constant: if the pre-planted crystal ever stops rendering, this is what notices.
-	eq(baseParts, 156, "a 1-chamber player with one crystal growing holds exactly 156 BaseParts")
+	-- invisible SpawnLocation, so the count was 156. Since 2026-09-30 it also holds the highscore
+	-- board on the entrance wall (one Part, `Leaderboard`, standard §3), so it is 157. Spelled out
+	-- rather than folded into the constant: if the pre-planted crystal ever stops rendering, or the
+	-- board goes missing, this is what notices.
+	eq(baseParts, 157, "a 1-chamber player with one crystal growing holds exactly 157 BaseParts (156 + the board)")
 	eq(lights, 10, "a 1-chamber player's plot holds exactly 10 PointLights")
 end
 

@@ -102,17 +102,21 @@ dustLabel.TextColor3 = Color3.fromRGB(150, 230, 255); dustLabel.Text = "💎 0"
 dustLabel.Parent = top
 do local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 30; cc.Parent = dustLabel end
 
--- Full-width text is sized in scale with an offset cap: 460 px wide on a desktop window, and
--- never wider than the screen on a phone.
+-- Full-width text is sized in scale with an offset cap: 800 px wide on a desktop window, and
+-- never wider than the screen on a phone (applyLayout).
 local hint = Instance.new("TextLabel")
 hint.AnchorPoint = Vector2.new(0.5, 0); hint.Position = UDim2.new(0.5, 0, 0, 70)
 hint.Size = UDim2.new(0.9, 0, 0, 22); hint.BackgroundTransparency = 1
 hint.Font = Enum.Font.GothamMedium; hint.TextScaled = true
 hint.TextColor3 = Color3.fromRGB(210, 214, 230)
-hint.Text = "👆 Click a glowing socket to PLANT (you start with 3 free seeds!) · click a grown crystal to HARVEST 💎"
+hint.Text = "👆 Click a glowing socket to PLANT · click a grown crystal to HARVEST 💎"
 hint.Parent = root
-do local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 14; cc.Parent = hint end
-do local sc = Instance.new("UISizeConstraint"); sc.MaxSize = Vector2.new(460, math.huge); sc.Parent = hint end
+-- The hint is the whole tutorial, so it must be READABLE. It was one 100-glyph sentence in a line capped at 460
+-- design px: about 7.6 px on a desktop monitor and 4.6 px on a phone (robloxemu/check_growacrystal_hint.luau).
+-- applyLayout now picks the wording and the caps per layout: a short line that may span the screen on a phone,
+-- and "tap" rather than "click" on a touch screen.
+local hintText = Instance.new("UITextSizeConstraint"); hintText.MaxTextSize = 16; hintText.Parent = hint
+local hintWidth = Instance.new("UISizeConstraint"); hintWidth.MaxSize = Vector2.new(800, math.huge); hintWidth.Parent = hint
 
 -- transient toast (server messages, e.g. "not enough dust")
 local toast = Instance.new("TextLabel")
@@ -121,8 +125,11 @@ toast.Size = UDim2.new(0.9, 0, 0, 24); toast.BackgroundTransparency = 1
 toast.Font = Enum.Font.GothamBold; toast.TextScaled = true
 toast.TextColor3 = Color3.fromRGB(255, 210, 120); toast.Text = ""
 toast.Parent = root
-do local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 15; cc.Parent = toast end
-do local sc = Instance.new("UISizeConstraint"); sc.MaxSize = Vector2.new(460, math.huge); sc.Parent = toast end
+-- The toast says why an action was refused, so it has to be READABLE on a phone. Its constraints are design px
+-- under the UIScale: a 15-px cap came out 9 screen px on an 800x360 phone, and the 460-px width cap made a long
+-- reason smaller still. applyLayout lifts both on compact layouts (robloxemu/check_growacrystal_refused.luau).
+local toastText = Instance.new("UITextSizeConstraint"); toastText.MaxTextSize = 15; toastText.Parent = toast
+local toastWidth = Instance.new("UISizeConstraint"); toastWidth.MaxSize = Vector2.new(460, math.huge); toastWidth.Parent = toast
 ToastEvent.OnClientEvent:Connect(function(msg)
 	if typeof(msg) ~= "string" then return end
 	toast.Text = msg
@@ -257,7 +264,8 @@ local function showRedeemResult(msg: string)
 end
 codeBtn.Activated:Connect(function()
 	local input = codeBox.Text
-	if input == "" then return end
+	-- never a silent no-op (robloxemu/check_growacrystal_refused.luau)
+	if string.match(input, "^%s*$") then showRedeemResult("Type a code first"); return end
 	local ok, res = pcall(function() return RedeemFunc:InvokeServer(input) end)
 	if ok and type(res) == "table" then
 		if res.ok then codeBox.Text = ""; showRedeemResult("✅ Redeemed!")
@@ -293,17 +301,17 @@ lbLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 	lbList.CanvasSize = UDim2.new(0, 0, 0, math.ceil(lbLayout.AbsoluteContentSize.Y / uiScale.Scale) + 4)
 end)
 
+-- The server sends the public board's rows with the name and the score already in them (it resolves and caches
+-- names once for the whole server); this panel used to look every name up again on every refresh.
 LeaderboardEvent.OnClientEvent:Connect(function(top)
 	for _, c in ipairs(lbList:GetChildren()) do if c:IsA("TextLabel") then c:Destroy() end end
 	for i, e in ipairs(top) do
 		local l = Instance.new("TextLabel")
 		l.BackgroundTransparency = 1; l.Size = UDim2.new(1, 0, 0, 22); l.LayoutOrder = i
 		l.Font = Enum.Font.GothamMedium; l.TextScaled = true; l.TextXAlignment = Enum.TextXAlignment.Left
-		l.TextColor3 = Color3.fromRGB(225, 230, 245)
-		local name = "Player"
-		local okn, res = pcall(function() return Players:GetNameFromUserIdAsync(e.userId) end)
-		if okn then name = res end
-		l.Text = string.format("%d. %s — 💎%d", i, name, e.dust); l.Parent = lbList
+		l.TextColor3 = if e.userId == player.UserId then Color3.fromRGB(255, 215, 90) else Color3.fromRGB(225, 230, 245)
+		l.Text = string.format("%d. %s — 💎%s", tonumber(e.rank) or i, tostring(e.name or "Miner"), tostring(e.score or "?"))
+		l.Parent = lbList
 		local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 14; cc.Parent = l
 	end
 end)
@@ -451,6 +459,20 @@ local function applyLayout()
 
 	toggleBar.Visible = layout.compact
 
+	local verb = if UserInputService.TouchEnabled then "Tap" else "Click"
+	if layout.compact then
+		-- 52 glyphs across 96 % of the screen: 12.7 px on a 414-px portrait phone, 13.2 px (the line's height) wider
+		hint.Text = "👆 " .. verb .. " a socket to PLANT · " .. string.lower(verb) .. " a crystal to HARVEST"
+		hint.Size = UDim2.new(0.96, 0, 0, 22)
+		hintText.MaxTextSize = 22
+		hintWidth.MaxSize = Vector2.new(math.huge, math.huge)
+	else
+		hint.Text = "👆 " .. verb .. " a glowing socket to PLANT · " .. string.lower(verb) .. " a grown crystal to HARVEST 💎"
+		hint.Size = UDim2.new(0.9, 0, 0, 22)
+		hintText.MaxTextSize = 16
+		hintWidth.MaxSize = Vector2.new(800, math.huge)
+	end
+
 	if layout.compact then
 		local toggleW, toggleH = touchSize(TOGGLE_W), touchSize(TOGGLE_H)
 		-- Widening the toggles must not push the row off the edge, so three of them plus their
@@ -477,6 +499,11 @@ local function applyLayout()
 		local drawerTop = toastY + 28
 		hint.Position = UDim2.new(0.5, 0, 0, hintY)
 		toast.Position = UDim2.new(0.5, 0, 0, toastY)
+		-- the toast's text may fill its whole 24-px line (14.4 screen px at the phone floor scale, 0.6) and the line
+		-- spans the screen, so a refusal's reason reads at 12 px or more on every phone
+		toast.Size = UDim2.new(0.96, 0, 0, 24)
+		toastText.MaxTextSize = 24
+		toastWidth.MaxSize = Vector2.new(math.huge, math.huge)
 
 		-- A drawer starts below the header stack, so it gets that much less room than a panel
 		-- that may use the full height of the screen.
@@ -495,6 +522,9 @@ local function applyLayout()
 		top.Size = UDim2.new(0, 300, 0, 56)
 		hint.Position = UDim2.new(0.5, 0, 0, 70)
 		toast.Position = UDim2.new(0.5, 0, 0, 98)
+		toast.Size = UDim2.new(0.9, 0, 0, 24)
+		toastText.MaxTextSize = 15
+		toastWidth.MaxSize = Vector2.new(460, math.huge)
 		-- Centred panels are lifted by half the control band so a touch tablet keeps them off
 		-- the jump button; padDesign is 0 on desktop, where this is the original layout.
 		-- The seed panel also has to stop short of the code panel below it. That frame is

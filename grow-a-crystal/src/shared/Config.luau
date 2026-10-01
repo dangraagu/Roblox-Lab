@@ -56,8 +56,11 @@ Config.Growth = {
 Config.Economy = {
 	-- Gem Dust you get for harvesting a crystal of the FINAL (post-refraction) tier.
 	DustValue = { [1] = 1, [2] = 4, [3] = 16, [4] = 64, [5] = 300, [6] = 1500 },
-	-- Cost (in Dust) to buy a seed of a given base tier from the shop.
-	SeedCost = { [1] = 10, [2] = 50, [3] = 250, [4] = 1200, [5] = 6000, [6] = 30000 },
+	-- Cost (in Dust) to buy a seed of a given base tier from the shop. The Shard was 10 and returned 7.82 on
+	-- average at luck 0 (78 %), so a player without the codes ran dry and never bought chamber 2. The owner
+	-- decided on 2026-09-30 (EYECANDY.md §11): 7, so it pays back (112 %); tests/Pacing.spec.luau measures it.
+	-- It must stay the cheapest seed (Economy.needsFreeSeed relies on that; Economy.spec asserts it).
+	SeedCost = { [1] = 7, [2] = 50, [3] = 250, [4] = 1200, [5] = 6000, [6] = 30000 },
 	-- Seed tiers the shop sells from the start (higher tiers gated behind chambers).
 	SeedShopUnlockedByChamber = { [1] = 1, [2] = 1, [3] = 2, [4] = 3, [5] = 5, [6] = 7 },
 	-- Chambers: cost of the NEXT chamber given how many you already own.
@@ -153,8 +156,10 @@ Config.Env = {
 			depthOfField = { FarIntensity = 0.1, FocusDistance = 30, InFocusRadius = 25, NearIntensity = 0.2 },
 			pulse = { depth = 0.15, period = 9 },
 			pieces = { "poolShimmer", "glowworms" },
-			ambient = { { kind = "moth", count = 5 } },
-			weather = { { kind = "drips", rate = 5 } },
+			-- its own: glowflies (the glow-worms' adults, blinking blue-green under the strands) and their silk,
+			-- glowing motes drifting down from the threads (EnvConfig.spec: every band brings its own life and weather)
+			ambient = { { kind = "moth", count = 3 }, { kind = "glowfly", count = 5 } },
+			weather = { { kind = "silk", rate = 4 }, { kind = "drips", rate = 3 } },
 			visitors = { "mothSwirl" },
 		},
 		{
@@ -168,7 +173,8 @@ Config.Env = {
 			depthOfField = { FarIntensity = 0.1, FocusDistance = 30, InFocusRadius = 25, NearIntensity = 0.2 },
 			pulse = { depth = 0.2, period = 8 },
 			pieces = { "poolShimmer", "glowworms", "shrooms" },
-			ambient = { { kind = "moth", count = 6 } },
+			-- its own: fireflies, warm blinking beads in a low layer under the moths, over the mushroom caps
+			ambient = { { kind = "moth", count = 4 }, { kind = "firefly", count = 6 } },
 			weather = { { kind = "spores", rate = 8 }, { kind = "drips", rate = 3 } },
 			visitors = { "mothSwirl" },
 		},
@@ -207,13 +213,15 @@ Config.Env = {
 	-- How many elements each scenery piece has (Grotto.layout). A half-weight piece shows the first half.
 	Layout = { Glowworms = 16, Shrooms = 6, GeodePrisms = 10, Seams = 8 },
 
-	-- Parts per critter model (moths and wisps are one glowing bead, a bat is a body and two wings).
-	CritterParts = { moth = 1, bat = 3, wisp = 1 },
+	-- Parts per critter model (moths, wisps, glowflies and fireflies are one glowing bead, a bat is a body and two wings).
+	CritterParts = { moth = 1, bat = 3, wisp = 1, glowfly = 1, firefly = 1 },
 	-- Ambient life: never collidable, never in anybody's way (Grotto.layout gives each its zone).
 	Critters = {
 		moth = { speedMin = 2, speedMax = 4 },
 		bat = { speedMin = 12, speedMax = 18 },
 		wisp = { speedMin = 2, speedMax = 3.5 },
+		glowfly = { speedMin = 1, speedMax = 2 },
+		firefly = { speedMin = 1.5, speedMax = 3 },
 	},
 
 	-- What a harvest looks like, by the refraction tier it rolled. A beam of light only for Legendary
@@ -271,11 +279,32 @@ Config.Pacing = {
 		nocodes = { checkEvery = 75, codes = {}, selectTier = 1, buy = "cheapest" },
 	},
 	SessionHours = 8,
+	-- The brag moment (docs/complete-game-standard.md §2: "within about 30-45 minutes of normal play"): the first
+	-- crystal that refracts all the way to Mythic. Measured by tests/Pacing.spec.luau on 2026-09-30: a normal player
+	-- gets it at a median of 31 min (p10 4, p90 70), a slow one at 62. The long-term goals beyond it are the Heart of
+	-- the Geode (chamber 8, median 238 min) and the highscore board.
+	Brag = { tier = 6, name = "your first Mythic crystal", fromMinutes = 20, byMinutes = 45 },
+}
+
+-- The SERVER's per-plot crystal effects (Main.server.luau, applyPlotBudget). The cavern itself has 10 lamp
+-- PointLights and 2 dust emitters (34 particles/s) per plot; on top of those, each READY crystal glints (the
+-- "ready to harvest" cue, so every ready crystal keeps it) and the rarest ready tier-3+ crystals cast light.
+-- Uncapped, 48 crystals that matured offline gave one plot 58 PointLights and 322 particles/s (review round 2,
+-- robloxemu/check_growacrystal_plotbudget.luau measures the caps).
+Config.PlotBudget = {
+	CrystalLights = 6,     -- PointLights on ready crystals, the rarest first; the plot's total is 10 + this
+	SparkleRate = 48,      -- particles/s summed over every ready crystal's sparkle, shared equally
+	SparklePerCrystal = 6, -- Fx.sparkle's own rate: up to 8 ready crystals glint at full strength
 }
 
 -- Mobile budget for what the CLIENT builds (measured in robloxemu/check_growacrystal_env.luau at every
 -- chamber count and every seam). The server builds none of this. On top of the server's own cavern
--- (154 parts, 10 lights, 2 emitters per plot).
+-- (156 parts at chamber 1 and 177 at chamber 8, the highscore board included, plus one per crystal; 10 lamp
+-- lights and 2 dust emitters per plot, plus the crystal effects in Config.PlotBudget).
+-- These client budgets are capped BY CONSTRUCTION, not by a runtime counter: every client-built part comes from a
+-- fixed-size pool whose size is a Config number (scenery = Grotto.layout, MaxShards, one beam with its one light,
+-- one host per weather kind, EnvBands.capRates on the emitter rates), tests/EnvConfig.spec.luau proves the worst
+-- case fits MaxLocalParts, and robloxemu/check_growacrystal_env.luau measures the peak at every chamber count.
 Config.Budget = {
 	MaxLocalParts = 150,
 	MaxScenery = 80,         -- Grotto.layout elements, all pieces together
@@ -287,13 +316,66 @@ Config.Budget = {
 	MaxVisitors = 1,
 }
 
+-- ── The highscore board: public + friends (docs/complete-game-standard.md §3) ─────────────────────────
+-- Ranks on Gem Dust EARNED FROM HARVESTS (profile.totalDust: codes, the Geode and purchases never add to it; a
+-- harvest needs a crystal that has grown for real time, and the refraction roll carries a server-only salt), in
+-- whole points of DustPerPoint. Ties go to whoever reached the points FIRST. Stored in the OrderedDataStore
+-- Config.Save.Leaderboard, key u_<userId>, value points * 2e9 + (2e9 - reachedAtUnix) (Board.encode), written only
+-- when the points go up. The board stands on the entrance wall of every player's own cavern, behind the spawn
+-- (Cavern.board); its ProximityPrompt switches that player's board between everyone and their Roblox friends.
+Config.Board = {
+	DustPerPoint = 100,         -- a point is 100 Gem Dust; 1.1 million in an 8-hour session is 11 000 points
+	PublicRows = 10,            -- GetSortedAsync(false, 10)
+	PublicCacheSeconds = 60,    -- the server asks the store for the top 10 at most once a minute
+	FriendsRows = 10,
+	FriendsCap = 200,           -- Players:GetFriendsAsync is never read further than this
+	FriendsCacheSeconds = 300,  -- a player's friends list
+	FriendsRetrySeconds = 60,   -- a failed friends fetch is not retried sooner (the note says "in a minute")
+	ScoreCacheSeconds = 120,    -- a friend's stored value, per server (also "has not harvested")
+	ReadsBurst = 40,            -- GetAsync on the board store for friends: 40 at once ...
+	ReadsPerSecond = 1,         -- ... then 1 a second (Roblox gives 60 + 10 per player a minute)
+	BudgetReserve = 10,         -- always leave this many GetAsync in Roblox's request budget
+	MaxMetric = 4000000,        -- the value is exact in a double up to here (4e6 * 2e9 < 2^53): 400 million dust
+	PromptDistance = 12,        -- studs; the spawn is about 8.5 from the board, so the prompt is there when you turn
+	Text = {
+		Title = "TOP MINERS",
+		Subtitle = "Gem Dust earned from harvests",
+		Everyone = "EVERYONE",
+		Friends = "FRIENDS",
+		EmptyPublic = "No miners on the board yet. Harvest a crystal and be the first!",
+		FriendsFailed = "Couldn't load your Roblox friends right now. Try again in a minute.",
+		NoFriends = "No Roblox friends yet. Friends you add show up here, ranked against you.",
+		FriendsNoScores = "None of your %d friends has harvested yet. Invite one and race them to Mythic!",
+		FriendsChecking = "Checking your friends: %d of %d so far...",
+		Loading = "Loading...",
+		Offline = "The board is offline on this server (no DataStore).",
+		ShowFriends = "Show friends",
+		ShowEveryone = "Show everyone",
+		Object = "Top Miners",
+		NotYours = "That's another miner's board, not yours",
+	},
+}
+
 -- ── Save ─────────────────────────────────────────────────────────────────────
 Config.Save = {
 	Enabled = true,
 	Store = "GrowCrystal_v1",
-	Leaderboard = "GrowCrystal_LB_v1", -- OrderedDataStore by total Dust earned
+	-- OrderedDataStore for the highscore board. v2 (2026-09-30): the value is Board.encode(points, reachedAt), not
+	-- raw totalDust. v1 held raw totalDust, which would sort below every encoded value; a v1 player comes back on
+	-- the board at their next save (the profile has totalDust), stamped with that session as the time reached.
+	Leaderboard = "GrowCrystal_LB_v2",
 	AutosaveSeconds = 20,   -- also renews the session lock; MUST be < SessionLockSeconds
 	SessionLockSeconds = 45, -- soft lock; expires fast so a crash rejoin isn't locked out
+	-- What a session that cannot save tells its player (Main.server: loadProfile / retryLoad), each once. A blocked
+	-- or failed load is retried on every autosave. Short enough for 12 px on every screen (check_growacrystal_rejoin).
+	Text = {
+		NoStore = "Saving is off here: progress won't save",      -- no DataStore on this server (Studio without API access)
+		Locked = "Save open on another server: retrying",          -- another server's lock is on the record
+		LoadRetry = "Couldn't load your save: retrying",           -- the load call failed
+		Loaded = "Your save loaded: progress saves again",         -- a retry read a newer record and took the lock
+		Resumed = "Your save is back: progress saves again",       -- a retry took the lock; what was played since is kept
+		WaitChamber = "Chambers wait until your save loads",       -- a chamber cannot be built on a copy that may be replaced
+	},
 }
 
 return Config

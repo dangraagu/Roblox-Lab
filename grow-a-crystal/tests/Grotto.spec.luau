@@ -148,6 +148,50 @@ do
 	eq(Grotto.flashDue(10, 9, 2), false, "a clock that went backwards does not flash early")
 end
 
+--=========================================================================== the rarest harvest keeps its celebration
+-- Review round 2, finding 2: a Mythic harvested inside a row of Legendary harvests got no flash and no shake (the
+-- cooldown held it back), and the next Legendary took its card and its beam 0.25 s later. The rarest outcome in the
+-- game, in the likeliest brag moment, lost its whole celebration. A HIGHER tier than the last flash now skips the
+-- cooldown (the client replaces the older flash, so there is still never two on screen), and a card or beam on
+-- stage is not taken over by a LOWER tier before it ends.
+do
+	eq(Grotto.flashDue(10, 10.25, 2, 5, 6), true, "a Mythic 0.25 s after a Legendary's flash flashes")
+	eq(Grotto.flashDue(10, 10.25, 2, 6, 6), false, "a Mythic after a Mythic still waits out the cooldown")
+	eq(Grotto.flashDue(10, 10.25, 2, 6, 5), false, "a Legendary after a Mythic still waits")
+	eq(Grotto.flashDue(10, 10.25, 2, 5, 5), false, "a Legendary after a Legendary still waits")
+	eq(Grotto.flashDue(10, 10.25, 2, nil, 6), false, "no last tier: no bypass (the 3-argument rule)")
+	eq(Grotto.flashDue(10, 10.25, 2, 0 / 0, 6), false, "a NaN last tier does not bypass")
+	eq(Grotto.flashDue(10, 10.25, 2, 5, 0 / 0), false, "a NaN tier does not bypass")
+	eq(Grotto.flashDue(10, 12, 2, 6, 5), true, "after the cooldown any tier flashes, as before")
+	-- a Legendary row with the Mythic at every position: the Mythic always flashes, at most 2 flashes per row
+	for k = 1, 6 do
+		local last, lastTier, flashes, mythicFlashed = nil, nil, 0, false
+		for i = 1, 6 do
+			local tier = if i == k then 6 else 5
+			local now = 100 + (i - 1) * 0.25
+			if Grotto.flashDue(last, now, 2, lastTier, tier) then
+				flashes += 1
+				last, lastTier = now, tier
+				if tier == 6 then mythicFlashed = true end
+			end
+		end
+		truthy(mythicFlashed, "a Legendary row with the Mythic as harvest #" .. k .. ": the Mythic flashes")
+		truthy(flashes <= 2, "... and the row flashes at most twice (" .. flashes .. ")")
+	end
+
+	truthy(type(Grotto.outranked) == "function", "Grotto.outranked(stageTier, stageUntil, now, tier) exists")
+	if type(Grotto.outranked) == "function" then
+		eq(Grotto.outranked(6, 13.8, 10.25, 5), true, "a Legendary does not take a Mythic's card or beam while it plays")
+		eq(Grotto.outranked(6, 13.8, 10.25, 6), false, "a later Mythic takes it (the latest click's socket)")
+		eq(Grotto.outranked(5, 13.8, 10.25, 6), false, "a Mythic takes a Legendary's")
+		eq(Grotto.outranked(5, 13.8, 10.25, 5), false, "a Legendary takes a Legendary's")
+		eq(Grotto.outranked(6, 13.8, 13.8, 5), false, "once the Mythic's has ended, a Legendary gets its own")
+		eq(Grotto.outranked(nil, nil, 10, 5), false, "nothing on stage: nothing outranks")
+		eq(Grotto.outranked(6, 0 / 0, 10, 5), false, "a NaN end does not hold the stage for good")
+		eq(Grotto.outranked(6, 13.8, 10.25, 0 / 0), false, "a NaN tier is not held back (the burst still plays)")
+	end
+end
+
 --=========================================================================== pulse
 do
 	approx(Grotto.pulse(0, 8), 0, "the pulse starts at rest")

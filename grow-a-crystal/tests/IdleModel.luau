@@ -12,8 +12,9 @@
 --   buy          "cheapest": after replanting, buy the cheapest upgrade the shop offers (chamber,
 --                luck, growth) while keeping enough dust to replant every empty socket
 -- Mirrors the server: a click on an empty socket auto-buys a seed of the selected tier when the player
--- has none (tryPlant), a harvest rolls refraction with a fresh Rng and pays DustValue[final]
--- (grantHarvest). Offline growth is NOT modelled: every minute here is a minute played, so real
+-- has none (tryPlant), and when the player cannot buy it and Economy.needsFreeSeed says they are at a dead
+-- end (nothing growing, no seed, less dust than a Shard) plants a free Shard instead; a harvest rolls
+-- refraction with a fresh Rng and pays DustValue[final] (grantHarvest). Offline growth is NOT modelled: every minute here is a minute played, so real
 -- players who leave their crystals growing overnight get there sooner.
 local Economy = require("../src/shared/Economy")
 local Growth = require("../src/shared/Growth")
@@ -39,7 +40,8 @@ function IdleModel.expectedDust(cfg: any, seedTier: number, luckMult: number): n
 	return ev
 end
 
--- One simulated session. Returns { chamberAt = {[k] = seconds}, codexAt = {[t] = seconds}, final = profile }.
+-- One simulated session. Returns { chamberAt = {[k] = seconds}, codexAt = {[t] = seconds}, final = profile,
+-- deadEndAt = seconds (nil if never): the first replant after which nothing at all is growing, freeSeeds }.
 function IdleModel.run(cfg: any, profile: any, seed: number, seconds: number): any
 	local p = {
 		dust = cfg.Economy.StartDust, seeds = { [1] = 3 }, chambers = cfg.Economy.StartChambers,
@@ -48,6 +50,8 @@ function IdleModel.run(cfg: any, profile: any, seed: number, seconds: number): a
 	local chamberAt = { [p.chambers] = 0 }
 	local codexAt = {}
 	local rolls = 0
+	local deadEndAt = nil
+	local freeSeeds = 0
 
 	for code in profile.codes or {} do
 		local reward = cfg.Codes[code]
@@ -67,7 +71,12 @@ function IdleModel.run(cfg: any, profile: any, seed: number, seconds: number): a
 					if t ~= profile.selectTier and (p.seeds[t] or 0) > 0 then tier = t; break end
 				end
 				if (p.seeds[tier] or 0) <= 0 then
-					if not Economy.buySeed(p, tier, cfg.Economy) then break end
+					if not Economy.buySeed(p, tier, cfg.Economy) then
+						if not Economy.needsFreeSeed(p, cfg.Economy) then break end
+						tier = 1
+						p.seeds[1] = (p.seeds[1] or 0) + 1
+						freeSeeds += 1
+					end
 				end
 				p.seeds[tier] -= 1
 				p.plants[s] = { tier = tier, at = now }
@@ -117,24 +126,27 @@ function IdleModel.run(cfg: any, profile: any, seed: number, seconds: number): a
 			end
 		end
 		plantAll(now)
+		if deadEndAt == nil and next(p.plants) == nil then deadEndAt = now end
 	end
-	return { chamberAt = chamberAt, codexAt = codexAt, final = p }
+	return { chamberAt = chamberAt, codexAt = codexAt, final = p, deadEndAt = deadEndAt, freeSeeds = freeSeeds }
 end
 
 -- Many seeded sessions: for every chamber k and codex tier t, the sorted list of arrival times
 -- (math.huge when a session never got there).
 function IdleModel.sweep(cfg: any, profile: any, runs: number, seconds: number): any
-	local chambers, codex = {}, {}
+	local chambers, codex, deadEnds, freeSeeds = {}, {}, 0, 0
 	for k = 1, cfg.Economy.MaxChambers do chambers[k] = {} end
 	for t = 1, cfg.MaxTier do codex[t] = {} end
 	for r = 1, runs do
 		local out = IdleModel.run(cfg, profile, 1000 + r * 31, seconds)
+		if out.deadEndAt ~= nil then deadEnds += 1 end
+		freeSeeds += out.freeSeeds
 		for k = 1, cfg.Economy.MaxChambers do table.insert(chambers[k], out.chamberAt[k] or math.huge) end
 		for t = 1, cfg.MaxTier do table.insert(codex[t], out.codexAt[t] or math.huge) end
 	end
 	for _, list in chambers do table.sort(list) end
 	for _, list in codex do table.sort(list) end
-	return { chambers = chambers, codex = codex, runs = runs }
+	return { chambers = chambers, codex = codex, runs = runs, deadEnds = deadEnds, freeSeeds = freeSeeds }
 end
 
 -- The q-quantile (0..1) of a sorted list.

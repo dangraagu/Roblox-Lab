@@ -42,11 +42,13 @@ eq(Economy.boosterCost(1, bc.Luck), math.floor(400 * 1.8), "booster cost grows")
 -- buySeed
 local p = newProfile(); p.dust = 30
 local ok, reason = Economy.buySeed(p, 1, ec)
-eq(ok, true, "buy shard ok"); eq(p.dust, 20, "dust deducted"); eq(p.seeds[1], 1, "seed added")
+-- (the price was 10, so these read 20; the owner set the Shard to 7 on 2026-09-30, pinned just below)
+eq(ec.SeedCost[1], 7, "the Shard seed costs 7 (owner decision 2026-09-30, EYECANDY.md §11)")
+eq(ok, true, "buy shard ok"); eq(p.dust, 30 - ec.SeedCost[1], "dust deducted"); eq(p.seeds[1], 1, "seed added")
 local ok2, r2 = Economy.buySeed(p, 3, ec)
 eq(ok2, false, "amethyst locked reject"); eq(r2, "locked", "locked reason")
 local ok3, r3 = Economy.buySeed(p, 2, ec)
-eq(ok3, false, "too poor for quartz"); eq(r3, "poor", "poor reason"); eq(p.dust, 20, "dust unchanged on fail")
+eq(ok3, false, "too poor for quartz"); eq(r3, "poor", "poor reason"); eq(p.dust, 30 - ec.SeedCost[1], "dust unchanged on fail")
 
 -- buyChamber
 local pc = newProfile(); pc.dust = 500
@@ -67,6 +69,32 @@ eq(oku, false, "unknown booster"); eq(ru, "unknown", "unknown reason")
 local pbm = newProfile(); pbm.dust = 1e9; pbm.growthLevel = bc.Growth.MaxLevel
 local okmx, rmx = Economy.buyBooster(pbm, "Growth", bc)
 eq(okmx, false, "growth maxed reject"); eq(rmx, "max", "booster max reason")
+
+-- ── no dead end (owner decision 2026-09-30, EYECANDY.md §11) ─────────────────────────────────────────────────────
+-- A player with nothing growing, no seed of any tier and less dust than the cheapest seed could never do anything
+-- again: every click said "not enough Gem Dust". The pacing model found every code-less player there within 8 h.
+-- needsFreeSeed says when the server plants a free Shard instead of refusing.
+if type(Economy.needsFreeSeed) ~= "function" then
+	failed += 1
+	print("FAIL:", "Economy.needsFreeSeed(profile, ec) exists")
+else
+	local cheapest = ec.SeedCost[1]
+	local function prof(dust, seeds, plants)
+		return { dust = dust, seeds = seeds, plants = plants, chambers = 1 }
+	end
+	eq(Economy.needsFreeSeed(prof(cheapest - 1, {}, {}), ec), true, "broke, no seed, nothing growing: a free seed")
+	eq(Economy.needsFreeSeed(prof(0, {}, {}), ec), true, "(with 0 dust too)")
+	eq(Economy.needsFreeSeed(prof(cheapest, {}, {}), ec), false, "can afford a Shard: no free seed")
+	eq(Economy.needsFreeSeed(prof(cheapest - 1, { [3] = 1 }, {}), ec), false, "owns a seed of another tier: plant that")
+	eq(Economy.needsFreeSeed(prof(cheapest - 1, { [1] = 0, [2] = 0 }, {}), ec), true, "zero counts are not seeds")
+	eq(Economy.needsFreeSeed(prof(cheapest - 1, {}, { [4] = { tier = 1, at = 0 } }), ec), false, "a crystal is growing: wait for it")
+	eq(Economy.needsFreeSeed(prof(cheapest - 1, {}, { ["4"] = { tier = 1, at = 0 } }), ec), false, "(a string socket key counts too)")
+	eq(Economy.needsFreeSeed({ dust = 0, chambers = 1 }, ec), true, "missing tables count as empty")
+	-- the cheapest seed is the Shard, so "cannot afford a Shard" is "cannot afford any seed"
+	local minCost = math.huge
+	for t = 1, 6 do minCost = math.min(minCost, ec.SeedCost[t]) end
+	eq(minCost, cheapest, "the Shard is the cheapest seed")
+end
 
 print(string.format("Economy: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Economy tests failed")

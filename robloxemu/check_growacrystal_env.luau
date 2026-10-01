@@ -333,6 +333,12 @@ end
 -- 10 times a second moves 7.4 % of what is left per write at 30 fps (every 4th frame, 0.133 s). Colours
 -- are written as whole 0-255 steps, so Ambient is held to the same 10 % or one colour step.
 local glide = { worst = 0, worstAmbient = 0, what = "" }
+-- Each band's OWN critters and weather (EnvConfig.spec: every band brings a kind of each that the band before lacks)
+-- must really be out once the band is full. Counted by name for the kinds no visitor shares (moths and bats are also
+-- the visitors' parts); every critter's height over a standing head is sampled here too, across all eight chambers.
+local OWN_CRITTER = { glowfly = "Glowfly", firefly = "Firefly", wisp = "Wisp" }
+local critterSamples = {}
+local blinkSeen = {}
 for c = 2, Config.Economy.MaxChambers do
 	local b0 = { Brightness = Lighting.Brightness, FogEnd = Lighting.FogEnd }
 	local last = { Brightness = Lighting.Brightness, FogEnd = Lighting.FogEnd }
@@ -373,6 +379,41 @@ for c = 2, Config.Economy.MaxChambers do
 	local got, exp = pieceCounts(), expectedCounts(c)
 	for id, n in exp do
 		eq(got[id] or 0, n, "chamber " .. c .. ": " .. id .. " shows " .. n .. " elements")
+	end
+	local wts = EnvBands.weights(bands, c)
+	for i, b in bands do
+		if (wts[i] or 0) >= 0.999 then
+			for _, a in b.ambient do
+				local name = OWN_CRITTER[a.kind]
+				if name then
+					local n = 0
+					for _, d in folder:GetChildren() do if d.Name == name then n += 1 end end
+					eq(n, a.count, "chamber " .. c .. " (" .. b.name .. "): its " .. a.count .. " " .. a.kind .. "s are out")
+				end
+			end
+			for _, wx in b.weather do
+				local host = folder:FindFirstChild("Weather_" .. wx.kind)
+				local pe = host and host:FindFirstChild("GrottoWeather")
+				truthy(pe ~= nil and pe.Enabled and math.abs(pe.Rate - wx.rate) < 0.1,
+					"chamber " .. c .. " (" .. b.name .. "): its " .. wx.kind .. " falls at " .. wx.rate .. "/s")
+			end
+		end
+	end
+	for _, d in folder:GetChildren() do
+		if d.Name == "Moth" or d.Name == "Bat_Body" or d.Name == "Glowfly" or d.Name == "Firefly" then
+			table.insert(critterSamples, { name = d.Name, lp = d.Position - ORIGIN })
+		end
+	end
+	-- glowflies and fireflies blink (a slow on/off glow), so they read as something other than a moth
+	for _, name in { "Glowfly", "Firefly" } do
+		local one = folder:FindFirstChild(name)
+		if one and blinkSeen[name] == nil then
+			local lo, hi = 1, 0
+			run(3, 1 / 30, function()
+				lo, hi = math.min(lo, one.Transparency), math.max(hi, one.Transparency)
+			end)
+			blinkSeen[name] = hi - lo
+		end
 	end
 	local parts, emitters, rate, lights = measure("chamber " .. c)
 	table.insert(rows, string.format("  chamber %d  %-20s parts %3d  emitters %d (%4.1f/s)  lights %d", c, bands[idx].name, parts, emitters, rate, lights))
@@ -445,6 +486,20 @@ truthy(burstDuringVisitor, "a harvest during a flight still bursts (the peak was
 eq(visitorOutside, nil, "every visitor and critter stays inside the cavern (or goes up the light shaft)")
 print(string.format("  lowest moth or bat over a standing head: %.1f studs", visitorLow))
 truthy(visitorLow >= 3.5, string.format("nothing flies lower than 3.5 studs above a standing head (lowest %.1f)", visitorLow))
+do
+	local low, what, kinds = math.huge, "", {}
+	for _, smp in critterSamples do
+		kinds[smp.name] = true
+		local over = smp.lp.Y - (groundAt(smp.lp.Z) + 5)
+		if over < low then low, what = over, string.format("%s at (%.1f, %.1f, %.1f)", smp.name, smp.lp.X, smp.lp.Y, smp.lp.Z) end
+	end
+	truthy(kinds.Glowfly and kinds.Firefly, "glowflies and fireflies were sampled across the chambers")
+	for _, name in { "Glowfly", "Firefly" } do
+		truthy((blinkSeen[name] or 0) >= 0.3, string.format("%s blinks: its transparency swings %.2f over 3 s", name, blinkSeen[name] or 0))
+	end
+	print(string.format("  lowest ambient critter over a standing head, chambers 2-8: %.1f studs (%s)", low, what))
+	truthy(low >= 3.5, string.format("every ambient critter, in every band, flies 3.5 studs or more above a standing head (lowest %.1f)", low))
+end
 local gapsOk = true
 for i = 2, #launchTimes do
 	local gap = launchTimes[i] - launchTimes[i - 1]
@@ -537,7 +592,7 @@ for _, d in folder:GetDescendants() do
 end
 eq(bad, nil, "every client part is anchored and non-collidable, non-queryable, non-touchable")
 local leaked = nil
-local ART = { "^Worm_", "^Giant_", "^Fall_", "^Prism_", "^Seam_", "^Shimmer_", "^Bat_", "^Moth$", "^Wisp$", "^Shard$",
+local ART = { "^Worm_", "^Giant_", "^Fall_", "^Prism_", "^Seam_", "^Shimmer_", "^Bat_", "^Moth$", "^Wisp$", "^Glowfly$", "^Firefly$", "^Shard$",
 	"^HarvestRing$", "^Beam", "^Weather_" }
 for _, d in h.workspace:FindFirstChild("Plots"):GetDescendants() do
 	for _, pat in ART do

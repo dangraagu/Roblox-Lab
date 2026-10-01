@@ -9,7 +9,9 @@
 --                             blindly (it arrives in a remote payload)
 --   chipText(bands, chambers) "🍄 Mushroom Terraces · 🌊 Chamber 7"
 --   burst(tier, rules)        what a harvest of that refraction tier looks like (a copy)
---   flashDue(last, now, cd)   may a harvest flash the whole screen now (at most once per cooldown)
+--   flashDue(last, now, cd)   may a harvest flash the whole screen now (at most once per cooldown; a higher
+--                             tier than the last flash skips it)
+--   outranked(tier, until, now, t)  does the card/beam on stage belong to a rarer harvest that is still playing
 --   pulse(t, period)          the slow "geode pulse", 0..1, smooth
 --   layout(cfg, Rng, Cavern)  WHERE every client-built piece goes, in plot-local coordinates, plus
 --                             the particle volumes, the critter zones and the visitors' routes
@@ -82,10 +84,28 @@ end
 -- seed always refracts to Legendary or Mythic, so a row of them harvested at a click rate flashed on every
 -- click and stacked into a wash (review 2026-09-24, finding 3). Only the full-screen part waits: the burst,
 -- the beam and the card play for every harvest. `lastAt` nil = no flash yet this session.
-function Grotto.flashDue(lastAt: number?, now: number, cooldown: number): boolean
+-- lastTier / tier (optional, review round 2): a HIGHER tier than the last flash skips the cooldown, so a Mythic
+-- harvested inside a row of Legendary harvests still flashes and shakes. The client replaces the older flash, so
+-- two are still never on screen. Equal or lower tiers wait, as before.
+function Grotto.flashDue(lastAt: number?, now: number, cooldown: number, lastTier: number?, tier: number?): boolean
 	if type(lastAt) ~= "number" or isNaN(lastAt) then return true end
 	if type(cooldown) ~= "number" or isNaN(cooldown) or cooldown <= 0 then return true end
+	if type(lastTier) == "number" and type(tier) == "number" and not isNaN(lastTier) and not isNaN(tier)
+		and tier > lastTier then
+		return true
+	end
 	return now - lastAt >= cooldown
+end
+
+-- Does a celebration still on stage (the harvest card, the beam) outrank a new harvest of `tier`? A card or a beam
+-- belongs to the rarest harvest still playing: a LOWER tier must not take it over before `stageUntil` (a
+-- Legendary 0.25 s after a Mythic used to take the Mythic's card and beam, review round 2). Equal or higher tiers
+-- take it, so a row of Mythics moves the beam to the latest click. A malformed value never holds the stage.
+function Grotto.outranked(stageTier: number?, stageUntil: number?, now: number, tier: number): boolean
+	if type(stageTier) ~= "number" or type(stageUntil) ~= "number" or type(tier) ~= "number" then return false end
+	if isNaN(stageTier) or isNaN(stageUntil) or isNaN(tier) then return false end
+	if now >= stageUntil then return false end
+	return tier < stageTier
 end
 
 function Grotto.pulse(t: number, period: number): number
@@ -332,6 +352,8 @@ function Grotto.layout(cfg: any, Rng: any, Cavern: any): any
 		spores = { position = v3(0, 14, 50), size = v3(56, 18, 100), color = { 220, 160, 255 } },
 		mist = { position = v3(-18, 22, 125), size = v3(12, 2, 8), color = { 200, 235, 245 } },
 		sparkle = { position = v3(0, 36, 119), size = v3(44, 14, 26), color = { 255, 200, 255 } },
+		-- glow-worm silk: motes drifting down from the threads, which hang from y 44 to about 37
+		silk = { position = v3(0, 40, 56), size = v3(56, 2, 120), color = { 140, 255, 220 } },
 	}
 
 	--------------------------------------------------------------- critter zones (above every head)
@@ -340,6 +362,10 @@ function Grotto.layout(cfg: any, Rng: any, Cavern: any): any
 		bat = { min = v3(-28, 34, -8), max = v3(28, 42, 130) },
 		-- wisps rise out of the water and up the light shaft
 		wisp = { min = v3(-9, 21, 111), max = v3(9, 47, 127) },
+		-- glowflies drift among the glow-worm strands, under the ceiling
+		glowfly = { min = v3(-28, 34, -8), max = v3(28, 42, 110) },
+		-- fireflies: a low layer of warm blinking beads under the moths, over every terrace (still above every head)
+		firefly = { min = v3(-27, 30, -8), max = v3(27, 35, 100) },
 	}
 
 	--------------------------------------------------------------- visitor routes (enter and leave by the shaft)

@@ -16,6 +16,10 @@ local EnvBands = require("../src/shared/EnvBands")
 local Rest = require("../src/shared/Rest")
 local Visitors = require("../src/shared/Visitors")
 local Config = require("../src/shared/Config")
+local Grotto = require("../src/shared/Grotto")
+local Rng = require("../src/shared/Rng")
+local Cavern = require("../src/shared/Cavern")
+local CavernArt = require("../src/shared/CavernArt")
 
 local passed, failed = 0, 0
 local function eq(a, b, msg)
@@ -36,7 +40,7 @@ local MAXC = Config.Economy.MaxChambers
 do
 	local ok, err = EnvBands.validate(bands)
 	truthy(ok, "Config.Env.Bands validates (" .. tostring(err) .. ")")
-	truthy(#bands >= 4, "at least four looks across the eight chambers (" .. #bands .. ")")
+	truthy(#bands >= 5, "at least five bands, the standard's minimum (" .. #bands .. ")")
 	truthy(bands[#bands].from <= MAXC, "the last band is reachable: it opens at or before chamber " .. MAXC)
 	truthy(bands[2] and bands[2].from - (bands[2].fade or 0) <= 1, "the first change is under way by the second chamber")
 
@@ -91,7 +95,7 @@ do
 		truthy(differs, "buying chamber " .. (c + 1) .. " visibly changes the cavern")
 	end
 
-	-- richer, never poorer: a band keeps every piece and every critter kind of the band before it
+	-- richer, never poorer: a band keeps every piece of the band before it (its critters and weather are its own, below)
 	for i = 2, #bands do
 		local have = {}
 		for _, id in bands[i].pieces do have[id] = true end
@@ -106,6 +110,64 @@ do
 		truthy(#(bands[i].visitors or {}) >= 1, "band " .. bands[i].id .. " has at least one visitor kind")
 		for _, k in bands[i].visitors do
 			truthy(Config.Visitors.Kinds[k] ~= nil, "band " .. bands[i].id .. " visitor " .. k .. " is defined")
+		end
+	end
+end
+
+--=========================================================================== each band's own life and weather
+-- docs/complete-game-standard.md §2: "at least 5 [bands], each with its own light, colour, scenery, critters and
+-- weather". Light, colour and scenery are pinned above (every field set, every purchase changes the look, every band
+-- adds a piece). Critters and weather: every band after the first brings a critter kind and a weather kind the band
+-- before it did not have. Before 2026-10-01 the first three bands had moths only, and the first two drips only.
+do
+	local layout = Grotto.layout(Config, Rng, Cavern)
+	local hasCritter = CavernArt.hasCritter or function(_) return false end
+	local function kinds(list)
+		local out = {}
+		for _, e in list or {} do out[e.kind] = true end
+		return out
+	end
+	for i = 2, #bands do
+		local prevC, myC = kinds(bands[i - 1].ambient), kinds(bands[i].ambient)
+		local prevW, myW = kinds(bands[i - 1].weather), kinds(bands[i].weather)
+		local newC, newW = {}, {}
+		for k in myC do if not prevC[k] then table.insert(newC, k) end end
+		for k in myW do if not prevW[k] then table.insert(newW, k) end end
+		truthy(#newC >= 1, "band " .. bands[i].id .. " brings critters of its own (" .. table.concat(newC, ", ") .. ")")
+		truthy(#newW >= 1, "band " .. bands[i].id .. " brings weather of its own (" .. table.concat(newW, ", ") .. ")")
+	end
+	-- every kind a band names can be drawn: a look, a zone, a speed and a part count; an emitter and its volume
+	for _, b in bands do
+		for _, a in b.ambient do
+			truthy(hasCritter(a.kind), "critter " .. a.kind .. " (band " .. b.id .. ") has a look in CavernArt")
+			truthy(layout.zones[a.kind] ~= nil, "critter " .. a.kind .. " has a zone in Grotto.layout")
+			truthy(Env.Critters[a.kind] ~= nil and Env.CritterParts[a.kind] ~= nil, "critter " .. a.kind .. " has a speed and a part count")
+		end
+		for _, w in b.weather do
+			truthy(CavernArt.hasWeather(w.kind), "weather " .. w.kind .. " (band " .. b.id .. ") has an emitter in CavernArt")
+			truthy(layout.emitters[w.kind] ~= nil, "weather " .. w.kind .. " has a volume in Grotto.layout")
+		end
+	end
+	-- every critter flies clear of a standing head: 3.5 studs, as check_growacrystal_env measures for moths and bats,
+	-- with 2 studs of slack where a critter overshoots its zone's edge before it turns back. Wisps are the exception
+	-- by design: they rise out of the pool's water, where nobody stands.
+	local C = Cavern.Const
+	local function groundAt(z: number): number -- the walkable top (Cavern's groundAt; check_growacrystal_env has the same)
+		if z < 0 then return 0 end
+		if z >= C.PITCH * C.G then return 21 end
+		local cc = math.floor(z / C.PITCH)
+		if cc >= C.G - 1 then return C.RISE * cc end
+		local r = z - C.PITCH * cc
+		if r >= 11 then return C.RISE * cc + 3 end
+		if r >= 9 then return C.RISE * cc + 1.5 end
+		return C.RISE * cc
+	end
+	for kind, z in layout.zones do
+		if kind ~= "wisp" then
+			local top = 0
+			for zz = math.floor(z.min.z - 2), math.ceil(z.max.z + 2) do top = math.max(top, groundAt(zz)) end
+			truthy(z.min.y >= top + 5 + 3.5, string.format("%s fly at least 3.5 studs over a standing head (zone from y %.1f, highest head %.1f)",
+				kind, z.min.y, top + 5))
 		end
 	end
 end

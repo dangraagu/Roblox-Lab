@@ -129,6 +129,16 @@ function Cavern.spawn(_cfg)
 	return { position = v3(0, 4, -6), look = v3(0, 0, 1) }
 end
 
+-- The highscore board (docs/complete-game-standard.md §3: "on a physical board in the world near spawn").
+-- On the entrance wall behind the spawn: its back is flush on the wall's inner face (z = -14), it faces +Z into
+-- the cavern, it is 8.5 studs from the spawn's root (inside Config.Board.PromptDistance, so its prompt is there as
+-- soon as the player turns round), and its bottom at y = 4 clears the apron's loose rubble on every plot. It is
+-- behind the spawn on purpose: the first frame is the six glowing sockets, and nothing stands in a click line.
+-- The server builds it (not Cavern.build, whose 149-part budget is pinned); tests/Cavern.spec.luau checks the spot.
+function Cavern.board(_cfg)
+	return { position = v3(0, 8.5, -13.7), size = v3(14, 9, 0.6), facing = v3(0, 0, 1) }
+end
+
 --============================================================================ part construction
 
 local function makePart(o)

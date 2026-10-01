@@ -144,11 +144,18 @@ end
 
 --============================================================================ critters
 
+-- name: the Part's Name; blink: radians per second of a slow on/off glow (glowflies and fireflies), nil = steady
 local CRITTER_LOOK = {
-	moth = { color = { 255, 236, 170 }, size = 0.32, transparency = 0.1 },
-	wisp = { color = { 200, 240, 255 }, size = 0.55, transparency = 0.15 },
+	moth = { name = "Moth", color = { 255, 236, 170 }, size = 0.32, transparency = 0.1 },
+	wisp = { name = "Wisp", color = { 200, 240, 255 }, size = 0.55, transparency = 0.15 },
+	glowfly = { name = "Glowfly", color = { 120, 255, 210 }, size = 0.22, transparency = 0.05, blink = 2.2 },
+	firefly = { name = "Firefly", color = { 255, 214, 90 }, size = 0.26, transparency = 0.05, blink = 3.1 },
 	bat = { color = { 34, 30, 40 } },
 }
+
+function CavernArt.hasCritter(kind: string): boolean
+	return CRITTER_LOOK[kind] ~= nil
+end
 
 function CavernArt:_newCritter(kind: string): any
 	local c = { kind = kind, parts = {}, alive = false, fade = 0 }
@@ -159,7 +166,7 @@ function CavernArt:_newCritter(kind: string): any
 		c.parts[3] = newPart("Bat_WingR", "Block", Vector3.new(1.5, 0.08, 0.9), col, 0, "SmoothPlastic")
 	else
 		local look = CRITTER_LOOK[kind]
-		c.parts[1] = newPart(kind == "moth" and "Moth" or "Wisp", "Ball", Vector3.one * look.size, c3(look.color), 1)
+		c.parts[1] = newPart(look.name, "Ball", Vector3.one * look.size, c3(look.color), 1)
 	end
 	return c
 end
@@ -269,8 +276,10 @@ function CavernArt:updateCritters(counts: { [string]: number }, dt: number, now:
 				else
 					self:_moveCritter(c, dt, now)
 					place(c, now)
-					local base = if kind == "bat" then 0 else CRITTER_LOOK[kind].transparency
-					for _, p in c.parts do setTransparency(p, 1 - (1 - base) * c.fade) end
+					local look = CRITTER_LOOK[kind]
+					local base = if kind == "bat" then 0 else look.transparency
+					local glow = if look.blink then 0.3 + 0.35 * (1 + math.sin(now * look.blink + c.phase)) else 1
+					for _, p in c.parts do setTransparency(p, 1 - (1 - base) * c.fade * glow) end
 				end
 			end
 		end
@@ -306,6 +315,16 @@ local WEATHER = {
 		pe.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 2), NumberSequenceKeypoint.new(1, 5) })
 		pe.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(1, 1) })
 		pe.LightEmission = 0.3
+	end,
+	silk = function(pe: ParticleEmitter)
+		pe.Lifetime = NumberRange.new(4, 6)
+		pe.Speed = NumberRange.new(0, 0.3)
+		pe.Acceleration = Vector3.new(0, -1.2, 0)
+		pe.EmissionDirection = Enum.NormalId.Bottom
+		pe.SpreadAngle = Vector2.new(30, 30)
+		pe.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 0.04) })
+		pe.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.2, 0.2), NumberSequenceKeypoint.new(1, 1) })
+		pe.LightEmission = 1
 	end,
 	sparkle = function(pe: ParticleEmitter)
 		pe.Lifetime = NumberRange.new(1, 2)
@@ -428,6 +447,7 @@ end
 local SHARD_LIFE = 1.1
 local RING_LIFE = 0.7
 local BEAM_LIFE = 2.5
+CavernArt.BeamLife = BEAM_LIFE -- Grotto.client keeps the beam for the rarest harvest this long (Grotto.outranked)
 
 -- pos: the top of the harvested socket's plate, in world space. rule: Grotto.burst(tier, ...).
 function CavernArt:burst(pos: Vector3, rule: any, color: Color3, now: number)

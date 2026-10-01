@@ -54,6 +54,21 @@ function Economy.buySeed(profile: any, seedTier: number, ec: any): (boolean, str
 	return true, "ok"
 end
 
+-- A DEAD END: nothing growing, no seed of any tier, and less dust than the cheapest seed (the Shard). Such a
+-- player could never do anything again; the server plants a free Shard instead of refusing (owner decision
+-- 2026-09-30, EYECANDY.md §11). It can never pay more than one Shard per grow cycle, far below normal play, and
+-- only while the player has nothing else, so it cannot be farmed.
+function Economy.needsFreeSeed(profile: any, ec: any): boolean
+	if (profile.dust or 0) >= ec.SeedCost[1] then return false end
+	for _, n in profile.seeds or {} do
+		if (tonumber(n) or 0) > 0 then return false end
+	end
+	for _ in profile.plants or {} do
+		return false
+	end
+	return true
+end
+
 -- Kjøp ett kammer. reasons: "ok" | "max" | "poor"
 function Economy.buyChamber(profile: any, ec: any): (boolean, string)
 	if profile.chambers >= ec.MaxChambers then

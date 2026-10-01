@@ -16,13 +16,27 @@ list after a geometry probe found that five of its seven camera set-ups left out
 and two put a landmark on the wrong side of the frame (§9). A separate reviewer then found three defects: the HUD
 could lose the join push to the cavern script (high), a phone player's code answer was about 6 px tall (low), and a
 row of Legendary harvests stacked full-screen flashes (low). The fourth session (§13) reproduced all three, wrote a
-failing test for each, fixed the game, and re-ran every gate and a 75-mutation sweep.
+failing test for each, fixed the game, and re-ran every gate and a 75-mutation sweep. **Review round 2 (2026-09-30,
+§14):** a second reviewer found six more (a predictable refraction roll, a Mythic losing its celebration inside a
+Legendary row, the title card over the Relax button on landscape phones, uncapped per-plot lights and sparkles,
+saves with no owner token, silent refusals). All six reproduced; each got a failing test first and a game fix. The
+owner's two open decisions were taken the same day (§11, "DECIDED 2026-09-30"). **Pass 2 of the complete-game
+standard (2026-09-30/10-01, §15)** added the public + friends highscore board, the end-to-end walk check, the named brag
+moment, a readable first-run hint, the store text, the clip list, and this document's shot size and new Studio items.
+**Pass 1 re-run (2026-10-01, §16)** re-ran the reviewer's own probes on the reviewed tree (all six findings reproduce)
+and on this tree (none does), re-ran round 2's 43-mutation sweep, and took the last open owner decision: a paid pass
+never moves the highscore board. **Pass 2b (2026-10-01, §17)** checked the standard item by item again and closed
+three gaps, each test-first: a session that could not save said nothing and never recovered (now it says so and
+retries on every autosave), the clip list could not be staged in Studio (codes and the Geode now work for the session
+when nothing can ever save), and bands 2 and 3 had no critters of their own (glowflies, fireflies, glow-worm silk).
 
 **In one paragraph.** The progress value is **how many chambers the player owns**. It is read from the player's own
 sockets in the world and from the server's State push, and it drives five looks: 💧 Sunken Grotto → ✨ Glow-worm Hollow
 → 🍄 Mushroom Terraces → 🌊 Waterfall Chamber → 💎 Heart of the Geode. Every chamber purchase changes the cavern, and
 nothing is ever taken away: glow-worms fill the ceiling, giant glowing mushrooms grow along the walls, an underground
-waterfall pours into the pool, crystal prisms line the geode wall. Light, fog, bloom and colour glide into each new look.
+waterfall pours into the pool, crystal prisms line the geode wall. Each look has life and weather of its own: blinking
+glowflies and drifting silk under the glow-worms, fireflies over the mushrooms, bats by the waterfall, wisps rising in the
+geode. Light, fog, bloom and colour glide into each new look.
 A slow **geode pulse** makes everything that glows breathe. A harvest throws **shards in the colour of the tier it
 refracted into**, and a Legendary or Mythic harvest sends a **beam of light** up to the ceiling. There are **no knock-down
 hazards** (§3). Instead, rare, harmless **visitors** (a moth swirl down the light shaft, a bat swoop under the ceiling)
@@ -88,16 +102,20 @@ a purchase that opens a band shows its card. The last band opens with a flash an
 starts the next look shows a teaser ("✨ Glow-worms are waking up…").
 
 Minutes = minutes of PLAY to own the chamber (40 seeded sessions of 8 h per profile, `tests/Pacing.spec.luau`,
-p10 / median / p90). Offline growth is not modelled, so real players who leave crystals growing overnight get there
-sooner.
+p10 / median / p90), re-measured on 2026-09-30 with the Shard at 7 dust (§11). Offline growth is not modelled, so real
+players who leave crystals growing overnight get there sooner.
 
 | # | band | first shows | full | normal: minutes | slow: median | lighting | scenery (cumulative) | life | particles | visitors |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 1 | 💧 Sunken Grotto | ch 1 | ch 1 | 0 | 0 | = the server's `Fx.Presets.Cozy`, number for number (dark teal, bloom 0.9) | shimmer on the pool | 2 moths | ceiling drips 6/s | none |
-| 2 | ✨ Glow-worm Hollow | ch 2 | ch 3 | 1 / 1 / 1 → 1 / 1 / 1 | 2 → 2 | cooler blue-green, darker ambient so the worms pop, bloom 1.05 | + 16 glow-worm strands (thread + bead) hanging from the ceiling | 5 moths | drips 5/s | moth swirl |
-| 3 | 🍄 Mushroom Terraces | ch 4 | ch 5 | 20 / 42 / 68 → 60 / 78 / 99 | 85 → 158 | warm violet/amber, saturation 0.28 | + 6 giant glowing mushrooms along the walls (stem, cap, gill ring) | 6 moths | spores rising 8/s + drips 3/s | moth swirl |
-| 4 | 🌊 Waterfall Chamber | ch 6 | ch 7 | 94 / 112 / 134 → 168 / 190 / 210 | 225 → 380 | aqua mist, haze 1.8, bloom 1.15 | + an underground waterfall into the pool (sheet, core, foam, spray) | 4 moths, 4 bats | mist 12/s + spores 4/s | bat swoop, moth swirl |
-| 5 | 💎 Heart of the Geode | ch 8 | ch 8 | 239 / 262 / 281 | not within 8 h (p10 478) | amethyst/magenta, strongest bloom 1.3, deepest pulse | + 10 crystal prisms lining the geode wall around the pool, 8 glowing seams on the ceiling and upper wall | 4 moths, 3 bats, 5 wisps rising up the light shaft | sparkle 10/s + mist 8/s | bat swoop, moth swirl |
+| 2 | ✨ Glow-worm Hollow | ch 2 | ch 3 | 1 / 1 / 1 → 1 / 1 / 1 | 2 → 2 | cooler blue-green, darker ambient so the worms pop, bloom 1.05 | + 16 glow-worm strands (thread + bead) hanging from the ceiling | 3 moths, **5 glowflies** (blinking blue-green beads among the strands) | **glow-worm silk 4/s** drifting down + drips 3/s | moth swirl |
+| 3 | 🍄 Mushroom Terraces | ch 4 | ch 5 | 19 / 38 / 51 → 51 / 65 / 78 | 75 → 130 | warm violet/amber, saturation 0.28 | + 6 giant glowing mushrooms along the walls (stem, cap, gill ring) | 4 moths, **6 fireflies** (blinking amber, a low layer under the moths) | spores rising 8/s + drips 3/s | moth swirl |
+| 4 | 🌊 Waterfall Chamber | ch 6 | ch 7 | 81 / 99 / 111 → 152 / 171 / 184 | 198 → 342 | aqua mist, haze 1.8, bloom 1.15 | + an underground waterfall into the pool (sheet, core, foam, spray) | 4 moths, 4 bats | mist 12/s + spores 4/s | bat swoop, moth swirl |
+| 5 | 💎 Heart of the Geode | ch 8 | ch 8 | 219 / 238 / 249 | 472 (p90 not within 8 h) | amethyst/magenta, strongest bloom 1.3, deepest pulse | + 10 crystal prisms lining the geode wall around the pool, 8 glowing seams on the ceiling and upper wall | 4 moths, 3 bats, 5 wisps rising up the light shaft | sparkle 10/s + mist 8/s | bat swoop, moth swirl |
+
+**Every band has life and weather of its own** (pass 2b, §17; `EnvConfig.spec`): each band after the first brings a
+critter kind and a particle kind the band before it did not have. Before, the first three bands had moths only and
+the first two drips only, against the standard's "each with its own light, colour, scenery, critters and weather".
 
 The **geode pulse** gets deeper with each band: depth 0.08 in the grotto, 0.35 in the geode, with a period of 9 s
 down to 7 s. It dims every glowing element and nudges bloom by up to ±4 %. Its phase is integrated, so a change of
@@ -106,7 +124,7 @@ period never makes it jump.
 **Chip** (under the HUD's header): `🍄 Mushroom Terraces  ·  🌊 Chamber 7`. With every chamber open it reads
 `…  ·  every chamber open`, and while resting `🛋 Relaxing — your crystals keep growing`.
 
-### The pacing model and an economy FINDING (owner decision, §11)
+### The pacing model and the economy (DECIDED 2026-09-30 (owner: take recommended), §11)
 
 `tests/IdleModel.luau` plays the game's own rules (Economy, Growth, Rarity, Codex, Rng, Config). The human part is
 written down in `Config.Pacing.Profiles`:
@@ -116,23 +134,44 @@ written down in `Config.Pacing.Profiles`:
 * **slow**: the same, every 150 s;
 * **nocodes**: normal, but never types a code.
 
-The model found something the looks cannot fix. **At luck level 0, no seed below Mythic pays back its price on
-average:**
+The model found something the looks could not fix: **at luck 0 no seed below Mythic paid back its price on average**,
+and a player who never typed a code ran dry. The owner decided on 2026-09-30 (§11). Now:
 
 | seed | costs | returns on average |
 |---|---|---|
-| Shard | 10 | 7.82 (78 %) |
+| Shard | **7** (was 10) | 7.82 (**112 %**, was 78 %) |
 | Quartz | 50 | 14.63 (29 %) |
 | Amethyst | 250 | 34.37 (14 %) |
 | Prism | 1 200 | 99.52 (8 %) |
 | Legendary | 6 000 | 360.00 (6 %) |
 
-A player who never types a code starts with 3 free Shards and 30 dust, runs dry after about 27 harvests, and **never
-owns chamber 2** (40 of 40 sessions, 8 h each). That player never leaves the first band. The codes (`MYTHIC` alone is
-5 000 dust) are what make the game progress at all. `Pacing.spec` asserts this as a FINDING, not a requirement, so this
-note stays true. When the economy is retuned those two assertions fail, and this section and the table above must be
-re-measured. Band 1 was made rich on purpose for exactly this reason: shimmer, drips, moths, the pulse, the harvest
-bursts and the Legendary beam all work in chamber 1.
+The rarer seeds still cost more than they return: they are bought for the codex, the beam and the brag, not for
+dust. The Shard is the income. A price alone was not enough, because a player who hits a **dead end** (nothing growing,
+no seed of any tier, less dust than a Shard) could never do anything again, so the server now plants a **free Shard**
+at a dead end (`Economy.needsFreeSeed`). Measured with the pacing model, 40 sessions of 8 h per profile (the first
+three rows by a scratch probe that stubs the rule or the price; the shipped row is what `Pacing.spec` runs):
+
+| nocodes player | dead ends | owns chamber 2 within 8 h | chamber 2, p10 / median / p90 (min) |
+|---|---|---|---|
+| before (Shard 10, no free Shard) | 39 of 40 | 1 of 40 | never / never / never |
+| Shard 7 only | 35 of 40 | 5 of 40 | 90 / never / never |
+| Shard 10 + free Shard | 0 of 40 | 17 of 40 | – |
+| **Shard 7 + free Shard (shipped)** | **0 of 40** | **36 of 40** | **24 / 182 / 472** |
+
+The normal and slow players never hit a dead end and never got a free Shard (0 in 80 sessions); their numbers moved
+only with the price (the table above). `Pacing.spec` now asserts, instead of the old FINDING: the Shard pays back at
+luck 0; a code-less player owns chamber 2 in the median 8-hour session; no session of any profile reaches a dead end.
+Band 1 stays rich on purpose: shimmer, drips, moths, the pulse, the harvest bursts and the Legendary beam all work in
+chamber 1.
+
+**The brag moment and the long-term goal (standard §2, pass 2).** `Config.Pacing.Brag` names it: **the first crystal
+that refracts to Mythic**, the game's biggest celebration (magenta flash, beam, title card; `check_growacrystal_flash`)
+and 1500 Gem Dust on the highscore board. `Pacing.spec` measures it: normal player p10 **4** / median **31** / p90 **70**
+min; slow median **62**; a code-less player median **268**. It asserts the normal median is inside 20-45 min, p90 within
+90 min, the slow player gets it in the session, and the **Heart of the Geode** (chamber 8, median **238** min) comes at
+least 2 h of play after it. The board is the other long-term goal: a normal player earns **1 125 295** dust in 8 h and
+then about **204 406** an hour at the end game, so the board's cap (400 million dust) is **1959** hours of play away
+(asserted: at least 1000).
 
 ---
 
@@ -201,8 +240,18 @@ opaque. Now the full-screen part (a 0.35 tint fading over 0.8 s, and Mythic's sh
 together (`EnvConfig.spec`). Shards, ring, beam and card still play for **every** harvest. Measured
 (`check_growacrystal_flash`): six Mythic harvests at 4 clicks/s give 1 flash, 1 shake, 6 bursts each at its own socket,
 peak opacity 0.35; a Legendary 2 s later flashes again, one 1 s after that does not. The band fanfare for the Heart of
-the Geode (a 0.4 flash, once per player) is not on this clock; a Legendary harvest within 0.8 s of buying chamber 8 can
-overlap it once.
+the Geode (a 0.4 flash, once per player) is not on this clock; a harvest flash now replaces it on screen instead of
+stacking.
+
+**The rarest harvest keeps its celebration** (review round 2, finding 2, §14). With the cooldown alone, a Mythic
+harvested inside a row of Legendary harvests got no flash and no shake, and the next Legendary took its card and its
+beam 0.25 s later. Now a HIGHER tier than the last flash skips the cooldown (`Grotto.flashDue(..., lastTier, tier)`)
+and replaces the older flash, so there is still never more than one on screen; and the card and the beam belong to
+the rarest harvest still playing (`Grotto.outranked`): a lower tier keeps its shards and ring but does not take them
+over until they end (card 3 s + 0.8 s fade, beam 2.5 s). Equal or higher tiers do take them, so a row of Mythics
+moves the beam to the latest click. Measured (`check_growacrystal_flash`): the Mythic at each position 2..6 of a
+Legendary row at 4 clicks/s flashes once and shakes once, its magenta beam is still on its socket 2.3 s later and its
+MYTHIC card still on screen 2.9 s later, never two flashes on screen, peak opacity 0.35.
 
 ---
 
@@ -262,9 +311,12 @@ is green and unchanged.
 
 **What other players see:** nothing of yours. Every plot is a sealed shell, and all of this is local to its owner.
 
-**An existing exploit, found in passing, NOT caused or changed by this work (§11):** `grantHarvest` seeds the
-refraction roll with `os.time()*1000 + socketId*977 + UserId`. A client that knows the server time can predict each
-second's roll and click only on a Mythic second. That is the checklist's "replayable RNG" trap.
+**The refraction roll is no longer predictable (FIXED in review round 2, §14).** `grantHarvest` used to seed the roll
+with `(os.time()*1000 + socketId*977 + UserId) % (2^31 - 1)`, all of it known to the client (its State push carries
+`now`), and a probe predicted 48 of 48 rolls. The seed now adds a salt the server draws for EACH harvest from its own
+entropy-seeded `Random` (`rollSalt`, a local of `Main.server`, never saved, sent or set as an attribute;
+`Rarity.rollSeed`). The same predictor now matches only at chance level (9-12 of 48 Shards at luck 3 over three runs,
+chance 13.2), and the odds are unchanged (§14).
 
 ---
 
@@ -272,33 +324,45 @@ second's roll and click only on a Mythic second. That is the checklist's "replay
 
 Client-built only. The server's own cavern is on top of this. Counted in the real plot through the emulator in the
 resume session: **155 parts at chamber 1 and 176 at chamber 8** (each purchase adds a chamber's sockets and removes
-its rubble caps), always 10 PointLights and 2 dust emitters, plus one part per growing crystal. The build session's
-"154" does not match this count (it did not say how it counted). The client numbers below were measured after 12 s at
+its rubble caps), 10 lamp PointLights and 2 dust emitters (34 particles/s), plus one part per crystal. The build
+session's "154" does not match this count (it did not say how it counted). **Since pass 2 each plot also holds the
+highscore board: one Part with a SurfaceGui and a ProximityPrompt, no light, no emitter: 156 and 177**
+(`check_crystal_sockets` pins 157 with one crystal growing). **The crystals' own effects were not
+capped and this paragraph used to say "always 10 PointLights and 2 dust emitters"** (review round 2, finding 4, §14):
+every ready crystal had a sparkle and every ready tier-3+ crystal a light, so 48 crystals that matured offline gave one
+plot 58 PointLights, 50 emitters and 322 particles/s, all rebuilt every 5 s. Now (`Config.PlotBudget`,
+`check_growacrystal_plotbudget`): every ready crystal still glints (the "ready to harvest" cue), the sparkles share at
+most 48 particles/s, and at most the 6 rarest ready tier-3+ crystals cast light. Measured at chamber 8 with 48 ready
+crystals: **16 PointLights (10 lamps + 6), 50 emitters, 82 particles/s**, and nothing is rebuilt while nothing changes. The client numbers below were measured after 12 s at
 every chamber count (10 half-lives, settled). The even chambers 2, 4 and 6 are the seams, where two bands are live at
 once.
 
 | chambers | band | local parts | emitters on (particles/s) | lights |
 |---|---|---|---|---|
 | 1 | Sunken Grotto | 5 | 1 (6/s) | 0 |
-| 2 | Sunken Grotto › Glow-worm | 22 | 1 (5.5/s) | 0 |
-| 3 | Glow-worm Hollow | 40 | 1 (5/s) | 0 |
-| 4 | Glow-worm › Mushroom | 50 | 2 (8/s) | 0 |
-| 5 | Mushroom Terraces | 60 | 2 (11/s) | 0 |
-| 6 | Mushroom › Waterfall | 68 | 2 (12/s) | 0 |
-| 7 | Waterfall Chamber | 75 | 2 (16/s) | 0 |
-| 8 | Heart of the Geode | 96 | 2 (18/s) | 0 |
+| 2 | Sunken Grotto › Glow-worm | 24 (was 22) | 2 (6.5/s) | 0 |
+| 3 | Glow-worm Hollow | 44 (was 40) | 2 (7/s; was 1, 5/s) | 0 |
+| 4 | Glow-worm › Mushroom | 55 (was 50) | 2 (7/s) | 0 |
+| 5 | Mushroom Terraces | 65 (was 60) | 2 (11/s) | 0 |
+| 6 | Mushroom › Waterfall | 71 (was 68) | 2 (12/s) | 0 |
+| 7 | Waterfall Chamber | 76 (was 75) | 2 (16/s) | 0 |
+| 8 | Heart of the Geode | 97 (was 96; 107 with a visitor in flight) | 2 (18/s) | 0 |
+
+Re-measured in pass 2b (§17) over 8 runs of `check_growacrystal_env`, with the glowflies, fireflies and silk in.
 
 | metric | measured peak | where | budget (`Config.Budget`) |
 |---|---|---|---|
-| local parts | **129** (121-129 over 8 runs, and again 121/129 over 6 resume runs: 121 when the flock is the 10-part moth swirl) | chamber 8, a bat swoop in flight **and** a Legendary burst with its beam | 150 |
+| local parts | **130** (122 or 130 over 8 pass-2b runs; it was 121-129 before the new critters: 122 when the flock is the 10-part moth swirl) | chamber 8, a bat swoop in flight **and** a Legendary burst with its beam | 150 |
 | scenery elements (all pieces) | 74 | layout | 80 |
 | particle emitters on | 2 | every seam | 2 (`MaxWeatherEmitters`, enforced by `EnvBands.capRates`) |
 | particles per second | 18 | chamber 8 | 30 (enforced) |
 | point lights | 1 | the beam, for 2.5 s | 1 |
 | visitors at once | 1 | | 1 |
 
-By construction, the worst case is 80 scenery + 21 critters + 18 visitor parts + 12 shards + ring + beam + 4
-weather hosts = 142 ≤ 150 (`EnvConfig.spec`).
+By construction, the worst case is 80 scenery + 22 critters + 18 visitor parts + 12 shards + ring + beam + 8
+weather-host slots = 143 ≤ 150 (`EnvConfig.spec`; 142 before pass 2b, the critters of bands 3 and 4 together are now
+the worst neighbours). Every ambient critter, in every band, flies at least 3.5 studs over a standing head: measured
+4.5-9.7 studs over 8 runs, and `EnvConfig.spec` checks every zone against the floor heights with 2 studs of slack.
 
 **How it stays cheap.** Pieces are built the first time their weight rises above 0, and each element is unparented
 while its share of the weight is 0. Pieces, the pulse and fades update at 10 Hz, and a transparency is written only
@@ -316,42 +380,56 @@ Every gate for this game, run on the final tree (bundle `robloxemu/build/grow-a-
 runner checks each process's exit code, not just its last line. That mattered once: the HUD gate printed nothing after
 "loaded" and would have passed a `tail -1` reading (§7.2).
 
-Final run: review round 1 session, 2026-09-24 (§13), on the bundle rebuilt from the final tree (md5 `e53f03c4…`; the
-resume session's was `749f1a1e…`). **All 30 suites green: 16 specs, 1 144 assertions; 14 headless checks, 870
-assertions plus 2 whole-screen PASS verdicts.** Rows marked *(R1)* are new or changed in that session.
+Final run: pass 2b, 2026-10-01 (§17), on the bundle rebuilt from the final tree (sha256 `c4b2bc7ce01d…`).
+**All 41 suites green (exit code 0 each): 17 specs, 1 392 assertions; 24 headless checks, 1 531 assertions plus 2
+whole-screen PASS verdicts.** (The pass 1 re-run's final run was 39 suites: 17 specs, 1 323 assertions; 22 checks,
+1 412 assertions plus 2 PASS, sha256 `6d308ffb651a…`. Review round 2's was 34 suites.) Rows marked *(R1)* are new or
+changed in review round 1, *(R2)* in review round 2, *(P2)* in pass 2 (§15), *(P1b)* in the pass 1 re-run (§16),
+*(P2b)* in pass 2b (§17).
 
 | suite | what it pins | result |
 |---|---|---|
 | `tests/Rng.spec` | deterministic LCG (pre-existing) | 56 / 0 |
-| `tests/Rarity.spec` | refraction roll (pre-existing) | 12 / 0 |
+| `tests/Rarity.spec` | refraction roll (pre-existing); *(R2)* + `rollSeed` and the salted odds against the exact odds, 100 000 rolls per case | 33 / 0 |
 | `tests/Growth.spec` | offline growth (pre-existing) | 20 / 0 |
-| `tests/Economy.spec` | harvest value, shop (pre-existing) | 36 / 0 |
+| `tests/Economy.spec` | harvest value, shop (pre-existing); *(R2)* + the Shard's price (7) and `needsFreeSeed`; the two buySeed dust assertions now read `30 - SeedCost[1]` instead of the old price's 20 | 46 / 0 |
 | `tests/Geode.spec` | weekly geode (pre-existing) | 22 / 0 |
 | `tests/Codex.spec` | codex (pre-existing) | 8 / 0 |
 | `tests/Codes.spec` | codes (pre-existing) | 12 / 0 |
-| `tests/Cavern.spec` | the server's cavern layout (pre-existing) | 67 / 0 |
+| `tests/Cavern.spec` | the server's cavern layout (pre-existing); *(P2)* + the board on the entrance wall | 80 / 0 |
 | `tests/responsive.spec` | HUD layout maths (pre-existing) | 70 / 0 |
 | `tests/EnvBands.spec` | band lookup + blend, glide, `capRates` (template, verbatim) | 124 / 0 |
 | `tests/Rest.spec` | rest rules (template, verbatim) | 55 / 0 |
 | `tests/Visitors.spec` | the rare-visitor clock, rarity, rest-toggle probe | 34 / 0 |
-| `tests/Grotto.spec` | progress, sockets → chambers, bursts, pulse, layout, zones, routes; *(R1)* + `flashDue`: at most one flash per cooldown, its edges, NaN (was 143) | 157 / 0 |
-| `tests/EnvConfig.spec` | the shipped `Config.Env` / `Visitors` / `Rest` / `Budget`; *(R1)* + `Env.HarvestFlash`: a tint, it fades, the cooldown outlasts the fade (was 430) | 435 / 0 |
-| `tests/Pacing.spec` | when a player reaches each look (`IdleModel`); the economy FINDING | 12 / 0 |
+| `tests/Grotto.spec` | progress, sockets → chambers, bursts, pulse, layout, zones, routes; *(R1)* + `flashDue`: at most one flash per cooldown, its edges, NaN (was 143); *(R2)* + the higher-tier bypass and `outranked`; *(P2b)* the glowfly and firefly zones and the silk volume pass the same zone rules | 191 / 0 |
+| `tests/EnvConfig.spec` | the shipped `Config.Env` / `Visitors` / `Rest` / `Budget`; *(R1)* + `Env.HarvestFlash`: a tint, it fades, the cooldown outlasts the fade (was 430); *(P2b)* + at least five bands, each band after the first brings a critter kind and a weather kind of its own, every named kind can be drawn, every critter zone clears a standing head by 3.5 studs | 499 / 0 |
+| `tests/Pacing.spec` | when a player reaches each look (`IdleModel`); *(R2)* the FINDING became requirements: the Shard pays back, chamber 2 without codes, no dead end; *(P2)* + the brag moment and the board's cap | 23 / 0 |
+| `tests/Board.spec` *(P2)* | the board's pure rules: points, encoding and tie-break, keep-higher, views, caches, the limiter | 95 / 0 |
 | `tests/StateFeed.spec` *(R1)* | one State connection per remote, a late subscriber handed the latest payload, either order, arguments intact, every call through the spawner | 24 / 0 |
 | `robloxemu/check_crystal` | HUD fit, panel overlap on (pre-existing) | PASS |
 | `robloxemu/check_crystal_sockets` | sockets in the world, clicks plant (pre-existing) | 36 / 0 |
 | `robloxemu/check_crystal_spawn` | spawn order, facing (pre-existing; `SPAWN-ORDER.md`) | 30 / 0 |
 | `robloxemu/check_growacrystal_harvest` | `lastHarvest` in the State push, nothing else | 23 / 0 |
-| `robloxemu/check_growacrystal_env` | the whole client glue, budgets, rarity, rest, leaks | 158 / 0 |
+| `robloxemu/check_growacrystal_env` | the whole client glue, budgets, rarity, rest, leaks; *(P2b)* + each full band's own glowflies, fireflies, wisps and weather are out at their rates, glowflies and fireflies blink, every ambient critter in every band stays 3.5 studs over a head | 173 / 0 |
 | `robloxemu/check_growacrystal_hud` | HUD fit with both clients, every drawer open | PASS |
-| `robloxemu/check_growacrystal_row` | the chip and Relax button against every HUD element | 389 / 0 |
+| `robloxemu/check_growacrystal_row` | the chip and Relax button against every HUD element; *(R2)* + the title card against the row and the HUD at 11 viewports | 581 / 0 |
 | `robloxemu/check_growacrystal_join` | a slow profile load: one quiet card, glide, no replayed burst | 21 / 0 |
 | `robloxemu/check_growacrystal_race` | the join push missed: chambers from the sockets | 12 / 0 |
 | `robloxemu/check_growacrystal_critters` | critters held to their zone's height band (new, resume session) | 12 / 0 |
 | `robloxemu/check_growacrystal_queue` *(R1)* | Roblox's queue rule replayed, the cavern script first: the HUD shows the saved profile with no click, one connection, later pushes reach both | 27 / 0 |
 | `robloxemu/check_growacrystal_queue_hudfirst` *(R1)* | the same with the HUD first and only 2 chambers of sockets in the world: the cavern gets the push too | 13 / 0 |
 | `robloxemu/check_growacrystal_redeem` *(R1)* | the code answer on 5 phone viewports and 2 mouse windows: size, place, nothing covered, timing; the box's hint | 131 / 0 |
-| `robloxemu/check_growacrystal_flash` *(R1)* | six Mythic harvests at 4 clicks/s: one flash, one shake, six bursts; the cooldown | 18 / 0 |
+| `robloxemu/check_growacrystal_flash` *(R1)* | six Mythic harvests at 4 clicks/s: one flash, one shake, six bursts; the cooldown; *(R2)* + a Mythic at each place in a Legendary row keeps its flash, shake, card and beam | 55 / 0 |
+| `robloxemu/check_growacrystal_salt` *(R2)* | a client's prediction of the roll is at chance level; per-harvest salt; roll unchanged; salt not readable; *(P2b)* on the virtual clock (it dropped a harvest that straddled a wall-clock second: 1 failed run in 40 under load, 0 in 40 after) | 10 / 0 |
+| `robloxemu/check_growacrystal_refused` *(R2)* | 15 refusals each toast their reason and change nothing; a dead end gets a free Shard; every toast ≥ 12 px at 10 viewports; *(P2)* + another player's socket or crystal says whose cavern it is | 103 / 0 |
+| `robloxemu/check_growacrystal_lock` *(R2)* | the owner token: a takeover is never overwritten, the lost session stops saving and is told once; the normal path | 26 / 0 |
+| `robloxemu/check_growacrystal_plotbudget` *(R2)* | crystal lights and sparkles capped per plot, every ready crystal glints, no rebuild while nothing changes | 32 / 0 |
+| `robloxemu/check_growacrystal_board` *(P2)* | the public + friends board through the real server: metric, writes only on a rise, caches, friends cap, names, the physical board and its prompt | 81 / 0 |
+| `robloxemu/check_growacrystal_walk` *(P2)* | the whole player path in one run: join, spawn, plant, harvest, buy, leave, offline growth, rejoin | 34 / 0 |
+| `robloxemu/check_growacrystal_hint` *(P2)* | the first-run hint is readable (≥ 12 px) on every viewport | 17 / 0 |
+| `robloxemu/check_growacrystal_pass` *(P1b)* | a paid pass (`DoubleDust`) doubles the dust a player spends but never the board metric or the board's points | 10 / 0 |
+| `robloxemu/check_growacrystal_rejoin` *(P2b)* | a session that cannot save says so at join and retries on every autosave: a crash-rejoin resumes and saves what was played; a renewed lock is never taken, and its release loads the newer record; a failed load loads the real profile and rebuilds the cavern; a failed load that finds a lock waits for it; Studio without API access says "won't save" once and grants codes for the session; chambers wait; every message ≥ 12 px | 53 / 0 |
+| `robloxemu/check_growacrystal_clips` *(P2b)* | every clip in `MARKETING.md` staged the way it says, in a session with no DataStore, through the HUD's buttons (found the way `film_game.py` finds them) and the sockets: codes 5 600 dust, chambers 2 and 3, the Glow-worm card, the Geode's Legendary in a Legendary week, socket 9 in range, 20 min, the beam and card, Relax at the pool, the board offline; this week (2026-09-28..10-04) is a Legendary week too | 51 / 0 |
 
 **Stability.** The client uses `Random.new()`, which the emulator does not seed, so the headless numbers can move
 between runs. In the resume session `check_growacrystal_env` ran 8 times (the gate run at the start, the 6 measuring
@@ -365,6 +443,48 @@ Spawn order: `check_crystal_spawn` is green and `Main.server.luau`'s spawn code 
 `lastHarvest` lines), so the `SPAWN-ORDER.md` fix stands.
 
 ### 7.1 Mutation sweep
+
+**Pass 1 re-run (2026-10-01, §16).** Round 2's 43 mutations re-run unchanged on the current tree, now 39 suites per
+mutant (pass 2's checks included): **40 of 40 real mutants KILLED, 3 of 3 controls SURVIVED; bundle proof 43 of 43;
+restored byte-identical (sha256) 43 of 43**; the copy was identical to the real tree before and after. The new
+decision's assertions: **5 of 5 KILLED, the control SURVIVED, bundle proof and restore 6 of 6** (table in §16).
+
+**Round 2 (2026-09-30, §14): 43 mutations on the new code, 40 real and 3 controls. All 40 real mutants KILLED and all
+3 controls SURVIVED; bundle proof 43 of 43; every file restored byte-identical (sha256) 43 of 43.** Harness:
+`gac_p1/sweep.py` + `make_mutations.py` in the session's scratchpad (a scratch copy verified identical to the real tree
+before and after, all 34 suites per mutant, 8 in parallel). Two things the sweep found, both fixed:
+* the first run refused 15 mutants because the working tree is CRLF and their anchors had newlines (the harness now
+  matches CRLF in the file and proves LF in the bundle), and one mutant survived: R10, the Grotto row mirroring a
+  taller phone toast line. It was an equivalent mutant: the HUD's scale never goes below 0.6 on a phone, so the
+  "taller" line was always 24 px. That code was removed; the real fix is the toast's text and width caps;
+* the full re-run left two survivors, both gaps in the checks. R9 (the phone toast keeps its 460-px width cap)
+  survived because `emu/guiRects` applies a `UISizeConstraint` only to auto-sized heights, so `refused` now applies the
+  width cap in its own estimate, as Roblox does. C2 (the stacked row forgets the chip) survived because the stacked row
+  only binds on a screen that is narrow AND short, so `row` now also measures the card at 360×400 (a portrait phone in
+  split screen). Both re-swept: KILLED, with a control that SURVIVED.
+
+| id | what the mutation breaks | killed by |
+|---|---|---|
+| S1-S3 | the server rolls with no salt / a constant salt / a one-bit salt | salt |
+| S4-S5 | `rollSeed` drops the salt / keeps only salt mod 7 | Rarity.spec, salt |
+| R1-R8 | each refusal silent or with the wrong reason; the empty code; the phone toast's 15-px cap | refused |
+| R9 | the phone toast keeps the 460-px width cap | refused (after the fix above) |
+| E1, E5 | a dead end refused forever; the free Shard given silently | refused |
+| E2 | `needsFreeSeed` ignores a growing crystal | Economy.spec, refused |
+| E3 | `needsFreeSeed` ignores owned seeds | Economy.spec |
+| E4 | the Shard back to 10 | Economy.spec, Pacing.spec |
+| K1 | no ownership check on a save | lock, refused |
+| K2 / K3 | token only / jobId only | lock |
+| K4 | a lost session keeps trying and toasting | lock |
+| K5 | the load never writes its token | lock and 7 more checks |
+| P1-P6 | lights uncapped / to the commonest / sparkle rate uncapped / the 5 s rebuild back / a few ready crystals lose their full glint / a harvest does not re-deal | plotbudget |
+| F1, F6, F7 | `flashDue` never bypasses / equal tiers yield / the stage never expires | Grotto.spec, flash |
+| F2-F5, F8 | no tiers passed / two flashes on screen / a Legendary takes the Mythic's card / beam / the flash tier never recorded | flash |
+| C1 | the card back at 40 % | row |
+| C2 | the stacked row forgets the chip | row (after the fix above) |
+| CTRL-1..3 | *controls*: a crystal light 0.1 dimmer; the salt never 0; the free-seed toast's emoji | survived ✓ |
+
+**Round 1 (review round 1 session, §13):**
 
 **Result (review round 1 session, §13): 75 mutations, the resume session's 49 re-run on the new tree plus 26 new.
 All 69 real mutants KILLED, and all 6 controls SURVIVED, as they must.** Bundle proof held for **75 of 75**, and every
@@ -568,10 +688,54 @@ or bat. The zone floors that `Grotto.spec` pins in the layout were never checked
 22. **The harvest flash cooldown** (new, review round 1): harvest a terrace of Legendary crystals quickly. One tint
     per 2 s: still a celebration, or does the second and third Legendary now feel flat? The cooldown is
     `Config.Env.HarvestFlash.cooldown`.
+23. **A Mythic inside a Legendary row** (new, review round 2): its flash replaces the Legendary's mid-fade. A clear
+    "something rarer happened", or a flicker? Its card and beam now stay put while the next Legendaries burst.
+24. **Sparkles on a full cavern** (new, review round 2): with 48 crystals ready the sparkles share 48 particles/s, so
+    each glints about once a second (up to 8 ready crystals keep the full 6/s). Does a 1/s glint still read as "ready
+    to harvest"? And frame time with 48 low-rate emitters and 16 lights in one plot, on a phone.
+25. **The toast line on a phone** (new, review round 2): it is now allowed the whole screen width and 24 design px of
+    text (about 14 screen px) on compact layouts. Readable over the cavern, and does a long reason ("Not enough Gem
+    Dust: a Legendary seed costs 6000") fit on one line in portrait?
+26. **The title card under the row** (new, review round 2): on a landscape phone the card now sits just below the chip
+    and the Relax button instead of at 40 % of the height. Still in the middle of the action, or too high?
+27. **A session that lost its record** (new, review round 2): only reachable when a server stalls past the 45 s lock.
+    If it can be staged (two Studio test servers on one DataStore), check that the "Opened on another server" toast
+    shows once and nothing is overwritten.
+28. **The highscore board** (new, pass 2): a 14x9-stud slab on the entrance wall, 8.5 studs behind the spawn, a
+    SurfaceGui at 40 px per stud with `LightInfluence = 0`. From the spawn, turning round: is it readable (ten rows,
+    each about half a stud tall), does it glow too much or too little against the Cozy grade, and is it seen at all
+    (it is behind the first frame on purpose)? In Studio with API access off it says it is offline, which is correct.
+29. **The board's prompt** (new, pass 2): `MaxActivationDistance` 12, so it shows as soon as the player turns round at
+    the spawn. Does it steal an E press or a tap meant for something else? Does "Show friends" / "Show everyone" read?
+    With API access on, only on a server you may write to: does the Friends view list friends and count "Checking
+    your friends: n of m"? **Never record or screenshot the Friends view with a real account.**
+30. **The first-run hint** (new, pass 2): "Tap a socket to PLANT · tap a crystal to HARVEST" on phones (13.2 px
+    estimated) and the longer line on desktop (16 px). Readable over the cavern? Is "socket" understood without
+    "glowing"?
+31. **The walk on a live server** (new, pass 2): `check_growacrystal_walk` proves join, plant, harvest, buy, leave and
+    rejoin in the emulator with a virtual clock. The real proof is a rejoin on the live server: plant, leave, wait a
+    minute, come back, and the crystal is grown.
+32. **Glowflies and fireflies** (new, pass 2b): 0.22- and 0.26-stud Neon beads that blink (a 0.3-1.0 glow on a 2.9 s
+    and a 2.0 s cycle). Do they read as fireflies, distinct from the steady cream moths, or as flicker? Glowflies
+    drift among the glow-worm strands (y 34-42), fireflies in a low layer under the moths (y 30-35).
+33. **Glow-worm silk** (new, pass 2b): 4 cyan motes/s falling slowly from the strands' height across the cavern.
+    Visible, or lost against the beads? It must not read as rain.
+34. **The Studio session that cannot save** (new, pass 2b): with API access off, the join toast must say "Saving is off
+    here: progress won't save", and the codes must give 5 630 dust (that is how `MARKETING.md` stages clips 4-7).
+    Note which way this Studio fails: `GetDataStore` raising (a rojo-built file) or every call raising (the published
+    place with API access off); both are handled, and only the first shows the board's "offline" note (the second
+    keeps "Loading...").
+35. **A crash-rejoin on the live server** (new, pass 2b): only stageable with a real crash (or two test servers on
+    one DataStore). The toast "Save open on another server: retrying" at join, and within about a minute "Your save
+    is back: progress saves again". Proved in the emulator only (`check_growacrystal_rejoin`).
 
 ---
 
 ## 9. Thumbnail shot list (for the night Studio session)
+
+**Output: 1920x1080 PNG** (16:9, the Roblox thumbnail size), captured from a 1920x1080 Studio viewport so nothing is
+rescaled; the icon (512x512) is a square crop of shot 4 or 5. Every framing below assumes that 16:9 frame and Roblox's
+default 70° vertical field of view. Hide the HUD for every shot except where it says otherwise.
 
 **Getting there without touching real saves.** *This recipe has not been tried in Studio. Verify step 2 before relying
 on the rest.*
@@ -615,7 +779,8 @@ set-ups below does. What the probe cannot judge (bloom, the glow columns, whethe
    up to terrace 2 and stand at about (6, 6, 30), facing the entrance. Camera from the entrance apron, 2 studs in
    front of the front wall, **(−2, 8, −12) → (3, 28, 60)**. In frame:
    * the upper half is glow-worm beads on their threads, from the top edge (beads at (−4, 38, 14) and
-     (−2, 40, 17), v +32..34) back to (3, 40, 70) and (12, 40, 72) just above the centre;
+     (−2, 40, 17), v +32..34) back to (3, 40, 70) and (12, 40, 72) just above the centre, with glowflies blinking
+     among them (pass 2b; not part of the geometry probe, they wander);
    * the light shaft's glow at the far end, just under the centre (v −5);
    * the crystal rows of terraces 1 and 2 across the lower third, from socket 7 at the right edge (h +38) to socket
      12 at the left (h −34); terrace 0's middle crystals sit at the bottom edge;
@@ -696,6 +861,11 @@ set-ups below does. What the probe cannot judge (bloom, the glow columns, whethe
    The centre line crosses 11 studs of the inner column, on purpose: the avatar is a silhouette against the light.
    Keep the Grotto row visible for one variant so the "🛋 Relaxing — your crystals keep growing" chip is in the
    picture.
+7. **"Top miners"** (pass 2; **HELD for the live server**: in Studio the board has no rows, see §8 item 28). Stand at
+   the spawn, (0, 4, −6), and turn round. Camera **(6, 9, −2) → (0, 8.5, −13.7)**: the whole board on the entrance wall
+   across the middle of the frame (its corners 21-32° off the centre line against the frame's ±51° × ±35°), seen
+   27° off its face. Public view only, never Friends. Checked by hand arithmetic only, not by the probe that checked
+   shots 1-6.
 
 ---
 
@@ -729,23 +899,45 @@ set-ups below does. What the probe cannot judge (bloom, the glow columns, whethe
 
 ## 11. Not done / open
 
-* **Review round 1 is closed; a second look at its fixes is not done.** An independent adversarial reviewer ran on
-  2026-09-24 and found three defects; all three are fixed and tested (§13). The fixes themselves (`StateFeed`, the
-  phone code answer, the flash cooldown) have been checked by their author's own tests and mutation sweep, not by a
-  second reviewer. The reviewer found the server diff, the `lastHarvest` leak argument, the rest rules, hazards and
-  budgets clean.
-* **Owner decision: the economy (§2).** At luck 0 every seed returns less than it costs on average (Shard 78 %,
-  Legendary 6 %). A player who skips the codes never owns chamber 2, and so never sees anything past the first band.
-  Not changed here: tuning the economy of a live game is the owner's call. The cheapest fix to evaluate is Shard
-  DustValue 1 → 2 (or SeedCost 10 → 7) and re-running `Pacing.spec`.
-* **Found in passing, not changed: the refraction roll is predictable** (§5). The seed is
-  `(os.time()*1000 + socketId*977 + UserId) % 2147483647`, all known to the client. An exploit script can click only on
-  seconds that roll Mythic, and the leaderboard is `totalDust`. The checklist's fix is to mix a per-session,
-  server-only salt into the seed. That is a server change, so not in this work.
+* **Review round 2 is closed (§14); its fixes have been checked by their author's tests and mutation sweep, not by a
+  third reviewer.**
+* **Review round 1's fixes had their second look in round 2.** The second reviewer found one regression in them (the
+  flash cooldown held back a Mythic inside a Legendary row, finding 2) and nothing wrong with `StateFeed` or the phone
+  code answer.
+* **Owner decision: the economy (§2). DECIDED 2026-09-30 (owner: take recommended).** The note named two options to
+  evaluate: Shard DustValue 1 → 2, or SeedCost 10 → 7. Evaluated with the pacing model: DustValue 2 gives the Shard
+  8.32 per 10 (83 %), still a loss, and the code-less player still never owns chamber 2; SeedCost 7 gives 112 %. So the
+  Shard costs **7**. The price alone still left 35 of 40 code-less sessions at a dead end (nothing growing, no seed,
+  under 7 dust), so a dead end now gets a **free Shard** (`Economy.needsFreeSeed`): never punishing, and not farmable
+  (at most one Shard per grow cycle, only while the player has nothing else). Result: 0 dead ends in 120 sessions,
+  36 of 40 code-less players own chamber 2 within 8 h (median 182 min). §2 has the numbers.
+* **Owner decision: the predictable refraction roll (§5). DECIDED 2026-09-30 (owner: take recommended).** The
+  recommended fix was the checklist's server-only salt. Applied with one change, and why: the salt is drawn per
+  HARVEST from an entropy-seeded server `Random`, not once per session, because the client sees every roll's tier and
+  a salt fixed for the session is a constant it could solve for. The odds are unchanged (§14).
 * **luau-analyze was not run** in any session (the binary is absent, §7.2); compile was verified by `loadstring`.
+  Fetching `luau-compile`/`luau-analyze` "needs the owner's go" (§7.2). **Not taken on 2026-09-30:** downloading a
+  binary needs an explicit go in chat for that download, which a blanket "take the recommended option" is not.
+  Still open (re-checked 2026-10-01, §16: same reason, not taken).
 * **The shot list is geometry-checked, not seen** (§9, §8 items 18-20).
 * **The join fix is proved in the emulator only** (§8 item 21): the queue rule is replayed there, not observed on a
   real server.
+* **Pass 2 (§15) was checked by its author's tests and mutation sweep only**, like round 2's fixes; no third reviewer.
+* **`docs/marketing/store-text.json` holds the old live store text** (Shard 10, "loses money", "board refreshes every
+  30 seconds"). `docs/` is not this game's to edit; the new text is in `README.md` for whoever publishes.
+* **Gamepasses stay off** (`Config.Passes`, no real IDs); none is planned for v1.
+* **Owner decision: may a paid pass move the highscore board? DECIDED 2026-09-30 (owner: take recommended).** The note
+  asked "decide first whether a paid pass may move the board" and marked no option. Taken: **no**. The owner's brief is
+  fair and never exploitable, and the standard ranks "a server-measured metric that a script cannot inflate" and rules
+  out pay-to-win (§3); a pass that doubled the board metric would let money buy rank. So `DoubleDust` still doubles the
+  dust a player spends (what it would be sold as), and the board counts every harvest at its un-doubled value
+  (`grantHarvest` in `Main.server`). Test first: `robloxemu/check_growacrystal_pass.luau` failed on the unchanged game
+  (the pass owner's saved `totalDust` 23 600 against 21 800 un-doubled, board 236 points against 218), then 10 / 0.
+  Details in §16.
+* **Pass 2b (§17) was checked by its author's tests and mutation sweep only**; no third reviewer.
+* **The save-state retry rests on the emulator's DataStore**, which never yields: the case of a player who leaves while
+  a retry's UpdateAsync is in flight (the retry then gives the lock back) cannot be produced there, like the older
+  "leaves during loadProfile" guard. It is read, not tested.
 * Not committed, not pushed, not published. Studio not opened.
 * §8 in full.
 
@@ -979,3 +1171,275 @@ The template copies `EnvBands.luau` and `Rest.luau`, and the server, were not to
 
 Nothing in `robloxemu/emu`, `tools`, `docs`, any `marketing` folder or any other game was written. The probes and the
 sweep ran on scratch copies.
+
+---
+
+## 14. Review round 2 (2026-09-30): six findings, the owner's decisions, the queued job
+
+A second independent reviewer worked on a scratch copy and reported six findings, with probes. This session ran each
+probe against a bundle of the unchanged tree first. **All six reproduced; none was rejected.** Each got a failing test,
+then a fix in the game. The owner's two open decisions (§11) and the queued job (the salt) were done the same way.
+
+| # | finding | reproduced (unchanged tree) | failing test first | fix | after |
+|---|---|---|---|---|---|
+| 1 (high) | the refraction roll is predictable from the State push | `probe_predict`: 48 of 48 predicted | `check_growacrystal_salt` 3 failures (48 of 48, the client's seed 48 times, 1 distinct salt); `Rarity.spec` 2 | a salt per harvest from `rollSalt = Random.new()` in `Main.server`; `Rarity.rollSeed` | 9, 11 and 12 of 48 matched in three runs (chance 13.2), 48 distinct salts; the reviewer's probe 24 of 48 (its mix of Shard and Legendary seeds, chance 27.4) |
+| 2 | a Mythic inside a Legendary row loses flash, shake, card and beam | `rv2_mythic`: 10 failures | `check_growacrystal_flash` 18 failures; `Grotto.spec` 7 | higher tier skips the cooldown and replaces the flash; `Grotto.outranked` for card and beam | flash 55/0, `rv2_mythic` 11/0 |
+| 3 | the title card covers the Relax button and the chip on landscape phones | `rv2_card`: 8 of 40 (50×37 px of the button at 640×300) | `check_growacrystal_row` 8 failures | the card sits under the row | row 581/0, `rv2_card` 40/0 |
+| 4 | per-plot lights and sparkles uncapped; every crystal rebuilt every 5 s; docs false | 58 lights, 50 emitters, 322 particles/s; 144 instances rebuilt per 5 s | `check_growacrystal_plotbudget` 19 failures | crystals updated in place; `applyPlotBudget`, `Config.PlotBudget` | 16 lights, 50 emitters, 82/s; 0 rebuilt in 30 s (and in the reviewer's `probe_churn` over 60 s) |
+| 5 | an autosave overwrites a session another server holds | `probe_lock`: dust 99999 → 100, WELCOME redeemable again | `check_growacrystal_lock` 13 failures | a session token on load; every save checks token + jobId | lock 26/0; `probe_lock` keeps SERVER-B's record |
+| 6 | refused actions give no feedback | `probe_silent`: 6 of 7 refusals sent nothing | `check_growacrystal_refused` 16 failures; its dead-end part 3 more before the free Shard, and its toast-size part 1 (9.0 px on an 800×360 phone) | `refuse()` with the reason and price everywhere; "Type a code first"; the phone toast's text and width caps | refused 99/0; `probe_silent` 7 of 7 toast; smallest toast 12.0 px |
+
+**Why a salt per harvest, not per session.** The checklist says "a per-session, server-only salt". Here every roll's
+result is shown to the player (their dust, codex and the burst), so a salt fixed for a session is one constant a script
+could solve for from the tiers it has seen, and then predict the rest of the session. Drawing it per harvest from a
+server-only `Random` seeded by the engine's entropy leaves nothing to solve for, and the stream is shared by every player
+on the server. **The odds are unchanged:** with a uniform salt every seed in [0, 2^31 - 1) is equally likely, and
+`Rarity.spec` measures it against the exact odds over 100 000 rolls per case (exact / salted / old formula):
+Shard at luck 0 0.5000 / 0.4994 / 0.5000 (Quartz 0.3250 / 0.3255, Amethyst 0.1365 / 0.1364), Shard at luck 3 0.2750 /
+0.2763 (Quartz 0.3571 / 0.3532), Legendary at luck 0 0.9500 / 0.9504; every tier within 5 sd (the worst |z| per case:
+0.52, 2.52, 0.61).
+
+**Refusals and their reasons** (all through `refuse()` in `Main.server`): "Still growing — ready in 60s"; "Not enough
+Gem Dust: chamber 2 costs 500" (and for Luck Lv1, Growth Lv1, a seed, the Geode, each with its price); "Legendary seeds
+unlock at chamber 5" (also when a selected locked seed is planted, which used to say "not enough Gem Dust"); "Every
+chamber is already open"; "Luck is already at its max level"; "This week's Geode is cracked — back next week";
+"Couldn't save — nothing spent, try again"; "Out of Gem Dust, so here's a free Shard seed 🌱"; "Opened on another server
+— this one won't save" (once). The HUD answers an empty code with "Type a code first". On a phone the toast used to be
+capped at 15 design px, which the 0.6 UIScale makes 9 screen px; it may now use its whole 24-px line and the screen's
+width (smallest measured over 15 messages × 10 viewports: 12.0 px, on a 1024×768 tablet).
+
+**Changed on the way, and why.** Two `Economy.spec` assertions pinned the old Shard price (30 - 10 = 20); they now read
+`30 - SeedCost[1]` and a new assertion pins the decided price, 7. `Pacing.spec`'s two FINDING assertions were written to
+fail when the economy was retuned (§2 said so) and are now requirements. `IdleModel` mirrors the server's free Shard
+through the same pure rule. No other existing assertion was changed.
+
+**Written in `grow-a-crystal/`:** `src/server/Main.server.luau` (salt, owner token, in-place crystals and the plot
+budget, refusals, free Shard); `src/shared/Rarity.luau` (`rollSeed`), `Economy.luau` (`needsFreeSeed`), `Config.luau`
+(Shard 7, `PlotBudget`, corrected budget comment), `Grotto.luau` (`flashDue` tiers, `outranked`), `CavernArt.luau`
+(`BeamLife`); `src/client/Grotto.client.luau` (flash, card and beam ranks; the card under the row) and `Hud.client.luau`
+(empty code, the phone toast); `tests/Rarity.spec`, `Economy.spec`, `Grotto.spec`, `Pacing.spec`, `IdleModel.luau`;
+this file and `CLAUDE.md`, `README.md`. **In `robloxemu/`:** `check_growacrystal_salt`, `_refused`, `_lock`,
+`_plotbudget` (new), new assertions in `check_growacrystal_flash` and `_row`, and `build/grow-a-crystal.luau`. Nothing in
+`robloxemu/emu`, `tools`, `docs` or another game was written. Nothing was committed, pushed or published; Studio was not
+opened. The probes and the sweep ran on scratch copies.
+
+---
+
+## 15. Pass 2: the complete-game standard (2026-09-30/10-01)
+
+The owner's finish line is `docs/complete-game-standard.md`. Every item was checked against the game; this is what
+was missing, what was built (each with a failing test first), and what is left.
+
+**Built.**
+
+1. **§3 Highscore board, public + friends** (`src/shared/Board.luau`, adapted from plus1-jump's; `Config.Board`;
+   `Cavern.board`; the board section of `Main.server`). Before: a HUD panel of raw `totalDust`, `SetAsync` on every
+   autosave (reproduced: **90 writes in 10 idle minutes** for three players with nothing changed), names looked up by
+   the client on every 30-s refresh, no friends view, no physical board, no tie-break. Now: the metric is dust earned
+   from harvests in points of 100 (codes, Geode and purchases never add to it; the roll is salted), stored as
+   `points * 2e9 + (2e9 - reachedAt)` in `GrowCrystal_LB_v2` through `UpdateAsync` + `Board.keepHigher`, **written only
+   when the points rise** (0 writes in 10 idle minutes). The time a player's points last rose is saved in the profile
+   (`boardAt`), and a pre-board profile is stamped with its next session. The public top 10 is read once per 60 s for
+   the whole server; friends are fetched only on the prompt, pages read to at most 200, cached 5 min, a failure cached
+   60 s, score reads through one token bucket (40, then 1/s) with the DataStore budget reserve; friends on the server
+   use their live points; names come from the friends pages or one cached lookup, never saved. The board stands on each
+   cavern's entrance wall behind the spawn (8.5 studs; the prompt reaches 12); anyone but the owner who triggers it is
+   told why. The HUD panel shows the same rows with names sent by the server. Tests: `tests/Board.spec.luau` (95),
+   `Cavern.spec` +13, `robloxemu/check_growacrystal_board.luau` (81).
+2. **§1 One walk of the whole path** (`robloxemu/check_growacrystal_walk.luau`, 34): join, spawn on the own pad facing
+   the sockets, plant within 5 s, "still growing" 5 s early, harvest at 60 s, buy a Shard with the HUD's own button,
+   leave (lock released), let the crystals grow offline, rejoin with dust, seeds, codex and both plants kept, harvest.
+   `os.time` is the emulator's virtual clock in that run only; the game is unchanged.
+3. **§2 The brag moment** named and measured (§2 above; `Config.Pacing.Brag`; `Pacing.spec` +8).
+4. **§1 No silent no-ops**: clicking another player's socket or crystal now says whose cavern it is
+   (`check_growacrystal_refused` +4; the text is short enough for 12 px on a tablet).
+5. **The first-run hint** was about 7.6 px on a desktop monitor and 4.6 px on a phone: one 100-glyph sentence in a
+   460-px line. Now a short "tap" line across the screen on phones and a shorter line up to 800 px on desktop; smallest
+   12.8 px (tablet) (`robloxemu/check_growacrystal_hint.luau`, 17).
+6. **§4 docs**: the store description in `README.md` (950 characters), the clip list in `MARKETING.md` (7 clips and one
+   held), the 1920x1080 output size and a held board shot in §9, needs-Studio items 28-31, and `CLAUDE.md`'s gates,
+   state and traps.
+
+**Already met, checked, not rebuilt.** Spawn (`check_crystal_spawn`); the salted roll, the owner token and the
+refusals (review round 2); Fx preset, five bands, harmless visitors instead of hazards, Relax; server budgets capped in
+code (`applyPlotBudget`) and client budgets capped by construction (fixed pools, measured by `check_growacrystal_env`,
+reason written next to `Config.Budget`); root Frame + UIScale, 44-px tap targets and the overlap rule 4b asserted with
+`overlap = true` in both HUD checks (`check_crystal`, `check_growacrystal_hud`); codes public, no Robux cost.
+
+**Mutation sweep (pass 2).** 46 mutants over every new assertion (Board rules 7, board placement 3, Config 6, server
+21, HUD 5, the walk's guards 5): **46 killed** (one, B3, survived the first run because with 100 dust per point the
+K-form truncation never binds; `Board.spec` now also checks a finer point, and B3 is killed). Each mutant was proved
+to be in the rebuilt bundle and each file was restored byte-identical by sha256. The control (the board slab one
+shade lighter) survived all 38 suites. `check_crystal_sockets`' exact part count moved 156 → 157 for the board (still
+an exact pin).
+
+---
+
+## 16. Pass 1 re-run (2026-10-01): the round-2 findings re-verified, the last owner decision
+
+The workflow ran pass 1 again ("try again"). The tree already held round 2's fixes (§14) and pass 2 (§15), so this
+session checked them instead of rebuilding them, and took the one owner decision that was still open.
+
+**The six findings, re-run with the reviewer's own probes.** Each probe ran on a bundle of the reviewer's scratch copy
+of the reviewed tree and on a bundle of this tree (scratch copies; paths are the only bundle difference).
+
+| # | probe | reviewed tree | this tree |
+|---|---|---|---|
+| 1 | `probe_predict` (luck 3, 48 crystals, half Shard, half Legendary) | 48 of 48 predicted | 23 of 48 (chance for this mix 27.4) |
+| 2 | `rv2_mythic` | 1 passed, 10 failed | 11 / 0 |
+| 3 | `rv2_card` | 32 passed, 8 failed (50×22 px of the Relax button at 800×360) | 40 / 0 |
+| 4 | `probe_server_budget` (chamber 8, 48 ready) | 58 PointLights, 50 emitters, 322 particles/s per plot; 126 lights in the workspace | 16, 50, 82/s; 42 |
+| 4 | `probe_churn` (60 s) | 144 instances rebuilt every 5 s | none rebuilt; 114 crystal instances |
+| 5 | `probe_lock` | SERVER-B's record overwritten: dust 100, chambers 1, totalDust 0, WELCOME redeemable | kept: dust 99999, chambers 5, totalDust 5000, WELCOME redeemed; the session stops saving |
+| 6 | `probe_silent` | Luck, a locked seed and the Geode with 5 dust: 0 toasts each | 1 toast each |
+
+All six reproduce on the reviewed tree and none on this one; none was rejected. The queued job (the salt, finding 1)
+is in place: `Rarity.rollSeed` with a per-harvest salt from `rollSalt = Random.new()`, odds measured in `Rarity.spec`
+(§14). Round 2's mutation sweep, re-run: 43 of 43 as expected (§7.1).
+
+**The last open owner decision (§11): a paid pass never moves the board.** DECIDED 2026-09-30 (owner: take
+recommended). No option was marked, so the one that serves the brief was taken (fair, never exploitable, and the
+standard's "never pay-to-win"): `DoubleDust` keeps doubling the dust a player spends, and `grantHarvest` adds the
+un-doubled value to `totalDust`, the board metric. Passes are still off (`Config.Passes`); this settles the rule before
+one is ever switched on.
+* Test first: `robloxemu/check_growacrystal_pass.luau` (new). Two saved profiles with the same six ripe Legendary
+  crystals, one owning `DoubleDust`; every crystal is clicked through the real server, both players leave, and the
+  saved records and the board store are read back. On the unchanged game: 8 passed, 2 failed (`totalDust` 23 600
+  against 21 800 un-doubled; 236 board points against 218). After the fix: 10 / 0, and 10 / 0 in five more runs.
+* Mutations (`gac_p1b/pass_mutations.json`, the round-2 harness):
+
+| id | what the mutation breaks | killed by |
+|---|---|---|
+| PM1 | the board counts the doubled dust again (the decision undone) | pass |
+| PM2 | the board metric takes the pass flag | pass |
+| PM3 | the pass no longer doubles spendable dust (the check would then test nothing) | pass |
+| PM4 | every harvest counts double on the board, pass or not | pass |
+| PM5 | `DoubleDust` triples | Economy.spec, pass |
+| CTRL-P | *control*: `false` spelled `nil` (same behaviour) | survived ✓ |
+
+* luau-analyze: still not fetched. Downloading a binary needs an explicit go in chat, and a relayed "take the
+  recommended option" is not one.
+
+**Gates (final tree, bundle sha256 `6d308ffb651a…`): 39 suites, every exit code 0.** 17 specs, 1 323 assertions;
+22 headless checks, 1 412 assertions plus 2 PASS verdicts (§7).
+
+**Written:** `src/server/Main.server.luau` (`grantHarvest`: the board metric adds the un-doubled harvest, +4 lines),
+`robloxemu/check_growacrystal_pass.luau` (new), the bundle, this file (§7, §7.1, §11, §16), `CLAUDE.md` and
+`README.md`. Nothing committed, pushed or published; Studio not opened. The probes and sweeps ran on scratch copies.
+
+---
+
+## 17. Pass 2b (2026-10-01): the standard checked item by item again, three gaps closed
+
+The workflow ran pass 2 again. Every item of `docs/complete-game-standard.md` was checked against the code and the
+gates, not only the reviewer's list (most of which §14-§16 had already closed). Three gaps were found. Each was
+reproduced on the unchanged game, then a failing test was written first, then the game was fixed. Nothing in an
+existing test was loosened.
+
+**1. §1 "it works, and it is honest": a session that could not save said nothing and never recovered.** Probe on the
+unchanged game: a player who rejoined within 45 s of a server crash (the dead server's lock still on the record) got
+**0 messages**. They played a session that never saved: two minutes later, long after the lock had expired, they had
+bought a seed and the record still said 1 234 dust. A returning player (4 321 dust) whose load call failed once was
+shown a new profile (30 dust), with 0 messages, and nothing they did was saved. A server with no DataStore said nothing
+either. A chamber could even be bought on the locked copy, and was lost on leaving. Now:
+* `loadProfile` marks the session `locked` (another server's lock), `retry` (the call failed) or `nostore` (no
+  DataStore, or a failed load in Studio, where API access is off for the whole session), and the join tells the
+  player once (`Config.Save.Text`).
+* Every autosave retries a `locked` or `retry` session (`retryLoad`). It takes the lock as soon as it is free. If
+  nobody has written the record since this session read it (same jobId, token and lockUntil; every write of every
+  version sets lockUntil), what was played meanwhile is kept and saved. Otherwise the record is newer, so it is loaded
+  and the cavern is rebuilt to it. Either way the player is told.
+* While waiting, codes and the Geode are refused (they could not persist), and chambers wait, because a built terrace
+  cannot be taken down if a newer record replaces the copy.
+* Test: `robloxemu/check_growacrystal_rejoin.luau`. Its first version gave **11 passed, 35 failed** on the unchanged
+  game; the final version gives **53 / 0**. Every message reads at 12.0 px or more on every viewport.
+
+**2. §4 the clip list could not be staged as written.** Clips 4-7 are staged "off camera: codes, then buy chamber 2",
+and clip 5 with the weekly Geode, in Studio with API access off. Probe on the unchanged game, in a session with no
+DataStore: WELCOME, CRYSTAL and MYTHIC all came back `retry` and dust stayed 30, and the Geode was refused the same way.
+Both refuse a grant they cannot persist, which is right when a save is possible but failed, and pointless when no save
+can ever happen. A session that can NEVER save (`nostore`) now keeps the codes' and the Geode's grants for the session.
+Nothing from it persists, the reward included, so there is nothing to duplicate, and it says so at join. A session
+that could save but cannot right now (`locked`, `retry`, a lost lock) still refuses, which `check_growacrystal_rejoin`
+and `check_growacrystal_lock` hold. Test: `robloxemu/check_growacrystal_clips.luau` plays every clip's staging through
+the real HUD and server: **32 passed, 19 failed** on the unchanged game, **51 / 0** now. It also checks the clip
+list's numbers against the game: 5 600 dust from the codes, chambers 500 and 1 100, Legendary weeks 2026-10-12..18
+and Mythic 2026-10-19..25 (and this week, 2026-09-28..10-04, is Legendary), 20 and 40 minutes of growth, socket 9 in click range from the spawn. And it checks the buttons
+the way `film_game.py`'s `laby_click_gui` finds them (the first TextButton whose text matches a Lua pattern). The Geode
+button reads "→ Legendary" too, so `MARKETING.md` anchors the seed row's pattern: `^Legendary`.
+
+**3. §2 "each with its own … critters and weather".** The first three bands had moths only, and the first two had
+drips only. Band 2 now has **glowflies** (5, blinking blue-green among the strands) and **glow-worm silk** (4/s
+drifting down), and band 3 has **fireflies** (6, blinking amber in a low layer under the moths, y 30-35, above every
+head like every other critter). `EnvConfig.spec` gave **11 failed** on the unchanged game: two bands had no critter of
+their own, one had no weather of its own, and no critter kind had a look that could be asked for. It now gives
+**499 / 0** with: at least five bands; each band after the first brings its own critter and weather kinds; every
+kind can be drawn; every zone clears a standing head by 3.5 studs. `check_growacrystal_env` (+15) counts each full
+band's own critters and weather in the world, sees glowflies and fireflies blink, and measures every ambient critter's
+height in every band (lowest 4.5-9.7 studs over 8 runs). Budgets: §6 (peak 130 of 150 local parts).
+
+**Also fixed: a flaky gate.** `check_growacrystal_salt` read the real clock and dropped a harvest that straddled a
+wall-clock second. It failed **1 run in 40** under parallel load ("47 harvests, want 48"). It now runs on the virtual
+clock (like the walk check): **0 in 40**. The two salt mutants below prove the check still bites.
+
+**Already met, checked, not rebuilt.** §1: the walk (`check_growacrystal_walk`), spawn (`check_crystal_spawn`,
+`RespawnLocation` = an enabled pad), the per-harvest server-only salt (the seed drives no geometry), the owner token,
+string keys and `numKeys`, every refusal toasted. §2: Fx Cozy + signature particles, five glided bands, harmless
+visitors instead of hazards (§3 says why), Relax (growth is server time, so a rest earns nothing extra), server budgets
+capped in code (`applyPlotBudget`), client budgets capped by construction (fixed pools, `EnvBands.capRates`, measured),
+the brag moment (first Mythic: median 31 min, p10 4, p90 70, normal profile; `Pacing.spec`) and the long-term goal
+(Heart of the Geode, median 238 min), root Frame + UIScale, 44-px taps, and overlap rule 4b asserted (`overlap = true`
+in `check_crystal` and `check_growacrystal_hud`). §3: the public + friends board, as built in pass 2
+(`check_growacrystal_board`, 81 / 0). §4: the store text (950 characters, ASCII only, every number recomputed from
+Config: 1 in 4 329 at Luck 0, 1 in 58.3 at Luck 10), the thumbnail shot list (1920x1080), the needs-Studio list.
+
+**Mutation sweep (pass 2b).** Every mutant was run against all 41 suites (8 in parallel), proved in the rebuilt bundle
+(the mutated file found verbatim in it), and its file restored byte-identical by sha256. The bundle hash after the
+sweep equals the hash before it (`c4b2bc7ce01d…`).
+
+| id | what the mutation breaks | killed by |
+|---|---|---|
+| SV1 | the join message removed | clips, rejoin |
+| SV2 | a locked load is not marked locked | rejoin |
+| SV3 | the autosave never retries a load | rejoin |
+| SV4 | resume without the fingerprint (overwrites a newer record) | rejoin |
+| SV5 | never resume (discards what was played while waiting) | rejoin |
+| SV6 | a reload does not rebuild the chambers | rejoin |
+| SV7 | chambers bought while waiting | rejoin |
+| SV8 | no session-only code grant without a store | clips, rejoin |
+| SV9 | no session-only Geode without a store | clips |
+| SV10 | codes granted while locked (a dupe) | rejoin |
+| SV11 | Studio without API access retries forever | rejoin |
+| SV12 | the lock fingerprint is not kept | rejoin |
+| SV13 | a failed load that finds the record locked does not load it | rejoin |
+| BD1 | band 2 has no critter of its own | EnvConfig.spec, env |
+| BD2 | band 2 has no weather of its own | EnvConfig.spec |
+| BD3 | band 3 has no critter of its own | EnvConfig.spec, env |
+| BD4 | fireflies at head height (zone from y 22) | EnvConfig.spec, Grotto.spec, env (+ salt, before its clock fix: a flake) |
+| BD5 | glowflies and fireflies do not blink | env |
+| BD6 | no silk volume | EnvConfig.spec, Grotto.spec, env |
+| BD7 | no glowfly look | EnvConfig.spec, clips, env, race |
+| BD8 | four bands (the waterfall band removed) | EnvConfig.spec, env |
+| SALT0 | no salt (after the salt check's clock change) | salt |
+| SALTFIX | one salt for the whole server | salt |
+| GEO4 | the Geode rotation's fourth week Mythic, not Legendary | Geode.spec, clips |
+| CTRL-A | *control*: the retry's session token `.. ""` (same string) | survived ✓ |
+| CTRL-B | *control*: firefly `speedMax = 3` spelled `3.0` | survived ✓ |
+
+24 of 24 real mutants killed, 2 of 2 controls survived, 26 of 26 in the bundle, 26 of 26 restored.
+
+**Not tested, and why.** A player who leaves while a retry's UpdateAsync is in flight: the retry then gives back the
+lock it has just taken. The emulator's DataStore never yields, so this cannot be produced there (the same holds for
+the older "leaves during loadProfile" guard). It is read, not tested.
+
+**Gates (final tree, bundle sha256 `c4b2bc7ce01d…`): 41 suites, every exit code 0.** 17 specs, 1 392 assertions;
+24 headless checks, 1 531 assertions plus 2 PASS verdicts (§7).
+
+**Written:** `src/server/Main.server.luau` (save states, the join message, `retryLoad`, the chamber wait, session-only
+grants without a store), `src/shared/Config.luau` (`Config.Save.Text`; bands 2 and 3; the two critters),
+`src/shared/Grotto.luau` (two zones, the silk volume), `src/shared/CavernArt.luau` (the two looks with their blink, the
+silk emitter, `hasCritter`), `tests/EnvConfig.spec.luau`, `robloxemu/check_growacrystal_rejoin.luau` and
+`check_growacrystal_clips.luau` (new), `check_growacrystal_env.luau` and `check_growacrystal_salt.luau`, the bundle,
+this file (§2, §6, §7, §8 items 32-35, §9 shot 1, §11, §17), `MARKETING.md`, `README.md` and `CLAUDE.md`. Nothing was
+committed, pushed or published, and Studio was not opened. The probes and sweeps ran on scratch copies and through
+`scratchpad/gac_p2c/sweep.py`.

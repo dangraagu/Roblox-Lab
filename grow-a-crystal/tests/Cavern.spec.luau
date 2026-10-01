@@ -1090,5 +1090,56 @@ killed("crystalHeadroom", mutate(function(m)
 	d.position = { x = 0, y = d.position.y + 4, z = d.position.z }
 end, { "crystalHeadroom" }), "Deck_2 raised into its own sockets' crystal column")
 
+--============================================================================ the highscore board
+-- docs/complete-game-standard.md §3: the board stands in the world NEAR SPAWN, with a ProximityPrompt that switches
+-- Public/Friends. Every player spawns in their own sealed cavern, so each cavern gets one, on the entrance wall
+-- behind the spawn (Cavern.board). The server builds it (Main.server); robloxemu/check_growacrystal_board.luau
+-- checks the built one. Here: where it stands against the real geometry, on every plot.
+do
+	local b = Cavern.board and Cavern.board(Config)
+	truthy(b ~= nil, "Cavern.board exists")
+	if b then
+		local boardPart = { name = "Board", position = b.position, size = b.size, orientation = { x = 0, y = 0, z = 0 } }
+		local bb = aabb(boardPart)
+		local wall = aabb(byName(cav, "WallFront"))
+		near(bb.minZ, wall.maxZ, 1e-9, "the board's back is flush on the entrance wall's inner face (z = " .. wall.maxZ .. ")")
+		truthy(b.facing and b.facing.z == 1 and b.facing.x == 0 and b.facing.y == 0, "the board faces +Z, into the cavern")
+		truthy(bb.minX >= -K.HALF_W and bb.maxX <= K.HALF_W, "the board is between the side walls")
+		truthy(bb.minY >= 3.5, string.format("the board's bottom (%.1f) clears the apron's loose rubble", bb.minY))
+		truthy(bb.maxY <= K.CEIL_UNDER, "and its top is under the ceiling")
+		truthy(b.size.x >= 10 and b.size.y >= 7, string.format("big enough to read ten rows (%gx%g studs)", b.size.x, b.size.y))
+		-- the prompt is in reach from the spawn, and the spawn is not in the board
+		local sp = cav.spawn.position
+		local dx, dy, dz = sp.x - b.position.x, sp.y - b.position.y, sp.z - b.position.z
+		local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+		truthy(d <= Config.Board.PromptDistance - 1, string.format(
+			"from the spawn the board is %.1f studs away, inside its prompt's %g", d, Config.Board.PromptDistance))
+		truthy(sp.z - bb.maxZ >= 4, string.format("the spawn stands %.1f studs clear of the board's face", sp.z - bb.maxZ))
+		truthy(distToHull(0, -6, xzHull(boardPart)) >= 6 - EPS, "the board stays out of the spawn keep-out cylinder")
+		-- nothing of any cavern pokes into it: rubble and stalactites are drawn per plot, so every plot is checked
+		local hits = {}
+		for plot = 0, 19 do
+			local c = Cavern.build(Config, plot, Rng)
+			for _, p in ipairs(c.parts) do
+				if p.name ~= "WallFront" and overlaps(aabb(p), bb) then
+					table.insert(hits, "plot " .. plot .. ": " .. p.name)
+				end
+			end
+		end
+		eq(#hits, 0, "no part of any of 20 caverns intersects the board" .. (if #hits > 0 then " (" .. hits[1] .. ")" else ""))
+		-- and it never stands in a click line: every socket is still clickable from its declared stand
+		local blocked = 0
+		for s = 1, TOTAL_SOCKETS do
+			local st, so = cav.stands[s], cav.sockets[s]
+			if segHitsBox({ x = st.x, y = st.y + 1.5, z = st.z }, { x = so.x, y = so.y + 0.5, z = so.z }, bb) then
+				blocked += 1
+			end
+		end
+		eq(blocked, 0, "the board blocks none of the 48 click lines")
+		-- the board is not part of Cavern.build: the generated budget above stays 149 parts
+		eq(byName(cav, "Board"), nil, "the board is the server's, not one of the generated parts")
+	end
+end
+
 print(string.format("Cavern: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Cavern tests failed")
