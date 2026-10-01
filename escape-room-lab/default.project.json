@@ -1,0 +1,22 @@
+{
+  "name": "escape-room-lab",
+  "tree": {
+    "$className": "DataModel",
+    "Workspace": {
+      "$properties": {
+        "StreamingEnabled": false
+      }
+    },
+    "ServerScriptService": {
+      "$path": "src/server"
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "$path": "src/client"
+      }
+    },
+    "ReplicatedStorage": {
+      "$path": "src/shared"
+    }
+  }
+}
