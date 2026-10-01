@@ -7,9 +7,10 @@
 
 local Config = {}
 
--- Determinism. Every cave cell is a pure function of this seed, the rebirth count and the
--- cell's coordinates — so two players at the same rebirth are digging the SAME cave, which is
--- the only reason a depth leaderboard means anything.
+-- The PUBLIC half of the cave seed, which every client has (this file replicates). Since 2026-09-30 it no
+-- longer decides a cave by itself: each player's cave at each rebirth is drawn from a server-only key that
+-- never replicates (Mine.luau, "the cave key"; review 2026-09-30, finding 1), and this seed survives only in
+-- Mine.legacyKey, which names the old public cave for tests and the Studio shot recipe.
 Config.WorldSeed = 20260909
 
 -- ── The shaft grid ───────────────────────────────────────────────────────────
@@ -61,6 +62,9 @@ Config.Mine = {
 
 	ReachStuds = 26, -- ClickDetector activation distance on a rock face
 	SwingCooldown = 0.28, -- seconds the server enforces between two swings
+	-- A click on a bedrock WALL says why it cannot be mined (no silent no-ops), at most once this often. It is not a
+	-- swing: it uses its own clock, so a missed click never costs a real swing its cooldown.
+	WallToastSeconds = 2,
 
 	-- ── Streaming: only the layers around the miner hold Parts ───────────────
 	--
@@ -207,9 +211,45 @@ Config.Prestige = {
 Config.Save = {
 	Enabled = true,
 	Store = "DeepVein_v1",
-	Leaderboard = "DeepVein_LB_v1", -- OrderedDataStore by deepest depth ever reached, in studs
+	-- OrderedDataStore for the board (Config.Board). v2 (2026-10-01): the value is Board.encode(bestLayer,
+	-- reachedAtUnix), so ties go to whoever got there first. v1 held raw studs; the game was never published, so
+	-- v1 holds nothing, and a v1 value would decode as depth 0 anyway.
+	Leaderboard = "DeepVein_LB_v2",
 	AutosaveSeconds = 20, -- also renews the session lock; MUST be < SessionLockSeconds
 	SessionLockSeconds = 45,
+}
+
+-- ── The board: public + friends (docs/complete-game-standard.md §3) ──────────────────────────
+-- Ranks on the DEEPEST LAYER a miner has ever opened (bestLayer, survives rebirth). The server measures it: a
+-- layer counts only when the server opens a cell there, by a swing it accepted (reach, cooldown) or a void that
+-- swing broke into (Main.server noteOpen). Stored in Config.Save.Leaderboard under u_<userId> as
+-- bestLayer * 2e9 + (2e9 - reachedAtUnix) (Board.encode, +1 Jump's template), written only when it deepens.
+-- Each miner's board hangs on the south wall of their own mouth, in view from the spawn; a ProximityPrompt
+-- toggles Public/Friends for its owner. Names are resolved on the server and kept in memory, never saved.
+Config.Board = {
+	PublicRows = 10, -- GetSortedAsync(false, 10)
+	PublicCacheSeconds = 60, -- the server asks the store for the top 10 at most once a minute
+	FriendsRows = 10,
+	FriendsCap = 200, -- Players:GetFriendsAsync is never read past this many
+	FriendsCacheSeconds = 300, -- a player's friend list
+	ScoreCacheSeconds = 120, -- a friend's best, per server (also "has not dug")
+	ReadsBurst = 40, -- GetAsync on the board for friends: 40 at once ...
+	ReadsPerSecond = 1, -- ... then 1 a second (Roblox allows 60 + 10 per player a minute)
+	BudgetReserve = 10, -- always leave this many GetAsync in Roblox's budget
+	MaxMetric = 4000000, -- the value is exact in a double up to here (4e6 * 2e9 < 2^53); the deepest layer is 324
+	-- The prompt hangs at the foot of the board on the mouth's south wall. 16 studs reaches it from the south half
+	-- of the mouth (and from a cell dug below it), not from the spawn 38 studs north, so it shows when you walk over.
+	PromptDistance = 16,
+	Text = {
+		Title = "DEEPEST MINERS",
+		EmptyPublic = "Nobody is on the board yet. Break the floor and be the first!",
+		FriendsFailed = "Couldn't load your Roblox friends right now. Try again in a minute.",
+		NoFriends = "No Roblox friends yet. Friends you add show up here, ranked against you.",
+		FriendsNoScores = "None of your %d friends has dug yet. Invite one and race them to the core!",
+		FriendsChecking = "Checking your friends: %d of %d so far...",
+		Loading = "Loading...",
+		Prompt = "Public / Friends",
+	},
 }
 
 -- ── The strata: the environment follows DEPTH ────────────────────────────────
@@ -271,6 +311,23 @@ Config.Env = {
 		shards = { { 230, 140, 255 } }, -- the lit edge
 		runes = { { 255, 84, 30 } },
 	},
+	-- The same rule for the two other things drawn beside ore (review 2026-09-30, finding 3): the core's glowing
+	-- floor, which lies under the deepest layer's cells from rebirth 10 on, and every hazard model, which pokes
+	-- out of the roof where ore sits (review 2026-09-24, finding 1). CaveArt builds them from these colours, in
+	-- this order; EnvConfig.spec holds each one MinDecorOreContrast from every ore that can sit beside it.
+	PieceGlow = {
+		coreglow = { { 255, 96, 24 }, { 255, 236, 200 } }, -- the glowing plate, its white-hot cracks (were {255,214,120}: gold)
+	},
+	HazardLook = {
+		rock = { { 96, 96, 104 } },
+		stalactite = { { 110, 124, 136 } },
+		lava = { { 255, 86, 22 } },
+		crystal = { { 214, 140, 255 } },
+		relic = { { 182, 160, 120 }, { 60, 230, 190 } }, -- the block, its glowing plate
+		shard = { { 28, 22, 40 }, { 230, 140, 255 } }, -- the glass, its lit edge
+		steam = { { 230, 240, 255 } },
+		magma = { { 255, 110, 30 } },
+	},
 	-- The server's mine preset (Fx.Presets.Horror, applied by Main.server), which the paid lamp track
 	-- was built against: "the head lamp and the glowing ore are ALL the light". Below the surface band a
 	-- stratum may tint the fill, not brighten it (EnvConfig.spec; check_deepvein_cave compares these
@@ -281,6 +338,10 @@ Config.Env = {
 		ReferenceExposure = -0.15,
 		MaxAmbientRatio = 1.25,
 		MaxExposureLift = 0.1,
+		-- the preset's ColorCorrection.Brightness, and no lift over it: a post-process lift brightens the UNLIT
+		-- cave, which is what the lamp is for (review 2026-09-30, finding 4)
+		ReferenceBrightness = -0.02,
+		MaxBrightnessLift = 0,
 	},
 
 	Bands = {
@@ -305,7 +366,7 @@ Config.Env = {
 				ExposureCompensation = -0.2, ClockTime = 23.6, FogStart = 12, FogEnd = 140, FogColor = { 26, 28, 36 } },
 			atmosphere = { Density = 0.4, Offset = 0.1, Color = { 92, 98, 114 }, Decay = { 32, 34, 44 }, Glare = 0.05, Haze = 1.4 },
 			bloom = { Intensity = 0.6, Size = 24, Threshold = 1.05 },
-			colorCorrection = { Brightness = 0, Contrast = 0.16, Saturation = -0.25, TintColor = { 215, 222, 240 } },
+			colorCorrection = { Brightness = -0.05, Contrast = 0.16, Saturation = -0.25, TintColor = { 215, 222, 240 } },
 			sunRays = { Intensity = 0, Spread = 0.8 },
 			rock = { color = { 104, 106, 114 }, material = "Slate", accent = { 78, 80, 88 }, accentChance = 0.12 },
 			weather = { kind = "dust", rate = 6 },
@@ -319,7 +380,7 @@ Config.Env = {
 				ExposureCompensation = -0.2, ClockTime = 23.6, FogStart = 12, FogEnd = 135, FogColor = { 38, 27, 22 } },
 			atmosphere = { Density = 0.42, Offset = 0.1, Color = { 122, 92, 76 }, Decay = { 44, 30, 24 }, Glare = 0.08, Haze = 1.5 },
 			bloom = { Intensity = 0.65, Size = 24, Threshold = 1.0 },
-			colorCorrection = { Brightness = 0, Contrast = 0.17, Saturation = -0.15, TintColor = { 240, 220, 202 } },
+			colorCorrection = { Brightness = -0.05, Contrast = 0.17, Saturation = -0.15, TintColor = { 240, 220, 202 } },
 			sunRays = { Intensity = 0, Spread = 0.8 },
 			rock = { color = { 104, 94, 90 }, material = "Slate", accent = { 112, 66, 52 }, accentChance = 0.22 },
 			weather = { kind = "rust", rate = 6 },
@@ -333,7 +394,7 @@ Config.Env = {
 				ExposureCompensation = -0.15, ClockTime = 23.6, FogStart = 14, FogEnd = 130, FogColor = { 14, 34, 48 } },
 			atmosphere = { Density = 0.44, Offset = 0.12, Color = { 72, 122, 150 }, Decay = { 18, 40, 56 }, Glare = 0.1, Haze = 1.8 },
 			bloom = { Intensity = 0.85, Size = 28, Threshold = 0.95 },
-			colorCorrection = { Brightness = 0.01, Contrast = 0.15, Saturation = -0.05, TintColor = { 204, 230, 255 } },
+			colorCorrection = { Brightness = -0.04, Contrast = 0.15, Saturation = -0.05, TintColor = { 204, 230, 255 } },
 			sunRays = { Intensity = 0, Spread = 0.8 },
 			rock = { color = { 72, 86, 100 }, material = "Slate", accent = { 56, 94, 118 }, accentChance = 0.18 },
 			weather = { kind = "drips", rate = 14 },
@@ -347,7 +408,7 @@ Config.Env = {
 				ExposureCompensation = -0.13, ClockTime = 23.6, FogStart = 14, FogEnd = 130, FogColor = { 16, 38, 34 } },
 			atmosphere = { Density = 0.44, Offset = 0.12, Color = { 82, 150, 130 }, Decay = { 20, 50, 46 }, Glare = 0.12, Haze = 1.8 },
 			bloom = { Intensity = 1.1, Size = 30, Threshold = 0.85 },
-			colorCorrection = { Brightness = 0.01, Contrast = 0.15, Saturation = 0.1, TintColor = { 215, 255, 236 } },
+			colorCorrection = { Brightness = -0.04, Contrast = 0.15, Saturation = 0.1, TintColor = { 215, 255, 236 } },
 			sunRays = { Intensity = 0, Spread = 0.8 },
 			rock = { color = { 68, 80, 72 }, material = "Rock", accent = { 58, 100, 66 }, accentChance = 0.25 },
 			weather = { kind = "spores", rate = 10 },
@@ -361,7 +422,7 @@ Config.Env = {
 				ExposureCompensation = -0.1, ClockTime = 23.6, FogStart = 12, FogEnd = 115, FogColor = { 60, 20, 10 } },
 			atmosphere = { Density = 0.46, Offset = 0.12, Color = { 200, 92, 52 }, Decay = { 70, 24, 12 }, Glare = 0.3, Haze = 2.2 },
 			bloom = { Intensity = 1.3, Size = 32, Threshold = 0.8 },
-			colorCorrection = { Brightness = 0.02, Contrast = 0.2, Saturation = 0.15, TintColor = { 255, 216, 192 } },
+			colorCorrection = { Brightness = -0.03, Contrast = 0.2, Saturation = 0.15, TintColor = { 255, 216, 192 } },
 			sunRays = { Intensity = 0, Spread = 0.8 },
 			rock = { color = { 82, 52, 46 }, material = "Rock", accent = { 108, 40, 26 }, accentChance = 0.2 },
 			weather = { kind = "embers", rate = 18 },
@@ -375,7 +436,7 @@ Config.Env = {
 				ExposureCompensation = -0.1, ClockTime = 23.6, FogStart = 14, FogEnd = 130, FogColor = { 30, 20, 50 } },
 			atmosphere = { Density = 0.44, Offset = 0.12, Color = { 140, 112, 200 }, Decay = { 40, 30, 70 }, Glare = 0.2, Haze = 1.8 },
 			bloom = { Intensity = 1.2, Size = 30, Threshold = 0.82 },
-			colorCorrection = { Brightness = 0.02, Contrast = 0.16, Saturation = 0.2, TintColor = { 232, 216, 255 } },
+			colorCorrection = { Brightness = -0.03, Contrast = 0.16, Saturation = 0.2, TintColor = { 232, 216, 255 } },
 			sunRays = { Intensity = 0, Spread = 0.8 },
 			rock = { color = { 84, 76, 104 }, material = "Marble", accent = { 108, 92, 138 }, accentChance = 0.2 },
 			weather = { kind = "glints", rate = 8 },
@@ -389,7 +450,7 @@ Config.Env = {
 				ExposureCompensation = -0.13, ClockTime = 23.6, FogStart = 14, FogEnd = 135, FogColor = { 40, 34, 22 } },
 			atmosphere = { Density = 0.42, Offset = 0.12, Color = { 170, 150, 110 }, Decay = { 54, 44, 30 }, Glare = 0.12, Haze = 1.6 },
 			bloom = { Intensity = 0.95, Size = 28, Threshold = 0.9 },
-			colorCorrection = { Brightness = 0.01, Contrast = 0.14, Saturation = -0.05, TintColor = { 255, 240, 212 } },
+			colorCorrection = { Brightness = -0.04, Contrast = 0.14, Saturation = -0.05, TintColor = { 255, 240, 212 } },
 			sunRays = { Intensity = 0, Spread = 0.8 },
 			rock = { color = { 108, 94, 78 }, material = "Sandstone", accent = { 138, 124, 100 }, accentChance = 0.16 },
 			weather = { kind = "sand", rate = 6 },
@@ -403,7 +464,7 @@ Config.Env = {
 				ExposureCompensation = -0.11, ClockTime = 23.6, FogStart = 14, FogEnd = 135, FogColor = { 44, 36, 18 } },
 			atmosphere = { Density = 0.42, Offset = 0.12, Color = { 196, 168, 100 }, Decay = { 60, 48, 24 }, Glare = 0.18, Haze = 1.7 },
 			bloom = { Intensity = 1.05, Size = 30, Threshold = 0.86 },
-			colorCorrection = { Brightness = 0.02, Contrast = 0.15, Saturation = 0.05, TintColor = { 255, 236, 196 } },
+			colorCorrection = { Brightness = -0.03, Contrast = 0.15, Saturation = 0.05, TintColor = { 255, 236, 196 } },
 			sunRays = { Intensity = 0, Spread = 0.8 },
 			rock = { color = { 118, 106, 90 }, material = "Limestone", accent = { 146, 132, 104 }, accentChance = 0.16 },
 			weather = { kind = "motes", rate = 7 },
@@ -417,7 +478,7 @@ Config.Env = {
 				ExposureCompensation = -0.11, ClockTime = 23.6, FogStart = 12, FogEnd = 120, FogColor = { 22, 14, 36 } },
 			atmosphere = { Density = 0.46, Offset = 0.12, Color = { 120, 86, 190 }, Decay = { 36, 22, 64 }, Glare = 0.22, Haze = 2.0 },
 			bloom = { Intensity = 1.25, Size = 32, Threshold = 0.8 },
-			colorCorrection = { Brightness = 0.01, Contrast = 0.2, Saturation = 0.12, TintColor = { 226, 210, 255 } },
+			colorCorrection = { Brightness = -0.04, Contrast = 0.2, Saturation = 0.12, TintColor = { 226, 210, 255 } },
 			sunRays = { Intensity = 0, Spread = 0.8 },
 			rock = { color = { 64, 50, 92 }, material = "Slate", accent = { 92, 70, 134 }, accentChance = 0.22 },
 			weather = { kind = "void", rate = 9 },
@@ -431,7 +492,7 @@ Config.Env = {
 				ExposureCompensation = -0.05, ClockTime = 23.6, FogStart = 10, FogEnd = 100, FogColor = { 90, 30, 8 } },
 			atmosphere = { Density = 0.5, Offset = 0.14, Color = { 255, 122, 52 }, Decay = { 100, 30, 6 }, Glare = 0.4, Haze = 2.5 },
 			bloom = { Intensity = 1.6, Size = 36, Threshold = 0.75 },
-			colorCorrection = { Brightness = 0.03, Contrast = 0.24, Saturation = 0.25, TintColor = { 255, 206, 172 } },
+			colorCorrection = { Brightness = -0.02, Contrast = 0.24, Saturation = 0.25, TintColor = { 255, 206, 172 } },
 			sunRays = { Intensity = 0, Spread = 0.8 },
 			rock = { color = { 110, 24, 20 }, material = "Rock", accent = { 150, 56, 24 }, accentChance = 0.28 },
 			weather = { kind = "sparks", rate = 28 },
@@ -451,8 +512,12 @@ Config.Env = {
 -- one cell): step out of it into any open cell beside you and it misses. A hit knocks you down for
 -- a moment and nothing else — no health, no ore, no depth. Client only (Cave.client).
 Config.Hazards = {
-	IntervalMin = 120, -- seconds of MINING (the clock stops while resting) between two hazards
-	IntervalMax = 180,
+	-- Seconds of MINING (the clock stops while resting) between two hazards. DECIDED 2026-09-30 (owner: take
+	-- recommended; EYECANDY.md §12): over 8 drawn caves 120-180 gave ordinary play one per 2.7-3.0 min, the
+	-- slow edge of the owner's "about one per 2-3 minutes"; 110-160 gives one per 2.5-2.8 min
+	-- (check_deepvein_rarity), and one per 2.25 min standing beside an open cell.
+	IntervalMin = 110,
+	IntervalMax = 160,
 	MinTelegraphSeconds = 3,
 	MinCommitSeconds = 1.5,
 	MaxRetargetSpeed = 1.5, -- the hang point stops following a miner who moves faster (the elevator)

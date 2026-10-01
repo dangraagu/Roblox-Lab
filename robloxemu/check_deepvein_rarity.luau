@@ -237,9 +237,12 @@ eq(atSurface, 0, "none at the surface")
 truthy(#gaps == 0 or gaps[1] >= Config.Hazards.IntervalMin - 1,
 	string.format("no two hazards closer than IntervalMin of play (shortest %.0f s)", gaps[1] or 0))
 truthy(perMin <= 1 / 2, string.format("RARE: in ordinary play no more than one hazard per 2 minutes on average (%.2f/min)", perMin))
--- …but not so rare that the pit rule (no launch without a way out) or a retune quietly switches them off:
--- the owner asked for about one near-hit per 2-3 minutes; ordinary digging measured 0.32-0.35/min.
-truthy(perMin >= 1 / 4, string.format("…and they do come: at least one per 4 minutes of ordinary play (%.2f/min)", perMin))
+-- …and not rarer than the owner's "about one near-hit per 2-3 minutes" either. Ordinary digging measured
+-- 0.32-0.35/min on the public cave and 0.33-0.37/min (one per 2.7-3.0 min) on 8 drawn caves on the 120-180 s
+-- clock: the slow edge of the brief. DECIDED 2026-09-30 (owner: take recommended): the clock is 110-160 s of
+-- mining, 0.36-0.41/min on the same 8 caves, the middle of the brief (EYECANDY.md §12); this is the brief's
+-- other bound (mutants D3 and D4 in sweep 6 are killed by it and the one above).
+truthy(perMin >= 1 / 3, string.format("…and they do come: at least one per 3 minutes of ordinary play (%.2f/min)", perMin))
 truthy(perBelow <= 1 / 2, string.format("…and none more often than that below the surface either (%.2f/min)", perBelow))
 
 for _, e in h:errors() do

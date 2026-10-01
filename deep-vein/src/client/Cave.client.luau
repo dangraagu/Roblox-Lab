@@ -260,7 +260,11 @@ local layout = Responsive.layout(Responsive.REF_X, Responsive.REF_Y, UserInputSe
 -- The row's metrics from the last layout, in design px, and the free span it was last placed in.
 local row: any = nil
 local rowPlacedFor = ""
-local chipFits = true
+-- Screen px per character the chip's text must get to be read on a phone (about a 10 px font). The chip
+-- shortens its text to fit its box (chipText below) and is never hidden (review 2026-09-30, finding 5: at
+-- 568x320 with the shop open it was hidden, and its 43 characters got 1.16-3.6 screen px each on phones).
+local CHIP_CHAR_PX = 6
+local CHIP_PAD = 8 -- the chip's UIPadding on each side, design px
 
 -- Place the chip, the Rest button and the warning banner inside the horizontal span [fl, fr]. With no
 -- HUD drawer open that span is the row's own (centred between the HUD's side panels); with a phone
@@ -281,18 +285,21 @@ local function placeRow(fl: number, fr: number)
 		local lL, lR = math.max(MARGIN, fl), math.min(m.elevLeft - GAP, fr)
 		local rL, rR = math.max(m.elevRight + GAP, fl), math.min(m.rootW - MARGIN, fr)
 		local leftW, rightW = math.max(0, lR - lL), math.max(0, rR - rL)
-		local chipW
-		if rightW >= btnW then
-			restBtn.Position = UDim2.fromOffset(rR - btnW, rowTop)
-			chipW = leftW
-		else
-			restBtn.Position = UDim2.fromOffset(lR - btnW, rowTop)
-			chipW = leftW - btnW - GAP
-		end
+		-- the button right of the elevator if it fits there; the chip then takes whichever side has more room
+		-- left, never nothing (review 2026-09-30, finding 5: with the shop open on a 568x320 phone the left side
+		-- was 45 design px and the chip was hidden, while 107 stood free beside the button)
+		local restRight = rightW >= btnW
+		local leftFree = if restRight then leftW else leftW - btnW - GAP
+		local rightFree = if restRight then rightW - btnW - GAP else rightW
+		restBtn.Position = UDim2.fromOffset(if restRight then rR - btnW else lR - btnW, rowTop)
 		restBtn.Size = UDim2.fromOffset(btnW, rowH)
-		chipFits = chipW >= 60 or (fl <= MARGIN and fr >= m.rootW - MARGIN)
-		chip.Position = UDim2.fromOffset(lL, rowTop)
-		chip.Size = UDim2.fromOffset(math.max(60, chipW), rowH)
+		if leftFree >= rightFree then
+			chip.Position = UDim2.fromOffset(lL, rowTop)
+			chip.Size = UDim2.fromOffset(math.max(1, leftFree), rowH)
+		else
+			chip.Position = UDim2.fromOffset(rL, rowTop)
+			chip.Size = UDim2.fromOffset(math.max(1, rightFree), rowH)
+		end
 		-- the banner goes under the chip, unless a drawer squeezed that side and the other has more room
 		if leftW >= WARN_MIN_W or leftW >= rightW then
 			warning.Position = UDim2.fromOffset(lL, warnTop)
@@ -303,11 +310,11 @@ local function placeRow(fl: number, fr: number)
 		end
 	else
 		local width = fr - fl
-		local rowW = math.max(math.min(ROW_W, width), btnW + 60)
+		-- a phone gives the row the whole free span (the chip's text needs it); a desktop keeps it compact
+		local rowW = math.max(if layout.compact then width else math.min(ROW_W, width), btnW + 60)
 		local left = fl + (width - rowW) / 2
 		restBtn.Position = UDim2.fromOffset(left + rowW - btnW, rowTop)
 		restBtn.Size = UDim2.fromOffset(btnW, rowH)
-		chipFits = true
 		chip.Position = UDim2.fromOffset(left, rowTop)
 		chip.Size = UDim2.fromOffset(rowW - btnW - GAP, rowH)
 		warning.Position = UDim2.fromOffset(left, warnTop)
@@ -410,7 +417,17 @@ pcall(function()
 end)
 
 local cardToken = 0
+-- A HAZARD WARNING OUTRANKS A TITLE CARD (review 2026-09-30, finding 5). On a landscape phone the card sits
+-- over the banner (800x360: card y 130-172 screen px, banner 157-192), so a card that comes due during a
+-- warning waits for it, and a warning that starts while a card is up sends the card away until it is over
+-- (frame). Neither is lost; a fanfare's flash waits with its card.
+local pendingCard: { any }? = nil
 local function showCard(title: string, sub: string, celebrate: boolean)
+	if warning.Visible then
+		pendingCard = { title, sub, celebrate }
+		return
+	end
+	pendingCard = nil
 	cardToken += 1
 	local mine = cardToken
 	card.Text = title
@@ -582,6 +599,17 @@ end)
 pcall(function()
 	UserInputService.TouchTap:Connect(function(_, processed)
 		if not processed then clickPulse = true end
+	end)
+end)
+-- …and whichever way a swing reached the server (a gamepad, a touch the engine processed, anything), the server
+-- says so, and that is activity too: nobody mines through a rest (review 2026-09-30, finding 6). Listening only;
+-- this script still fires no remote.
+task.spawn(function()
+	local remotes = ReplicatedStorage:WaitForChild("VeinRemotes", 60)
+	local swingEvent = remotes and remotes:WaitForChild("Swing", 60)
+	if swingEvent == nil then return end
+	(swingEvent :: RemoteEvent).OnClientEvent:Connect(function(uid)
+		if uid == nil or uid == player.UserId then clickPulse = true end
 	end)
 end)
 
@@ -838,24 +866,63 @@ local function frame(dt: number)
 		end
 	end
 
-	-- the chip, the button, the cards
-	local chipText
+	-- the card gives way to a warning, and comes back after it (showCard)
+	if warning.Visible then
+		if card.Visible then
+			pendingCard = { card.Text, cardSub.Text, false } -- a fanfare has flashed already
+			cardToken += 1
+			card.Visible = false
+			cardSub.Visible = false
+		end
+	elseif pendingCard ~= nil then
+		local pc = pendingCard :: { any }
+		pendingCard = nil
+		showCard(pc[1], pc[2], pc[3])
+	end
+
+	-- the chip, the button, the cards. A phone drawer open: the row steps into the side it leaves free,
+	-- banner and Rest button included.
+	placeRow(rowSpan())
+	local options: { string }
 	if resting then
-		chipText = if rest.source == "idle" then "💤 Idle — the cave leaves you alone" else "⛺ Resting — the cave leaves you alone"
+		options = if rest.source == "idle" then { "💤 Idle — the cave leaves you alone", "💤 Idle" }
+			else { "⛺ Resting — the cave leaves you alone", "⛺ Resting" }
 	else
+		-- Longest first; the chip shows the longest its box can hold at CHIP_CHAR_PX. The countdown never promises
+		-- a stratum below the depth wall (review 2026-09-30, finding 8: a rebirth-0 miner at the wall read "🍄 in
+		-- 24 m" of rock that is unbreakable until a rebirth). The wall is the top of the bedrock floor slab.
 		local b = bands[bandIdx]
-		chipText = string.format("%s %s  ·  %d m", b.emoji, b.name, math.floor(Mine.depthStuds(Config, layer)))
+		local depth = math.floor(Mine.depthStuds(Config, layer))
+		local wallLayer = if floorTop then math.floor(-((floorTop :: number) - originY) / S + 0.5) else nil
+		local nextFull, nextShort = nil, nil
 		local nextIdx, remaining = EnvBands.nextBand(bands, layer)
 		if nextIdx then
-			chipText ..= string.format("  ·  %s in %d m", bands[nextIdx].emoji, math.max(1, math.ceil(remaining :: number)) * S)
+			local nb = bands[nextIdx]
+			if wallLayer ~= nil and nb.from > wallLayer then
+				nextFull, nextShort = nb.emoji .. " after a ♻️ rebirth", nb.emoji .. " after ♻️"
+			else
+				nextFull = string.format("%s in %d m", nb.emoji, math.max(1, math.ceil(remaining :: number)) * S)
+				nextShort = nextFull
+			end
+		end
+		options = {}
+		table.insert(options, string.format("%s %s  ·  %d m", b.emoji, b.name, depth) .. (if nextFull then "  ·  " .. nextFull else ""))
+		table.insert(options, string.format("%s %s · %d m", b.emoji, b.name, depth))
+		if nextShort then table.insert(options, string.format("%s %d m · %s", b.emoji, depth, nextShort)) end
+		table.insert(options, string.format("%s %d m", b.emoji, depth))
+	end
+	local room = (chip.Size.X.Offset - 2 * CHIP_PAD) * layout.scale
+	local chipText = options[#options]
+	for _, text in options do
+		if room / math.max(1, utf8.len(text) or #text) >= CHIP_CHAR_PX then
+			chipText = text
+			break
 		end
 	end
 	if chip.Text ~= chipText then chip.Text = chipText end
 	local btnText = if resting then "▶ Mine" elseif rest.pending then "⛺ …" else "⛺ Rest"
 	if restBtn.Text ~= btnText then restBtn.Text = btnText end
-	-- a phone drawer open: the row steps into the side it leaves free, banner and Rest button included
-	placeRow(rowSpan())
-	chip.Visible = chipFits
+	chip.Visible = true
 	restBtn.Visible = true
 
 	-- A new band is announced when the miner STANDS in it (not while falling past it). The first card

@@ -40,7 +40,7 @@ end
 
 local M = Config.Mine
 local W = M.GridW
-local w0 = Mine.world(Config, 0)
+local w0 = Mine.world(Config, 0, Mine.legacyKey(Config, 0))
 
 --============================================================================ 1. the hash
 
@@ -101,6 +101,108 @@ do
 		end
 	end
 	inRange(sum / n, 0.28, 0.39, "neighbouring cells are uncorrelated (mean |a-b| ~ 1/3)")
+end
+
+--============================================================================ 1b. the cave key
+-- Review 2026-09-30, finding 1. src/shared replicates, so this generator and Config.WorldSeed are on every
+-- client, and the State payload carries the rebirth count. The seed was WorldSeed * 7919 + rebirths * 104729
+-- and nothing else, so a probe built from ReplicatedStorage alone predicted 462 of 462 hidden ore cells: an
+-- ore x-ray, and one memorisable map per rebirth shared by everybody. The cave is now a function of a KEY the
+-- server draws per player per rebirth and never replicates: two uniform 32-bit words. `a` seeds the chain the
+-- way the old seed did; `b` enters every cell's LAST mix, after its coordinates, so no single 32-bit state
+-- decides the cave (complete-game-standard §1: a salt on a 32-bit seed that also drives visible geometry is
+-- not enough). Mine.legacyKey names the public cave everybody shared before; only tests and the Studio shot
+-- recipe use it.
+
+do
+	local function describe(k)
+		if type(k) ~= "table" then return tostring(k) end
+		return "{a=" .. tostring(k.a) .. ", b=" .. tostring(k.b) .. "}"
+	end
+	truthy(not pcall(Mine.world, Config, 0), "Mine.world refuses a cave without a key: there is no public cave")
+	for _, bad in { {}, { a = 1 }, { b = 1 }, { a = -1, b = 0 }, { a = 1.5, b = 2 }, { a = 2 ^ 32, b = 0 },
+		{ a = 0, b = 2 ^ 32 }, { a = "1", b = "2" }, { a = 0 / 0, b = 1 }, 7, "key" } do
+		truthy(not pcall(Mine.world, Config, 0, bad), "Mine.world refuses a malformed key " .. describe(bad))
+		truthy(not Mine.validKey(bad), "validKey rejects " .. describe(bad))
+	end
+	truthy(Mine.validKey({ a = 0, b = 0 }) and Mine.validKey({ a = 2 ^ 32 - 1, b = 2 ^ 32 - 1 }),
+		"validKey takes the whole 32-bit range of both words")
+
+	local legacy = Mine.legacyKey(Config, 3)
+	eq(legacy.a, Mine.seedFor(Config, 3), "the legacy key's first word is the old public seed")
+	eq(legacy.b, 0, "…and its second word is zero")
+	eq(Mine.world(Config, 3, legacy).seed, Mine.seedFor(Config, 3), "a legacy world carries the old seed")
+	eq(Mine.world(Config, 3, legacy).maxLayer, Mine.maxLayer(Config, 3), "a keyed world still carries its wall")
+
+	-- The keys the server really draws: one GUID each (HttpService:GenerateGUID), two words out of it.
+	local g1 = "5F1C2A9E-03B4-4D7A-9C21-7E6B5A4F3D2C"
+	local k1 = Mine.keyFromHex(g1)
+	truthy(Mine.validKey(k1), "a GUID makes a valid key")
+	local again = Mine.keyFromHex(g1)
+	truthy(k1 ~= nil and again ~= nil and k1.a == again.a and k1.b == again.b, "…the same GUID the same key")
+	local lower = Mine.keyFromHex(string.lower(g1))
+	truthy(k1 ~= nil and lower ~= nil and k1.a == lower.a and k1.b == lower.b, "…in either case")
+	local moved = 0
+	for i = 1, 36 do
+		local ch = string.sub(g1, i, i)
+		if ch ~= "-" then
+			local flip = (ch == "0") and "1" or "0"
+			local k2 = Mine.keyFromHex(string.sub(g1, 1, i - 1) .. flip .. string.sub(g1, i + 1))
+			if k2 and k1 and (k2.a ~= k1.a or k2.b ~= k1.b) then moved += 1 end
+		end
+	end
+	eq(moved, 32, "every one of a GUID's 32 hex digits moves the key")
+	for _, bad in { "", "5F1C2A9E-03B4", "not a guid at all, not even close!!", "5F1C2A9E-03B4-4D7A-9C21-7E6B5A4F3DZZ" } do
+		eq(Mine.keyFromHex(bad), nil, "keyFromHex refuses '" .. bad .. "'")
+	end
+
+	-- THE SECOND WORD DECIDES THE CAVE. Two keys that share `a` and differ in ONE bit of `b` must be two
+	-- unrelated caves, or `b` is decoration and the cave is still a 32-bit search away. Same for `a`.
+	local R = 3
+	local base = { a = 2718281828, b = 3141592653 }
+	local function compare(ka, kb)
+		local wa, wb = Mine.world(Config, R, ka), Mine.world(Config, R, kb)
+		local rollGap, rolls, kindDiff, cells, oreCells, oreSame = 0, 0, 0, 0, 0, 0
+		for y = 2, wa.maxLayer do
+			for x = 2, W - 1 do
+				for z = 2, W - 1 do
+					cells += 1
+					rollGap += math.abs(Mine.oreRoll(Config, wa, x, y, z) - Mine.oreRoll(Config, wb, x, y, z))
+					rolls += 1
+					local ca, cb = Mine.cell(Config, Ore, wa, x, y, z), Mine.cell(Config, Ore, wb, x, y, z)
+					if ca.kind ~= cb.kind then kindDiff += 1 end
+					if ca.kind == "rock" and cb.kind == "rock" and ca.ore > 0 then
+						oreCells += 1
+						if ca.ore == cb.ore then oreSame += 1 end
+					end
+				end
+			end
+		end
+		return rollGap / rolls, kindDiff / cells, oreSame / math.max(1, oreCells), oreCells
+	end
+	for _, case in {
+		{ "one low bit of b", { a = base.a, b = bit32.bxor(base.b, 1) } },
+		{ "the top bit of b", { a = base.a, b = bit32.bxor(base.b, 2 ^ 31) } },
+		{ "one low bit of a", { a = bit32.bxor(base.a, 1), b = base.b } },
+		{ "b = 0 (the legacy shape)", { a = base.a, b = 0 } },
+	} do
+		local gap, kinds, same, n = compare(base, case[2])
+		print(string.format("  key vs key with %s: mean |roll gap| %.3f, void layout differs on %.1f%%, same ore on %.1f%% of %d ore cells",
+			case[1], gap, kinds * 100, same * 100, n))
+		inRange(gap, 0.30, 0.37, "flipping " .. case[1] .. " re-rolls every cell's ore (mean |gap| ~ 1/3)")
+		truthy(kinds > 0.15, string.format("flipping %s moves the voids (%.1f%% of cells differ)", case[1], kinds * 100))
+		truthy(same < 0.5, string.format("flipping %s leaves the ore at chance (%.1f%% the same)", case[1], same * 100))
+	end
+	-- CONTROL: the comparison can see an identical cave.
+	local gap0, kinds0, same0 = compare(base, { a = base.a, b = base.b })
+	truthy(gap0 == 0 and kinds0 == 0 and same0 == 1, "CONTROL: the same key is the same cave, cell for cell")
+
+	-- THE PUBLIC PREDICTION IS AT CHANCE. What a client can compute (the legacy world: WorldSeed and the
+	-- rebirth count) against a server-keyed cave at the same rebirth.
+	local _, _, publicSame, publicN = compare(Mine.legacyKey(Config, R), base)
+	print(string.format("  the public prediction on a keyed rebirth-%d cave: same ore on %.1f%% of %d ore cells", R, publicSame * 100, publicN))
+	truthy(publicN > 200 and publicSame < 0.5, string.format(
+		"a client's prediction from ReplicatedStorage finds the keyed cave's ore at chance (%.1f%%)", publicSame * 100))
 end
 
 --============================================================================ 2. the noise
@@ -192,7 +294,7 @@ end
 do
 	-- A different rebirth must be a genuinely different cave, or "regenerates a fresh seed" is
 	-- a line in the description that the code does not do.
-	local w1 = Mine.world(Config, 1)
+	local w1 = Mine.world(Config, 1, Mine.legacyKey(Config, 1))
 	local diff, total = 0, 0
 	for y = 2, 24 do
 		for x = 2, W - 1 do
@@ -785,7 +887,7 @@ do
 	--     rebuilt for them on every join, for ever, because nothing unloads. The bound is the
 	--     box, and this is the box — asserted so it cannot grow quietly.
 	do
-		local deep = Mine.world(Config, Config.Prestige.MaxRebirths - 1)
+		local deep = Mine.world(Config, Config.Prestige.MaxRebirths - 1, Mine.legacyKey(Config, Config.Prestige.MaxRebirths - 1))
 		local everything = {}
 		local cells = 0
 		for y = 0, deep.maxLayer do
@@ -862,7 +964,7 @@ local function lattice(w)
 end
 
 do
-	local deep = Mine.world(Config, Config.Prestige.MaxRebirths - 1)
+	local deep = Mine.world(Config, Config.Prestige.MaxRebirths - 1, Mine.legacyKey(Config, Config.Prestige.MaxRebirths - 1))
 
 	-- 1. the shape of the 10 097.
 	do
@@ -893,7 +995,7 @@ end
 --============================================================== 7d. the depth band (Mine.faces)
 
 do
-	local w = Mine.world(Config, 0)
+	local w = Mine.world(Config, 0, Mine.legacyKey(Config, 0))
 	local dug = excavated(w)
 
 	-- Everything, then a window: the window must be a strict subset, and must contain exactly the
@@ -923,7 +1025,7 @@ end
 do
 	-- THE POINT OF THE BAND, MEASURED AT THE WORST WINDOW IN THE GAME. Not the average window: the
 	-- band is a per-player budget, and what matters is the most expensive place a player can stand.
-	local deep = Mine.world(Config, Config.Prestige.MaxRebirths - 1)
+	local deep = Mine.world(Config, Config.Prestige.MaxRebirths - 1, Mine.legacyKey(Config, Config.Prestige.MaxRebirths - 1))
 	local k = Config.Mine.StreamLayers
 	for _, dig in { { "excavated", excavated(deep) }, { "lattice", lattice(deep) } } do
 		local worst, worstAt = 0, 0
@@ -980,7 +1082,7 @@ end
 do
 	local S = Config.Mine.CellSize
 	for _, r in { 0, 1, 24 } do
-		local w = Mine.world(Config, r)
+		local w = Mine.world(Config, r, Mine.legacyKey(Config, r))
 		local shell = Mine.shell(Config, w)
 		eq(#shell, 5, "r" .. r .. ": the box is five slabs, not " .. (4 * (W - 1) * (w.maxLayer + 2))
 			.. " cubes")
@@ -1049,10 +1151,10 @@ do
 	-- CONTROL: the shell has to MOVE when the wall does, or it is a constant pretending to be a
 	-- measurement — a floor that stayed at rebirth 0's depth would seal every deeper cave shut.
 	local f0, f24 = nil, nil
-	for _, s in Mine.shell(Config, Mine.world(Config, 0)) do
+	for _, s in Mine.shell(Config, Mine.world(Config, 0, Mine.legacyKey(Config, 0))) do
 		if s.kind == "floor" then f0 = s.y end
 	end
-	for _, s in Mine.shell(Config, Mine.world(Config, 24)) do
+	for _, s in Mine.shell(Config, Mine.world(Config, 24, Mine.legacyKey(Config, 24))) do
 		if s.kind == "floor" then f24 = s.y end
 	end
 	truthy(f24 < f0 - 100, "CONTROL: the floor slab follows the depth wall down (" .. tostring(f0)
@@ -1104,7 +1206,7 @@ do
 	shadow.Save = { Enabled = false, Store = "somewhere_else", Leaderboard = "nope",
 		AutosaveSeconds = 1, SessionLockSeconds = 2 }
 
-	local sw = Mine.world(shadow, 0)
+	local sw = Mine.world(shadow, 0, Mine.legacyKey(shadow, 0))
 	eq(sw.seed, w0.seed, "CONTROL: cosmetic config does not change the cave seed")
 	eq(sw.maxLayer, w0.maxLayer, "CONTROL: cosmetic config does not move the depth wall")
 
@@ -1129,7 +1231,7 @@ do
 	local realChange = table.clone(Config)
 	realChange.Mine = table.clone(Config.Mine)
 	realChange.Mine.AirThreshold = Config.Mine.AirThreshold - 0.10
-	local rw = Mine.world(realChange, 0)
+	local rw = Mine.world(realChange, 0, Mine.legacyKey(realChange, 0))
 	local noticed = 0
 	for y = 2, 26 do
 		for x = 2, W - 1 do

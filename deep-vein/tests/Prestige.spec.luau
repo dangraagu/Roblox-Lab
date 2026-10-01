@@ -133,7 +133,7 @@ do
 
 	-- Sell the entire rebirth-0 shaft, one cell at a time, through the real economy.
 	local p = newProfile()
-	local w0 = Mine.world(Config, 0)
+	local w0 = Mine.world(Config, 0, Mine.legacyKey(Config, 0))
 	local cells = 0
 	for y = 1, w0.maxLayer do
 		for x = 2, W - 1 do
@@ -295,7 +295,7 @@ do
 
 	-- Everything the rebirth-`r` shaft would pay out if a player mined every last cell of it.
 	local function shaftIncome(r: number): number
-		local w = Mine.world(Config, r)
+		local w = Mine.world(Config, r, Mine.legacyKey(Config, r))
 		local raw = 0
 		for y = 1, w.maxLayer do
 			for x = 2, W - 1 do
@@ -323,6 +323,41 @@ do
 	end
 	print(string.format("  rebirth price across all %d levels: %.2fx the shaft (r%d) .. %.2fx (r%d)"
 		.. " — spread %.2fx", pc.MaxRebirths, worst, worstAt, best, bestAt, best / worst))
+
+	-- EVERY PLAYER'S CAVE IS THEIR OWN NOW (review 2026-09-30, finding 1: the server draws a secret key per
+	-- player per rebirth). The price is analytic, so it is the same for everybody; what must hold is that no
+	-- player's draw makes a rebirth unpayable or trivial. Three drawn keys per level, from a fixed LCG so the
+	-- census is repeatable, on the same two-sided band as the public caves above.
+	local lcg = 20260930
+	local function word()
+		lcg = (lcg * 1103515245 + 12345) % 2147483648
+		local hi = lcg
+		lcg = (lcg * 1103515245 + 12345) % 2147483648
+		return (hi * 2 + lcg % 2) % 4294967296
+	end
+	local kWorst, kBest, keyed = math.huge, 0, 0
+	for r = 0, pc.MaxRebirths - 1 do
+		local need = Prestige.requirement(Config, Ore, r)
+		for _ = 1, 3 do
+			local key = { a = word(), b = word() }
+			local w = Mine.world(Config, r, key)
+			local raw = 0
+			for y = 1, w.maxLayer do
+				for x = 2, W - 1 do
+					for z = 2, W - 1 do
+						local c = Mine.cell(Config, Ore, w, x, y, z)
+						if c.kind == "rock" then raw += Ore.value(Config, c.ore) * Ore.yieldOf(Config, c.ore) end
+					end
+				end
+			end
+			local ratio = math.floor(raw * Prestige.multiplier(Config, r)) / need
+			keyed += 1
+			kWorst, kBest = math.min(kWorst, ratio), math.max(kBest, ratio)
+			truthy(ratio >= 2 and ratio <= 5, string.format(
+				"a drawn cave at rebirth %d stays inside the price band (%.2fx its price)", r, ratio))
+		end
+	end
+	print(string.format("  %d drawn caves (3 per level): %.2fx .. %.2fx their price", keyed, kWorst, kBest))
 
 	-- CONTROLS: the comparison must be able to fail in BOTH directions, or the loop is decoration.
 	local tight = table.clone(Config)

@@ -33,7 +33,7 @@ local BEST = 36
 do
 	local Config = require("../deep-vein/src/shared/Config")
 	local Mine = require("../deep-vein/src/shared/Mine")
-	local w = Mine.world(Config, 2)
+	local w = Mine.world(Config, 2, Mine.legacyKey(Config, 2))
 	local c = Mine.center(Config)
 	local dug = {}
 	for y = 1, BEST do dug[Mine.key(c, y, c)] = true end
@@ -42,6 +42,7 @@ do
 		cash = 0, totalCash = 90000, inventory = {}, pickTier = 5, backpackLevel = 12, lampLevel = 4,
 		rebirths = 2, depthLayer = BEST, bestLayer = BEST,
 		openedBits = Mine.packOpened(Config, w, dug),
+		caveKey = Mine.legacyKey(Config, w.rebirths), -- the cave this fixture was written against (the old public one)
 	} })
 end
 

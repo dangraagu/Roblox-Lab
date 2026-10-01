@@ -230,6 +230,67 @@ do
 	end
 end
 
+--================================================================ …nor does the core's floor, nor a hazard
+-- Review 2026-09-30, finding 3. The rule above held the WALL decor only. The core's glowing floor lies under
+-- the deepest layer's cells from rebirth 10 on, and its cracks were {255,214,120}: 51.2 RGB from gold, which
+-- sits on that floor (8 gold cells on it at rebirth 11). Every hazard model pokes out of the roof where ore
+-- sits (review 2026-09-24, finding 1), and nothing held its colours: the relic's plate could go back to gold
+-- unnoticed. Both are config now (Env.PieceGlow, Env.HazardLook; CaveArt builds from them) and keep the same
+-- distance from every ore that can be beside them: a piece at every depth its band shows it, a hazard at every
+-- layer whose band sends it, and the layers above and below (the roof it hangs in, the floor it lands on).
+
+do
+	local minD = Env.MinDecorOreContrast
+	local function oresNear(layer: number, reach: number)
+		local out = {}
+		for l = math.max(1, layer - reach), math.min(maxRebirthWall, layer + reach) do
+			for tier = 1, Config.MaxOre do
+				if Ore.weight(Config, tier, l) > 0 then out[tier] = true end
+			end
+		end
+		return out
+	end
+	local worst, worstAt, checked = math.huge, "", 0
+	local function hold(what: string, c: { number }, layer: number, reach: number)
+		for tier in oresNear(layer, reach) do
+			checked += 1
+			local d = Strata.contrast(c, Ore.color(Config, tier))
+			if d < worst then
+				worst = d
+				worstAt = string.format("%s {%d,%d,%d} vs %s at layer %d", what, c[1], c[2], c[3], Ore.name(Config, tier), layer)
+			end
+		end
+	end
+	local pieces, looks = Env.PieceGlow, Env.HazardLook
+	truthy(type(pieces) == "table" and type(looks) == "table", "the core floor's and the hazards' colours are config")
+	if type(pieces) == "table" and type(looks) == "table" then
+		truthy(type(pieces.coreglow) == "table" and #pieces.coreglow >= 2, "PieceGlow lists the core floor's plate and cracks")
+		for kind in Hz.Kinds do
+			truthy(type(looks[kind]) == "table" and #looks[kind] >= 1, "HazardLook lists the colours of " .. kind)
+		end
+		for layer = 1, maxRebirthWall do
+			-- a set piece shows at any depth its band has weight
+			local w = EnvBands.weights(bands, layer)
+			for i, b in bands do
+				if (w[i] or 0) > 0 then
+					for _, id in b.pieces or {} do
+						for _, c in pieces[id] or {} do hold("piece " .. id, c, layer, 0) end
+					end
+				end
+			end
+			-- a hazard flies in the band named at the miner's layer, between that layer's roof and floor
+			local b = bands[EnvBands.indexAt(bands, layer)]
+			for _, kind in b.hazards or {} do
+				for _, c in looks[kind] or {} do hold("hazard " .. kind, c, layer, 1) end
+			end
+		end
+		print(string.format("  core floor and hazard models vs ore: worst %.1f (%s), floor %d, %d pairs", worst, worstAt, minD, checked))
+		truthy(checked > 1000, "set-up: the core floor and every hazard were compared with ore at every layer (" .. checked .. ")")
+		truthy(worst >= minD, string.format(
+			"neither the core's floor nor any hazard model is within MinDecorOreContrast of an ore beside it (worst %.1f, %s)", worst, worstAt))
+	end
+end
+
 --================================================================ the lamp stays the main light underground
 -- Review 2026-09-24, finding 6. The server's mine preset (Fx.Presets.Horror, Main.server: "the head lamp
 -- and the glowing ore are ALL the light") is what the paid lamp track (26 -> 74 studs) was built against.
@@ -263,6 +324,26 @@ do
 			"…and OutdoorAmbient (worst x%.2f)", worstO))
 		truthy(worstE <= fill.ReferenceExposure + fill.MaxExposureLift + 1e-9, string.format(
 			"…and exposure stays within +%.2f EV of it (worst %+.2f)", fill.MaxExposureLift, worstE))
+
+		-- Review 2026-09-30, finding 4: the rule above held Ambient and exposure, and the same lift came back
+		-- through the post-process. ColorCorrection.Brightness is added to every pixel, so a lift brightens the
+		-- UNLIT cave, which is exactly what the lamp is for. Every underground band set 0..0.03 against the
+		-- preset's -0.02 (+0.02..+0.05), and a mutant at 0.35 in the core passed every gate. The grade may carry
+		-- a stratum's tint, contrast and saturation, never a lift: at most MaxBrightnessLift over the preset.
+		truthy(type(fill.ReferenceBrightness) == "number" and type(fill.MaxBrightnessLift) == "number"
+			and fill.MaxBrightnessLift <= 0.005, string.format("LampFill holds the preset's post-process brightness and allows no lift (%s, +%s)",
+			tostring(fill.ReferenceBrightness), tostring(fill.MaxBrightnessLift)))
+		if type(fill.ReferenceBrightness) == "number" and type(fill.MaxBrightnessLift) == "number" then
+			local worstB, atB = -math.huge, ""
+			for layer = bands[2].from, maxRebirthWall do
+				local cc = EnvBands.sample(bands, layer, "colorCorrection")
+				if cc.Brightness > worstB then worstB, atB = cc.Brightness, "layer " .. layer end
+			end
+			print(string.format("  post-process brightness below the surface: up to %+.3f (%s), server %+.3f", worstB, atB, fill.ReferenceBrightness))
+			truthy(worstB <= fill.ReferenceBrightness + fill.MaxBrightnessLift + 1e-9, string.format(
+				"…and the colour grade never lifts the unlit cave over the server's (worst %+.3f at %s, server %+.3f)",
+				worstB, atB, fill.ReferenceBrightness))
+		end
 	end
 end
 

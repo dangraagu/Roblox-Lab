@@ -49,7 +49,7 @@ local PIT = nil -- a layer where only the centre cell is dug and all four sides 
 do
 	local Config = require("../deep-vein/src/shared/Config")
 	local Mine = require("../deep-vein/src/shared/Mine")
-	local w = Mine.world(Config, VET_REBIRTHS)
+	local w = Mine.world(Config, VET_REBIRTHS, Mine.legacyKey(Config, VET_REBIRTHS))
 	local c = Mine.center(Config)
 	for y = 100, 200 do
 		local walled = true
@@ -69,6 +69,7 @@ do
 		cash = 0, totalCash = 0, inventory = {}, pickTier = 5, backpackLevel = 12, lampLevel = 8,
 		rebirths = VET_REBIRTHS, depthLayer = w.maxLayer, bestLayer = w.maxLayer,
 		openedBits = Mine.packOpened(Config, w, dug),
+		caveKey = Mine.legacyKey(Config, w.rebirths), -- the cave this fixture was written against (the old public one)
 	} })
 end
 
@@ -130,7 +131,8 @@ local workspaceBefore, lightingBefore, rsBefore = {}, {}, {}
 for _, c in h.workspace:GetChildren() do workspaceBefore[c] = true end
 for _, c in Lighting:GetChildren() do lightingBefore[c.Name] = c.ClassName end
 -- the server's own dark preset (Fx.Presets.Horror), before the client writes anything: what the lamp was built against
-local serverFill = { Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient, Exposure = Lighting.ExposureCompensation }
+local serverFill = { Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient, Exposure = Lighting.ExposureCompensation,
+	Brightness = (Lighting:FindFirstChild("FxColorCorrection") :: any).Brightness }
 for _, c in RS:GetDescendants() do rsBefore[c] = true end
 local expectedCalls = 0 -- remote calls THIS FILE makes (the elevator); the client must add none
 local function elevator(dir)
@@ -161,10 +163,28 @@ local RunService = h.game:GetService("RunService")
 local UIS = h.game:GetService("UserInputService")
 local announced = {}
 local lastCard = ""
+-- every colour a hazard model was DRAWN in, with the layer it was drawn at (review 2026-09-30, finding 3). A
+-- shown model's parts are children of the folder; a hidden one is unparented.
+local hazardLooks: { [string]: { [string]: { rgb: { number }, layer: number } } } = {}
+local function recordHazardLooks()
+	for _, d in folder:GetChildren() do
+		local k = string.match(d.Name, "^Hazard_(%a+)$")
+		if k and d.Transparency < 1 then
+			local rgb = { math.round(d.Color.R * 255), math.round(d.Color.G * 255), math.round(d.Color.B * 255) }
+			local looks = hazardLooks[k] or {}
+			hazardLooks[k] = looks
+			local key = table.concat(rgb, ",")
+			if looks[key] == nil then
+				looks[key] = { rgb = rgb, layer = Mine.layerOfY(Config, d.Position.Y - origin.Y) }
+			end
+		end
+	end
+end
 local function frame(dt)
 	cam.CFrame = CFrame.new(hrp.Position + Vector3.new(0, 8, 14), hrp.Position)
 	RunService.RenderStepped:Fire(dt)
 	h:advance(dt)
+	recordHazardLooks()
 	if card and card.Visible and card.Text ~= lastCard then
 		lastCard = card.Text
 		table.insert(announced, card.Text)
@@ -193,6 +213,7 @@ end
 -- ── measurement helpers ─────────────────────────────────────────────────────
 local Budget = Config.Budget
 local peak = { parts = 0, emitters = 0, rate = 0, lights = 0, beams = 0, trails = 0, hazards = 0 }
+
 local peakWhere = {}
 local function measure(where)
 	local m = { parts = 0, emitters = 0, rate = 0, lights = 0, beams = 0, trails = 0, hazards = 0 }
@@ -392,6 +413,8 @@ local bandRows = {}
 local function luma(c3) return 255 * (0.2126 * c3.R + 0.7152 * c3.G + 0.0722 * c3.B) end
 local function luma3(t) return 0.2126 * t[1] + 0.7152 * t[2] + 0.0722 * t[3] end
 local fillWorst, decorGlowSeen, decorGlowBad, decorOreWorst, decorOreAt = 0, 0, 0, math.huge, ""
+local liftWorst, liftAt = -math.huge, "" -- the post-process brightness the client wrote, over the server's (finding 4)
+local coreSeen, coreBad, coreOreWorst, coreOreAt = 0, 0, math.huge, "" -- the core floor as BUILT (finding 3)
 do
 	-- review 2026-09-24, finding 6: Config.Env.LampFill quotes the server's preset; it must BE the server's preset
 	local fill = Config.Env.LampFill
@@ -399,6 +422,8 @@ do
 	truthy(same(serverFill.Ambient, fill.ReferenceAmbient) and same(serverFill.OutdoorAmbient, fill.ReferenceOutdoorAmbient)
 		and math.abs(serverFill.Exposure - fill.ReferenceExposure) < 1e-6,
 		"Config.Env.LampFill's references are the server's real Lighting before the client ran (Ambient " .. tostring(serverFill.Ambient) .. ")")
+	truthy(math.abs(serverFill.Brightness - fill.ReferenceBrightness) < 1e-6, string.format(
+		"…and its post-process brightness is the server's real colour grade (%+.3f)", serverFill.Brightness))
 end
 do
 	mining(true)
@@ -423,6 +448,35 @@ do
 		-- the lamp stays the main light: below the surface band the fill the client wrote stays near the server's
 		if st.p >= bands[2].from then
 			fillWorst = math.max(fillWorst, luma(Lighting.Ambient) / luma(serverFill.Ambient), luma(Lighting.OutdoorAmbient) / luma(serverFill.OutdoorAmbient))
+			-- …and the colour grade the client wrote lifts nothing over the server's (review 2026-09-30, finding 4)
+			local cc = Lighting:FindFirstChild("FxColorCorrection") :: any
+			local lift = cc.Brightness - serverFill.Brightness
+			if lift > liftWorst then liftWorst, liftAt = lift, st.where end
+		end
+		-- the core's glowing floor as the client BUILT it: from Config.Env.PieceGlow, and like no ore on it (finding 3)
+		for _, d in folder:GetChildren() do
+			if d.Name == "CoreGlow" or d.Name == "CoreCrack" then
+				coreSeen += 1
+				local rgb = { math.round(d.Color.R * 255), math.round(d.Color.G * 255), math.round(d.Color.B * 255) }
+				local want = Config.Env.PieceGlow.coreglow[if d.Name == "CoreGlow" then 1 else 2]
+				if want[1] ~= rgb[1] or want[2] ~= rgb[2] or want[3] ~= rgb[3] then
+					coreBad += 1
+					if coreBad == 1 then print(string.format("  %s: %s glows {%d,%d,%d}, not from Config.Env.PieceGlow", st.where, d.Name, rgb[1], rgb[2], rgb[3])) end
+				end
+				local L = Mine.layerOfY(Config, d.Position.Y - origin.Y)
+				for layer = math.max(1, L - 1), L + 1 do
+					for tier = 1, Config.MaxOre do
+						if Ore.weight(Config, tier, layer) > 0 then
+							local oc = Config.Ores.Color[tier]
+							local dist = math.sqrt((rgb[1] - oc[1]) ^ 2 + (rgb[2] - oc[2]) ^ 2 + (rgb[3] - oc[3]) ^ 2)
+							if dist < coreOreWorst then
+								coreOreWorst = dist
+								coreOreAt = string.format("%s {%d,%d,%d} vs %s at layer %d", d.Name, rgb[1], rgb[2], rgb[3], Config.Ores.Names[tier], layer)
+							end
+						end
+					end
+				end
+			end
 		end
 		-- every glowing decoration the client BUILT is from its kind's palette, and passes for no ore that can sit there
 		for _, d in folder:GetChildren() do
@@ -507,6 +561,14 @@ do
 	eq(decorGlowBad, 0, "every glowing decoration the client built takes its colour from Config.Env.DecorGlow")
 	truthy(decorOreWorst >= Config.Env.MinDecorOreContrast, string.format(
 		"…and none glows within MinDecorOreContrast of an ore that can sit beside it (worst %.1f, %s)", decorOreWorst, decorOreAt))
+	print(string.format("  colour grade below the surface: up to %+.3f over the server's (%s); core floor: %d parts, worst %.1f from an ore (%s)",
+		liftWorst, liftAt, coreSeen, coreOreWorst, coreOreAt))
+	truthy(liftWorst <= Config.Env.LampFill.MaxBrightnessLift + 1e-3, string.format(
+		"below the surface the client's colour grade lifts nothing over the server's (worst %+.3f, %s)", liftWorst, liftAt))
+	truthy(coreSeen >= 5, "set-up: the core's glowing floor was built and read (" .. coreSeen .. " parts)")
+	eq(coreBad, 0, "the core's glowing floor takes its colours from Config.Env.PieceGlow")
+	truthy(coreOreWorst >= Config.Env.MinDecorOreContrast, string.format(
+		"…and passes for no ore that can lie on it (worst %.1f, %s)", coreOreWorst, coreOreAt))
 end
 
 --======================================================================= 4. nothing leaks, nothing is touched
@@ -1024,6 +1086,48 @@ do
 end
 
 do
+	-- Review 2026-09-30, finding 6: a swing wakes the miner WHICHEVER way it reaches the server. The client used
+	-- to count only an unprocessed MouseButton1 or TouchTap as a swing; one by any other path (a gamepad on a
+	-- ClickDetector, say) mined at full rate through idle rest with the hazard clock frozen. The reviewer
+	-- measured 43 blocks broken in 180 s, resting on 2700 of 2700 frames. Here: idle rest, then swings on the
+	-- server's own ClickDetectors with no input event at all.
+	local p = bands[EnvBands.indexOf(bands, "magma")].from + 2
+	local L = math.floor(p)
+	standDepth(p)
+	clickEvery = nil
+	run(25, 1 / 15)
+	truthy(chipIdle(), "set-up: standing still 25 s rests the miner (idle: " .. chip.Text .. ")")
+	-- the rock around the miner's cell at their layer: the west, north and south faces of the column
+	local targets = {}
+	for _, d in myShaft:GetChildren() do
+		local k = d:GetAttribute("CellKey")
+		if k == Mine.key(C - 1, L, C) or k == Mine.key(C, L, C - 1) or k == Mine.key(C, L, C + 1) then table.insert(targets, d) end
+	end
+	truthy(#targets >= 1, "set-up: rock beside the miner is built and clickable (" .. #targets .. ")")
+	local restingFrames, frames, swings = 0, 0, 0
+	for _ = 1, 20 do -- 10 s, a swing every 0.5 s, and not one UserInputService event
+		local target = nil
+		for _, d in targets do
+			if d.Parent ~= nil and d:FindFirstChildOfClass("ClickDetector") then target = d break end
+		end
+		if target then
+			target:FindFirstChildOfClass("ClickDetector").MouseClick:Fire(plr)
+			swings += 1
+		end
+		run(0.5, 1 / 15, function()
+			frames += 1
+			if chipResting() or chipIdle() then restingFrames += 1 end
+		end)
+	end
+	print(string.format("  idle rest, then %d server-side swings with no input event: resting on %d of %d frames", swings, restingFrames, frames))
+	truthy(swings >= 3, "set-up: the server took the swings (" .. swings .. ")")
+	truthy(restingFrames <= 2, string.format(
+		"a swing that reaches the server by any path wakes the miner at once (resting on %d of %d frames)", restingFrames, frames))
+	clickEvery = 1.0
+	work(4, 1 / 15)
+end
+
+do
 	-- right after waking, a rest is QUEUED (MinAwakeSeconds), and a swing drops it
 	local p = bands[EnvBands.indexOf(bands, "magma")].from + 2
 	standDepth(p)
@@ -1063,15 +1167,33 @@ do
 		if chipResting() then rested += 1 end
 	end)
 	eq(rested, 0, "a miner who swings and presses Rest between every swing never rests at all")
-	-- the toggler's last press is still queued; a swing a moment later drops it
+	-- the toggler's last press is still queued; a swing a moment later drops it. A swing under a threat never drops
+	-- a queued rest (by design: stepping off the lane is what the warning asks for), and on the 110-160 s clock a
+	-- hazard was in flight at this moment in 1 of 14 runs (and 2 of 24 in mutation sweep 6), so the set-up below
+	-- flaked. A hazard in flight plays out first; nothing asserted is loosened.
+	work(10, 1 / 15, function()
+		if hazardShown() == nil and not warningLabel.Visible and not hum.PlatformStand then return false end
+	end)
+	hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+	standDepth(p)
 	work(0.5, 1 / 15)
 	click()
 	work(0.5, 1 / 15)
 	if chipResting() then click() work(0.5, 1 / 15) end
 	eq(restBtn.Text, "⛺ Rest", "set-up: no rest queued before the idle test")
 
-	-- idle: no swing and no step for IdleSeconds
+	-- idle: no swing and no step for IdleSeconds. Measured in the topsoil, where no hazard flies: an inbound hazard
+	-- resets the idle clock by design (Rest.update: a threat is not stillness), and on the 110-160 s clock decided
+	-- on 2026-09-30 one landed inside this window often enough to make the timing a coin toss.
+	standAt(1)
+	work(10, 1 / 15, function() -- a hazard already in flight plays out first (it is a threat until it lands)
+		if hazardShown() == nil and not warningLabel.Visible and not hum.PlatformStand then return false end
+	end)
+	hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+	standAt(1)
+	work(1, 1 / 15)
 	clickEvery = nil
+	click() -- the last swing: the idle clock starts here
 	local idleAt = nil
 	local t3 = 0
 	work(30, 1 / 15, function()
@@ -1216,7 +1338,38 @@ do
 	-- button are a label and a button, so this compares them with every piece of the HUD at the top
 	-- level (readout, hint, toast, shop, board, elevator, drawer toggles), at the same ten viewports,
 	-- and the warning banner too, as if it were showing.
-	local VIEWPORTS = require("./emu/hudcheck").VIEWPORTS
+	--
+	-- Review 2026-09-30, finding 5: the gate's ten viewports missed the phones where the row is tightest. At
+	-- 568x320 with the shop open the chip was HIDDEN (36 screen px), and its 43 characters got 1.16 screen px
+	-- each at 640x300 with the shop open, 3.02 at 800x360: text nobody can read. So the reviewer's phones are
+	-- measured too, and at every viewport, drawer open or shut, the chip is SHOWN and its text gets at least
+	-- CHAR_PX screen px per character (a ~10 px font; the chip shortens its text to fit, never hides).
+	local CHAR_PX = 6
+	local VIEWPORTS = table.clone(require("./emu/hudcheck").VIEWPORTS)
+	for _, v in {
+		{ name = "iPhone SE landscape", w = 568, h = 320, touch = true },
+		{ name = "iPhone 8 landscape", w = 667, h = 375, touch = true },
+		{ name = "Android 740x360", w = 740, h = 360, touch = true },
+		{ name = "iPhone 12 landscape", w = 844, h = 390, touch = true },
+		{ name = "iPhone 14 Pro Max landscape", w = 932, h = 430, touch = true },
+		{ name = "iPhone 8 portrait", w = 375, h = 667, touch = true },
+		{ name = "iPhone 12 portrait", w = 390, h = 844, touch = true },
+		{ name = "Android portrait", w = 360, h = 800, touch = true },
+	} do
+		table.insert(VIEWPORTS, v)
+	end
+	local chipReadWorst, chipReadAt, chipStates = math.huge, "", 0
+	local function readChip(where, r)
+		chipStates += 1
+		local sc = (root :: any):FindFirstChildOfClass("UIScale").Scale
+		local textPx = r.sw - 16 * sc -- the chip's UIPadding: 8 design px each side
+		local perChar = textPx / math.max(1, utf8.len(chip.Text) or #chip.Text)
+		if perChar < chipReadWorst then
+			chipReadWorst, chipReadAt = perChar, string.format("%s: '%s' in %.0f screen px", where, chip.Text, r.sw)
+		end
+		truthy(perChar >= CHAR_PX, string.format("%s: the chip's text is readable (%.2f screen px per character: '%s' in %.0f px)",
+			where, perChar, chip.Text, r.sw))
+	end
 	local hudGui = plr.PlayerGui:FindFirstChild("DeepVeinHud")
 	local bad, checked, drawerChecked = 0, 0, 0
 	for _, v in VIEWPORTS do
@@ -1230,6 +1383,7 @@ do
 				if r.obj ~= warningLabel then
 					truthy(r.shown, v.name .. ": " .. r.name .. " is showing (no HUD drawer is open)")
 				end
+				if r.obj == chip then readChip(v.name, r) end
 				table.insert(mine, r)
 			end
 		end
@@ -1274,6 +1428,7 @@ do
 							if r.obj ~= warningLabel then
 								truthy(r.shown, v.name .. ", " .. want .. " drawer open: " .. r.name .. " is still showing")
 							end
+							if r.obj == chip then readChip(v.name .. ", " .. want .. " drawer open", r) end
 							table.insert(rects, r)
 						end
 					end
@@ -1306,7 +1461,8 @@ do
 		end
 	end
 	truthy(checked > 100, "set-up: HUD pieces compared (" .. checked .. ")")
-	truthy(drawerChecked >= 6, "set-up: a phone drawer was opened over the row at every phone viewport (" .. drawerChecked .. ")")
+	truthy(drawerChecked >= 22, "set-up: a phone drawer was opened over the row at every phone viewport (" .. drawerChecked .. ")")
+	print(string.format("  the chip at %d viewport and drawer states: worst %.2f screen px per character (%s)", chipStates, chipReadWorst, chipReadAt))
 	eq(bad, 0, "the band chip, the Rest button and the warning never overlap any piece of the HUD, drawers open or shut, at all ten viewports")
 
 	-- …and live: a phone, the shop open underground, a hazard inbound. The reviewer measured 0 of 95 frames
@@ -1409,6 +1565,44 @@ truthy(peak.rate <= Budget.MaxEmitterRate, "particles per second within budget, 
 truthy(peak.lights <= Budget.MaxLights, "point lights within budget (" .. peak.lights .. " <= " .. Budget.MaxLights .. ")")
 truthy(peak.beams <= Budget.MaxBeams and peak.trails <= Budget.MaxTrails, "beams and trails within budget")
 eq(peak.hazards, Budget.MaxHazards, "one hazard model at a time, at most")
+
+--======================================================================= every hazard as DRAWN passes for no ore
+-- review 2026-09-30, finding 3: EnvConfig.spec holds Config.Env.HazardLook; this holds what the client drew
+do
+	local kinds, bad, worst, worstAt, n = 0, 0, math.huge, "", 0
+	for k, looks in hazardLooks do
+		kinds += 1
+		for _, l in looks do
+			n += 1
+			local inPalette = false
+			for _, c in Config.Env.HazardLook[k] or {} do
+				if c[1] == l.rgb[1] and c[2] == l.rgb[2] and c[3] == l.rgb[3] then inPalette = true end
+			end
+			if not inPalette then
+				bad += 1
+				print(string.format("  Hazard_%s drawn {%d,%d,%d}, not from Config.Env.HazardLook", k, l.rgb[1], l.rgb[2], l.rgb[3]))
+			end
+			for layer = math.max(1, l.layer - 1), l.layer + 1 do
+				for tier = 1, Config.MaxOre do
+					if Ore.weight(Config, tier, layer) > 0 then
+						local oc = Config.Ores.Color[tier]
+						local dist = math.sqrt((l.rgb[1] - oc[1]) ^ 2 + (l.rgb[2] - oc[2]) ^ 2 + (l.rgb[3] - oc[3]) ^ 2)
+						if dist < worst then
+							worst = dist
+							worstAt = string.format("%s {%d,%d,%d} vs %s at layer %d", k, l.rgb[1], l.rgb[2], l.rgb[3], Config.Ores.Names[tier], layer)
+						end
+					end
+				end
+			end
+		end
+	end
+	print(string.format("  hazard models as drawn: %d kinds, %d colours, worst %.1f from an ore beside them (%s)", kinds, n, worst, worstAt))
+	-- six are forced in §5e (every falling kind); the vents come at random
+	truthy(kinds >= 6, "set-up: most hazard kinds were drawn and read (" .. kinds .. ")")
+	eq(bad, 0, "every hazard model is drawn in its Config.Env.HazardLook colours")
+	truthy(worst >= Config.Env.MinDecorOreContrast, string.format(
+		"…and none passes for an ore beside it (worst %.1f, %s)", worst, worstAt))
+end
 
 
 print("")

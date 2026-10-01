@@ -91,7 +91,7 @@ local store = h.services.DataStoreService:GetDataStore(Config.Save.Store)
 -- modules for; every count below is written out by hand.
 local STREAM_REBIRTHS = 8
 do
-	local w = Mine.world(Config, STREAM_REBIRTHS)
+	local w = Mine.world(Config, STREAM_REBIRTHS, Mine.legacyKey(Config, STREAM_REBIRTHS))
 	local c = Mine.center(Config)
 	local dug = {}
 	for y = 1, w.maxLayer do dug[Mine.key(c, y, c)] = true end
@@ -101,9 +101,16 @@ do
 			pickTier = 5, backpackLevel = 12, lampLevel = 0,
 			rebirths = STREAM_REBIRTHS, depthLayer = w.maxLayer, bestLayer = w.maxLayer,
 			openedBits = Mine.packOpened(Config, w, dug),
+			caveKey = Mine.legacyKey(Config, w.rebirths), -- the cave this fixture was written against (the old public one)
 		},
 	})
 end
+
+-- THE WALKER DIGS A KNOWN CAVE. Every count this file writes out by hand was measured in the old public
+-- rebirth-0 cave. Since 2026-09-30 the server draws a secret cave per player (check_deepvein_secret.luau
+-- asserts that path), so the walker's record names that cave by its key and holds nothing else: to the
+-- server it is a brand-new miner (every other field takes its default).
+store:SetAsync("u_" .. WALKER, { data = { caveKey = Mine.legacyKey(Config, 0) } })
 
 assert(h:tryRun("server/Main.server"))
 h:advance(1)
@@ -304,6 +311,10 @@ do
 		end
 		eq(#spawns, 1, "…and it is the ONLY enabled spawn, so the engine has no choice to make ("
 			.. table.concat(spawns, ", ") .. ")")
+		-- complete-game-standard §1 / SPAWN-ORDER.md: the player's RespawnLocation names it, so the engine's
+		-- placement does not rest on the pad being the only enabled spawn in a world that may grow another.
+		truthy(walker.RespawnLocation == pad, "…and the walker's RespawnLocation points at it ("
+			.. tostring(walker.RespawnLocation and walker.RespawnLocation.Name) .. ")")
 		-- and it must not be standing inside anybody's mine
 		local inside = nil
 		for _, f in shafts:GetChildren() do
@@ -752,7 +763,7 @@ do
 		-- was there" can be luck; what cannot be luck is every solid cell of the 3x3 column around
 		-- the landing being up while the pump is still visibly behind. Mine is used here to ADDRESS
 		-- which cells are solid, never to predict how many.
-		local w = Mine.world(Config, STREAM_REBIRTHS)
+		local w = Mine.world(Config, STREAM_REBIRTHS, Mine.legacyKey(Config, STREAM_REBIRTHS))
 		local c = Mine.center(Config)
 		local ly = w.maxLayer
 		local wantCol, haveCol = 0, 0

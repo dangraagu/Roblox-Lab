@@ -309,7 +309,7 @@ end
 --================================================================ the inner faces of the bedrock walls
 
 do
-	local w = Mine.world(cfg, 0)
+	local w = Mine.world(cfg, 0, Mine.legacyKey(cfg, 0))
 	local shell = Mine.shell(cfg, w)
 	local faces = Strata.wallFaces(cfg)
 	local count = 0

@@ -32,7 +32,7 @@ local UID = 5656
 do
 	local Config = require("../deep-vein/src/shared/Config")
 	local Mine = require("../deep-vein/src/shared/Mine")
-	local w = Mine.world(Config, 24)
+	local w = Mine.world(Config, 24, Mine.legacyKey(Config, 24))
 	local c = Mine.center(Config)
 	local dug = {}
 	for y = 1, w.maxLayer do
@@ -44,6 +44,7 @@ do
 		cash = 0, totalCash = 0, inventory = {}, pickTier = 5, backpackLevel = 12, lampLevel = 8,
 		rebirths = 24, depthLayer = w.maxLayer, bestLayer = w.maxLayer,
 		openedBits = Mine.packOpened(Config, w, dug),
+		caveKey = Mine.legacyKey(Config, w.rebirths), -- the cave this fixture was written against (the old public one)
 	} })
 end
 

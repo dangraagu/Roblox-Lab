@@ -437,10 +437,9 @@ LeaderboardEvent.OnClientEvent:Connect(function(topList)
 		l.TextScaled = true
 		l.TextXAlignment = Enum.TextXAlignment.Left
 		l.TextColor3 = Color3.fromRGB(225, 230, 245)
-		local name = "Miner"
-		local okn, res = pcall(function() return Players:GetNameFromUserIdAsync(e.userId) end)
-		if okn then name = res end
-		l.Text = string.format("%d. %s — %dm%s", i, name, e.depth, strataEmoji(e.depth))
+		-- The server resolves names once and keeps them (Main.server nameOf); this client never looks one up.
+		local name = if type(e.name) == "string" and e.name ~= "" then e.name else "Miner"
+		l.Text = string.format("%d. %s — %dm%s", i, name, tonumber(e.depth) or 0, strataEmoji(tonumber(e.depth) or 0))
 		l.Parent = boardList
 		cap(l, 14)
 	end

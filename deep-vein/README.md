@@ -10,6 +10,31 @@ Built from Game-Radar #3 (2026-09-09). Sibling of `labyrint-spill/`, `plus1-jump
 
 ---
 
+## Store description
+
+The text for the experience page (docs/complete-game-standard.md §4), checked against the game on 2026-10-01:
+994 characters (the dashboard allows 1000), plain ASCII, no emoji at all (Roblox rejected coloured-square emoji,
+`docs/publishing.md`). "About half an hour" is the pacing model's number, not telemetry: a normal player first
+stands in the magma at 24.0-33.6 min over eight drawn caves (`tests/Pacing.spec.luau`) and at 23.6 min through the
+real server (`check_deepvein_pace`). The game is not published, so there is no live text; `docs/marketing/store-text.json`
+has no Deep Vein entry and is not this game's to write (it is filled by `tools/store_text.py` after publishing).
+
+```
+Your own mine shaft, and a cave nobody else has. Click a block to swing at it: stone takes a few hits, ore goes in your backpack. Break into a hidden cave and it opens all at once.
+
+Copper near the top, then iron, gold, diamond and obsidian deeper down. When the bag is full, SURFACE + SELL takes you up and sells in one press. Spend it on a better pickaxe, a bigger bag and a wider lamp: there is no sun down here. Your tunnels are saved.
+
+Eleven strata from the grass to the core, each with its own rock, light and wall finds. The magma comes about half an hour in, by our estimate.
+
+Rare hazards: a rock works loose overhead, a steam vent bursts underfoot. A ring at your feet shows where. Step into the next cell and it misses; a hit only knocks you down. Press Rest to take a break.
+
+REBIRTH at the bedrock: a permanent cash multiplier and a new cave, 72 studs deeper.
+
+The Deepest Miners board in your mine shows Public or Friends. Ties go to whoever got there first. Nothing costs Robux.
+```
+
+---
+
 ## The loop
 
 1. **Spawn in the mouth of your shaft** — a 7×7 open room at the surface, walled by bedrock that
@@ -27,7 +52,8 @@ Built from Game-Radar #3 (2026-09-09). Sibling of `labyrint-spill/`, `plus1-jump
    has no sun, so the lamp is the difference between seeing a vein and walking past it.
    Spending can never cost you a rebirth: the rebirth gate is on what this run has **earned**,
    which only ever goes up.
-6. **Hit the depth wall.** Below layer 24 is indestructible bedrock, and it tells you so.
+6. **Hit the depth wall.** Below layer 24 is indestructible bedrock, and it tells you so; so does a
+   click on the bedrock walls around the shaft (the edge of your claim).
    The walls and the floor are five anchored slabs rather than a grid — see *Why the box is five
    Parts*, below.
 7. **♻️ REBIRTH** wipes cash, this run's earnings, haul, upgrades and this run's depth for a
@@ -35,7 +61,14 @@ Built from Game-Radar #3 (2026-09-09). Sibling of `labyrint-spill/`, `plus1-jump
    It costs a fixed fraction of the cave it is charged against — measured at 27-35% of the shaft,
    at every one of the 25 levels.
 
-Deepest-ever depth goes to a global OrderedDataStore leaderboard and survives every rebirth.
+**The Deepest Miners board** (complete-game-standard §3) hangs on the south wall of your own mouth, the
+wall you face when you spawn. It ranks the deepest layer each miner has ever opened (the server measures it: a
+layer counts only when the server opens a cell there), survives every rebirth, and breaks ties by who got there
+FIRST: the OrderedDataStore value is `layer * 2e9 + (2e9 - reachedAtUnix)`, written only when it deepens.
+Walk up to it and press E (or tap) to switch between PUBLIC (the top 10, read at most once a minute) and
+FRIENDS (your Roblox friends, fetched only when you ask, capped at 200 and throttled). Names are looked up
+on the server and never saved. `src/shared/Board.luau` is +1 Jump's module, byte-identical;
+`check_deepvein_board.luau` drives all of it through the real server and client.
 
 ---
 
@@ -85,10 +118,12 @@ this beats culling / pooling / `StreamingEnabled`, in `REVIEW-4.md`.
 
 The cave is coherent **value noise** over a stateless hash of `(seed, x, y, z)`, *not* an LCG
 stream like `grow-a-crystal`'s `Rng`. A stream's output depends on the order cells are drawn in,
-and a player uncovers cells in whatever order they choose to dig. Determinism still comes from
-one `WorldSeed`: `seed = WorldSeed * 7919 + rebirths * 104729`, so two players at the same
-rebirth count are digging the *same* cave, which is the only reason a depth leaderboard means
-anything.
+and a player uncovers cells in whatever order they choose to dig. **Which cave is a secret**
+(2026-09-30): the generator replicates, so a cave decided by `WorldSeed` and the rebirth count, as it
+used to be, could be computed on any client (an ore x-ray; one memorisable map per rebirth). Each
+player's cave at each rebirth now comes from a 64-bit key the server draws, saves with the profile and
+never replicates (`Mine.world(cfg, rebirths, key)`, EYECANDY.md §14). Rebirth prices are analytic, so
+they are the same for everybody, and every drawn cave stays inside the same payable band.
 
 Blocks are only built where the player has actually exposed them. `Mine.reveal` floods through
 open cells with 6-neighbour connectivity (what you can walk through) and collects solid faces
@@ -141,10 +176,14 @@ deep-vein/
   src/shared/Rest.luau      rest rules (plus1-jump's + settle / min-awake)             (pure)
   src/shared/Strata.luau    depth, the rock look, open cells, wall decor layout        (pure)
   src/shared/CaveArt.luau   the strata's art, built in code; CLIENT ONLY
+  src/shared/Board.luau     the highscore board's rules: stored value, ties, views  (verbatim from plus1-jump) (pure)
   src/server/Main.server.luau   authoritative; the ONLY file that knows Roblox exists
   src/client/Hud.client.luau    display + buttons
   src/client/Cave.client.luau   the strata, hazards and rest (cosmetic / local-only)
-  tests/*.spec.luau         one per pure module (+ EnvConfig.spec for the shipped numbers)
+  src/client/Board.client.luau  draws this player's view of the board in their own mouth
+  tests/*.spec.luau         one per pure module (+ EnvConfig.spec for the shipped numbers,
+                            Pacing.spec for the minutes, played on tests/DigModel.luau)
+  MARKETING.md              the clip list for tools/film_game.py
 ```
 
 **Shared modules take their dependencies as ARGUMENTS.** A bare `require("./Ore")` resolves in
@@ -159,15 +198,17 @@ test stayed green.
 ```
 cd deep-vein
 luau tests/Ore.spec.luau            # 1272 passed, 0 failed
-luau tests/Mine.spec.luau           #  173 passed, 0 failed
+luau tests/Mine.spec.luau           #  223 passed, 0 failed
 luau tests/Economy.spec.luau        #  131 passed, 0 failed
-luau tests/Prestige.spec.luau       #  220 passed, 0 failed
+luau tests/Prestige.spec.luau       #  295 passed, 0 failed
 luau tests/Responsive.spec.luau     #   70 passed, 0 failed
 luau tests/EnvBands.spec.luau       #  124 passed, 0 failed
 luau tests/Hazards.spec.luau        #  140 passed, 0 failed
 luau tests/Rest.spec.luau           #   76 passed, 0 failed
 luau tests/Strata.spec.luau         #  103 passed, 0 failed
-luau tests/EnvConfig.spec.luau      #  269 passed, 0 failed
+luau tests/EnvConfig.spec.luau      #  283 passed, 0 failed
+luau tests/Board.spec.luau          #   75 passed, 0 failed   (+1 Jump's board rules, and the metric)
+luau tests/Pacing.spec.luau         #   36 passed, 0 failed   (~20 s: the brag and the long-term goal)
 ```
 
 Then compile and analyze every source:
@@ -185,16 +226,21 @@ fake engine and then asks the world what actually arrived:
 ```
 cd ../robloxemu
 py -3 wrap.py --game ../deep-vein --out build/deep-vein.luau
-luau check_deepvein.luau                     # 136 passed, 0 failed
-luau check_deepvein_cave.luau                # 387 passed, 0 failed   (the strata client, EYECANDY.md)
+luau check_deepvein.luau                     # 144 passed, 0 failed
+luau check_deepvein_board.luau               #  92 passed, 0 failed   (public + friends, on the mouth's wall)
+luau check_deepvein_cave.luau                # 589 passed, 0 failed   (the strata client, EYECANDY.md)
 luau check_deepvein_cave_budget.luau         #  10 passed, 0 failed
-luau check_deepvein_cave_hud.luau            # PASS (HUD fit with the strata row)
+luau check_deepvein_cave_cap.luau            #  14 passed, 0 failed   (budgets capped in code)
+luau check_deepvein_cave_hud.luau            # PASS (HUD fit with the strata row, 18 viewports)
 luau check_deepvein_cave_join.luau           #  22 passed, 0 failed
+luau check_deepvein_cave_row.luau            #  13 passed, 0 failed   (the chip, the card and the warning)
 luau check_deepvein_strata.luau              #  45 passed, 0 failed
 luau check_deepvein_pace.luau                #  29 passed, 0 failed
 luau check_deepvein_rarity.luau              #  15 passed, 0 failed
+luau check_deepvein_secret.luau              #  27 passed, 0 failed   (the cave key never reaches a client)
+luau check_deepvein_lock.luau                #  49 passed, 0 failed   (an owner token on every write)
 cd ../deep-vein
-luau tests/walk.luau                         # 129 passed, 0 failed
+luau tests/walk.luau                         # 130 passed, 0 failed
 ```
 
 Two headless gates, because they answer different questions. `check_deepvein.luau` is the
@@ -223,7 +269,8 @@ workspace.
 
 - **Never run by a person.** No Studio session, no Roblox Player. Unit tests, a headless boot and
   a mutation sweep only.
-- **No experience created, nothing published.** No place ID, no gamepasses, no thumbnail.
+- **No experience created, nothing published.** No place ID, no gamepasses, no thumbnail, no clip
+  (the shot list is `EYECANDY.md` §10, the clip list `MARKETING.md`; both are the night shift's).
 - **No auto-sell, no drill, no pets, no codes, no trading.** The brief mentions auto-sell-on-
   pickup as an alternative to hauling; only hauling is built.
 - **Balance is arithmetic, not play.** Expected value and swings-per-block were computed at every

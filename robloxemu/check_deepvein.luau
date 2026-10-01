@@ -65,12 +65,18 @@ store:SetAsync("u_" .. LOADED, {
 -- Two miners kitted out to dig FAST, so a test can excavate a whole column without spending a
 -- thousand clicks on it: a Singularity Bore one-shots almost everything, and a maxed backpack
 -- means the "your backpack is full" guard never refuses a swing mid-column.
+-- Both dig the cave these sections were written against: the old public rebirth-0 cave (its 144-cell void
+-- at layer 6). Since 2026-09-30 the server draws a secret cave per player (check_deepvein_secret.luau), so
+-- a fixture that needs a KNOWN cave names it by its key, Mine.legacyKey.
+local MineFixture = require("../deep-vein/src/shared/Mine")
+local ConfigFixture = require("../deep-vein/src/shared/Config")
 for _, uid in { SURF, CAVER } do
 	store:SetAsync("u_" .. uid, {
 		data = {
 			cash = 0, totalCash = 0, inventory = {},
 			pickTier = 5, backpackLevel = 12, lampLevel = 0,
 			rebirths = 0, depthLayer = 0, bestLayer = 0,
+			caveKey = MineFixture.legacyKey(ConfigFixture, 0),
 		},
 	})
 end
@@ -153,9 +159,10 @@ do
 	eq(n.bedrock, 0, "…and not one bedrock CUBE is left: the box is slabs")
 	eq(n.shell, 5, "…exactly five of them, four walls and a floor")
 	eq(n.pads, 1, "…with one SELL pad")
-	-- Only what you can swing at gets a detector: 49 floor cells, the sell pad, and the depth-wall
-	-- floor slab, which is clickable on purpose so the bottom of the cave can explain itself.
-	eq(n.clicks, 51, "every minable face is clickable, plus the sell pad and the depth wall")
+	-- What you can swing at gets a detector (49 floor cells), and so does everything a player might try to
+	-- swing at and cannot: the depth-wall floor slab and, since 2026-10-01, the four bedrock walls, which
+	-- answer a click with WHY instead of ignoring it (complete-game-standard §1: no silent no-ops). Plus the pad.
+	eq(n.clicks, 55, "every minable face is clickable, plus the sell pad, the depth wall and the four walls")
 end
 
 do
@@ -209,8 +216,37 @@ do
 		top = math.max(top, wl.Position.Y + wl.Size.Y / 2)
 		eq(wl.Anchored, true, "…anchored (" .. tostring(wl.Name) .. ")")
 		eq(wl.CanCollide, true, "…and solid enough to stop a player (" .. tostring(wl.Name) .. ")")
-		eq(wl:FindFirstChildOfClass("ClickDetector"), nil,
-			"…and not something you can swing at (" .. tostring(wl.Name) .. ")")
+		-- Not minable, and it SAYS so: a wall that silently ignored a click read as a broken game
+		-- (EYECANDY.md §13.2 left this open; complete-game-standard §1).
+		local cd = wl:FindFirstChildOfClass("ClickDetector")
+		truthy(cd ~= nil, "…and a click on it is answered, not ignored (" .. tostring(wl.Name) .. ")")
+		eq(wl:GetAttribute("CellKey"), nil, "…but it is no cell: nothing routes a swing to it (" .. tostring(wl.Name) .. ")")
+	end
+	do
+		-- one click on a wall: a toast that says why, and the walls stay standing
+		local wall = walls[1]
+		local cd = wall and wall:FindFirstChildOfClass("ClickDetector")
+		local before = #toasts
+		if cd then cd.MouseClick:Fire(me) end
+		h:advance(0.1)
+		truthy(#toasts > before and string.find(lastToast(), "Bedrock", 1, true) ~= nil
+			and string.find(lastToast(), "edge", 1, true) ~= nil,
+			"clicking a bedrock wall says it is the edge of the claim (" .. lastToast() .. ")")
+		truthy(wall ~= nil and wall.Parent ~= nil, "…and the wall is still there")
+		-- spam-clicking it does not flood the toast feed
+		local spamFrom = #toasts
+		for _ = 1, 10 do
+			if cd then cd.MouseClick:Fire(me) end
+			h:advance(0.1)
+		end
+		truthy(#toasts - spamFrom <= 1, "ten clicks in a second raise at most one more toast (" .. (#toasts - spamFrom) .. ")")
+		-- and someone else's click on MY wall says nothing to me
+		h:advance(3)
+		local quiet = #toasts
+		local other = { Name = "Stranger", UserId = 999999 }
+		if cd then cd.MouseClick:Fire(other) end
+		h:advance(0.1)
+		eq(#toasts, quiet, "a click by another player on this miner's wall toasts nothing to this miner")
 	end
 	truthy(top >= CELL * (RIM_MULT - 1),
 		"the wall stands " .. tostring(top) .. " studs proud of the mouth — you cannot jump out")

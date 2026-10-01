@@ -20,6 +20,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService") -- GenerateGUID only (cave keys, session tokens); no HTTP
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Mine = require(ReplicatedStorage:WaitForChild("Mine"))
@@ -31,6 +32,8 @@ local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
 -- are replicated with every Part anyway, so this costs no extra instance and no extra traffic.
 local EnvBands = require(ReplicatedStorage:WaitForChild("EnvBands"))
 local Strata = require(ReplicatedStorage:WaitForChild("Strata"))
+-- The highscore board's pure rules (+1 Jump's template, byte-identical): the stored value, ties, the views.
+local Board = require(ReplicatedStorage:WaitForChild("Board"))
 
 -- Mørkt, kaldt og tåkete: en gruve. Horror-preset setter ClockTime 0.2, så det finnes ingen sol
 -- under bakken — lampa på hodelykta og de lysende malmårene er ALT lyset spilleren har.
@@ -53,6 +56,13 @@ local ElevatorEvent = mk("RemoteEvent", "Elevator") -- klient -> server: "up" | 
 local RebirthEvent = mk("RemoteEvent", "Rebirth") -- klient -> server: prestige
 local ToastEvent = mk("RemoteEvent", "Toast") -- server -> klient: kort melding
 local LeaderboardEvent = mk("RemoteEvent", "Leaderboard")
+-- server -> the swinging player: "a swing of yours landed". Cave.client counts it as activity, so a swing by
+-- ANY input path wakes a resting miner (review 2026-09-30, finding 6: only a mouse click or a tap did, and a
+-- swing that reached this server another way mined through idle rest with the hazard clock frozen).
+local SwingEvent = mk("RemoteEvent", "Swing")
+-- server -> one player: THEIR view of the board in their mouth ({ viewer, mode = "public"|"friends", rows, note }).
+-- Board.client draws it locally on that player's own board, so each miner can look at Public or Friends.
+local BoardEvent = mk("RemoteEvent", "Board")
 
 local function toast(plr: Player, msg: string)
 	ToastEvent:FireClient(plr, msg)
@@ -94,12 +104,34 @@ local function defaultProfile()
 		rebirths = 0,
 		depthLayer = 0, -- deepest LAYER opened this run (studs are display only)
 		bestLayer = 0, -- deepest LAYER ever, across every rebirth — the leaderboard
+		-- When bestLayer was first reached (unix seconds): the board's tie-break, earliest first (Board.encode).
+		bestAt = 0,
+		-- The bestLayer last written to the board. The board is written only when bestLayer passes it.
+		boardLayer = 0,
 		-- THE CAVE ITSELF, packed one bit per cell (Mine.packOpened). Without it a rejoining
 		-- player found every cell they had ever mined standing again, ore included, and could
 		-- sell the same shaft over and over just by leaving and coming back.
 		openedBits = nil,
+		-- THE CAVE'S KEY (review 2026-09-30, finding 1): two 32-bit words, drawn here for each player at each
+		-- rebirth and saved with the dug cells it describes. Server-only: never an attribute, never in a payload.
+		caveKey = nil,
 		canSave = false,
+		-- Runtime only: the token this session wrote into the record when its load took the lock. Every write
+		-- lands only if the record still carries it (saveProfile). nil = this session owns nothing.
+		session = nil,
 	}
+end
+
+-- A cave key for one player's one rebirth. Two words out of a fresh GUID (Mine.keyFromHex); if
+-- GenerateGUID ever fails, a server-side Random draws them instead. Never a public key: the cave used to be
+-- WorldSeed and the rebirth count, both of which every client has, and a probe built from ReplicatedStorage
+-- alone predicted 462 of 462 hidden ore cells.
+local keyRng = Random.new()
+local function drawKey()
+	local ok, guid = pcall(function() return HttpService:GenerateGUID(false) end)
+	local k = if ok then Mine.keyFromHex(guid) else nil
+	if k then return k end
+	return { a = keyRng:NextInteger(0, 4294967295), b = keyRng:NextInteger(0, 4294967295) }
 end
 
 local function key(uid: number): string
@@ -121,13 +153,25 @@ end
 
 -- Last + soft session-lock: last ALLTID ekte data; canSave = eier vi låsen. Kort TTL fornyet
 -- av autosave, så en krasj ikke låser spilleren ute.
+--
+-- The load that takes the lock writes a fresh SESSION TOKEN into the record, and saveProfile writes only
+-- while the record still carries it (review 2026-09-30, finding 2). game.JobId names a server, not a
+-- session, so it cannot tell this session from the one that took the record after this one's lock lapsed.
+local function newSessionToken(plr: Player): string
+	local ok, guid = pcall(function() return HttpService:GenerateGUID(false) end)
+	if ok and type(guid) == "string" and #guid > 0 then return guid end
+	return string.format("%s-%d-%d", tostring(game.JobId), plr.UserId, math.floor(os.clock() * 1e6))
+end
+
 local function loadProfile(plr: Player)
 	local p = defaultProfile()
 	if not store then
 		p.canSave = false
+		p.caveKey = drawKey() -- nothing is saved this session, so neither is this cave
 		return p
 	end
 	local acquired = false
+	local token = newSessionToken(plr)
 	local ok, err = pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
 			old = old or {}
@@ -144,6 +188,8 @@ local function loadProfile(plr: Player)
 				p.rebirths = tonumber(d.rebirths) or 0
 				p.depthLayer = tonumber(d.depthLayer) or 0
 				p.bestLayer = tonumber(d.bestLayer) or 0
+				p.bestAt = tonumber(d.bestAt) or 0
+				p.boardLayer = tonumber(d.boardLayer) or 0
 				-- CASH IN HAND IS A LOWER BOUND ON WHAT THIS RUN EARNED, always: the only source of
 				-- cash is a sale, a sale banks the same amount of earnings, and rebirth zeroes
 				-- both together. So a profile written before runEarned existed is migrated to the
@@ -152,6 +198,8 @@ local function loadProfile(plr: Player)
 				-- change. Economy.spec asserts the invariant the migration leans on.
 				p.runEarned = math.max(tonumber(d.runEarned) or 0, tonumber(d.cash) or 0)
 				p.openedBits = type(d.openedBits) == "string" and d.openedBits or nil
+				local k = d.caveKey
+				p.caveKey = if Mine.validKey(k) then { a = k.a, b = k.b } else nil
 			end
 			if lockedByOther then
 				acquired = false
@@ -159,6 +207,7 @@ local function loadProfile(plr: Player)
 			end
 			acquired = true
 			old.jobId = game.JobId
+			old.session = token
 			old.lockUntil = now + Config.Save.SessionLockSeconds
 			return old
 		end)
@@ -168,9 +217,23 @@ local function loadProfile(plr: Player)
 		warn("[DeepVein] load failed for " .. plr.Name .. ": " .. tostring(err))
 	else
 		p.canSave = acquired
+		p.session = if acquired then token else nil
 		if not acquired then
 			warn("[DeepVein] " .. plr.Name .. " READ-ONLY (locked by another session); progress won't save.")
 		end
+	end
+	-- WHICH CAVE THIS SESSION DIGS. A session that holds the lock digs the saved one (or, for a profile that
+	-- never had a key, a freshly drawn one that its next write saves). A session that cannot save digs a
+	-- THROWAWAY cave: it would otherwise be free scouting of the saved cave, every revealed face an ore it
+	-- could later dig straight to, because nothing it does is kept (fork-tower REVIEW-4 §9 found exactly
+	-- that for a read-only session). Its dug tunnels still come back; the rock around them is not the save's.
+	if not p.canSave or p.caveKey == nil then
+		p.caveKey = drawKey()
+	end
+	-- Saved before 2026-10-01: a best depth with no time. When it was reached is unknown, so it is stamped with
+	-- this session (it comes back on the board at the next save, behind everyone who reached that layer before).
+	if p.bestLayer > 0 and p.bestAt <= 0 then
+		p.bestAt = os.time()
 	end
 	return p
 end
@@ -178,36 +241,78 @@ end
 -- Forward-declared: packing the cave needs the live per-player tables, which are built with the
 -- world further down, while saveProfile belongs up here with the rest of the DataStore code.
 local openedBitsOf
+-- …and so is pushState: a save that finds another session owns the record tells the player at once.
+local pushState
+
+-- THE BOARD'S STORE (docs/complete-game-standard.md §3). Written only when the best depth has passed the last one
+-- written, and never lower than what is stored: Board.keepHigher aborts the UpdateAsync otherwise. A tie goes to
+-- whoever reached the layer first (Board.encode). Called only after a profile write landed, so a session that
+-- does not own the profile never writes the board either.
+local function writeBoard(p: any, userId: number)
+	if not orderedLB or p.bestLayer <= (p.boardLayer or 0) then return end
+	local layer = p.bestLayer
+	local value = Board.encode(layer, p.bestAt, Config.Board)
+	local ok = pcall(function()
+		orderedLB:UpdateAsync(key(userId), function(old)
+			return Board.keepHigher(old, value)
+		end)
+	end)
+	if ok then
+		p.boardLayer = layer -- also when keepHigher aborted: what is stored is at least as deep
+	end
+end
 
 -- Returnerer true bare hvis dataene faktisk ble persistert. Rebirth bruker det til en atomisk
 -- flush: den ene uopprettelige handlingen i spillet skal aldri kunne halv-lagres.
 local function saveProfile(plr: Player, releaseLock: boolean): boolean
 	local p = profiles[plr]
 	if not p or not p.canSave or not store then return false end
+	-- OWNERSHIP. The write lands only if the record still carries the token this session's load wrote AND the
+	-- jobId every one of this session's writes stamps; anything else means another session has taken the
+	-- profile since (the jobId catches a server running code from before tokens, which leaves our token in
+	-- place), and this write is cancelled (a nil return), whatever it is: an autosave, a rebirth's flush, the
+	-- final save on leaving. Without it, a server whose lock had lapsed rolled the new session's progress back
+	-- and released its lock. `lost` is set on every invocation: the transform may run more than once.
+	local lost = false
 	local ok = pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
 			old = old or {}
+			if old.session ~= p.session or old.jobId ~= game.JobId then
+				lost = true
+				return nil
+			end
+			lost = false
 			old.data = {
 				cash = p.cash, totalCash = p.totalCash, inventory = p.inventory,
 				runEarned = p.runEarned,
 				pickTier = p.pickTier, backpackLevel = p.backpackLevel, lampLevel = p.lampLevel,
 				rebirths = p.rebirths, depthLayer = p.depthLayer, bestLayer = p.bestLayer,
+				bestAt = p.bestAt, boardLayer = p.boardLayer,
 				-- Packed HERE rather than maintained on every swing: the live `opened` table is
 				-- the authority, and re-deriving the string at the write is the only arrangement
 				-- in which the two cannot drift. A completely excavated rebirth-0 shaft is 336
 				-- characters; the deepest wall in the game is 4 239.
 				openedBits = openedBitsOf(plr, p),
+				-- …in the same write as the key of the cave they belong to, so neither is ever saved without the other
+				caveKey = p.caveKey,
 			}
 			old.jobId = game.JobId
 			old.lockUntil = releaseLock and 0 or (os.time() + Config.Save.SessionLockSeconds)
 			return old
 		end)
 	end)
-	if ok and orderedLB and p.bestLayer > 0 then
-		-- OrderedDataStore krever heltall. Studs, ikke lag, så tallet leser som en dybde.
-		pcall(function()
-			orderedLB:SetAsync(key(plr.UserId), math.floor(Mine.depthStuds(Config, p.bestLayer)))
-		end)
+	if ok and lost then
+		-- Another session owns this profile now. Nothing this one does is kept from here on, so it stops
+		-- writing (and a rebirth, which is granted only inside a write, is refused), and the player is told.
+		p.canSave = false
+		p.session = nil
+		warn("[DeepVein] " .. plr.Name .. ": another session has taken this profile; nothing here saves any more.")
+		toast(plr, "⚠️ Your progress is saved by another server now, so nothing here saves any more. Rejoin to carry on.")
+		if plr.Parent ~= nil then pushState(plr) end
+		return false
+	end
+	if ok then
+		writeBoard(p, plr.UserId)
 	end
 	return ok
 end
@@ -251,7 +356,9 @@ local function buildSpawnPad()
 	pad.Parent = workspace
 	return pad
 end
-buildSpawnPad()
+-- …and every player's RespawnLocation points at it (robloxemu/SPAWN-ORDER.md, complete-game-standard §1), so the
+-- engine's own placement never depends on there being exactly one enabled spawn in the world.
+local spawnPad = buildSpawnPad()
 
 local usedShafts = {} -- [shaftIndex] = player
 local shaftIndex = {} -- [player] = index
@@ -263,6 +370,7 @@ local cellDefs = {} -- [player] = { [cellKey] = Mine.Cell }
 local cellHp = {} -- [player] = { [cellKey] = remaining hit points }
 local deepestOpen = {} -- [player] = { x, y, z } — where the "DESCEND" elevator drops you
 local lastSwing = {} -- [player] = tick() of the last accepted swing
+local lastWallToast = {} -- [player] = tick() of the last "this is the edge of your claim" toast
 local lampOf = {} -- [player] = PointLight on the character
 local buildQueue = {} -- [player] = { cells, head, folder } — solids waiting for a frame's budget
 local bandOf = {} -- [player] = { lo, hi, centre } — the LAYERS that currently hold Parts
@@ -278,7 +386,8 @@ local bandOf = {} -- [player] = { lo, hi, centre } — the LAYERS that currently
 openedBitsOf = function(plr: Player, p: any): string?
 	local w = worlds[plr]
 	local op = opened[plr]
-	if w == nil or op == nil or w.rebirths ~= (p.rebirths or 0) then
+	local key = p.caveKey
+	if w == nil or op == nil or w.rebirths ~= (p.rebirths or 0) or key == nil or w.seed ~= key.a or w.key2 ~= key.b then
 		return p.openedBits -- no live shaft for THIS rebirth: keep whatever the profile carries
 	end
 	local bits = Mine.packOpened(Config, w, op)
@@ -328,11 +437,10 @@ end
 --============================================================================== parts
 
 local swing -- forward declaration (the ClickDetector handler needs it)
--- Forward-declared for the same reason: sellHaul is built with the world, well before the state
--- pusher exists, and the headless check caught what happens without this — the SELL pad DID sell
--- your haul and then never told the client, so the cash readout and the backpack bar both sat
--- there unchanged and the only reasonable thing a player could conclude was that it was broken.
-local pushState
+-- (pushState is forward-declared above saveProfile. sellHaul, built with the world well before the state
+-- pusher exists, needs it too: the headless check caught what happens without it — the SELL pad DID sell
+-- your haul and then never told the client, so the cash readout and the backpack bar both sat there
+-- unchanged and the only reasonable thing a player could conclude was that it was broken.)
 
 -- The bedrock's look is config (Config.Mine.BedrockColor / BedrockMaterial), so EnvConfig.spec can hold every
 -- stratum's stone away from it: the unbreakable walls must never look like the rock beside them.
@@ -688,7 +796,10 @@ local function noteOpen(plr: Player, x: number, y: number, z: number)
 	local p = profiles[plr]
 	if not p then return end
 	if y > p.depthLayer then p.depthLayer = y end
-	if y > p.bestLayer then p.bestLayer = y end
+	if y > p.bestLayer then
+		p.bestLayer = y
+		p.bestAt = os.time() -- the board's tie-break: the first to open a layer ranks above the next
+	end
 	local d = deepestOpen[plr]
 	if not d or y > d.y then deepestOpen[plr] = { x = x, y = y, z = z } end
 end
@@ -895,6 +1006,21 @@ local function buildShell(plr: Player)
 				lastSwing[plr] = now
 				toast(plr, "🪨 Bedrock. This is as deep as this cave goes — REBIRTH to open a deeper one!")
 			end)
+		else
+			-- …AND SO DO THE WALLS (2026-10-01, complete-game-standard §1: no silent no-ops). A click on one did
+			-- nothing at all, which reads as a broken pickaxe. Not a swing: it costs no cooldown and wakes no
+			-- one; it only says why, at most once per WallToastSeconds so a missed click streak is not a flood.
+			local cd = Instance.new("ClickDetector")
+			cd.MaxActivationDistance = Config.Mine.ReachStuds
+			cd.Parent = part
+			cd.MouseClick:Connect(function(clicker)
+				if clicker ~= plr then return end
+				local now = tick()
+				local last = lastWallToast[plr]
+				if last and (now - last) < Config.Mine.WallToastSeconds then return end
+				lastWallToast[plr] = now
+				toast(plr, "🪨 Bedrock: the edge of your claim. Dig down or across, inside the walls.")
+			end)
 		end
 		part.Parent = folder
 		made += 1
@@ -912,7 +1038,7 @@ local function buildShaft(plr: Player)
 	folder.Parent = shaftsFolder
 	shaftFolders[plr] = folder
 
-	worlds[plr] = Mine.world(Config, p.rebirths)
+	worlds[plr] = Mine.world(Config, p.rebirths, p.caveKey)
 	opened[plr] = {}
 	cellParts[plr] = {}
 	cellDefs[plr] = {}
@@ -1112,6 +1238,8 @@ swing = function(plr: Player, cellKey: string)
 	local last = lastSwing[plr]
 	if last and (now - last) < Config.Mine.SwingCooldown then return end
 	lastSwing[plr] = now
+	-- A swing is activity, whether it breaks, chips, or is refused below (bedrock, a full backpack).
+	SwingEvent:FireClient(plr, plr.UserId)
 
 	if not cell.breakable then
 		toast(plr, "🪨 Bedrock. This is as deep as this cave goes — REBIRTH to open a deeper one!")
@@ -1233,6 +1361,9 @@ RebirthEvent.OnServerEvent:Connect(function(plr)
 		-- cave is every tunnel the player has dug. A rollback that restored the counter but not
 		-- the cave would hand back a rebirth the player already spent their whole shaft on.
 		runEarned = p.runEarned, openedBits = p.openedBits,
+		-- …and the key of the cave those cells were dug in, so a rolled-back rebirth goes on saving the cave
+		-- the player is still standing in rather than the one they did not get
+		caveKey = p.caveKey,
 	}
 
 	local ok, reason = Prestige.apply(p, Config, Ore)
@@ -1246,6 +1377,8 @@ RebirthEvent.OnServerEvent:Connect(function(plr)
 		end
 		return
 	end
+	-- A new cave: a new key, drawn now so the atomic flush below saves it with the new rebirth count.
+	p.caveKey = drawKey()
 
 	if p.canSave and not saveProfile(plr, false) then
 		for k, v in pairs(before) do p[k] = v end
@@ -1269,19 +1402,280 @@ RebirthEvent.OnServerEvent:Connect(function(plr)
 	pushState(plr)
 end)
 
---============================================================================== leaderboard
+--============================================================================== the board: public + friends
 
-local function refreshLeaderboard()
-	if not orderedLB then return end
-	local ok, page = pcall(function() return orderedLB:GetSortedAsync(false, 10) end)
-	if not ok or not page then return end
-	local top = {}
-	for _, e in ipairs(page:GetCurrentPage()) do
-		top[#top + 1] = { userId = tonumber((string.gsub(e.key, "^u_", ""))), depth = e.value }
+-- docs/complete-game-standard.md §3. The metric is bestLayer, measured here (noteOpen: a layer counts only when
+-- this server opens a cell in it, by a swing it accepted or a void that swing broke into). Stored encoded in
+-- Config.Save.Leaderboard (Board.encode: ties to whoever got there first), written only when it deepens
+-- (writeBoard). The public top 10 is read at most once per PublicCacheSeconds. Friends are read only when a miner
+-- asks for them at their board: capped, cached and throttled (Board.newLimiter plus Roblox's own budget). Names
+-- are looked up here and kept in memory, never saved.
+--
+-- WHERE: every miner spawns in their own mouth, 160 studs from the next, inside bedrock walls they cannot climb
+-- out of. So each miner gets a board of their own, hung on the mouth's SOUTH wall: the wall a freshly spawned
+-- miner faces (spawnCFrame looks south), above the mouth floor and under the pithead on the rim. It is in a
+-- folder of its own, not in the shaft, so a rebirth (which rebuilds the shaft) leaves it standing and the
+-- shaft's part counts are untouched. Board.client draws each player's own view on their own board.
+local BC = Config.Board
+local boardsFolder = Instance.new("Folder")
+boardsFolder.Name = "DeepBoards"
+boardsFolder.Parent = workspace
+local BOARD_SIZE = Vector3.new(22, 12, 0.4) -- 880 x 480 px at Board.client's 40 px per stud
+local BOARD_BOTTOM = 2.5 -- studs over the mouth floor: a miner standing in front of it reads it at eye level
+local boardParts: { [Player]: BasePart } = {}
+local boardMode: { [Player]: string } = {} -- "public" | "friends", per player
+local showBoard -- forward-declared: the prompt is wired when the board is built
+
+local function buildBoard(plr: Player)
+	local S = Config.Mine.CellSize
+	local inner = (Config.Mine.GridW - 2) * S / 2 -- the walls' inner faces, 21 studs from the centre
+	local centre = shaftOrigin(shaftIndex[plr] or 0)
+		+ Vector3.new(0, BOARD_BOTTOM + BOARD_SIZE.Y / 2, inner - 0.25 - BOARD_SIZE.Z / 2)
+	local part = Instance.new("Part")
+	part.Name = "DeepestBoard_" .. plr.UserId
+	part.Anchored = true
+	part.CanCollide = true
+	part.CanTouch = false
+	part.CanQuery = false -- a click aimed at the rock never lands on the board
+	part.CastShadow = false
+	part.Size = BOARD_SIZE
+	-- the front face (local -Z, where Board.client draws) looks north, across the mouth at the spawn
+	part.CFrame = CFrame.lookAt(centre, centre + Vector3.new(0, 0, -1))
+	part.Material = Enum.Material.SmoothPlastic
+	part.Color = Color3.fromRGB(24, 22, 30)
+	part:SetAttribute("BoardOf", plr.UserId)
+	-- a gold rim behind it: anything interactive should read as interactive (docs/new-game-checklist.md §2)
+	local trim = Instance.new("Part")
+	trim.Name = "Trim"
+	trim.Anchored = true
+	trim.CanCollide = false
+	trim.CanTouch = false
+	trim.CanQuery = false
+	trim.CastShadow = false
+	trim.Size = Vector3.new(BOARD_SIZE.X + 0.8, BOARD_SIZE.Y + 0.8, 0.2)
+	trim.CFrame = part.CFrame * CFrame.new(0, 0, BOARD_SIZE.Z / 2 + 0.05) -- local +Z = behind the board
+	trim.Material = Enum.Material.Neon
+	trim.Color = Color3.fromRGB(255, 196, 90)
+	trim.Parent = part
+	-- the prompt at the foot of the board, so it shows when a miner walks over to it, not at the spawn
+	local at = Instance.new("Attachment")
+	at.Name = "PromptAt"
+	at.Position = Vector3.new(0, -BOARD_SIZE.Y / 2 + 0.5, -BOARD_SIZE.Z / 2 - 0.3)
+	at.Parent = part
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "BoardPrompt"
+	prompt.ActionText = BC.Text.Prompt
+	prompt.ObjectText = "Deepest Miners"
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = BC.PromptDistance
+	prompt.RequiresLineOfSight = false
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.Parent = at
+	prompt.Triggered:Connect(function(who: Player)
+		if who ~= plr then
+			-- unreachable in play (every mouth is walled off from the next), but never silent
+			toast(who, "📋 That board belongs to another miner. Yours hangs on the south wall of your own mine.")
+			return
+		end
+		boardMode[plr] = if boardMode[plr] == "friends" then "public" else "friends"
+		showBoard(plr)
+	end)
+	part.Parent = boardsFolder
+	boardParts[plr] = part
+end
+
+-- Names: from players in this server, the friends list or GetNameFromUserIdAsync; kept in memory, never saved.
+local nameCache: { [number]: string } = {}
+local function nameOf(userId: number): string
+	local cached = nameCache[userId]
+	if cached then return cached end
+	local here = Players:GetPlayerByUserId(userId)
+	if here then
+		nameCache[userId] = here.Name
+		return here.Name
 	end
-	for _, plr in ipairs(Players:GetPlayers()) do
-		LeaderboardEvent:FireClient(plr, top)
+	local ok, res = pcall(function()
+		return Players:GetNameFromUserIdAsync(userId)
+	end)
+	if ok and type(res) == "string" then
+		nameCache[userId] = res
+		return res
 	end
+	return "#" .. tostring(userId) -- not cached: the next view tries again
+end
+local function withNames(rows: { any }): { any }
+	local out = {}
+	for i, r in rows do
+		out[i] = { rank = r.rank, userId = r.userId, tier = r.tier, you = r.you, name = nameOf(r.userId) }
+	end
+	return out
+end
+
+-- A player's own value, from memory (fresher than the store, which is written at autosave).
+local function liveValue(p: any): number
+	if not p or p.bestLayer <= 0 then return 0 end
+	return Board.encode(p.bestLayer, p.bestAt, BC)
+end
+
+local publicView: any = { rows = {}, note = BC.Text.Loading }
+
+local function sendBoard(plr: Player, mode: string, view: any)
+	-- `viewer`: in Roblox FireClient reaches only this player; the field lets the client ignore anything else.
+	BoardEvent:FireClient(plr, { viewer = plr.UserId, mode = mode, rows = view.rows, note = view.note })
+end
+
+local function refreshPublic()
+	if not orderedLB then
+		publicView = Board.publicView({}, BC)
+		return
+	end
+	local ok, page = pcall(function()
+		return orderedLB:GetSortedAsync(false, BC.PublicRows)
+	end)
+	if not ok or not page then return end -- keep the last list
+	local okPage, items = pcall(function()
+		return page:GetCurrentPage()
+	end)
+	if not okPage or type(items) ~= "table" then return end
+	local entries = {}
+	for _, e in ipairs(items) do
+		local uid = Board.userIdOf(tostring(e.key))
+		if uid and type(e.value) == "number" then
+			table.insert(entries, { userId = uid, value = e.value })
+		end
+	end
+	local view = Board.publicView(entries, BC)
+	publicView = { rows = withNames(view.rows), note = view.note }
+end
+
+local function sendPublic(plr: Player)
+	-- the HUD's top-10 drawer: decoded depths in studs and the server's names, never a stored value
+	local hudRows = {}
+	for i, r in publicView.rows do
+		hudRows[i] = { userId = r.userId, depth = math.floor(Mine.depthStuds(Config, r.tier)), name = r.name }
+	end
+	LeaderboardEvent:FireClient(plr, hudRows)
+	if boardMode[plr] == "public" then sendBoard(plr, "public", publicView) end
+end
+
+-- Friends: only on request, capped at FriendsCap, cached per player. A failed fetch is retried after a minute,
+-- not on every press.
+local friendsCache = Board.newCache(BC.FriendsCacheSeconds)
+local friendsFailed = Board.newCache(60)
+local scoreCache = Board.newCache(BC.ScoreCacheSeconds)
+local readLimiter = Board.newLimiter(BC.ReadsBurst, BC.ReadsPerSecond, tick())
+local fetching: { [Player]: boolean } = {}
+
+local function friendIdsOf(plr: Player): ({ number }, boolean)
+	local now = tick()
+	local hit = Board.cacheGet(friendsCache, plr.UserId, now)
+	if hit then return hit, false end
+	if Board.cacheHas(friendsFailed, plr.UserId, now) then return {}, true end
+	local ok, pages = pcall(function()
+		return (Players :: any):GetFriendsAsync(plr.UserId)
+	end)
+	local ids = {}
+	local broken = not ok or pages == nil
+	while not broken and #ids < BC.FriendsCap do
+		local okPage, items = pcall(function()
+			return pages:GetCurrentPage()
+		end)
+		if not okPage or type(items) ~= "table" then
+			broken = #ids == 0
+			break
+		end
+		for _, item in ipairs(items) do
+			local id = tonumber(item.Id)
+			if id and #ids < BC.FriendsCap then
+				table.insert(ids, id)
+				if type(item.Username) == "string" then nameCache[id] = item.Username end
+			end
+		end
+		if pages.IsFinished or #ids >= BC.FriendsCap then break end
+		if not pcall(function() pages:AdvanceToNextPageAsync() end) then break end
+	end
+	if broken then
+		Board.cachePut(friendsFailed, plr.UserId, true, now)
+		return {}, true
+	end
+	Board.cachePut(friendsCache, plr.UserId, ids, now)
+	return ids, false
+end
+
+-- Always leave BudgetReserve GetAsync calls in Roblox's budget (if it cannot be read, only the limiter applies).
+local function budgetLeft(): boolean
+	local ok, budget = pcall(function()
+		return DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetAsync)
+	end)
+	return not (ok and type(budget) == "number" and budget < BC.BudgetReserve)
+end
+
+-- A friend's stored value (0 = has not dug), or nil while reads are throttled (try again later). A read that fails
+-- counts as 0 without being cached, so one bad key does not stop the list.
+local function friendValue(userId: number): number?
+	local here = Players:GetPlayerByUserId(userId)
+	if here and profiles[here] then return liveValue(profiles[here]) end
+	local now = tick()
+	if Board.cacheHas(scoreCache, userId, now) then return Board.cacheGet(scoreCache, userId, now) end
+	if not orderedLB then return 0 end
+	if not budgetLeft() or not Board.take(readLimiter, now) then return nil end
+	local ok, v = pcall(function()
+		return orderedLB:GetAsync(key(userId))
+	end)
+	if not ok then return 0 end
+	local value = if type(v) == "number" then v else 0
+	Board.cachePut(scoreCache, userId, value, now)
+	return value
+end
+
+-- The board's current mode, drawn: friends are fetched (on this request only), public is the cached top 10.
+showBoard = function(plr: Player)
+	if boardMode[plr] ~= "friends" then
+		sendBoard(plr, "public", publicView)
+		return
+	end
+	if fetching[plr] then
+		sendBoard(plr, "friends", { rows = {}, note = BC.Text.Loading }) -- the fetch already running sends soon
+		return
+	end
+	fetching[plr] = true
+	task.spawn(function()
+		sendBoard(plr, "friends", { rows = {}, note = BC.Text.Loading })
+		local ids, failedList = friendIdsOf(plr)
+		local values: { [number]: number } = {}
+		local status = { friendCount = #ids, checked = 0, failed = failedList }
+		local function push()
+			values[plr.UserId] = liveValue(profiles[plr])
+			local view = Board.friendsView(plr.UserId, values, status, BC)
+			sendBoard(plr, "friends", { rows = withNames(view.rows), note = view.note })
+		end
+		local i, lastPush = 1, -math.huge
+		while i <= #ids and plr.Parent == Players and boardMode[plr] == "friends" do
+			local v = friendValue(ids[i])
+			if v == nil then
+				status.checked = i - 1
+				if tick() - lastPush >= 0.5 then
+					push()
+					lastPush = tick()
+				end
+				task.wait(1) -- throttled: wait for the limiter
+			else
+				values[ids[i]] = v
+				i += 1
+			end
+		end
+		status.checked = i - 1
+		if plr.Parent == Players and boardMode[plr] == "friends" then push() end
+		fetching[plr] = nil
+	end)
+end
+
+local function teardownBoard(plr: Player)
+	local part = boardParts[plr]
+	boardParts[plr] = nil
+	if part then part:Destroy() end
+	boardMode[plr] = nil
+	fetching[plr] = nil
 end
 
 --============================================================================== lifecycle
@@ -1324,8 +1718,13 @@ local function onPlayerAdded(plr: Player)
 	cashValue.Parent = ls
 	ls.Parent = plr
 
+	-- Where the ENGINE puts this player (on join and on every respawn), before `place` moves them into their shaft.
+	plr.RespawnLocation = spawnPad
+
 	claimShaft(plr)
 	buildShaft(plr)
+	buildBoard(plr)
+	boardMode[plr] = "public"
 
 	-- THE ENGINE PLACES THE CHARACTER **AFTER** CharacterAdded, AND THE ENGINE WINS.
 	--
@@ -1375,6 +1774,7 @@ local function onPlayerAdded(plr: Player)
 	if plr.Character then place(plr.Character) end
 
 	pushState(plr)
+	sendPublic(plr) -- the board and the HUD's top 10 from the cached list, at once
 end
 
 local function onPlayerRemoving(plr: Player)
@@ -1382,11 +1782,13 @@ local function onPlayerRemoving(plr: Player)
 	-- Destroy the shaft FIRST, then free the index: a join in the same frame must never be able
 	-- to claim a name that is still taken.
 	teardownShaft(plr)
+	teardownBoard(plr) -- before the index is freed: the next miner in this mouth gets a board of their own
 	local idx = shaftIndex[plr]
 	shaftIndex[plr] = nil
 	if idx ~= nil then usedShafts[idx] = nil end
 	profiles[plr] = nil
 	lastSwing[plr] = nil
+	lastWallToast[plr] = nil
 	lampOf[plr] = nil
 	buildQueue[plr] = nil
 end
@@ -1409,8 +1811,11 @@ end)
 
 task.spawn(function()
 	while true do
-		refreshLeaderboard()
-		task.wait(30)
+		refreshPublic() -- at most one GetSortedAsync per PublicCacheSeconds
+		for _, plr in ipairs(Players:GetPlayers()) do
+			sendPublic(plr)
+		end
+		task.wait(BC.PublicCacheSeconds)
 	end
 end)
 

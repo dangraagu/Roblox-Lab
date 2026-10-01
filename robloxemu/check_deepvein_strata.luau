@@ -38,7 +38,7 @@ local VET_REBIRTHS = 12 -- wall at layer 168: the Core starts at 150
 do
 	local Config = require("../deep-vein/src/shared/Config")
 	local Mine = require("../deep-vein/src/shared/Mine")
-	local w = Mine.world(Config, VET_REBIRTHS)
+	local w = Mine.world(Config, VET_REBIRTHS, Mine.legacyKey(Config, VET_REBIRTHS))
 	local c = Mine.center(Config)
 	local dug = {}
 	for y = 1, w.maxLayer do dug[Mine.key(c, y, c)] = true end
@@ -47,6 +47,7 @@ do
 		cash = 0, totalCash = 0, inventory = {}, pickTier = 5, backpackLevel = 12, lampLevel = 0,
 		rebirths = VET_REBIRTHS, depthLayer = w.maxLayer, bestLayer = w.maxLayer,
 		openedBits = Mine.packOpened(Config, w, dug),
+		caveKey = Mine.legacyKey(Config, w.rebirths), -- the cave this fixture was written against (the old public one)
 	} })
 	-- the obsidian miner: the same shaft, the column dug to layer OBS_LAYER
 	local dugObs = {}
@@ -55,6 +56,7 @@ do
 		cash = 0, totalCash = 0, inventory = {}, pickTier = 5, backpackLevel = 12, lampLevel = 0,
 		rebirths = VET_REBIRTHS, depthLayer = OBS_LAYER, bestLayer = OBS_LAYER,
 		openedBits = Mine.packOpened(Config, w, dugObs),
+		caveKey = Mine.legacyKey(Config, w.rebirths), -- the cave this fixture was written against (the old public one)
 	} })
 end
 

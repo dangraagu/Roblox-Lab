@@ -14,7 +14,7 @@
 -- because a player uncovers cells in whatever order they choose to dig, and a cell's contents
 -- must not depend on when it was first looked at. So each cell's numbers come from a stateless
 -- mixer over (seed, x, y, z, salt): order-independent, and identical in the CLI and in Roblox.
--- Determinism still comes from one WorldSeed — see `seedFor`.
+-- Which cave: a KEY the server draws per player per rebirth and never replicates (see "the cave key").
 --
 -- COORDINATES. Cells are (x, y, z) integers. x and z run 1..GridW across the shaft; y counts
 -- DOWNWARD, y = 0 being the open mouth at the surface. The world is a closed box: a bedrock ring
@@ -100,10 +100,52 @@ end
 
 --============================================================================ the world
 
--- Determinism, the reason a depth leaderboard means anything: same WorldSeed and same rebirth
--- count = the same cave, for every player, in every server, forever.
+-- The PUBLIC seed of a rebirth: WorldSeed and the rebirth count, both of which every client has. Before
+-- 2026-09-30 this was the whole cave, the same for everybody, which made it an ore x-ray: this module and
+-- Config replicate, the State payload carries the rebirth count, and a probe built from those alone
+-- predicted 462 of 462 hidden ore cells (review 2026-09-30, finding 1). It survives only inside
+-- `legacyKey`, the key of that old public cave, which tests and the Studio shot recipe use to name it.
 function Mine.seedFor(cfg: any, rebirths: number): number
 	return u32(cfg.WorldSeed * SEED_MIX + (rebirths or 0) * REBIRTH_MIX)
+end
+
+--============================================================================ the cave key
+-- A cave is a function of a KEY: two uniform 32-bit words, drawn by the SERVER for each player at each
+-- rebirth (`keyFromHex` over a GUID), saved in the profile and never replicated. `a` seeds the chain the
+-- way the public seed did. `b` enters every cell's LAST mix, after its coordinates (see `density` and
+-- `oreRoll`), so no single 32-bit state decides the cave: a script that sees revealed cells has to search
+-- `a` and `b` together. The best such search found here is a cell of the rarest ore tier, whose value
+-- pins `b` to about p * 2^32 candidates for each of the 2^32 values of `a`: roughly p * 2^64 hashes with
+-- p <= 0.06, per player per rebirth, since every rebirth draws a new key. There is no keyless path.
+export type Key = { a: number, b: number }
+
+local function isWord(n: any): boolean
+	return type(n) == "number" and n == n and n >= 0 and n < MOD32 and n == math.floor(n)
+end
+
+function Mine.validKey(k: any): boolean
+	return type(k) == "table" and isWord(k.a) and isWord(k.b)
+end
+
+-- The key of the old public cave (`seedFor`, b = 0): exactly the cave every player at that rebirth used
+-- to share. The server never uses it; tests and the Studio shot recipe (EYECANDY.md §10) do, to name a
+-- known cave.
+function Mine.legacyKey(cfg: any, rebirths: number): Key
+	return { a = Mine.seedFor(cfg, rebirths), b = 0 }
+end
+
+-- Two words out of a GUID's 128 bits (HttpService:GenerateGUID). Each word XORs two 32-bit quarters,
+-- so the version and variant nibbles a v4 GUID fixes are covered by random bits, then goes through the
+-- finalizer. nil for anything that is not 32 hex digits.
+function Mine.keyFromHex(s: string): Key?
+	if type(s) ~= "string" then return nil end
+	local hex = string.gsub(s, "[%-{}]", "")
+	if #hex ~= 32 or string.find(hex, "[^%x]") then return nil end
+	local w = {}
+	for i = 0, 3 do
+		w[i + 1] = tonumber(string.sub(hex, i * 8 + 1, i * 8 + 8), 16) :: number
+	end
+	return { a = mix32(bit32.bxor(w[1], w[3])), b = mix32(bit32.bxor(w[2], w[4], 0x9E3779B9)) }
 end
 
 -- The depth wall. Rebirth is what moves it, which is what turns "I cannot dig any deeper" into
@@ -113,12 +155,16 @@ function Mine.maxLayer(cfg: any, rebirths: number): number
 end
 
 -- One descriptor threaded through everything else, so nobody can pass a seed from one rebirth
--- alongside a depth wall from another.
-export type World = { seed: number, maxLayer: number, rebirths: number }
+-- alongside a depth wall from another. `seed` and `key2` are the cave key's two words: server-side
+-- state, never sent to a client.
+export type World = { seed: number, key2: number, maxLayer: number, rebirths: number }
 
-function Mine.world(cfg: any, rebirths: number): World
+function Mine.world(cfg: any, rebirths: number, key: Key): World
+	if not Mine.validKey(key) then
+		error("Mine.world: a cave needs the server's key (two 32-bit words); there is no public cave", 2)
+	end
 	local r = rebirths or 0
-	return { seed = Mine.seedFor(cfg, r), maxLayer = Mine.maxLayer(cfg, r), rebirths = r }
+	return { seed = key.a, key2 = key.b, maxLayer = Mine.maxLayer(cfg, r), rebirths = r }
 end
 
 function Mine.center(cfg: any): number
@@ -154,7 +200,7 @@ function Mine.density(cfg: any, w: World, x: number, y: number, z: number): numb
 			x / m.NoiseScaleXZ * freq,
 			y / m.NoiseScaleY * freq,
 			z / m.NoiseScaleXZ * freq,
-			SALT_CARVE
+			bit32.bxor(SALT_CARVE, w.key2) -- the key's second word, in each corner's last mix
 		)
 		norm += amp
 		amp *= m.OctaveGain
@@ -166,7 +212,7 @@ end
 -- The single uniform draw that decides which ore a rock cell holds. Its own salt, so retuning
 -- the carving never reshuffles the veins and vice versa.
 function Mine.oreRoll(cfg: any, w: World, x: number, y: number, z: number): number
-	return Mine.unit(w.seed, x, y, z, SALT_ORE)
+	return Mine.unit(w.seed, x, y, z, bit32.bxor(SALT_ORE, w.key2))
 end
 
 -- "air" | "rock" | "bedrock" | "void". Order matters: the ring is checked before the mouth, so

@@ -11,9 +11,34 @@ crystal geode, fossil beds, lost ruins, obsidian depths and the core. Each strat
 the light, the air, the particles, the critters and the finds on the walls. Its hazards fit it: rocks and
 stalactites work loose overhead, steam and magma burst from the floor.
 
-**State: built, unit-tested, headless-tested and mutation-tested (§8); adversarially reviewed once, and
-all six findings closed test-first (§13). NOT seen in Studio.** Nothing was committed, pushed or published.
+**State: built, unit-tested, headless-tested and mutation-tested (§8); adversarially reviewed twice, and
+all fourteen findings closed test-first (§13, §14). The two open owner decisions are DECIDED (§12). NOT seen
+in Studio.** Nothing was committed, pushed or published.
 Studio was not opened. REVIEW-4's part budget holds: the server builds exactly the Parts it built before (§6).
+
+**Complete-game pass (2026-10-01, §15).** Every item of `docs/complete-game-standard.md` was checked against the
+game; what was missing was built test-first: the public + friends board on a physical board in every miner's mouth,
+`RespawnLocation`, a bedrock wall that says why it cannot be mined, the pacing model in `tests/`, the store text,
+the clip list (`MARKETING.md`), and §9 items 25-29 and §10's shot 7 here. Mutation sweep 7: 25 mutants killed,
+4 controls unnoticed.
+
+**Second review round (2026-09-30, §14).** A second independent reviewer found eight defects, two of them
+older than the strata. Each was reproduced first, then fixed with a failing check first:
+1. The whole cave could be computed on a client (the generator and the seed replicate). Every player's cave
+   is now drawn from a server-only 64-bit key per rebirth, saved with the profile and never replicated.
+2. A save wrote over another session's record and released its lock. Every write now carries the session's
+   own token (and the server's jobId), or it is cancelled.
+3. The core floor's cracks were gold-coloured beside gold ore, and nothing held the hazard models' colours.
+4. The colour grade lifted the unlit cave by +0.02 to +0.05 over the server's preset, weakening the lamp.
+5. On landscape phones the title card covered the hazard banner, and the chip was hidden or unreadable.
+6. Only a mouse click or a tap woke a resting miner; a swing by any other path mined through idle rest.
+7. The client budgets were measured but not capped in code.
+8. The chip counted down to a stratum below the bedrock depth wall.
+The owner's two open decisions were taken the same day ("take the recommended option for all", §12).
+The first attempt at this round was cut off by a usage limit before it wrote §14 or ran a mutation sweep. The
+resume session (2026-10-01) reproduced every finding on the unchanged game, ran mutation sweep 6 (§14) and
+fixed three things in the round's own work: an untested half of the owner check, a flaky set-up in
+`check_deepvein_cave`, and a stray line ending.
 
 **Review round (2026-09-24, §13).** An independent reviewer found six defects; each was reproduced before
 anything changed, then fixed with a failing check first:
@@ -120,7 +145,9 @@ they are (`check_deepvein_cave_join`, with a 20-second load). Any new stratum yo
 gets a quiet title card (`🌊 UNDERGROUND RIVER`, `108 m deep`).
 
 On screen all the time: a chip under the HUD's readout (`🔥 Magma Glow · 240 m · 💎 in 84 m`), the `⛺ Rest`
-button, and the brag emoji next to your best depth and on the top-10 board.
+button, and the brag emoji next to your best depth and on the top-10 board. Since §14 the chip picks the
+longest of four texts that fits its box at 6 screen px per character (`🔥 240 m` at the shortest), and a
+stratum below the depth wall reads `💎 after a ♻️ rebirth`, never a countdown.
 
 **Placed on the game's own ladder.** The depth wall is 24 + 12 × rebirths, and a run spends most of its time
 near the bottom of its shaft, so strata open near the bottom of a rebirth. The first four come in the first
@@ -133,8 +160,17 @@ every swing on a real ClickDetector, every haul sold at the real SELL, every upg
 taken through the real atomic flush. The human costs are written down in `Config.Pacing.Profiles`: normal =
 0.45 s per swing, 1.5 s per new block, 12 s per surface trip (fast 0.32 / 0.8 / 7, slow 0.7 / 2.5 / 20). The
 owner gave no Deep Vein target. The check asserts that the magma, the first fanfare and the first brag, comes
-during the third run inside 25-45 min, and that the core is at least 3× that (it is 13.9×: about 6.4 hours).
-That is the long-term goal, like +1 Jump's galaxy.
+during the third run, within 45 min and not before 20 (DECIDED 2026-09-30, §12 (a); it was 25-45 while
+every player shared one cave), and that the core is at least 3× that. That is the long-term goal, like
++1 Jump's galaxy.
+
+**Since 2026-09-30 every player digs their own drawn cave (§14, finding 1), so the minutes spread.** The
+numbers in the table above are the old public cave's. Eight drawn cave sequences through the same bot
+(`check_deepvein_pace`, the emulator's GUID counter advanced by 0, 97, 194 ... 679 before the server starts,
+re-measured on 2026-10-01): the magma at 23.6-31.4 / 14.7-19.7 / 38.0-50.6 min (normal / fast / slow), the
+core at 373.0-409.4 / 224.0-245.4 / 606.8-666.3 min (6.2-6.8 hours for a normal player), the geode at
+42.0-52.0 normal. All eight samples pass every pace assertion. The price of a rebirth is analytic and the same
+for everybody; `Prestige.spec` checks 75 drawn caves (3 per level) against the same payable band: 2.53-3.75x.
 
 ---
 
@@ -156,7 +192,8 @@ A mine shaft is a box of rock, so nothing flies in sideways: every Deep Vein haz
 **Rules** (`Hazards.luau` + `Config.Hazards`, validated at load; an invalid config switches hazards OFF with
 a warning, it never costs the game):
 
-* **When.** One hazard every **120-180 s of mining**, on a clock that only runs while you are not resting.
+* **When.** One hazard every **110-160 s of mining** (DECIDED 2026-09-30, §12 (b); it was 120-180), on a clock
+  that only runs while you are not resting.
   Never two at once. None in the topsoil (the mouth, the SELL pad, the spawn). A hazard that comes due in a
   quiet band is re-rolled, so arriving somewhere never releases a backlog.
 * **Only when you can step out of it.** It launches only while you stand on something AND have an open cell
@@ -195,7 +232,8 @@ a warning, it never costs the game):
 
 | measurement | where | result |
 |---|---|---|
-| raw scheduler, 20 h | `Hazards.spec`, `EnvConfig.spec` (real config) | 477 hazards = **one per 150.9 s**; gaps 120.5-180.0 s; never 2 in the air |
+| raw scheduler, 20 h | `Hazards.spec`, `EnvConfig.spec` (real config) | 529 hazards = **one per 136.1 s** on the 110-160 s clock (477 = one per 150.9 s on the old 120-180); never 2 in the air |
+| **2026-10-01: ordinary play, the decided 110-160 s clock, 8 drawn cave sequences** | `check_deepvein_rarity` | **49-58 hazards = one per 2.5-2.8 min of play** (0.36-0.41/min), one per 2.3-2.5 min below the surface; the old 120-180 s clock on the same 8 caves: 44-51 hazards, one per 2.7-3.0 min (0.33-0.37/min) |
 | standing still beside an open cell, geode, 20 min | `check_deepvein_cave` §5a, real client | 8-9 hazards (crystal, steam), **every one hits**, each warned ≥ 3.13 s before; knock ≥ 28 studs/s sideways, ≤ 8 up; it wears off every time |
 | stepping one cell aside at `MOVE!`, 20 min | §5b | 7-8 hazards, **0 hits** |
 | a one-cell pit, 8 min / the mouth, 10 min | §5c / §5d | **0** / **0**; the held hazard launches < 2 s after there is room |
@@ -206,10 +244,12 @@ a warning, it never costs the game):
 | **review round:** a phone with the shop open, a hazard inbound | `check_deepvein_cave` §9 | banner on 94 of 94 warning frames (was 0), Rest button on 94 |
 | rest-toggle exploit probe, 6 h | `Hazards.spec` | never rests **142**, toggles every 7 s **142**, rests 40 s of every 150 s **142** |
 
-So in ordinary digging a player meets **one hazard every 2.8-3.1 minutes**. That sits at the slow end of the
-owner's "about one per 2-3 minutes". Every one is a near-hit by construction (it comes for you), easy to step
+So in ordinary digging a player meets **one hazard every 2.5-2.8 minutes** (DECIDED 2026-09-30: it was
+2.8-3.1 on the public cave and 2.7-3.0 on drawn caves, the slow end of the owner's "about one per 2-3
+minutes"). Every one is a near-hit by construction (it comes for you), easy to step
 out of, and costs nothing if you do not. The knob is `Config.Hazards.IntervalMin/Max` (seconds of mining);
-`check_deepvein_rarity` asserts that ordinary play stays between one per 2 and one per 4 minutes.
+`check_deepvein_rarity` asserts that ordinary play stays between one per 2 and one per 3 minutes, the owner's
+own bounds.
 
 ---
 
@@ -230,7 +270,10 @@ A Roblox server cannot stop the world for one player, so **rest is a state the p
 Deep Vein's progress is **clicking**, not walking: you stand still and swing. So two rules sit on top of the
 template (`Rest.luau`, both mandatory in `EnvConfig.spec`):
 
-* **A swing is activity.** A click on the world, or a TAP on a phone, wakes you and stops idle rest.
+* **A swing is activity.** A click on the world, or a TAP on a phone, wakes you and stops idle rest. So does
+  **any swing the server takes, whatever input made it** (a gamepad, a touch the engine processed): the server
+  tells the swinging player's client (the `Swing` remote), and that counts as a swing (review 2026-09-30,
+  finding 6; before it, server-side swings mined 43 blocks through idle rest in the reviewer's probe).
   A finger dragged across the screen turns the camera and does NOT wake you (checked).
 * **`SettleSeconds` 1.5:** a rest starts only after 1.5 s without a step or a swing.
   **`MinAwakeSeconds` 6:** after a rest ends, the next cannot start until you have been awake 6 s. A request
@@ -241,7 +284,8 @@ template (`Rest.luau`, both mandatory in `EnvConfig.spec`):
 1. **There is nothing to dodge.** Deep Vein has no round clock, no raid, no timed event and no penalty. The
    leaderboard is best-ever DEPTH, which only digging changes. The rebirth price is on what this run has
    earned. Rest touches none of these. The only thing it pauses is hazards, and a hazard takes nothing.
-2. **You cannot mine while resting.** Digging is the server's ClickDetector on the server's rock, and any
+2. **You cannot mine while resting.** Digging is the server's ClickDetector on the server's rock, the server
+   announces every swing it takes to the swinging client (§14, finding 6), and any
    swing wakes you. The server does not know rest exists. A modified client that never woke up would only
    skip its own hazards, and it could delete them outright anyway.
 3. **Not a panic button.** Rest cannot START in the air or with a hazard inbound (`BlockWhileThreat`,
@@ -264,7 +308,8 @@ template (`Rest.luau`, both mandatory in `EnvConfig.spec`):
 | the rock's colour and material per stratum | **server** (`Main.server` → `Strata.rockLook`) | a Part's Color and Material replicate with it anyway: no extra Instance, no extra traffic, and every client sees the same strata. Deterministic per cell, so a streamed-out cell comes back looking exactly the same (checked). |
 | lighting, atmosphere, post-fx, the pithead, the core's floor, wall decor, critters, weather, chip, cards, fanfare | **client** (`Cave.client` + `CaveArt`) | cosmetic and per-player (your strata follow YOUR depth); costs the server nothing, replicates nothing |
 | hazards: schedule, telegraph, hit test, knock | **client** | harms only the local player, whose character physics the client already owns |
-| rest | **client** | it only pauses client hazards |
+| rest | **client** | it only pauses client hazards; the server's `Swing` remote (server → the swinging client) wakes it on any swing |
+| which cave | **server**, a key per player per rebirth | the generator replicates; the key never does (§14, finding 1) |
 | digging, ore, cash, depth, best depth, the leaderboard, rebirth, saves, the streamer | **server** (unchanged) | authoritative, as before; it trusts nothing from the client |
 | the brag emoji | client (`Hud.client`) | read from depths already on the board and in your own state |
 
@@ -279,7 +324,8 @@ already replicated. It never reads the cave generator:
 * The rock look is a seed-0 per-cell hash plus the layer: nothing about what is behind a face.
 * Critters fly only through cells you have stood in.
 
-It fires no remote, adds no remote, sets no attribute and changes nothing the server built.
+It fires no remote, adds no remote, sets no attribute and changes nothing the server built. It LISTENS to one
+server remote since 2026-09-30: `Swing`, which says a swing of this player's landed.
 `check_deepvein_cave` §8 snapshots every server Part's colour, material, transparency, size, collision and
 `CellKey` before the client starts and compares at the end. It also asserts that the client added exactly one
 workspace folder and two Lighting effects (its rest focus and the surface's sun rays) and fired no remote.
@@ -355,6 +401,22 @@ formula, never what is built):
 * **Hazards:** one model per kind, one ring, one lane.
 * **Rest:** one lantern.
 
+**Capped in code (review 2026-09-30, finding 7).** The budgets above are no longer only measured:
+* **parts:** decor and critters (the parts a config can multiply) are admitted only while they fit beside
+  everything else the client can draw at once: every set piece (built at start, unparented), the biggest
+  hazard model, its ring and lane, the rest lantern and the weather host. A decor layer that does not fit waits
+  until the miner moves (nearest layers first); a critter waits;
+* **emitters and particles:** the weather leaves one emitter and 16 particles/s (the biggest hazard trickle)
+  free, and an emitter's rate is written at once whenever it must come down;
+* **lights:** the set pieces light at most `MaxLights` − 2 (a hazard's blink and the rest lantern);
+* **hazards:** showing one model puts any other away; no Beam or Trail is ever made.
+`check_deepvein_cave_cap` breaks the config on purpose (decor ×10, critters ×10, weather ×5, the weather
+allowed every emitter) and rides the elevator 150 times with a hazard every 6-7 s. Before the caps: peak
+**839** parts, 5 emitters, 76.5 particles/s. After: **197** parts, 4 emitters, 60.0/s, 2 lights, 1 hazard, on
+every frame; every frame with a ring still drew its hazard, the rest lantern was set down at the core, and the
+capped config still showed 146 decor parts and 89 critter parts at most. The shipped config is unchanged in
+play: `check_deepvein_cave` peak 79 parts, `check_deepvein_cave_budget` 106 (400 rides, 178 hazards).
+
 Lighting is written ≤ 10×/s, only on change. These are part and emitter counts, not frame times: phone frame
 time is on the Studio list. On top of the server's shaft (up to 1 124 Parts in the worst state the game can
 reach, typically 50-500), the client adds at most ~80 in play.
@@ -362,6 +424,8 @@ reach, typically 50-500), the client adds at most ~80 in play.
 ---
 
 ## 7. Gates
+
+**The second review round's gates (2026-09-30, 23 suites) are in §14.** This table is the first rounds'.
 
 Every gate green on the final tree. "Before" is the game as REVIEW-4 and the spawn fix left it. "Earlier
 attempt" is the last run the interrupted build made (2026-09-23 18:17), before its final edit.
@@ -554,6 +618,8 @@ controls 3 of 3 survived (unnoticed), as they must.**
 **Totals after the review round: 79 mutations of real behaviour, 78 killed for the stated reason, 1 equivalent
 (N7); 9 controls, all unnoticed.**
 
+Sweep 6 (the second review round, 2026-10-01: 45 mutants, 5 controls) is in §14.
+
 ---
 
 ## 9. Needs Studio (only real rendering, physics and a real device can judge)
@@ -604,10 +670,40 @@ controls 3 of 3 survived (unnoticed), as they must.**
 18. **The new rock (review round):** magma and the core are now `Rock` (dark red-brown, deep crimson), obsidian
     a dark violet `Slate`. Next to the near-black Basalt walls: do the walls read as the edge of the claim at a
     glance? And the new glow colours: rose crystals, turquoise glyphs and keystones, redder lava.
+19. **(2026-09-30) The core's white-hot cracks** ({255,236,200}, were gold-orange) on the orange floor under bloom 1.6: still
+    "molten", or blown out to white?
+20. **(2026-09-30) The darker grade.** Every underground band's `ColorCorrection.Brightness` moved down 0.05 (finding 4). With
+    item 17's fill cut, do the strata still read apart in the lamp's circle, and is lamp level 1 enough to play?
+    The knob is each band's `colorCorrection.Brightness` (at most the preset's -0.02).
+21. **(2026-09-30) The chip's short texts** on a real phone: `🌊 120 m · 🍄 in 48 m` and `🌊 120 m` with emoji in a `TextScaled`
+    label. The 6 screen px per character rule is a proxy for GothamBold at about 10 px; check it reads.
+22. **(2026-09-30) The ring's yellow rim on a gold floor.** The rim ({255,210,60}) is 19 RGB from gold ore, and the floor you
+    stand on can be a gold block. Does the ring (the dark disc and the rim) still read there? Not changed.
+23. **(2026-09-30) A gamepad (or any non-mouse, non-tap) swing** on a ClickDetector: does it reach the server and wake a
+    resting miner through the `Swing` remote, and is the round trip short enough that nothing is mined asleep?
+24. **(2026-09-30) The title card after a warning:** a stratum card (or the magma fanfare) that came due during a hazard
+    warning now appears when the warning ends. Does that read as the reward it is, a few seconds late?
+25. **(2026-10-01) The Deepest Miners board on the mouth's south wall** (§15). 22 x 12 studs, rows of 25 px at 40 px
+    per stud, `LightInfluence = 0`, a gold neon rim behind it. Is it legible from the spawn 38 studs away on a desktop
+    (about 13 screen px per row at 1080p by arithmetic) and from the south half of the mouth on a phone? Does the rim
+    bloom read as "interactive" or blow out against the dusk? Does it clash with the pithead above the rim?
+26. **(2026-10-01) The board's ProximityPrompt** (16-stud reach, at the foot of the board): it should appear only once
+    the miner walks into the south half of the mouth, not at the spawn. On a phone, is the tap button clear of the
+    thumbstick and the HUD, and does it still show from a cell dug out below it (5.4 studs, measured)?
+27. **(2026-10-01) A click on a bedrock wall** now shows the hand cursor (each wall carries a ClickDetector so it can say
+    "the edge of your claim"). Does the cursor over a wall tempt players to keep clicking it, and is one toast per
+    2 s (`Config.Mine.WallToastSeconds`) enough?
+28. **(2026-10-01) A respawn** (reset the character): every player's `RespawnLocation` is now `MinersRest`; the engine
+    puts the character there and `place` moves them into their own mouth. Confirm both steps in the real engine.
+29. **(2026-10-01) The friends view with a real account.** Never film or screenshot it with real friends on it (their
+    usernames); check it reads, then switch back to PUBLIC.
 
 ---
 
 ## 10. Thumbnail shot list (for the night Studio session)
+
+Every thumbnail is a still at **1920x1080** (Roblox's experience thumbnail size; Studio's screenshot of a 1920x1080
+viewport, HUD off unless a shot says otherwise). The vertical clips are a different list: `MARKETING.md`.
 
 **Getting there.** *This recipe has not been tried in Studio: verify steps 1-3 before relying on the rest.*
 
@@ -616,7 +712,12 @@ controls 3 of 3 survived (unnoticed), as they must.**
 2. **No saves exist to touch.** Deep Vein has never been published, so it has no DataStore. The server warns
    `datastore unavailable` and every Play starts from `defaultProfile()`, a fresh rebirth-0 miner whose wall is
    at layer 24. Nothing is saved.
-3. **Start deep, in THIS place only, never in `src/`.** Open `ServerScriptService → Main` and, in
+3. **Name the cave, in THIS place only (added 2026-09-30).** Every player now digs a cave drawn from a
+   server-only key (§14), so in `ServerScriptService → Main` make `drawKey()` start with
+   `do return Mine.legacyKey(Config, 12) end`. That is the old public rebirth-12 cave, the one every depth,
+   block and wall position below was checked against. Studio has no DataStore here, so every Play draws
+   through `drawKey()`.
+4. **Start deep, in THIS place only, never in `src/`.** Open `ServerScriptService → Main` and, in
    `defaultProfile()`, set `pickTier = 5, backpackLevel = 12, lampLevel = 8, rebirths = 12`, plus the
    `depthLayer` / `bestLayer` each shot names below. On join the server builds a rebirth-12 shaft (wall at
    layer 168) and reopens its centre elevator column from layer 1 down to `depthLayer`. This is the legacy
@@ -629,12 +730,12 @@ controls 3 of 3 survived (unnoticed), as they must.**
    148 → 152. DESCEND would then land in the cave, not the column, and the saved best would already be past
    the next stratum, so its fanfare would never play. Every depth, block and wall position below was checked
    against the real cave generator, running the server's own restore on the pure modules.
-4. **The look follows the AVATAR, not the camera.** Cave.client names the stratum from where the character
+5. **The look follows the AVATAR, not the camera.** Cave.client names the stratum from where the character
    stands, so park the avatar in the stratum and fly the camera. Freecam is Shift+P (it takes the movement
    keys).
-5. **Clean frames** (command bar, Client):
+6. **Clean frames** (command bar, Client):
    `local g = game.Players.LocalPlayer.PlayerGui; g.DeepVeinHud.Enabled = false; g.DeepVeinCave.Enabled = false; game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)`
-6. **Coordinates** are for shaft 0 (the first player in the server), whose mouth is centred on the world
+7. **Coordinates** are for shaft 0 (the first player in the server), whose mouth is centred on the world
    origin. Layer `L`'s floor is at `y = -6L` and a block of layer `L` is centred at `y = -6L + 3`. The column
    is at `x = z = 0`; "east" is +X, "south" is +Z. The walls' inner faces are at ±21. "Dig east 3" = click the
    blocks centred at x = 6, 12 and 18 on your layer, walking into each hole.
@@ -729,6 +830,13 @@ the open column above, about (1, -990, 1), looking straight down at (0, -1008, 0
 layer 147 opens a cave from 147 to 152 that includes the column's layers 150 and 151. Dig 148 and 149 and you
 drop to layer 151: `🌋 YOU REACHED THE CORE!`.
 
+**Shot 7: "The Deepest Miners board"** (🌱 the mouth, added 2026-10-01). *Any session.* Avatar in the mouth's south half
+at (0, 4, 12) facing the board on the south wall (centre (0, 8.5, 20.55), 22 x 12 studs). Camera behind and above the
+avatar at about (6, 10, -4), looking at (0, 8, 20). In frame: the board with its gold rim, its title, the PUBLIC
+mode line and the prompt "Public / Friends" at its foot; the rim lanterns and the headframe above. Studio has no
+DataStore, so the board says "Nobody is on the board yet..."; a shot with names on it needs the published game,
+and never with a real account's friends (item 29 of §9).
+
 *Spares if a shot disappoints:*
 * 🏛️ Lost Ruins, layer 106: dig east 3; a sandstone arch with a turquoise keystone on the east wall at z ≈ 1.6.
 * 🦴 Fossil Beds, layer 85: dig east 3 plus (18, y, 6); an ammonite on the east wall at z ≈ 3.4.
@@ -793,16 +901,32 @@ touched (the other games were read only for the template, +1 Jump).
 
 ## 12. Not done / open
 
-* **Reviewed once (§13).** The six findings are closed. The review round's own changes (the drawing, the ring,
-  the drawer layout, the palettes and the fill) have been mutation-tested (§8, sweep 5) but not reviewed by a
-  second independent pass.
-* **Decisions for Gustav, surfaced, not taken:**
-  * **(a) When the first brag comes.** The magma and its fanfare come at about 28 minutes for a normal player,
-    during the third run. The core, the long-term goal, comes at about 6.4 hours in the twelfth. The owner
-    gave +1 Jump a 30-45 min target for space and no number for Deep Vein; `check_deepvein_pace` asserts
-    25-45 min for the magma.
-  * **(b) The hazard rate.** In ordinary digging it is one per 2.8-3.1 minutes, the slow end of "2-3". The knob
-    is `Config.Hazards.IntervalMin/Max` (120/180 s of mining).
+* **Reviewed twice (§13, §14).** All fourteen findings are closed. The second round's own changes and the
+  complete-game pass (§15) have been mutation-tested (sweeps 6 and 7) but not reviewed by an independent pass.
+* **Owner decisions** (the owner, 2026-09-30: "take the recommended option for all"; neither item had a
+  marked recommendation, so each took the option that best serves the brief: fair, fun, never punishing,
+  never exploitable):
+  * **(a) When the first brag comes. DECIDED 2026-09-30 (owner: take recommended): the magma stays at layer
+    40, the third run.** Neither option was marked as recommended, so this takes the one that best serves the
+    brief. Re-measured on 2026-10-01 over eight drawn cave sequences: the magma at 23.6-31.4 min for a normal
+    player (14.7-19.7 fast, 38.0-50.6 slow), inside the 45-minute bound of the complete-game standard's
+    "within about 30-45 minutes" on every sample. The only other placement is the fourth run, whose first new
+    stratum (the geode) a normal player first stands in at 42.0-52.0 min (the run starts at 39.6-49.9): past
+    45 on five of the eight caves. A slower ladder would mean dearer rebirths for everybody. An earlier brag
+    serves "fun, never punishing". `check_deepvein_pace` asserts the third run and 20-45 min (the lower bound
+    was 25 when every player shared one cave; the drawn cave the gate digs gives 23.6).
+    Test first: that bound failed on the drawn cave (23.6 < 25) before it was restated; mutants D1 (a
+    player twice as slow: past 45) and D2 (twice as fast: before 20) are killed (§14).
+  * **(b) The hazard rate. DECIDED 2026-09-30 (owner: take recommended): `IntervalMin/Max` 110/160 s of
+    mining (was 120/180).** Neither option was marked, so this takes the one that best serves the brief.
+    Re-measured on 2026-10-01 over eight drawn cave sequences: the old clock gives ordinary play one per
+    2.7-3.0 min (0.33-0.37/min), the slow edge of the owner's "about one per 2-3 minutes"; the new clock one
+    per 2.5-2.8 min (0.36-0.41/min), the middle of it. Standing beside an open cell it is one per 2.25 min
+    (`EnvConfig.spec`, 20 h raw: 529 hazards, one per 136.1 s). A hazard still costs nothing.
+    `check_deepvein_rarity` now asserts the brief's other bound (at least one per 3 minutes, was 4). The first
+    attempt recorded that bound failing on 2 of 8 old-clock samples; the resume's eight old-clock samples all
+    passed it, the slowest at 0.334/min, so the bound is held by mutants instead: D3 (140-200 s) and D4
+    (60-80 s) are killed (§14).
 * **The wall-decor layout repeats every 60 layers** (template `EnvBands.hash01`'s mixing). The kinds differ by
   stratum, so nobody will notice; noted, not changed, because the template is shared.
 * **Right after an elevator ride** the client can briefly count a not-yet-built cell as open (the server's
@@ -992,3 +1116,386 @@ Two older races in `check_deepvein_cave` were fixed along the way (§7).
 
 Their ceiling probe measures the model's span down to the hit, which now includes the visible fall, so its
 lower bound is no longer the hang height. §5e measures the hang and the fall separately.
+
+---
+
+## 14. Second review round (2026-09-30 / 10-01): eight findings, all closed
+
+A second independent reviewer read the strata and the game around them in a scratch copy (nothing written in
+the repo) and reported eight findings, two of them older than the strata (1 and 2). The first attempt at this
+round fixed all eight and left every gate green, but a usage limit cut it off before it wrote this section or
+ran a mutation sweep, and it kept no record of its reproductions. The resume session (2026-10-01) read every
+changed and new file and re-ran every gate: all green, and the bundle rebuilt from the sources was
+byte-identical to the one on disk (sha256 `096b74ec…`). It then did what was missing:
+* **Reproduced every finding on the unchanged game.** It used the sources of commit 654ad07 in a scratch copy,
+  ran the reviewer's own probes, ran the round's new checks there (they fail) and re-applied the reviewer's
+  surviving mutants (they survive again).
+* **Ran mutation sweep 6:** 45 mutants and 5 controls on the round's code (below).
+* **Fixed four things in the round's own work:**
+  * The session half of the owner check was untested (mutant L3 survived). `check_deepvein_lock` now has a
+    newer session on the same server.
+  * The MaxHazards cap in `CaveArt.showHazard` could not be reached by any gate (mutant P4 survived).
+    `check_deepvein_cave_cap` now calls it directly.
+  * A set-up step in `check_deepvein_cave` flaked: 1 of 14 runs, and 2 of the 24 sweep runs made before the
+    fix. It was a race with a hazard in flight. It is fixed, and nothing asserted was loosened.
+  * One line in a CRLF file ended in LF.
+
+| # | sev | finding | reproduced on the unchanged game | after |
+|---|---|---|---|---|
+| 1 | medium | the whole cave could be computed on a client | reviewer's `probe_leak`, ReplicatedStorage + the State payload only: 1182 of 1182 cells hidden at join predicted, **462 of 462 ore** | the same probe with the best public guess (`Mine.legacyKey`): **39 of 526** hidden ore cells (7.4%), chance; `check_deepvein_secret` 27 / 0 |
+| 2 | medium | a save overwrote another session's record and released its lock | `probe_lock`: after another server took the record, this server's final save left jobId `robloxemu-headless`, lockUntil 0, cash 100, rebirths 0; the new `check_deepvein_lock` there: 19 passed, 30 failed | the record keeps `OTHER-SERVER`, cash 999999, rebirths 5 and its lock; `check_deepvein_lock` 49 / 0 |
+| 3 | low | the core's cracks were gold-coloured; nothing held the hazard models' colours | cracks {255,214,120}, 51.2 RGB from gold; the reviewer's M1 (cracks = gold) and RF5b (relic plate = gold) reach the bundle and pass EnvConfig.spec 269 / 0, check_deepvein_cave 387 / 0, Strata.spec, _strata, _cave_budget | cracks {255,236,200}; the core floor as built at least 94.7 RGB from any ore beside it, the hazard models as drawn at least 78.8, the config at least 78.8 over 4305 pairs; C1-C4 killed |
+| 4 | low | the colour grade lifted the unlit cave | every underground band's Brightness 0 .. +0.03 against the preset's -0.02; the reviewer's M2 (core 0.35) passes the same five gates | at most -0.020 at every layer below the surface in config, at most -0.001 over the server's as the client writes it; B1-B3 killed |
+| 5 | low | on phones the title card covered the hazard banner, and the chip was hidden or unreadable | `probe_hud`: card and banner overlap in place on 5 landscape phones; 568x320 with the shop open the chip is HIDDEN (36 screen px); 0.84-3.60 screen px per character with a drawer open; the new `check_deepvein_cave_row` there: card and banner on screen together on 102 frames | together on 0 frames (the card waits for the warning and comes back after it); the chip shown at all 46 viewport and drawer states, worst 6.07 screen px per character |
+| 6 | low | a swing by anything but a mouse click or a tap mined through idle rest | `probe_restmine`: 47 server-side swings, 43 blocks broken, resting on **414 of 414** frames of the swing window | the same probe: **0 of 414**; `check_deepvein_cave`: 0 of 160 frames |
+| 7 | low | budgets measured, not capped in code | nothing in `src/` read MaxLocalParts, MaxLights, MaxBeams, MaxTrails or MaxHazards; the new `check_deepvein_cave_cap` there, config broken on purpose: peak 840 parts (cap 200), 5 emitters (4), 76.4 particles/s (60), 2 lights (1) | 193 parts, 4 emitters, 60.0/s, 1 light, 1 hazard on every frame; the shipped config's peaks unchanged (79 parts, 2 emitters, 27.9/s, 1 light) |
+| 8 | low | the chip counted down to a stratum below the depth wall | `probe_chipwall` at the rebirth-0 wall: `🌊 Underground River · 144 m · 🍄 in 24 m`; `check_deepvein_cave_row` there: `💎 in 48 m` with the wall 12 m down | `🌊 Underground River · 144 m`; on a 1280x720 window `🔥 Magma Glow · 276 m · 💎 after a ♻️ rebirth` |
+
+### What changed in the game
+
+1. **The cave key** (`Mine.luau`, `Main.server.luau`).
+   * `Mine.world(cfg, rebirths, key)` takes `{ a, b }`, two 32-bit words, and errors without one.
+   * `a` seeds the chain. `b` enters the last mix of the ore roll and of every carving-noise corner, so no
+     single 32-bit state decides a cave.
+   * The server draws a key per player per rebirth (`drawKey`: a GUID through `Mine.keyFromHex`, a server
+     `Random` if that fails). It saves it as `data.caveKey` in the same write as `openedBits`.
+   * A rebirth draws a new key inside its atomic flush; the snapshot and the rollback include it. A session
+     that cannot save digs a throwaway key, so it cannot scout the saved cave for free.
+   * `Mine.legacyKey(cfg, r)` names the old public cave for fixtures and the Studio recipe (§10).
+   * A profile saved before keys has none and draws one; its dug tunnels come back in the new cave. No such
+     profile exists, because the game was never published.
+2. **An owner token on every write** (`Main.server.luau`).
+   * The load that takes the lock writes a fresh `session` GUID.
+   * `saveProfile` writes only while the record carries this session's token AND this server's jobId.
+     Otherwise it cancels the write, sets `canSave = false`, pushes state and toasts `⚠️ Your progress is
+     saved by another server now…`.
+   * A rebirth whose flush is cancelled is rolled back.
+3. **Colours as config.** `Config.Env.PieceGlow` (the core's plate and cracks) and `Config.Env.HazardLook`
+   (every hazard model's parts); `CaveArt` builds from them. The cracks are white-hot {255,236,200}.
+4. **No lift.** `Env.LampFill.ReferenceBrightness` is -0.02 and `MaxBrightnessLift` 0. Every underground
+   band's `colorCorrection.Brightness` moved down 0.05, to -0.05 .. -0.02.
+5. **The phone row** (`Cave.client`).
+   * A title card that comes due during a warning waits for it. A warning that starts while a card is up
+     sends the card away until it is over. Neither is lost, and a fanfare's flash waits with its card.
+   * The chip is never hidden. It takes the side of the elevator pair with more room, gets the whole free
+     span on a phone, and shows the longest of up to four texts that gives 6 screen px per character
+     (`CHIP_CHAR_PX`).
+6. **The `Swing` remote** (server to the swinging player, after the cooldown). Any swing that reaches the
+   server counts as activity on the client and wakes a resting miner. The client only listens.
+7. **Budgets capped in code** (`CaveArt`).
+   * Decor and critters are admitted only within `MaxLocalParts`, after every set piece, the largest hazard
+     model, its ring and lane, the lantern and the weather host.
+   * The weather leaves one emitter and 16 particles/s for a hazard's trickle (`TRICKLE_MAX`). A weather
+     rate that must come down is written at once.
+   * Set pieces light at most `MaxLights` - 2. Showing a hazard puts away any other kind.
+8. **The chip and the wall.** A next stratum below the wall (read off the floor slab) reads
+   `after a ♻️ rebirth` (or `after ♻️`), never a countdown.
+
+### Checks, new or extended
+
+* `Mine.spec` 173 → 223:
+  * malformed keys are refused, and every one of a GUID's 32 hex digits moves the key;
+  * one bit of `a` or `b` re-rolls the ore and moves the voids;
+  * a control, and the public prediction on a keyed cave (11.5% the same ore, chance).
+* `Prestige.spec` 220 → 295: 75 drawn caves (3 per level) all inside the payable band, at 2.53-3.75x their
+  price.
+* `EnvConfig.spec` 269 → 283: the core floor and every hazard model against ore at every layer (worst 78.8),
+  and the colour grade's brightness at every layer.
+* `check_deepvein_secret` (new, 27):
+  * the public prediction is at chance on real Parts, and keys are saved per player;
+  * 1254 replicated instances and 150 payloads scanned, 0 hits;
+  * a rejoin keeps the cave (436 of 436 faces); a rebirth draws a new key, and a failed one rolls it back;
+  * a read-only session digs a throwaway cave (18 of 129 ore cells match the saved one).
+* `check_deepvein_lock` (new, 37, and 49 since the resume):
+  * takeovers by another server with a token, without one, and by code from before tokens;
+  * since the resume, a **newer session on this same server**;
+  * a rebirth after a takeover;
+  * controls: the owner saves, renews, releases, and rejoins with a new token.
+* `check_deepvein_cave` 387 → 589:
+  * the core floor and the hazard models as built;
+  * the client's colour grade against the server's;
+  * a swing with no input event wakes the miner;
+  * the chip readable at 18 viewports with both drawers (46 states).
+* `check_deepvein_cave_row` (new, 13): the card and the warning, live on an 800x360 touch phone, and the chip
+  at the wall on a phone and on a desktop.
+* `check_deepvein_cave_cap` (new, 12, and 14 since the resume):
+  * the config broken on purpose: 10x decor, 10x critters, 5x weather, every emitter for the weather, one
+    light, a hazard every 6-7 s;
+  * over 150 rides, every budget holds on every frame, and no hazard is crowded out (the model is shown on
+    8131 of 8131 frames with a ring);
+  * decor (146 parts at most) and critters (89) still show, and the rest lantern is set down at the core;
+  * since the resume, a caller that never hides shows five kinds in turn: 1 model each time.
+* `check_deepvein_cave_hud`: 18 viewports (the reviewer's 8 phones added).
+* `check_deepvein_pace` and `_rarity`: the owner decisions (§12).
+* Fixtures that need a known cave store `caveKey = Mine.legacyKey(...)`. These are `check_deepvein`, `_cave`,
+  `_cave_budget`, `_cave_join`, `_strata`, `_cave_row`, `_cave_cap` and `walk`.
+
+### Fixed on the resume
+
+* **The session half of the owner check (L3).** With `saveProfile` comparing jobIds only, the lock check as the
+  first attempt left it passed 37 / 0: every takeover it staged came from another server. A newer session on
+  THIS server (a quick rejoin while the older copy still writes) stamps the same jobId, so only the token tells
+  them apart. The new section fails 6 assertions on L3 and passes on the game.
+* **The hazard cap in CaveArt (P4).** Cave.client hides every plan's model when the plan ends, so no ride ever
+  shows two kinds and the cap was unreachable. The new probe calls `showHazard` with five kinds and never
+  hides one. It counted 1, 2, 3, 4, 5 models on P4 and counts 1 each time on the game.
+* **A race in `check_deepvein_cave`** (the toggler's queued rest). A swing under a threat never drops a queued
+  rest; that is by design, because stepping off the lane is what the warning asks for. When a hazard was in
+  flight at the end of the toggler minute, the set-up "no rest queued before the idle test" failed.
+  * Instrumented, it failed in 1 of 14 runs: `⛺ …` with `MOVE! Step out of the shadow` showing at the click.
+    The same failure appeared under mutants S6 and S8, which `check_deepvein_secret` also killed for the
+    right reason.
+  * The 110-160 s clock made this likelier.
+  * A hazard in flight now plays out first, as the idle test beside it already did. Nothing asserted changed.
+* `check_deepvein_cave.luau` had one LF line among 1609 CRLF lines; it is CRLF throughout again.
+
+### Mutation sweep 6 (2026-10-01)
+
+Harness `scratchpad/dv2/mut.py`; definitions `muts6.json` (and `ctl2.json` for K4 and K5); results
+`sweep6/results.json` and `sweep6b/results.json`; the proof and this table `table6.py`. All of it ran on
+scratch copies, and the real tree was never mutated.
+* **Per mutant:** a fresh copy of the game, the emulator and every `check_deepvein*`; exactly one occurrence
+  of each edit replaced (in the file's own CRLF or LF); the bundle rebuilt.
+* **Proof that it reached the bundle:** each mutant's rebuilt bundle, with its paths normalised, equals the
+  sweep's unmutated bundle with the same edits applied, each exactly once. K3's copy was made after the
+  resume's comment-only edit to `Config.luau`, so its base has that comment edit too.
+* **Gates:** 15 suites per mutant (every spec and check that can see the round's code; the pacing mutants run
+  `check_deepvein_pace`, the rarity mutants `_rarity` and `Hazards.spec`), and all 23 suites per control.
+* The real tree's sources and checks were hashed before the sweep. Afterwards they differed only by the
+  resume's own edits listed under "Files" below.
+
+**45 mutants: 44 KILLED, 1 SURVIVED (P4; the new probe kills it, 13 passed and 1 failed). Every mutant's bundle
+is exactly the unmutated bundle with the same edits.** Controls: K1, K2, K4 and K5 went unnoticed by all 23
+suites. K3 (the chip asks for 7 screen px per character instead of 6) was noticed by `check_deepvein_cave` and
+`_cave_row`, and correctly so. On the tested phones it drops the countdown and the stratum's name that 6 px
+still fits, and both checks assert that text is shown. So it was not a neutral edit, and K4 and K5 replace it.
+In the table, "(the race only)" marks a `check_deepvein_cave` failure caused by the set-up race fixed above.
+Both mutants that show it are also killed for their own reason.
+
+| id | mutation | killed by |
+|---|---|---|
+| S1 | fix reverted: every player digs the public cave (WorldSeed + rebirths), key ignored | Mine.spec, check_deepvein_secret |
+| S2 | the ore roll ignores the key's second word | Mine.spec |
+| S3 | the carving ignores the key's second word | Mine.spec, walk |
+| S4 | keyFromHex drops the third quarter of the GUID | Mine.spec, walk, check_deepvein |
+| S5 | validKey accepts fractional words | Mine.spec |
+| S6 | the server leaks the key's first word as a shaft attribute | check_deepvein_cave (the race only), check_deepvein_secret |
+| S7 | the server sends the key in the State payload | check_deepvein_secret |
+| S8 | a read-only session digs the saved cave (free scouting) | check_deepvein_cave (the race only), check_deepvein_secret |
+| S9 | a rebirth keeps the old key (the same cave, deeper) | check_deepvein_secret |
+| S10 | the rebirth snapshot omits the key (a failed flush keeps the new key) | check_deepvein_secret |
+| S11 | saveProfile does not write the key | check_deepvein_secret |
+| S12 | loadProfile ignores the saved key (a relog re-rolls the cave) | walk, check_deepvein, check_deepvein_secret |
+| L1 | fix reverted: saveProfile writes whoever holds the record | check_deepvein_lock |
+| L2 | the session half only (no jobId half) | check_deepvein_lock |
+| L3 | the jobId half only (no session half) | check_deepvein_lock |
+| L4 | taking the lock writes no token | walk, check_deepvein, check_deepvein_lock, check_deepvein_secret, check_deepvein_strata |
+| L5 | a lost profile is not told to the player | check_deepvein_lock |
+| L6 | a lost profile keeps canSave = true | check_deepvein_lock |
+| C1 | config: the core's cracks gold again (reviewer M1) | EnvConfig.spec, check_deepvein_cave |
+| C2 | CaveArt hard-codes the old crack colour past the palette | check_deepvein_cave |
+| C3 | config: the relic's plate gold again | EnvConfig.spec, check_deepvein_cave |
+| C4 | CaveArt hard-codes the relic plate gold past HazardLook (reviewer RF5b) | check_deepvein_cave |
+| B1 | config: the core's colour grade lifts to 0.35 (reviewer M2) | EnvConfig.spec, check_deepvein_cave |
+| B2 | config: the rule loosened (MaxBrightnessLift 0.5) | EnvConfig.spec |
+| B3 | the client lifts the grade by 0.1 as it writes it | check_deepvein_cave |
+| H1 | a card that comes due during a warning is drawn over it | check_deepvein_cave_row |
+| H2 | a warning no longer sends a showing card away | check_deepvein_cave_row |
+| H3 | a card that waited is never shown | check_deepvein_cave_row |
+| H4 | the chip always takes the left side (the old layout's squeeze) | check_deepvein_cave |
+| H5 | the chip always shows its longest text | check_deepvein_cave |
+| H6 | the chip settles for 2 screen px per character | check_deepvein_cave |
+| W1 | fix reverted (server): no Swing event | check_deepvein_cave |
+| W2 | fix reverted (client): the Swing event is ignored | check_deepvein_cave |
+| P1 | decor and critters admitted without the part budget | check_deepvein_cave_cap |
+| P2 | the weather no longer leaves an emitter and 16/s for a hazard | check_deepvein_cave_cap |
+| P2a | the weather leaves the emitter, not the particles | check_deepvein_cave_cap |
+| P2b | the weather leaves the particles, not the emitter | check_deepvein_cave_cap |
+| P3 | set pieces light without the cap | check_deepvein_cave_cap |
+| P4 | showing a hazard does not put another kind away | **SURVIVED** |
+| P5 | a weather rate comes down lazily (only on a 0.25/s change) | check_deepvein_cave_cap |
+| X1 | fix reverted: the chip counts down past the depth wall | check_deepvein_cave_row |
+| D1 | (a) a normal player twice as slow (the brag past 45 min) | check_deepvein_pace |
+| D2 | (a) a normal player twice as fast (the brag before 20 min) | check_deepvein_pace |
+| D3 | (b) the hazard clock back past the brief: 140-200 s | check_deepvein_rarity |
+| D4 | (b) the hazard clock too fast: 60-80 s | check_deepvein_rarity |
+
+| control | edit | result |
+|---|---|---|
+| K1 | the falling rock 2 points redder | unnoticed by all 23 suites |
+| K2 | the lost-profile toast reworded | unnoticed by all 23 suites |
+| K3 | the chip asks for 7 screen px per character, not 6 (stricter) | noticed by check_deepvein_cave, check_deepvein_cave_row: not a neutral edit (see above) |
+| K4 | the Swing remote carries no UserId (the client takes nil as its own) | unnoticed by all 23 suites |
+| K5 | the steam vent's jet 2 points less red | unnoticed by all 23 suites |
+
+### Gates at the end of the round
+
+Every suite ran on the real tree after the last edit, the bundle rebuilt first (sha256 `d15d8cc1ad29…`).
+* Specs **2717 / 0**: Ore 1272, Mine 223, Economy 131, Prestige 295, Responsive 70, EnvBands 124, Hazards 140,
+  Rest 76, Strata 103, EnvConfig 283.
+* Headless **1078 / 0 + PASS**: `walk` 129, `check_deepvein` 136, `check_deepvein_cave` 589, `_cave_budget` 10,
+  `_cave_cap` 14, `_cave_hud` PASS (18 viewports), `_cave_join` 22, `_cave_row` 13, `_strata` 45, `_pace` 29,
+  `_rarity` 15, `_secret` 27, `_lock` 49.
+* Compile: all 39 files (16 sources, 11 test files, 12 `check_deepvein*`) go through `loadstring` clean, and
+  the checker fails on a broken file. No type analysis was run.
+* Stability: `check_deepvein_cave` with the race fixed ran green 12 times out of 12 (instrumented; a hazard was
+  in flight at the toggler's end in one of them and played out first).
+
+### Files written in this round
+
+* **`deep-vein`:** `src/shared/Mine.luau` (the key), `src/server/Main.server.luau` (key, token, `Swing`),
+  `src/shared/Config.luau` (PieceGlow, HazardLook, LampFill brightness, the grade, the hazard clock),
+  `src/shared/CaveArt.luau` (palettes, budget caps), `src/client/Cave.client.luau` (row, card, chip, `Swing`);
+  `tests/Mine.spec.luau`, `Prestige.spec.luau`, `EnvConfig.spec.luau`, `Strata.spec.luau`, `walk.luau`;
+  `EYECANDY.md`, `README.md`, `CLAUDE.md`.
+* **`robloxemu`:** new `check_deepvein_secret`, `_lock`, `_cave_row`, `_cave_cap`; changed `check_deepvein`,
+  `_cave`, `_cave_budget`, `_cave_hud`, `_cave_join`, `_strata`, `_pace`, `_rarity`; the rebuilt
+  `build/deep-vein.luau`.
+* **On the resume:** `check_deepvein_lock` (the same-server section), `check_deepvein_cave_cap` (the cap
+  probe), `check_deepvein_cave` (the race and the line ending), comments in `Config.luau` and the pace and
+  rarity checks (the re-measured numbers), and these documents.
+* Nothing else. Not robloxemu/emu, tools, docs or any other game. Nothing was committed, pushed or published,
+  and Studio was not opened.
+
+---
+
+## 15. Complete-game pass (2026-10-01): measured against `docs/complete-game-standard.md`
+
+The owner's finish line for every game ("lag komplette spill ... inkludert alt vi har diskutert"). This pass checked
+each item of the standard against the game, not against the reviewer's list alone, and built what was missing. The
+resume found the round's first attempt had left nothing on disk after pass 1 (no file newer than pass 1's last
+write; the bundle rebuilt byte-identical, sha256 `d15d8cc1ad29…`), so it started from pass 1's tree with every gate
+green (23 suites, the same counts as §14).
+
+| standard | state found | what was done | test (failing on the unchanged game first) |
+|---|---|---|---|
+| §1 core loop from join | `walk.luau` plays spawn to rebirth and a rejoin | nothing | (met) |
+| §1 spawn: `RespawnLocation` | never set; the one enabled pad did the job | every player's `RespawnLocation = MinersRest` | `walk.luau`: 129 passed, 1 failed there |
+| §1 nothing secret replicates | pass 1 (§14, finding 1) | nothing; the board's payloads and attributes carry user ids and depths only | `check_deepvein_secret` 27 / 0 |
+| §1 DataStore, owner token | pass 1 (§14, finding 2) | the board is written only after a profile write landed | `check_deepvein_lock` 49 / 0 |
+| §1 no silent no-ops | a click on a bedrock wall did nothing (§13.2, "not done") | each wall slab carries a ClickDetector that toasts "Bedrock: the edge of your claim", at most once per `Mine.WallToastSeconds` (2 s), owner only, never a swing | `check_deepvein`: 138 passed, 6 failed there |
+| §2 Fx, bands, hazards, rest | §1-§14 | nothing | (met) |
+| §2 budgets capped in code | pass 1 (§14, finding 7) | nothing | `check_deepvein_cave_cap` 14 / 0 |
+| §2 brag in 30-45 min, measured in `tests/` | measured only in `robloxemu/check_deepvein_pace` | `tests/Pacing.spec.luau` + `tests/DigModel.luau`: the pace bot's policy on the pure modules, eight drawn cave sequences | 36 / 0 (a measurement; held by mutants M23-M25) |
+| §2 phone, rule 4b | `check_deepvein_cave_hud` runs with `overlap = true` at 18 viewports; card and banner never together (`_cave_row`) | nothing | (met) |
+| §3 board, public + friends | a public top 10 in a HUD drawer, raw studs, no tie-break, written on every save, names looked up by the client on every push | the whole §3 design (below) | `check_deepvein_board` crashed there (no Board remote, no boards); `tests/Board.spec` could not load |
+| §3 no Robux, no gambling, codes public | none of them exist | nothing | (met) |
+| §4 store text | none | `README.md`: 994 characters, plain ASCII | counted |
+| §4 needs-Studio list, thumbnail shot list | §9, §10 (no size) | §9 items 25-29; §10 says 1920x1080 and gains shot 7, the board | - |
+| §4 clip list | none | `MARKETING.md`: nine clips, 7-15 s, 1080x1920, staging for each | - |
+| §4 CLAUDE.md: gates and traps | gates listed by name and count | how to run each, the new counts, the board's and the pacing model's traps | - |
+| §5 night shift | not started | nothing (not this pass's) | - |
+
+### The board (complete-game-standard §3)
+
+* **The rules are +1 Jump's.** `src/shared/Board.luau` is `plus1-jump/src/shared/Board.luau`, byte-identical
+  (sha256 `07fa43c3…`, the same file facility-nightmare and labyrint-spill carry). `tests/Board.spec.luau` is its
+  spec, unchanged, plus a Deep Vein section: the deepest layer in the game (324, the wall at rebirth 25) is inside
+  `MaxMetric` and round-trips exactly; one layer deeper always ranks above; no board text is +1 Jump's ("climb",
+  "space", "tile"); the store is not v1's.
+* **The metric** is `bestLayer`, the deepest layer a miner has ever opened. Only `noteOpen` raises it (a cell the
+  server opened: a swing it accepted, or a void that swing broke into), and it stamps `bestAt` then. A profile with
+  a best and no `bestAt` (saved before this pass) is stamped at load. The value in `DeepVein_LB_v2` is
+  `layer * 2e9 + (2e9 - bestAt)`, written by `writeBoard` only after a profile write landed, only when `bestLayer`
+  has passed `boardLayer`, through `Board.keepHigher`. The old store (`DeepVein_LB_v1`, raw studs) is retired; the
+  game was never published, so it holds nothing.
+* **Where.** Each miner spawns in their own mouth, 160 studs from the next, inside walls they cannot climb, so each
+  gets a board of their own: `workspace.DeepBoards.DeepestBoard_<id>`, 22 x 12 x 0.4 studs, 2.5 studs over the mouth
+  floor on the SOUTH wall, the wall a freshly spawned miner faces (38.55 studs ahead, measured). Not in the shaft folder: the
+  shaft's part counts are asserted, and a rebirth rebuilds the shaft. `CanQuery = false`, so no click meant for the
+  rock lands on it; a gold neon rim behind it. Destroyed when its owner leaves.
+* **The prompt** sits at the board's foot, reach `Config.Board.PromptDistance` = 16 studs: from the south row
+  (2.3 studs), from a cell dug out below it (5.4), from the middle of the south half (14.1), not from the spawn (38.1;
+  all four measured by `check_deepvein_board`).
+  Only the owner toggles PUBLIC / FRIENDS; anyone else is told whose board it is.
+* **Public** is `GetSortedAsync(false, 10)`, at most once per `PublicCacheSeconds` (60 s): measured 3 calls in
+  180 s. **Friends** come only when asked: `GetFriendsAsync`, capped at 200, cached 300 s per player, scores read
+  at 40 at once then 1 a second (`Board.newLimiter`) and never into Roblox's last 10 GetAsync; a friend in this
+  server is read from memory. Measured with 450 friends: 41 reads in the first second, 100 in the first minute,
+  exactly 200 in all, 3 pages turned. The four empty states each say something different (`Config.Board.Text`).
+* **Names** are resolved on the server (players here, the friends list, else `GetNameFromUserIdAsync`) and kept
+  in memory; no profile holds one. The HUD's top 10 now gets decoded depths in studs and the server's names, and no
+  longer looks names up itself on every push.
+* **Drawn by `Board.client`** on the player's own board only, as a SurfaceGui (not in PlayerGui, so the HUD fit check
+  is unaffected): the mode, ten rows `rank. name (you)  depth m` with the stratum's emoji, a note, a hint.
+* **A script cannot inflate it.** `check_deepvein_board` §3b: a character teleported onto the depth wall plus
+  forged Elevator, Buy and Rebirth remotes opened no depth (best stays 0 m) and put nothing on the board.
+
+### The pacing model in `tests/`
+
+`tests/DigModel.luau` plays `check_deepvein_pace`'s bot (deepest visible block first, ore breaking ties, the server's
+stream band with its hysteresis, SURFACE + SELL and one try at each upgrade when the bag is full, rebirth when
+offered) on `Mine`, `Ore`, `Economy` and `Prestige` directly, with `Config.Pacing`'s human costs. `Pacing.spec`
+plays eight cave sequences (keys from `Mine.hash`) to the third run and the first of them to the core:
+
+| | normal | fast | slow |
+|---|---|---|---|
+| the magma (the brag), eight sequences | 24.0-33.6 min, always in the third run | 15.1-20.7 | 38.6-54.3 |
+| the first rebirth | 7.0-15.3 min | | |
+| the core (the long-term goal), sequence 1 | 386 min (12.9x the magma) | | |
+
+The end-to-end twin through the real server (`check_deepvein_pace`, one sequence) measured the magma at 23.6 min and
+the core at 382 min this session, the same picture. Owner decision (a) stands: the brag lands inside the 45-minute
+bound on every sequence, and the model asserts 20-45 min and the third run for each.
+
+### Mutation sweep 7 (2026-10-01)
+
+Every mutant ran in its own scratch copy of the tree; for each, the edited source's sha256 changed and the rebuilt
+bundle differed from the unmutated scratch bundle (`aec3f863…`), so every mutant reached the code under test.
+
+| # | mutant | killed by |
+|---|---|---|
+| M1 | the board is written on every save | `_board`: 36 writes where 24 (4 failures) |
+| M2 | `noteOpen` stops stamping `bestAt` | `_board`: Gil's reach time stays 1760000000 |
+| M3 | no stamp for a save without `bestAt` | `_board`: Dee's 9 stored as **10** (a `bestAt` of 0 overflows into the next layer) |
+| M4 | no `keepHigher` | `_board`: Ned's 25 lowered to 15 |
+| M5 | the public list refreshed every 30 s | `_board`: 6 GetSortedAsync in 180 s |
+| M6 | friends fetched at join | `_board`: fetched before anyone asked |
+| M7 | the friends cap 1000 | `_board`: 340 reads, 8 pages |
+| M8 | no read limiter | `_board`: 200 reads in the first second |
+| M9 | anyone toggles anyone's board | `_board`: Bo flipped Ava's board |
+| M10 | the HUD looks names up itself | `_board`: row 1 `User_505`, not the server's `Eve` |
+| M11 | a leaver's board stays | `_board` |
+| M12 | the board faces the wall | `_board`: cos -1.00 |
+| M13 | the board takes clicks | `_board` |
+| M14 | the client draws on the first board it finds | `_board` (8 failures) |
+| M15 | the HUD gets layers, not studs | `_board`: row 1 `50m` |
+| M16 | no `RespawnLocation` | `walk` |
+| M17 | the walls silent again | `check_deepvein` (6 failures) |
+| M18 | no throttle on the wall toast | `check_deepvein`: 10 toasts for 10 clicks |
+| M19 | a stranger's click toasts the owner | `check_deepvein` |
+| M20 | a board title copied from +1 Jump | `Board.spec` |
+| M21 | `MaxMetric` 300 | `Board.spec` (3 failures) |
+| M22 | DESCEND credits the character's own position | `_board` §3b: Rex at 144 m with nothing dug |
+| M23 | a normal player twice as slow | `Pacing.spec`: the magma at 56.0-67.2 min on the first three sequences (8 failures) |
+| M24 | the magma 12 layers deeper (fourth run) | `Pacing.spec` |
+| M25 | rebirths 2.5x dearer | `Pacing.spec`: the magma at 51.0 and 53.3 min, and not within three runs on sequence 3 (8 failures) |
+
+Controls, each run against all 26 suites and noticed by none (each reached the bundle): K1 the board's rim 5 points
+darker; K2 the friends view's loading text reworded; K3 the board's hint reworded; K4 the wall toast's throttle 3 s
+instead of 2. So the sweep can report a survivor, and the 25 kills are not a harness that fails everything.
+
+### Gates at the end of the pass
+
+Every suite ran on the real tree after the last source edit, the bundle rebuilt first (sha256 `d46ba924b12b…`);
+26 suites, all green:
+* Specs **2828 / 0**: Ore 1272, Mine 223, Economy 131, Prestige 295, Responsive 70, EnvBands 124, Hazards 140,
+  Rest 76, Strata 103, EnvConfig 283, Board 75 (new), Pacing 36 (new).
+* Headless **1179 / 0 + PASS**: `walk` 130, `check_deepvein` 144, `check_deepvein_board` 92 (new), `_cave` 589,
+  `_cave_budget` 10, `_cave_cap` 14, `_cave_hud` PASS (18 viewports), `_cave_join` 22, `_cave_row` 13, `_strata` 45,
+  `_pace` 29, `_rarity` 15, `_secret` 27, `_lock` 49. (`check_deepvein_board` gained two print lines after that run,
+  for the distances above, and was re-run: 92 / 0.)
+* Compile: all 45 files (18 sources, 14 test files, 13 `check_deepvein*`) go through `loadstring` clean, and the
+  checker fails on a deliberately broken file. No type analysis was run.
+
+### Files written in this pass
+
+* **`deep-vein`:** new `src/shared/Board.luau` (copied), `src/client/Board.client.luau`, `tests/Board.spec.luau`,
+  `tests/Pacing.spec.luau`, `tests/DigModel.luau`, `MARKETING.md`; changed `src/server/Main.server.luau` (the board,
+  `RespawnLocation`, the wall toast), `src/shared/Config.luau` (`Config.Board`, `Save.Leaderboard` v2,
+  `Mine.WallToastSeconds`), `src/client/Hud.client.luau` (the server's names), `tests/walk.luau` (one assertion),
+  `README.md`, `CLAUDE.md` and this file.
+* **`robloxemu`:** new `check_deepvein_board.luau`; changed `check_deepvein.luau` (the walls); the rebuilt
+  `build/deep-vein.luau`.
+* Nothing else: not robloxemu/emu, tools, docs or any other game (+1 Jump was read for the template). Nothing was
+  committed, pushed or published, and Studio was not opened.

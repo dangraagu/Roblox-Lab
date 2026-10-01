@@ -20,6 +20,13 @@
 --     Budget.MaxWeatherEmitters on and Budget.MaxEmitterRate particles/s (EnvBands.capRates);
 --   * hazards: one model per kind, one ring (the shadow / the vent), one lane line;
 --   * rest: one lantern beside a resting miner.
+-- CAPPED IN CODE, not only measured (review 2026-09-30, finding 7), against Config.Budget:
+--   * parts: decor and critters are the parts a config can multiply, so they are admitted only while they fit
+--     beside everything else that can be drawn at once (every set piece, the biggest hazard model, its ring
+--     and lane, the rest lantern, the weather host). A layer of decor or a critter that does not fit waits;
+--   * emitters and particles: the weather leaves room for a hazard's trickle (one emitter, TRICKLE_MAX/s);
+--   * lights: set pieces may light at most MaxLights minus two (a hazard's blink and the rest lantern);
+--   * hazards: showing one hides any other (MaxHazards is 1). No Beam or Trail is ever made.
 --
 -- Dependencies arrive as arguments (a bare `require("./X")` is invalid in Roblox):
 --   CaveArt.new(folder, rand, Config, EnvBands, Strata, Mine)
@@ -165,14 +172,22 @@ local function buildHeadframe(item, cfg)
 		offset = CFrame.new((far + out) / 2, rimTop - 0.5, 0) })
 end
 
--- The core: the bedrock floor glows through its cracks. Placed on the floor slab's top face.
+-- The core: the bedrock floor glows through its cracks. Placed on the floor slab's top face, under the deepest
+-- layer's cells, so its colours are Config.Env.PieceGlow.coreglow (plate, cracks), which EnvConfig.spec holds
+-- away from every ore that can sit on it (review 2026-09-30, finding 3: the cracks were gold).
+local function paletteColor(list, i)
+	local c = list and (list[i] or list[1])
+	if c then return rgb(c[1], c[2], c[3]) end
+	return rgb(255, 255, 255)
+end
 local function buildCoreGlow(item, cfg)
 	local w = (cfg.Mine.GridW - 2) * cfg.Mine.CellSize
+	local pal = (cfg.Env.PieceGlow or {}).coreglow
 	local plate = addPart(item, { name = "CoreGlow", size = Vector3.new(w - 0.4, 0.2, w - 0.4), material = Enum.Material.Neon,
-		color = rgb(255, 96, 24), transparency = 0.35, offset = CFrame.new(0, 0.12, 0) })
+		color = paletteColor(pal, 1), transparency = 0.35, offset = CFrame.new(0, 0.12, 0) })
 	for i, a in { 0.3, -0.5, 1.2, -1.0 } do
 		addPart(item, { name = "CoreCrack", size = Vector3.new(0.5, 0.25, w * (0.55 + 0.1 * i)), material = Enum.Material.Neon,
-			color = rgb(255, 214, 120), transparency = 0.1, offset = CFrame.new((i - 2.5) * 6, 0.2, 0) * CFrame.Angles(0, a, 0) })
+			color = paletteColor(pal, 2), transparency = 0.1, offset = CFrame.new((i - 2.5) * 6, 0.2, 0) * CFrame.Angles(0, a, 0) })
 	end
 	local light = Instance.new("PointLight")
 	light.Name = "CoreLight"
@@ -409,27 +424,32 @@ end
 
 -- ─────────────────────────────────────────────────────────────── hazards
 
--- Glowing hazard models use the strata's decor palette (Config.Env.DecorGlow), so a hazard poking out of the
--- roof never reads as ore either (review 2026-09-24: the relic's plate was gold, the crystal obsidian-violet).
+-- A hazard model's colours are Config.Env.HazardLook[kind], one per part in this order, held away from every
+-- ore that can sit beside the hazard (EnvConfig.spec), so a hazard poking out of the roof never reads as ore
+-- (review 2026-09-24: the relic's plate was gold, the crystal obsidian-violet; review 2026-09-30, finding 3:
+-- nothing held them, so a plate could go back to gold unnoticed).
+-- The most particles per second a hazard's trickle ever emits (showHazard); the weather leaves room for it.
+local TRICKLE_MAX = 16
+
 local HAZARDS = {
-	rock = { label = "FALLING ROCK", parts = { { size = Vector3.new(2.6, 2.6, 2.6), shape = Enum.PartType.Ball, material = Enum.Material.Slate,
-		color = rgb(96, 96, 104) } }, trickle = { 150, 140, 130 } },
-	stalactite = { label = "STALACTITE", parts = { { size = Vector3.new(1.1, 3.8, 1.1), material = Enum.Material.Rock,
-		color = rgb(110, 124, 136) } }, trickle = { 150, 200, 240 } },
-	lava = { label = "LAVA DRIP", parts = { { size = Vector3.new(2.0, 2.0, 2.0), shape = Enum.PartType.Ball, material = Enum.Material.Neon,
-		color = rgb(255, 86, 22) } }, trickle = { 255, 140, 50 } },
+	rock = { label = "FALLING ROCK", parts = { { size = Vector3.new(2.6, 2.6, 2.6), shape = Enum.PartType.Ball,
+		material = Enum.Material.Slate } }, trickle = { 150, 140, 130 } },
+	stalactite = { label = "STALACTITE", parts = { { size = Vector3.new(1.1, 3.8, 1.1), material = Enum.Material.Rock } },
+		trickle = { 150, 200, 240 } },
+	lava = { label = "LAVA DRIP", parts = { { size = Vector3.new(2.0, 2.0, 2.0), shape = Enum.PartType.Ball,
+		material = Enum.Material.Neon } }, trickle = { 255, 140, 50 } },
 	crystal = { label = "FALLING CRYSTAL", parts = { { size = Vector3.new(1.2, 3.4, 1.2), material = Enum.Material.Neon,
-		color = rgb(214, 140, 255), transparency = 0.1 } }, trickle = { 220, 200, 255 } },
-	relic = { label = "CRUMBLING RUIN", parts = { { size = Vector3.new(2.4, 2.0, 2.4), material = Enum.Material.Sandstone,
-		color = rgb(182, 160, 120) }, { size = Vector3.new(0.9, 0.9, 0.1), material = Enum.Material.Neon, color = rgb(60, 230, 190),
-		offset = CFrame.new(0, 0, -1.25) } }, trickle = { 220, 200, 150 } },
-	shard = { label = "FALLING SHARD", parts = { { size = Vector3.new(1.0, 3.6, 1.0), material = Enum.Material.Glass,
-		color = rgb(28, 22, 40) }, { size = Vector3.new(0.14, 3.2, 0.14), material = Enum.Material.Neon, color = rgb(230, 140, 255),
-		offset = CFrame.new(0.45, 0, 0) } }, trickle = { 190, 150, 255 } },
-	steam = { label = "STEAM VENT", parts = { { size = Vector3.new(7, 2.2, 2.2), shape = Enum.PartType.Cylinder, material = Enum.Material.SmoothPlastic,
-		color = rgb(230, 240, 255), transparency = 0.45, jet = true } }, trickle = { 235, 240, 250 }, vent = true },
-	magma = { label = "MAGMA BURST", parts = { { size = Vector3.new(7, 2.2, 2.2), shape = Enum.PartType.Cylinder, material = Enum.Material.Neon,
-		color = rgb(255, 110, 30), transparency = 0.2, jet = true } }, trickle = { 255, 150, 60 }, vent = true },
+		transparency = 0.1 } }, trickle = { 220, 200, 255 } },
+	relic = { label = "CRUMBLING RUIN", parts = { { size = Vector3.new(2.4, 2.0, 2.4), material = Enum.Material.Sandstone },
+		{ size = Vector3.new(0.9, 0.9, 0.1), material = Enum.Material.Neon, offset = CFrame.new(0, 0, -1.25) } },
+		trickle = { 220, 200, 150 } },
+	shard = { label = "FALLING SHARD", parts = { { size = Vector3.new(1.0, 3.6, 1.0), material = Enum.Material.Glass },
+		{ size = Vector3.new(0.14, 3.2, 0.14), material = Enum.Material.Neon, offset = CFrame.new(0.45, 0, 0) } },
+		trickle = { 190, 150, 255 } },
+	steam = { label = "STEAM VENT", parts = { { size = Vector3.new(7, 2.2, 2.2), shape = Enum.PartType.Cylinder,
+		material = Enum.Material.SmoothPlastic, transparency = 0.45, jet = true } }, trickle = { 235, 240, 250 }, vent = true },
+	magma = { label = "MAGMA BURST", parts = { { size = Vector3.new(7, 2.2, 2.2), shape = Enum.PartType.Cylinder,
+		material = Enum.Material.Neon, transparency = 0.2, jet = true } }, trickle = { 255, 150, 60 }, vent = true },
 }
 
 function CaveArt.hazardKinds()
@@ -478,7 +498,30 @@ function CaveArt.new(folder, rand, Config, EnvBands, Strata, Mine)
 	self.origin = nil
 	self.floorTop = nil
 	self.faces = Strata.wallFaces(Config)
+	-- THE PART BUDGET. Every set piece is built now, unparented (updatePiece parents it by weight), so its size
+	-- is known before anything else is admitted. What is left of MaxLocalParts after the pieces and the fixed
+	-- items (one hazard model at its largest, the ring's three parts, the lantern's two, the weather host) is
+	-- what decor and critters may use together.
+	local budget = Config.Budget or {}
+	local fixed = 3 + 2 + 1
+	local biggest = 0
+	for _, def in HAZARDS do biggest = math.max(biggest, #def.parts) end
+	fixed += biggest
+	for id, build in PIECES do
+		local item = newItem(id)
+		build(item, Config)
+		self.pieces[id] = item
+		fixed += #item.entries
+	end
+	self.partBudget = math.max(0, (budget.MaxLocalParts or 200) - fixed)
+	self.optionalParts = 0 -- decor + critter parts that exist now
+	self.maxPieceLights = math.max(0, (budget.MaxLights or 3) - 2)
 	return self
+end
+
+-- Decor and critters are admitted only while they fit (see the header).
+function CaveArt:admit(n)
+	return self.optionalParts + n <= self.partBudget
 end
 
 -- The shaft this client decorates: its world origin (the centre of the mouth at y = 0) and the top of
@@ -495,17 +538,23 @@ function CaveArt:setShaft(origin, floorTop)
 end
 
 function CaveArt:updatePiece(id, w)
-	local build = PIECES[id]
-	if build == nil then return end
 	local item = self.pieces[id]
+	if item == nil then return end
 	if self.origin == nil then w = 0 end
-	if item == nil then
-		if w <= 0.01 then return end
-		item = newItem(id)
-		build(item, self.cfg)
-		self.pieces[id] = item
-	end
 	setWeight(item, w, self.folder)
+	-- the set pieces together light no more than MaxLights minus the blink and the lantern
+	local lit = 0
+	for _, it in self.pieces do
+		for _, l in it.lights do
+			if l.Enabled then
+				lit += 1
+				if lit > self.maxPieceLights then
+					l.Enabled = false
+					lit -= 1
+				end
+			end
+		end
+	end
 	if item.shown then
 		local root = CFrame.new(self.origin)
 		if id == "coreglow" then
@@ -526,6 +575,7 @@ end
 
 function CaveArt:clearDecor()
 	for _, parts in self.decor do
+		self.optionalParts -= #parts
 		for _, p in parts do p:Destroy() end
 	end
 	self.decor = {}
@@ -545,11 +595,24 @@ function CaveArt:buildDecorLayer(layer)
 	local parts = {}
 	local S = self.cfg.Mine.CellSize
 	local yc = -(layer - 0.5) * S
+	-- describe the layer first: it is built whole, and only if it fits the part budget
+	local planned = {}
+	local n = 0
 	for _, item in items do
 		local builder = DECOR[item.kind]
 		local face = self.faces[item.wall]
 		if builder and face then
-			for _, d in builder(item.scale, item.roll, (self.cfg.Env.DecorGlow or {})[item.kind]) do
+			local ds = builder(item.scale, item.roll, (self.cfg.Env.DecorGlow or {})[item.kind])
+			table.insert(planned, { item = item, face = face, ds = ds })
+			n += #ds
+		end
+	end
+	if not self:admit(n) then return false end
+	self.optionalParts += n
+	for _, pl in planned do
+		local item, face = pl.item, pl.face
+		do
+			for _, d in pl.ds do
 				local p = newPart({ name = "Decor_" .. item.kind, size = d.size, material = d.material, color = d.color, shape = d.shape,
 					transparency = d.transparency, reflectance = d.reflectance })
 				local base = faceCFrame(face, item.u + d.pos.X, yc + item.v * S + d.pos.Y, d.pos.Z)
@@ -569,6 +632,7 @@ function CaveArt:buildDecorLayer(layer)
 		end
 	end
 	self.decor[layer] = parts
+	return true
 end
 
 -- Keep decor for the layers within DecorLayers of `centre`; build at most DecorBuildPerFrame layers a
@@ -578,6 +642,7 @@ function CaveArt:updateDecor(centre)
 	local range = self.cfg.Env.DecorLayers
 	for layer, parts in self.decor do
 		if math.abs(layer - centre) > range then
+			self.optionalParts -= #parts
 			for _, p in parts do p:Destroy() end
 			self.decor[layer] = nil
 		end
@@ -596,8 +661,8 @@ function CaveArt:updateDecor(centre)
 	while built < self.cfg.Env.DecorBuildPerFrame and #self.decorQueue > 0 do
 		local layer = table.remove(self.decorQueue, 1)
 		if self.decor[layer] == nil and math.abs(layer - centre) <= range then
-			self:buildDecorLayer(layer)
-			built += 1
+			-- a layer that does not fit the part budget is skipped until the miner moves on (nearest first)
+			if self:buildDecorLayer(layer) then built += 1 end
 		end
 	end
 end
@@ -622,6 +687,7 @@ function CaveArt:updateCritters(desired, crumbs, dt, now)
 	for kind, list in self.critters do
 		local want = desired[kind] or 0
 		for i = #list, want + 1, -1 do
+			self.optionalParts -= #list[i].parts
 			for _, e in list[i].parts do e.part:Destroy() end
 			table.remove(list, i)
 		end
@@ -641,9 +707,10 @@ function CaveArt:updateCritters(desired, crumbs, dt, now)
 				list = {}
 				self.critters[kind] = list
 			end
-			-- at most one new critter per kind per frame
-			if #list < want then
+			-- at most one new critter per kind per frame, and only while it fits the part budget
+			if #list < want and self:admit(#CRITTERS[kind].parts) then
 				local c = buildCritter(kind)
+				self.optionalParts += #c.parts
 				c.at = 1 + math.floor(rand() * #crumbs) % #crumbs
 				c.to = c.at
 				c.hop = 0
@@ -708,8 +775,9 @@ function CaveArt:updateWeather(rates, cam)
 		self.emitters = {}
 	end
 	local budget = self.cfg.Budget or {}
-	local capped = self.EnvBands.capRates(rates, math.min(budget.MaxWeatherEmitters or 2, budget.MaxEmitters or 2),
-		budget.MaxEmitterRate or 60, self.cfg.Env.WeatherMinRate or 0.05)
+	-- one emitter and TRICKLE_MAX particles/s stay free for a hazard's trickle
+	local capped = self.EnvBands.capRates(rates, math.max(0, math.min(budget.MaxWeatherEmitters or 2, (budget.MaxEmitters or 4) - 1)),
+		math.max(0, (budget.MaxEmitterRate or 60) - TRICKLE_MAX), self.cfg.Env.WeatherMinRate or 0.05)
 	local anyOn = false
 	for kind, def in WEATHER do
 		local rate = capped[kind] or 0
@@ -742,7 +810,8 @@ function CaveArt:updateWeather(rates, cam)
 		if pe then
 			local on = rate > 0
 			pe.Enabled = on
-			if math.abs((pe.Rate or 0) - rate) > 0.25 or (not on and pe.Rate ~= 0) then
+			-- written at once when it must come DOWN (the cap is a cap), within 0.25/s when it goes up
+			if math.abs((pe.Rate or 0) - rate) > 0.25 or rate < (pe.Rate or 0) or (not on and pe.Rate ~= 0) then
 				pe.Rate = if on then rate else 0
 			end
 			anyOn = anyOn or on
@@ -764,9 +833,10 @@ function CaveArt:hazardModel(kind)
 	local def = HAZARDS[kind] or HAZARDS.rock
 	item = newItem("Hazard_" .. kind)
 	local main = nil
-	for _, d in def.parts do
-		local p = addPart(item, { name = "Hazard_" .. kind, size = d.size, material = d.material, color = d.color, shape = d.shape,
-			transparency = d.transparency, offset = d.offset })
+	local look = (self.cfg.Env.HazardLook or {})[kind]
+	for i, d in def.parts do
+		local p = addPart(item, { name = "Hazard_" .. kind, size = d.size, material = d.material, color = paletteColor(look, i),
+			shape = d.shape, transparency = d.transparency, offset = d.offset })
 		main = main or p
 		if d.jet then item.jet = item.entries[#item.entries] end
 	end
@@ -830,6 +900,14 @@ end
 
 -- plan: the Hazards plan; pos: where it is now; zone: Hazards.zone; feetY: the floor under the miner.
 function CaveArt:showHazard(plan, pos, now, zone, feetY)
+	-- one hazard model at a time (Budget.MaxHazards): another kind still shown is put away first
+	for k, other in self.hazardModels do
+		if k ~= plan.kind and other.shown then
+			other.billboard.Enabled = false
+			for _, pe in other.emitters do pe.Enabled = false end
+			setWeight(other, 0, self.folder)
+		end
+	end
 	local item = self:hazardModel(plan.kind)
 	setWeight(item, 1, self.folder)
 	local def = item.def
@@ -838,7 +916,7 @@ function CaveArt:showHazard(plan, pos, now, zone, feetY)
 	local hanging = plan.hang ~= nil and plan.t < plan.hang
 	local pe = item.emitters[1]
 	pe.Enabled = plan.t < plan.arriveAt
-	local rate = if def.vent then (if hanging then 8 else 16) else (if hanging then 10 else 0)
+	local rate = math.min(TRICKLE_MAX, if def.vent then (if hanging then 8 else 16) else (if hanging then 10 else 0))
 	if pe.Rate ~= rate then pe.Rate = rate end
 	local p = Vector3.new(pos.x, pos.y, pos.z)
 	if def.vent then
