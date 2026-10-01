@@ -2,6 +2,24 @@
 
 Newest night first. Each job: done / in progress (with exact resume point) / blocked (why).
 
+## Night of 2026-10-01 (run started 00:18, stopped at about 00:55, nothing done)
+
+Clock: Bash `date` and PowerShell `Get-Date` both read 00:18 at start.
+
+**Why nothing was done:** `git status --short` showed uncommitted changes I did not make in EVERY game
+folder (all 11 existing games plus same-door, signal-lost, meteor-drop-tycoon, stormgrow, escape-room-lab)
+and 142 files under `robloxemu/`. Files were still being written at 00:49, so the daytime run from
+2026-09-30 (docs/complete-game-standard.md) was active. Per section 3c every game was skipped:
+"skipped: daytime run in progress". That covers H, I, A, B, C, D, E. F needs a Studio session on a game
+(and could collide with the daytime run's Studio/MCP use), so it was skipped too.
+
+- G (Reddit): blocked. The Chrome extension refused old.reddit.com ("This site is not allowed due to
+  safety restrictions"), so the visibility gate for `t3_1wcafbz` could not be checked. No post.
+- Shorts plan: schedule.json has 12 posts with `youtube: null` every day 2026-10-01 .. 2026-10-12, so no
+  extension needed.
+- The plus1-jump resume point from 2026-09-27 (below) still stands, but check first whether the daytime run
+  already did the second-review fixes / Studio items for plus1-jump.
+
 ## Night of 2026-09-27 (run started 00:17, stopped early)
 
 **Why it stopped early:** mid-run both clocks (Bash `date` and PowerShell `Get-Date`) jumped from about
