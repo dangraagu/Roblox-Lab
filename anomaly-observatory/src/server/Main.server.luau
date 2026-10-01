@@ -23,6 +23,7 @@ local Progression = require(Shared:WaitForChild("Progression"))
 local Codex = require(Shared:WaitForChild("Codex"))
 local Codes = require(Shared:WaitForChild("Codes"))
 local Fx = require(Shared:WaitForChild("Fx"))
+local Highscore = require(Shared:WaitForChild("Highscore"))
 
 -- Visual polish (code-only, additive): cold + dense horror rig with post-fx. Atmosphere is
 -- half of this genre — without it the concourse reads as grey boxes instead of a night shift.
@@ -59,6 +60,14 @@ end)
 if not orderedOk then
 	bestBoard = nil
 end
+-- The Field Guide board's own ordered store (queued job A). Not the Best-Day store: that one ranks a
+-- Day streak and is left exactly as it was.
+local guideOk, guideStore = pcall(function()
+	return DataStoreService:GetOrderedDataStore(Config.Save.GuideStore)
+end)
+if not guideOk then
+	guideStore = nil
+end
 
 type Profile = {
 	bestDay: number,
@@ -75,6 +84,23 @@ type Profile = {
 	readOnlyNotified: boolean, -- R5: the "this session can't save" notice is one-shot
 	redeemBusy: boolean, -- R4: an UpdateAsync redeem is in flight for this player
 	remoteAt: { [string]: number }, -- R4: per-remote last-accepted os.clock(), for the cooldown
+	pendingTint: string?, -- a tint picked inside SetTint's cooldown: applied when it ends (the last pick wins)
+	run: Run?, -- the Day streak and its live pass, saved (owner decision 2026-09-30, see sanitizeRun)
+	loadedRunId: string?, -- the run id this session loaded (or adopted): retryClaim's staleness test
+	-- the Field Guide board (queued job A): types caught as the board counts them, when that count was
+	-- first reached (unix), the count last written to the board store, and os.clock() of that write
+	guideCount: number,
+	guideAt: number,
+	guidePublished: number,
+	lastGuideAt: number,
+}
+
+-- The saved run (owner decision 2026-09-30: "never punishing"). Saved WITH the live pass, so leaving
+-- is never a re-roll; a wrong call replaces it (new id, Day 1, no pass) and is flushed at once.
+type Run = {
+	id: string, -- a new id for every run: a run ended by a wrong call can never be resumed
+	day: number,
+	pass: { clean: boolean, anomalyId: string? }?, -- nil between a wrong call and the next roll
 }
 
 type PassState = {
@@ -85,6 +111,9 @@ type PassState = {
 	awaiting: boolean,
 	salt: number, -- per-session anomaly-sequence salt (server memory only, never replicated)
 	startedAt: number, -- os.clock() when this pass went live (anti-autoclicker plausibility)
+	runId: string, -- the run this Day belongs to (Run.id)
+	ownRun: boolean, -- this session started the run (fresh, or after its own wrong call): see retryClaim
+	hinted: boolean, -- a hint was bought for THIS pass: pressing H again re-shows it, free
 }
 
 local profiles: { [Player]: Profile } = {}
@@ -123,7 +152,7 @@ end
 local saltSource = Random.new()
 
 -- Forward declarations for the mutually-recursive loop functions (assigned below).
-local beginPass: (Player) -> ()
+local beginPass: (Player, any?) -> ()
 local resolveChoice: (Player, string) -> ()
 local useHint: (Player) -> ()
 local awardMilestone: (Player, number) -> ()
@@ -172,6 +201,60 @@ local function sanitizeOwnedTints(raw: any, currentTint: string): { [string]: bo
 	return owned
 end
 
+-- A stored run, or nil when there is nothing usable. The store is data from an earlier version (or a
+-- hand-edited one), so everything is checked: the id a short string, the Day a whole number inside
+-- the streak's range, the pass a boolean roll whose anomaly THIS catalog still has. An unknown anomaly
+-- keeps the Day and drops the pass (the next pass is rolled): that is a catalog change, never
+-- something a player can arrange, so it is not a re-roll they can use.
+local function sanitizeRun(raw: any): Run?
+	if type(raw) ~= "table" or type(raw.id) ~= "string" or raw.id == "" or #raw.id > 64 then
+		return nil
+	end
+	local d = tonumber(raw.day)
+	if d == nil or d ~= d or d % 1 ~= 0 then
+		return nil
+	end
+	d = math.clamp(d, Config.Progression.StartDay, Config.Progression.MaxDay)
+	local pass = nil
+	local p = raw.pass
+	if type(p) == "table" and type(p.clean) == "boolean" then
+		if p.clean then
+			pass = { clean = true }
+		elseif type(p.anomalyId) == "string" and Anomaly.byId(Config, p.anomalyId) ~= nil then
+			pass = { clean = false, anomalyId = p.anomalyId }
+		end
+	end
+	return { id = raw.id, day = d, pass = pass }
+end
+
+local function isKnownAnomaly(id: string): boolean
+	return Anomaly.byId(Config, id) ~= nil
+end
+
+-- The board's count follows the Field Guide: only ids THIS catalog knows count (a profile carrying
+-- retired ids can never show more than the catalog has), and a new count is stamped with the time it
+-- was first reached, which breaks ties on the board.
+local function reconcileGuide(prof: any)
+	local known = Codex.countKnown(prof.caught, isKnownAnomaly)
+	if known > prof.guideCount then
+		prof.guideCount = known
+		prof.guideAt = os.time()
+	elseif known < prof.guideCount then
+		prof.guideCount = known -- the catalog retired ids since; the board store keeps what it has
+	end
+end
+
+-- The stored { count, at, published }, or zeros.
+local function readGuide(prof: any, raw: any)
+	if type(raw) ~= "table" then
+		return
+	end
+	local c, a, pub = tonumber(raw.count), tonumber(raw.at), tonumber(raw.published)
+	if c and c == c then prof.guideCount = math.max(0, math.floor(c)) end
+	if a and a == a then prof.guideAt = math.floor(a) end
+	if pub and pub == pub then prof.guidePublished = math.max(0, math.floor(pub)) end
+end
+
 -- Fresh default profile (used for brand-new players and when a load fails).
 local function defaultProfile(): Profile
 	return {
@@ -189,6 +272,10 @@ local function defaultProfile(): Profile
 		readOnlyNotified = false,
 		redeemBusy = false,
 		remoteAt = {},
+		guideCount = 0,
+		guideAt = 0,
+		guidePublished = 0,
+		lastGuideAt = -math.huge, -- so the first board write is never throttled
 	}
 end
 
@@ -202,6 +289,8 @@ type ClaimResult = {
 	redeemed: any,
 	tint: string,
 	ownedTints: { [string]: boolean },
+	run: any, -- raw; sanitizeRun decides what of it is usable
+	guide: any, -- raw; the board's { count, at, published }
 }
 
 -- Read the real profile via UpdateAsync and, if the previous lock is absent/stale/ours, claim
@@ -245,6 +334,8 @@ local function claimLock(plr: Player, myToken: string): ClaimResult?
 			local storedTint = old.tint
 			res.tint = (type(storedTint) == "string" and tintIsKnown(storedTint)) and storedTint or Config.DefaultTint
 			res.ownedTints = sanitizeOwnedTints(old.ownedTints, res.tint)
+			res.run = old.run
+			res.guide = old.guide
 
 			if heldByOther then
 				-- R8: someone else holds it — load READ-ONLY. Returning `old` here still counts
@@ -313,6 +404,12 @@ local function loadProfile(plr: Player): Profile
 	prof.publishedBest = res.bestDay -- R2: never publish BELOW what we actually loaded
 	prof.canSave = res.got
 	prof.lockToken = res.got and myToken or ""
+	-- A read-only session starts from the stored run too (the player sees their Day), and retryClaim
+	-- decides what wins once it can save.
+	prof.run = sanitizeRun(res.run)
+	prof.loadedRunId = prof.run and prof.run.id or nil
+	readGuide(prof, res.guide)
+	reconcileGuide(prof) -- a profile from before the board: its count is stamped now (when is unknown)
 	return prof
 end
 
@@ -359,6 +456,8 @@ local function saveProfile(plr: Player, releaseLock: boolean): boolean
 			old.redeemed = prof.redeemed
 			old.tint = prof.tint
 			old.ownedTints = prof.ownedTints
+			old.run = prof.run
+			old.guide = { count = prof.guideCount, at = prof.guideAt, published = prof.guidePublished }
 			if releaseLock then
 				old.lock = nil -- release: the next session claims immediately
 			else
@@ -414,6 +513,41 @@ local function publishBest(plr: Player, force: boolean?)
 	end
 end
 
+-- The Field Guide board (queued job A): write this player's count when it has gone UP since the last
+-- write. UpdateAsync keeps the larger value, so a write can never lower the board (on an equal count
+-- the earlier time is the larger value). Same ownership gate as publishBest; throttled per player, and
+-- `force` (autosave, leave, shutdown) flushes whatever is waiting.
+local function publishGuide(plr: Player, force: boolean?)
+	if not guideStore then
+		return
+	end
+	local prof = profiles[plr]
+	if not prof or not prof.canSave or prof.lockToken == "" then
+		return
+	end
+	if prof.guideCount <= 0 or prof.guideCount <= prof.guidePublished then
+		return
+	end
+	local now = os.clock()
+	if not force and (now - prof.lastGuideAt) < Config.Guide.PublishMinSeconds then
+		return
+	end
+	prof.lastGuideAt = now
+	local count = prof.guideCount
+	local value = Highscore.encode(count, prof.guideAt, Anomaly.count(Config))
+	local okPub = pcall(function()
+		guideStore:UpdateAsync(Highscore.key(plr.UserId), function(old)
+			if type(old) == "number" and old >= value then
+				return nil -- the board already holds this count (or better): write nothing
+			end
+			return value
+		end)
+	end)
+	if okPub then
+		prof.guidePublished = math.max(prof.guidePublished, count)
+	end
+end
+
 -- ------------------------------------------------------------------ Scene build
 local WHITE = Color3.fromRGB(235, 235, 245)
 local DARK = Color3.fromRGB(30, 34, 48)
@@ -436,6 +570,53 @@ local function zoneOrigin(index: number): Vector3
 	return Vector3.new(index * 1000, 100, 0)
 end
 
+-- HIDDEN and SHOWN (review 2026-09-30, finding 1). The zone is in workspace, so every client receives
+-- its instance tree: names, classes, parents. The appliers used to ADD parts named after the answer
+-- ("DoorExtra", "TelescopeTwin", "Fog", a Model "Figure") and DESTROY named ones ("Telescope",
+-- "Plant", "Chair4"), so `zone:FindFirstChild("DoorExtra")` answered the pass without looking, the
+-- same labelled answer the PassInfo move (CLAUDE.md) took away from `Clean = true`. Now everything
+-- an anomaly can add is built into EVERY hall, hidden, and everything it can remove is hidden in
+-- place; an applier only changes properties of parts that are always there. The tree is identical on
+-- every pass (robloxemu/check_anomaly_names.luau forces every catalog id and compares it, in order).
+-- What a script can still do is diff PROPERTIES against a clean hall it recorded: that is R12 below,
+-- the cost this game accepts, because the anomaly has to be drawn to be seen.
+--
+-- Hidden is Fx.dustVolume's convention: not drawn, not felt, not touched, not hit by a ray (so the
+-- default camera's occlusion ignores it too), no shadow.
+local function hide(p: BasePart)
+	p.Transparency = 1
+	p.CanCollide = false
+	p.CanTouch = false
+	p.CanQuery = false
+	p.CastShadow = false
+end
+
+-- Shown: an ordinary part again (the engine's defaults), at the transparency the anomaly draws.
+local function show(p: BasePart, transparency: number, collide: boolean)
+	p.Transparency = transparency
+	p.CanCollide = collide
+	p.CanTouch = true
+	p.CanQuery = true
+	p.CastShadow = true
+end
+
+-- create a dark humanoid-shaped "figure" (no AI, purely visual)
+local function makeFigure(cf: CFrame): Model
+	local m = Instance.new("Model")
+	m.Name = "Figure"
+	local torso = newPart({ Name = "Torso", Size = Vector3.new(2, 3, 1), CFrame = cf, Color = Color3.fromRGB(8, 8, 12), Material = Enum.Material.SmoothPlastic })
+	torso.Parent = m
+	local head = newPart({ Name = "Head", Size = Vector3.new(1.4, 1.4, 1.4), CFrame = cf * CFrame.new(0, 2.2, 0), Color = Color3.fromRGB(8, 8, 12) })
+	head.Parent = m
+	local eye = Instance.new("PointLight")
+	eye.Color = Color3.fromRGB(255, 60, 60)
+	eye.Brightness = 3
+	eye.Range = 8
+	eye.Parent = head
+	m.PrimaryPart = torso
+	return m
+end
+
 -- Build a CLEAN concourse under `zone` at `origin`. All the objects the anomalies can
 -- touch are named so the appliers can find them. The hall runs along -Z.
 local function buildClean(zone: Model, origin: Vector3)
@@ -448,6 +629,13 @@ local function buildClean(zone: Model, origin: Vector3)
 	newPart({ Name = "WallL", Size = Vector3.new(1, 16, HALL_LEN + 20), CFrame = at(-10, 8, -HALL_LEN / 2), Color = DARK, Parent = zone })
 	newPart({ Name = "WallR", Size = Vector3.new(1, 16, HALL_LEN + 20), CFrame = at(10, 8, -HALL_LEN / 2), Color = DARK, Parent = zone })
 	newPart({ Name = "EndWall", Size = Vector3.new(20, 16, 1), CFrame = at(0, 8, -HALL_LEN - 6), Color = DARK, Parent = zone })
+	-- The entrance (+Z) stays open to the eye, because the sky outside is the game's progress view
+	-- (EYECANDY.md), but not to the feet: the floor ends at z = +10 and past it is the void, so walking
+	-- out to look dropped the player off the world (review 2026-09-30, finding 7). An invisible pane,
+	-- floor to ceiling, just inside the entrance plane. Transparency 1 keeps it out of every photo and
+	-- out of the default camera's occlusion (Poppercam only stops at parts under 0.25 transparency);
+	-- 0.5 thick at z 9.5..10, so shot 1's caretaker (EYECANDY.md §9, parked at z = 8.5) stands clear.
+	newPart({ Name = "EntranceGlass", Size = Vector3.new(20, 16, 0.5), CFrame = at(0, 8, 9.75), Transparency = 1, CanTouch = false, CastShadow = false, Parent = zone })
 
 	-- lit fixtures (a Folder of PointLights so lights_out / flicker can find them)
 	local lights = Instance.new("Folder")
@@ -518,26 +706,49 @@ local function buildClean(zone: Model, origin: Vector3)
 	-- spawn pad (start of the loop) + decision pads (end)
 	newPart({ Name = "StartPad", Size = Vector3.new(6, 0.2, 6), CFrame = at(0, 1, -4), Color = Color3.fromRGB(60, 90, 140), Material = Enum.Material.Neon, Transparency = 0.3, Parent = zone })
 
+	-- The SPARES (finding 1, see `hide` above): what an anomaly can add, in every hall, hidden. Each is
+	-- built exactly as its applier used to build it, so a shown spare is the anomaly it always was.
+	local figure = makeFigure(at(0, 2.5, -HALL_LEN - 3) * CFrame.Angles(0, math.pi, 0))
+	figure.Parent = zone
+	for _, p in figure:GetChildren() do
+		if p:IsA("BasePart") then hide(p) end
+	end
+	local head = figure:FindFirstChild("Head")
+	local eye = head and head:FindFirstChildOfClass("PointLight")
+	if eye then eye.Enabled = false end -- a hidden figure must not glow red through the hall
+	hide(newPart({ Name = "Door2", Size = Vector3.new(5, 12, 0.5), CFrame = at(-8, 6, -70) * CFrame.Angles(0, math.rad(90), 0), Color = Color3.fromRGB(70, 55, 45), Material = Enum.Material.Wood, Parent = zone }))
+	local scope = zone:FindFirstChild("Telescope") :: Part
+	local twin = scope:Clone()
+	twin.Name = "Telescope2"
+	twin.CFrame = scope.CFrame * CFrame.new(4, 0, 0)
+	twin.Parent = zone
+	hide(twin)
+	local mirror2 = newPart({ Name = "Mirror2", Size = Vector3.new(0.3, 6, 4), CFrame = at(9.5, 6, -30), Color = Color3.fromRGB(200, 220, 240), Reflectance = 0, Material = Enum.Material.Glass, Parent = zone })
+	hide(mirror2)
+	hide(newPart({ Name = "Mist", Size = Vector3.new(18, 14, 30), CFrame = at(0, 8, -HALL_LEN / 2), Color = Color3.fromRGB(220, 230, 240), Material = Enum.Material.SmoothPlastic, Parent = zone }))
+
 	-- Floating dust motes down the length of the hall — cheap, code-only atmosphere. Rebuilt
 	-- with the rest of the clean hall each pass, so it can never linger as a false "anomaly".
 	Fx.dustVolume(zone, Vector3.new(18, 14, HALL_LEN), at(0, 8, -HALL_LEN / 2), Color3.fromRGB(200, 210, 230), 10)
 end
 
--- create a dark humanoid-shaped "figure" (no AI, purely visual)
-local function makeFigure(cf: CFrame): Model
-	local m = Instance.new("Model")
-	m.Name = "Figure"
-	local torso = newPart({ Name = "Torso", Size = Vector3.new(2, 3, 1), CFrame = cf, Color = Color3.fromRGB(8, 8, 12), Material = Enum.Material.SmoothPlastic })
-	torso.Parent = m
-	local head = newPart({ Name = "Head", Size = Vector3.new(1.4, 1.4, 1.4), CFrame = cf * CFrame.new(0, 2.2, 0), Color = Color3.fromRGB(8, 8, 12) })
-	head.Parent = m
-	local eye = Instance.new("PointLight")
-	eye.Color = Color3.fromRGB(255, 60, 60)
-	eye.Brightness = 3
-	eye.Range = 8
-	eye.Parent = head
-	m.PrimaryPart = torso
-	return m
+-- Stand the hidden Figure at `cf` and show it (three anomalies share the one figure; a pass carries
+-- at most one anomaly).
+local function showFigure(zone: Model, cf: CFrame)
+	local m = zone:FindFirstChild("Figure")
+	if not m then return end
+	local torso = m:FindFirstChild("Torso")
+	local head = m:FindFirstChild("Head")
+	if torso and torso:IsA("BasePart") then
+		torso.CFrame = cf
+		show(torso, 0, true)
+	end
+	if head and head:IsA("BasePart") then
+		head.CFrame = cf * CFrame.new(0, 2.2, 0)
+		show(head, 0, true)
+		local eye = head:FindFirstChildOfClass("PointLight")
+		if eye then eye.Enabled = true end
+	end
 end
 
 local function findPart(zone: Model, name: string): Part?
@@ -565,14 +776,20 @@ end
 -- is needed). Missing parts are tolerated (pcall-free nil checks) so a mutated scene can't
 -- error the loop.
 local APPLIERS: { [string]: (Model, Vector3) -> () } = {
+	-- Anomalies that ADD or REMOVE something show a hidden spare or hide a part in place: they never
+	-- create, destroy or rename an Instance (finding 1, `hide` above).
 	figure_end = function(zone, origin)
-		makeFigure(CFrame.new(origin + Vector3.new(0, 2.5, -HALL_LEN - 3)) * CFrame.Angles(0, math.pi, 0)).Parent = zone
+		showFigure(zone, CFrame.new(origin + Vector3.new(0, 2.5, -HALL_LEN - 3)) * CFrame.Angles(0, math.pi, 0))
 	end,
 	door_extra = function(zone, origin)
-		newPart({ Name = "DoorExtra", Size = Vector3.new(5, 12, 0.5), CFrame = CFrame.new(origin + Vector3.new(-8, 6, -70)) * CFrame.Angles(0, math.rad(90), 0), Color = Color3.fromRGB(70, 55, 45), Material = Enum.Material.Wood, Parent = zone })
+		local p = findPart(zone, "Door2")
+		if p then
+			p.CFrame = CFrame.new(origin + Vector3.new(-8, 6, -70)) * CFrame.Angles(0, math.rad(90), 0)
+			show(p, 0, true)
+		end
 	end,
 	scope_gone = function(zone)
-		local p = findPart(zone, "Telescope"); if p then p:Destroy() end
+		local p = findPart(zone, "Telescope"); if p then hide(p) end
 	end,
 	lights_out = function(zone)
 		setLights(zone, false)
@@ -605,7 +822,7 @@ local APPLIERS: { [string]: (Model, Vector3) -> () } = {
 		end
 	end,
 	twin_scope = function(zone)
-		local p = findPart(zone, "Telescope"); if p then local c = p:Clone(); c.Name = "TelescopeTwin"; c.CFrame = p.CFrame * CFrame.new(4, 0, 0); c.Parent = zone end
+		local p = findPart(zone, "Telescope2"); if p then show(p, 0, true) end
 	end,
 	reflection_off = function(zone)
 		local p = findPart(zone, "Mirror"); if p then p.Reflectance = 0; p.Color = Color3.fromRGB(20, 20, 30); p.Transparency = 0.1 end
@@ -665,10 +882,10 @@ local APPLIERS: { [string]: (Model, Vector3) -> () } = {
 		-- Must stay on the PLAYER side of EndWall (z = -HALL_LEN - 6, opaque, full cross-section)
 		-- and of the Window pane (z = -HALL_LEN - 5.4): anything beyond is sealed out of sight.
 		-- Floating in front of the pane at window height reads as "a face in the window".
-		makeFigure(CFrame.new(origin + Vector3.new(0, 9, -HALL_LEN - 4.2)) * CFrame.Angles(0, math.pi, 0)).Parent = zone
+		showFigure(zone, CFrame.new(origin + Vector3.new(0, 9, -HALL_LEN - 4.2)) * CFrame.Angles(0, math.pi, 0))
 	end,
 	plant_gone = function(zone)
-		local p = findPart(zone, "Plant"); if p then p:Destroy() end
+		local p = findPart(zone, "Plant"); if p then hide(p) end
 	end,
 	sign_swap = function(zone)
 		-- Mirror the arrow to the other half of the sign. Yawing the sign itself did nothing
@@ -686,7 +903,11 @@ local APPLIERS: { [string]: (Model, Vector3) -> () } = {
 		local p = findPart(zone, "Floor"); if p then p.CFrame = p.CFrame * CFrame.Angles(0, 0, math.rad(4)) end
 	end,
 	dupe_door = function(zone, origin)
-		newPart({ Name = "DoorDupe", Size = Vector3.new(5, 12, 0.5), CFrame = CFrame.new(origin + Vector3.new(6, 6, -HALL_LEN - 5.6)), Color = Color3.fromRGB(70, 55, 45), Material = Enum.Material.Wood, Parent = zone })
+		local p = findPart(zone, "Door2")
+		if p then
+			p.CFrame = CFrame.new(origin + Vector3.new(6, 6, -HALL_LEN - 5.6))
+			show(p, 0, true)
+		end
 	end,
 	moon_recolor = function(zone)
 		local p = findPart(zone, "Window"); if p then p.Color = Color3.fromRGB(200, 40, 40); p.Transparency = 0.2 end
@@ -695,19 +916,23 @@ local APPLIERS: { [string]: (Model, Vector3) -> () } = {
 		local p = findPart(zone, "Monitor"); if p then p.Color = Color3.fromRGB(200, 200, 200); p.Material = Enum.Material.Neon end
 	end,
 	figure_ceiling = function(zone, origin)
-		makeFigure(CFrame.new(origin + Vector3.new(0, 14, -HALL_LEN / 2)) * CFrame.Angles(math.pi, 0, 0)).Parent = zone
+		showFigure(zone, CFrame.new(origin + Vector3.new(0, 14, -HALL_LEN / 2)) * CFrame.Angles(math.pi, 0, 0))
 	end,
-	mirror_extra = function(zone, origin)
-		newPart({ Name = "MirrorExtra", Size = Vector3.new(0.3, 6, 4), CFrame = CFrame.new(origin + Vector3.new(9.5, 6, -30)), Color = Color3.fromRGB(200, 220, 240), Reflectance = 0.6, Material = Enum.Material.Glass, Parent = zone })
+	mirror_extra = function(zone)
+		local p = findPart(zone, "Mirror2")
+		if p then
+			p.Reflectance = 0.6
+			show(p, 0, true)
+		end
 	end,
 	scope_tilt = function(zone)
 		local p = findPart(zone, "Telescope"); if p then p.CFrame = p.CFrame * CFrame.Angles(-1.4, 0, 0) end
 	end,
-	cold_breath = function(zone, origin)
-		newPart({ Name = "Fog", Size = Vector3.new(18, 14, 30), CFrame = CFrame.new(origin + Vector3.new(0, 8, -HALL_LEN / 2)), Color = Color3.fromRGB(220, 230, 240), Transparency = 0.75, Material = Enum.Material.SmoothPlastic, CanCollide = false, Parent = zone })
+	cold_breath = function(zone)
+		local p = findPart(zone, "Mist"); if p then show(p, 0.75, false) end
 	end,
 	count_off = function(zone)
-		local p = findPart(zone, "Chair4"); if p then p:Destroy() end
+		local p = findPart(zone, "Chair4"); if p then hide(p) end
 	end,
 }
 
@@ -767,6 +992,11 @@ end
 -- Hiding it would mean not replicating the mutation, i.e. not having a game. So: treat the
 -- Best-Day board as a fun counter, NOT as a trustworthy competitive ranking, and do not build
 -- rewards on top of it that would pay out to a determined cheater.
+-- (2026-09-30) What a client can read is now only the drawn change itself: the PROPERTIES of parts
+-- that exist on every pass. The instance tree (names, classes, parents) is the same clean or not
+-- (`hide`/`show` above, check_anomaly_names.luau), so no pass is answered by FindFirstChild; a
+-- script must record a clean hall and diff it, which is the cost this game accepts. The Field Guide
+-- board ranks on types caught, capped at the catalog's size, so this costs it at most the tie-break.
 local MIN_PASS_SECONDS = 0.75
 
 -- R10: the hint's in-world ProximityPrompt sits on the StartPad (MaxActivationDistance 12).
@@ -885,6 +1115,16 @@ local function retryClaim(plr: Player)
 			prof.caught[id] = true -- union: never drop a discovery from either side
 		end
 	end
+	-- the board: the other session's count and time win when it got further, or got there first
+	do
+		local mine = { guideCount = prof.guideCount, guideAt = prof.guideAt, guidePublished = prof.guidePublished }
+		readGuide(mine, res.guide)
+		if mine.guideCount > prof.guideCount or (mine.guideCount == prof.guideCount and mine.guideAt > 0 and mine.guideAt < prof.guideAt) then
+			prof.guideCount, prof.guideAt = mine.guideCount, mine.guideAt
+		end
+		prof.guidePublished = math.max(prof.guidePublished, mine.guidePublished)
+		reconcileGuide(prof)
+	end
 	-- These are all authoritative-elsewhere values: the other session owned the write path, so
 	-- its numbers win over ours (adopting can only over-credit the player, never rob them).
 	prof.hintTokens = res.hintTokens
@@ -897,16 +1137,40 @@ local function retryClaim(plr: Player)
 	prof.lockToken = myToken
 	prof.readOnlyNotified = false
 
+	-- The run (owner decision 2026-09-30). This session started from the run it loaded, read-only. If
+	-- the stored run is no longer that one, the other session wrote after our read: most importantly a
+	-- wrong call's reset, which a stale copy must never undo. So unless this session has a run of its
+	-- own (it started fresh, or made its own wrong call, whose reset stands), the stored run wins.
+	local ps = passState[plr]
+	local stored = sanitizeRun(res.run)
+	local adopt: Run? = nil
+	if ps and stored and stored.id ~= prof.loadedRunId and not ps.ownRun then
+		adopt = stored
+		ps.day = stored.day
+		ps.runId = stored.id
+		prof.run = stored
+		prof.loadedRunId = stored.id
+	end
+	plr:SetAttribute("SavesRun", true)
+
 	local ls = plr:FindFirstChild("leaderstats")
 	if ls then
 		local b = ls:FindFirstChild("Best")
 		if b then (b :: IntValue).Value = prof.bestDay end
+		local d = ls:FindFirstChild("Day")
+		if d and ps then (d :: IntValue).Value = ps.day end
 	end
 	RevealRemote:FireClient(plr, {
 		readOnly = false,
-		message = "Saving restored — your progress is being recorded again.",
+		message = if adopt
+			then string.format("Saving restored — your saved run is back: Day %d.", adopt.day)
+			else "Saving restored — your progress is being recorded again.",
 	})
-	pushState(plr)
+	if adopt then
+		beginPass(plr, adopt.pass) -- the stored run's own hall (or a fresh roll if it had none)
+	else
+		pushState(plr)
+	end
 end
 
 -- Where the server says out loud what it just rolled, for tools that need to know: the marketing
@@ -935,8 +1199,369 @@ local function passInfoFor(plr: Player): Folder
 	return f
 end
 
--- Rebuild the hall and roll the next pass for this player.
-beginPass = function(plr: Player)
+-- ------------------------------------------------------------------ The Field Guide board (job A)
+-- Queued job A, design approved by the owner 2026-09-16. A sign on the right-hand wall just behind the
+-- start pad ranks players on Field Guide completion: anomaly TYPES caught, 0..the catalog's size, ties
+-- broken by who reached that count first (Highscore.luau encodes both into one ordered-store integer).
+-- Its prompt (L, gamepad Y, or a tap) switches PUBLIC / FRIENDS:
+--   * PUBLIC is GetSortedAsync(false, 10) inside Highscore.range (a fabricated value above the cap is
+--     never fetched), ONE fetch per server per Config.Guide.PublicCacheSeconds, shared by every sign;
+--   * FRIENDS is Players:GetFriendsAsync (first FriendsCap) and one GetAsync per friend, only when the
+--     player asks, cached per player, stopping early if the server's GetAsync budget runs low, all
+--     pcall'd; the player's own row comes from memory. An empty friends board says why.
+-- Names come from GetNameFromUserIdAsync (or the Player in this server), cached in memory, NEVER stored.
+--
+-- Where, and why there: the capture rig (tools/film_anomaly.py) shoots from hall-local (0, 7.5, +4)
+-- looking down the hall, and the hero thumbnail (marketing/ShotList.luau, shot 1) from (2, 5.5, -2)
+-- looking out of the doorway. On the right-hand wall at z 0..4 the sign is outside both frames
+-- (robloxemu/check_anomaly_board.luau projects its corners): the pairs must not differ by a scoreboard
+-- and no thumbnail carries a player's name. It is NOT part of the zone model: the hall is rebuilt every
+-- pass and must stay identical (check_anomaly_names); the sign changes. Its SurfaceGui is on the part, the
+-- usual way for a physical board (robloxemu's HUD gate walks everything in PlayerGui as a screen panel).
+type BoardRow = { userId: number, caught: number, at: number, name: string? }
+type Board = {
+	model: Model,
+	part: Part,
+	prompt: ProximityPrompt,
+	labels: { [string]: TextLabel },
+	mode: string, -- "public" | "friends"
+	friends: any?, -- { at, rows, ids, checked, failed, partial } once fetched
+	friendsLoading: boolean,
+}
+local boards: { [Player]: Board } = {}
+local nameCache: { [number]: string } = {} -- userId -> name, memory only
+local nameCount = 0
+local publicBoard: { at: number, rows: { BoardRow }?, failed: boolean, fetching: boolean } =
+	{ at = -math.huge, rows = nil, failed = false, fetching = false }
+
+local BOARD_BG = Color3.fromRGB(14, 18, 30)
+local BOARD_TEXT = Color3.fromRGB(205, 215, 240)
+local BOARD_DIM = Color3.fromRGB(140, 150, 185)
+
+local function nameOf(userId: number): string
+	local here = Players:GetPlayerByUserId(userId)
+	if here then
+		return here.Name
+	end
+	local cached = nameCache[userId]
+	if cached then
+		return cached
+	end
+	local ok, n = pcall(function()
+		return Players:GetNameFromUserIdAsync(userId)
+	end)
+	if ok and type(n) == "string" and n ~= "" then
+		if nameCount >= 2000 then
+			table.clear(nameCache) -- a bound, not a policy: names are cheap to look up again
+			nameCount = 0
+		end
+		nameCache[userId] = n
+		nameCount += 1
+		return n
+	end
+	return "(unknown player)"
+end
+
+local function rowOrder(total: number): (BoardRow, BoardRow) -> boolean
+	return function(a, b)
+		return Highscore.encode(a.caught, a.at, total) > Highscore.encode(b.caught, b.at, total)
+	end
+end
+
+-- The public list, re-read at most once per window for the whole server; a failure is not retried
+-- inside the window either (the stale list, if any, stays up).
+local function fetchPublic()
+	if not guideStore then
+		publicBoard.failed = true
+		return
+	end
+	local now = os.clock()
+	if publicBoard.at > -math.huge and now - publicBoard.at < Config.Guide.PublicCacheSeconds then
+		return
+	end
+	if publicBoard.fetching then
+		return
+	end
+	publicBoard.fetching = true
+	local total = Anomaly.count(Config)
+	local lo, hi = Highscore.range(total)
+	local ok, entries = pcall(function()
+		return (guideStore :: any):GetSortedAsync(false, Config.Guide.BoardSize, lo, hi):GetCurrentPage()
+	end)
+	if ok and type(entries) == "table" then
+		local rows: { BoardRow } = {}
+		for _, e in entries do
+			local uid = Highscore.userIdFromKey(e.key)
+			if uid and type(e.value) == "number" then
+				local c, at = Highscore.decode(e.value, total)
+				if c >= 1 then
+					table.insert(rows, { userId = uid, caught = c, at = at, name = nameOf(uid) })
+				end
+			end
+		end
+		table.sort(rows, rowOrder(total))
+		publicBoard.rows = rows
+		publicBoard.failed = false
+	else
+		publicBoard.failed = true
+	end
+	publicBoard.at = now
+	publicBoard.fetching = false
+end
+
+-- What the server may still spend on GetAsync this minute (nil when Roblox will not say).
+local function getAsyncBudget(): number?
+	local ok, n = pcall(function()
+		return DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetAsync)
+	end)
+	return if ok and type(n) == "number" then n else nil
+end
+
+-- This player's friends on the board: only when asked for, cached per player.
+local function fetchFriends(plr: Player, board: Board)
+	local now = os.clock()
+	local f = board.friends
+	if f and now - f.at < (if f.failed then Config.Guide.FriendsFailSeconds else Config.Guide.FriendsCacheSeconds) then
+		return
+	end
+	if board.friendsLoading then
+		return
+	end
+	board.friendsLoading = true
+	local result = { at = now, rows = {}, ids = 0, checked = 0, failed = false, partial = false }
+	local okF, pages = pcall(function()
+		return Players:GetFriendsAsync(plr.UserId)
+	end)
+	if not okF or pages == nil or not guideStore then
+		result.failed = true
+	else
+		local ids: { number } = {}
+		local cap = Config.Guide.FriendsCap
+		while #ids < cap do
+			local okP, page = pcall(function()
+				return pages:GetCurrentPage()
+			end)
+			if not okP or type(page) ~= "table" then
+				break
+			end
+			for _, fr in page do
+				local id = type(fr) == "table" and tonumber(fr.Id) or nil
+				if id and #ids < cap then
+					table.insert(ids, id)
+				end
+			end
+			local finished = true
+			pcall(function()
+				finished = pages.IsFinished
+			end)
+			if finished or #ids >= cap then
+				break
+			end
+			if not pcall(function()
+				pages:AdvanceToNextPageAsync()
+			end) then
+				break
+			end
+		end
+		result.ids = #ids
+		local total = Anomaly.count(Config)
+		for _, id in ids do
+			local budget = getAsyncBudget()
+			if budget ~= nil and budget <= Config.Guide.MinGetBudget then
+				result.partial = true -- the rest next time: never spend the server's whole budget here
+				break
+			end
+			local okG, v = pcall(function()
+				return (guideStore :: any):GetAsync(Highscore.key(id))
+			end)
+			result.checked += 1
+			if okG and type(v) == "number" then
+				local c, at = Highscore.decode(v, total)
+				if c >= 1 then
+					table.insert(result.rows, { userId = id, caught = c, at = at })
+				end
+			end
+		end
+		table.sort(result.rows, rowOrder(total))
+		while #result.rows > Config.Guide.BoardSize do
+			table.remove(result.rows)
+		end
+		for _, r in result.rows do
+			r.name = nameOf(r.userId)
+		end
+	end
+	board.friends = result
+	board.friendsLoading = false
+end
+
+local function renderBoard(plr: Player)
+	local board = boards[plr]
+	local prof = profiles[plr]
+	if not board or not prof then
+		return
+	end
+	local L = board.labels
+	local total = Anomaly.count(Config)
+	local rows: { BoardRow } = {}
+	local status = ""
+	if board.mode == "friends" then
+		L.Mode.Text = "FRIENDS  ·  press L or tap for public"
+		board.prompt.ActionText = "Show public"
+		local f = board.friends
+		if f == nil then
+			status = "Loading your friends…"
+		elseif f.failed then
+			status = "Couldn't reach Roblox for your friends list. Try again in a minute."
+		else
+			for _, r in f.rows do
+				table.insert(rows, r)
+			end
+			if prof.guideCount >= 1 then
+				table.insert(rows, { userId = plr.UserId, caught = prof.guideCount, at = prof.guideAt, name = plr.Name })
+			end
+			if f.ids == 0 then
+				status = "Add friends on Roblox to compare Field Guides here."
+			elseif #f.rows == 0 then
+				status = string.format("None of your friends has caught an anomaly yet. The Field Guide has %d to find: bring one along!", total)
+			elseif f.partial then
+				status = string.format("Checked %d of %d friends (Roblox's request limit). The rest next time.", f.checked, f.ids)
+			end
+		end
+	else
+		L.Mode.Text = "PUBLIC  ·  press L or tap for friends"
+		board.prompt.ActionText = "Show friends"
+		if publicBoard.rows then
+			for _, r in publicBoard.rows do
+				table.insert(rows, r)
+			end
+			if #rows == 0 then
+				status = string.format("Nobody has caught an anomaly yet. %d to find: be the first!", total)
+			end
+		elseif publicBoard.failed then
+			status = "The board can't reach Roblox right now. It tries again every minute."
+		else
+			status = "Loading the board…"
+		end
+	end
+	table.sort(rows, rowOrder(total))
+	for i = 1, Config.Guide.BoardSize do
+		local r = rows[i]
+		L["Row" .. i].Text = if r then string.format("%d. %s  %d/%d", i, r.name or "(unknown player)", r.caught, total) else ""
+	end
+	L.Status.Text = status
+end
+
+local function buildBoard(plr: Player, origin: Vector3)
+	local model = Instance.new("Model")
+	model.Name = "GuideBoard_" .. plr.UserId
+	-- 4 studs wide (z 0..4), 5 tall, on the right-hand wall's inner face, facing into the hall (-X)
+	local part = newPart({ Name = "Board", Size = Vector3.new(0.3, 5, 4), CFrame = CFrame.new(origin + Vector3.new(9.3, 6, 2)),
+		Color = BOARD_BG, Material = Enum.Material.SmoothPlastic, CastShadow = false })
+	part.Parent = model
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = "GuideBoardGui"
+	gui.Face = Enum.NormalId.Left
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 50 -- a 200 x 250 px canvas
+	gui.LightInfluence = 0 -- readable in the dark hall
+	gui.Parent = part
+	local labels: { [string]: TextLabel } = {}
+	local function label(name: string, y: number, h: number, size: number, color: Color3, bold: boolean)
+		local l = Instance.new("TextLabel")
+		l.Name = name
+		l.BackgroundTransparency = 1
+		l.Position = UDim2.new(0, 8, 0, y)
+		l.Size = UDim2.new(1, -16, 0, h)
+		l.Font = if bold then Enum.Font.GothamBold else Enum.Font.Gotham
+		l.TextSize = size
+		l.TextColor3 = color
+		l.TextXAlignment = Enum.TextXAlignment.Left
+		l.TextWrapped = true
+		l.Text = ""
+		l.Parent = gui
+		labels[name] = l
+	end
+	label("Title", 6, 20, 15, BOARD_TEXT, true)
+	labels.Title.Text = "📖 FIELD GUIDE · TOP " .. Config.Guide.BoardSize
+	label("Mode", 26, 16, 10, BOARD_DIM, true)
+	for i = 1, Config.Guide.BoardSize do
+		label("Row" .. i, 44 + (i - 1) * 16, 16, 12, BOARD_TEXT, false)
+	end
+	label("Status", 44 + Config.Guide.BoardSize * 16 + 2, 44, 10, BOARD_DIM, false)
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Show friends"
+	prompt.ObjectText = "Field Guide board"
+	prompt.KeyboardKeyCode = Enum.KeyCode.L
+	prompt.GamepadKeyCode = Enum.KeyCode.ButtonY -- the hint prompt on the pad next to it has ButtonX
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	prompt.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
+	prompt.Parent = part
+	model.Parent = workspace
+
+	local board: Board = { model = model, part = part, prompt = prompt, labels = labels, mode = "public", friends = nil, friendsLoading = false }
+	boards[plr] = board
+	prompt.Triggered:Connect(function(who)
+		if who ~= plr or boards[plr] ~= board then
+			return
+		end
+		-- No cooldown needed: a switch re-renders from the caches, and a fetch is never run twice at once.
+		board.mode = if board.mode == "public" then "friends" else "public"
+		renderBoard(plr)
+		task.spawn(function()
+			if board.mode == "friends" then
+				fetchFriends(plr, board)
+			else
+				fetchPublic()
+			end
+			if boards[plr] == board then
+				renderBoard(plr)
+			end
+		end)
+	end)
+	renderBoard(plr)
+	task.spawn(function()
+		fetchPublic()
+		if boards[plr] == board then
+			renderBoard(plr)
+		end
+	end)
+end
+
+local function dropBoard(plr: Player)
+	local board = boards[plr]
+	if board then
+		board.model:Destroy()
+		boards[plr] = nil
+	end
+end
+
+-- Called by the autosave loop: one fetch for the whole server once the window has passed, then every
+-- sign showing the public board is redrawn.
+local function refreshPublicBoards()
+	local any = false
+	for _, b in boards do
+		if b.mode == "public" then
+			any = true
+			break
+		end
+	end
+	if not any then
+		return
+	end
+	fetchPublic()
+	for p, b in boards do
+		if b.mode == "public" then
+			renderBoard(p)
+		end
+	end
+end
+
+-- Rebuild the hall and roll the next pass for this player. `restore` (a saved run's pass, already
+-- through sanitizeRun) rebuilds THAT pass instead of rolling: a rejoin gets the hall it left.
+beginPass = function(plr: Player, restore: any?)
 	local prof = profiles[plr]
 	local ps = passState[plr]
 	local zone = zones[plr]
@@ -949,14 +1574,20 @@ beginPass = function(plr: Player)
 	zone:ClearAllChildren()
 	buildClean(zone, origin)
 
-	-- roll
+	-- roll (or restore the saved pass)
 	ps.serial += 1
-	local rng = Rng.new(passSeed(plr, ps.salt, ps.serial))
-	local pass = Anomaly.rollPass(rng, Config, ps.day)
+	local pass
+	if type(restore) == "table" and type(restore.clean) == "boolean" then
+		pass = { clean = restore.clean, anomalyId = if restore.clean then nil else restore.anomalyId }
+	else
+		local rng = Rng.new(passSeed(plr, ps.salt, ps.serial))
+		pass = Anomaly.rollPass(rng, Config, ps.day)
+	end
 	ps.clean = pass.clean
 	ps.anomalyId = pass.anomalyId
 	ps.awaiting = true
 	ps.startedAt = os.clock()
+	ps.hinted = false
 
 	if not pass.clean and pass.anomalyId then
 		local applier = APPLIERS[pass.anomalyId]
@@ -1006,6 +1637,10 @@ beginPass = function(plr: Player)
 	info:SetAttribute("Serial", ps.serial)
 	info:SetAttribute("Zone", zone.Name)
 
+	-- the run as it now stands, with the pass that is live (saved by the next save; also after the
+	-- missing-applier fallback above, so a demoted pass is saved as the clean pass it now is)
+	prof.run = { id = ps.runId, day = ps.day, pass = { clean = ps.clean, anomalyId = ps.anomalyId } }
+
 	-- decision prompts on the end wall
 	local endWall = findPart(zone, "EndWall")
 	if endWall then
@@ -1053,8 +1688,14 @@ resolveChoice = function(plr: Player, choice: string)
 
 	-- record a caught anomaly in the Field Guide
 	local caughtId = Progression.caughtAnomalyId(choice, pass)
-	if caughtId then
-		Codex.discover(prof.caught, caughtId)
+	if caughtId and Codex.discover(prof.caught, caughtId) then
+		-- a NEW type: the board's count may go up (written at once, or by the autosave if throttled)
+		local before = prof.guideCount
+		reconcileGuide(prof)
+		if prof.guideCount > before then
+			task.spawn(publishGuide, plr, false)
+			task.spawn(renderBoard, plr) -- the player's own row on their friends board
+		end
 	end
 
 	if res.correct then
@@ -1075,6 +1716,13 @@ resolveChoice = function(plr: Player, choice: string)
 	else
 		local reached = ps.day
 		ps.day = Config.Progression.StartDay
+		-- The run is over: a new one (new id, so no stale copy of the old one can ever be resumed, see
+		-- retryClaim), with NO pass, since the Death payload below tells the player this pass's answer.
+		-- Flushed now, not at the next autosave, so leaving during the death beat cannot undo it.
+		ps.runId = newSessionToken()
+		ps.ownRun = true
+		prof.run = { id = ps.runId, day = ps.day }
+		task.spawn(saveProfile, plr, false)
 		local ls = plr:FindFirstChild("leaderstats")
 		if ls then
 			local d = ls:FindFirstChild("Day"); if d then (d :: IntValue).Value = ps.day end
@@ -1095,11 +1743,18 @@ useHint = function(plr: Player)
 	local prof = profiles[plr]
 	local ps = passState[plr]
 	if not prof or not ps or not ps.awaiting then return end
+	-- One hint per hall. Pressing H twice used to charge two hints for the same answer (the prompt has no
+	-- cooldown and HoldDuration 0, so a double tap did it). The answer is already paid for: show it again.
+	if ps.hinted then
+		RevealRemote:FireClient(plr, { ok = true, clean = ps.clean, remaining = prof.hintTokens, again = true })
+		return
+	end
 	if prof.hintTokens <= 0 then
 		RevealRemote:FireClient(plr, { ok = false })
 		return
 	end
 	prof.hintTokens -= 1
+	ps.hinted = true
 	RevealRemote:FireClient(plr, { ok = true, clean = ps.clean, remaining = prof.hintTokens })
 	pushState(plr)
 end
@@ -1136,12 +1791,24 @@ end
 local MAX_CODE_LEN = 64
 
 RedeemRemote.OnServerEvent:Connect(function(plr, code)
-	if typeof(code) ~= "string" or #code > MAX_CODE_LEN then return end
+	if typeof(code) ~= "string" then return end -- not something the HUD's box can send
+	-- (standard §1, no silent no-ops) everything below that refuses a code says why: the HUD clears its box
+	-- when it sends, so a refusal without a reply looks exactly like a game that ignored the player.
+	if #code > MAX_CODE_LEN then
+		RevealRemote:FireClient(plr, { redeem = "unknown" }) -- a pasted paragraph is no code of ours
+		return
+	end
 	local prof = profiles[plr]
 	if not prof then return end
-	-- R4: one in-flight redeem per player (the flag), plus a cooldown (the burst).
-	if prof.redeemBusy then return end
-	if rateLimited(prof, "Redeem") then return end
+	-- R4: one in-flight redeem per player (the flag), plus a cooldown (the burst). A refusal costs a reply,
+	-- never an UpdateAsync, so the store is still protected from a burst.
+	if prof.redeemBusy or rateLimited(prof, "Redeem") then
+		RevealRemote:FireClient(plr, {
+			redeem = "retry",
+			message = "One code at a time: nothing was used, send it again in a moment.",
+		})
+		return
+	end
 	local result = Codes.redeem(code, prof.redeemed, Config)
 	if not result.ok or not result.reward then
 		RevealRemote:FireClient(plr, { redeem = result.reason or "unknown" })
@@ -1278,13 +1945,34 @@ TintRemote.OnServerEvent:Connect(function(plr, tint)
 	if typeof(tint) ~= "string" then return end
 	local prof = profiles[plr]
 	if not prof then return end
-	if rateLimited(prof, "SetTint") then return end
 	-- Only allow tints the player OWNS. Ownership lives in its own persistent set: using
 	-- `prof.tint` as both "owned" and "selected" meant picking the free white tint destroyed
-	-- a code-earned tint forever (a one-time code can't be redeemed twice).
+	-- a code-earned tint forever (a one-time code can't be redeemed twice). The HUD says
+	-- "Tint locked" and never sends an unowned one, so this refusal is a script's, not a player's.
 	if not prof.ownedTints[tint] then
 		return
 	end
+	if rateLimited(prof, "SetTint") then
+		-- (standard §1, no silent no-ops) a second swatch tapped inside the cooldown used to vanish. It is
+		-- applied when the cooldown ends instead: the LAST pick wins, and a burst still costs one push.
+		local first = prof.pendingTint == nil
+		prof.pendingTint = tint
+		if first then
+			local left = math.max(0, (REMOTE_COOLDOWN.SetTint or 0.5) - (os.clock() - (prof.remoteAt.SetTint or 0)))
+			task.delay(left, function()
+				local t = prof.pendingTint
+				prof.pendingTint = nil
+				if profiles[plr] ~= prof or t == nil or not prof.ownedTints[t] then
+					return
+				end
+				prof.remoteAt.SetTint = os.clock()
+				prof.tint = t
+				pushState(plr)
+			end)
+		end
+		return
+	end
+	prof.pendingTint = nil -- a pick that got through outranks one still waiting
 	prof.tint = tint
 	pushState(plr)
 end)
@@ -1311,6 +1999,39 @@ end)
 -- cannot park this handler for the session.
 local SPAWN_WAIT_FRAMES = 300 -- 5 s at 60 Hz; a character that has not arrived by then never will
 
+-- The engine's own answer (docs/complete-game-standard.md §1; SPAWN-ORDER.md §3, the preferred pattern):
+-- every player gets a real, enabled SpawnLocation on their own start pad, and plr.RespawnLocation points
+-- at it, so the engine itself places them in their hall and no frame is spent in the void over the
+-- origin. onCharacter's teleport stays as the second net. The spawn is invisible and intangible (the
+-- StartPad is what they see and stand on), gives no force-field bubble, and is NOT in the zone model:
+-- the hall is rebuilt every pass and its tree must not change (check_anomaly_names).
+local spawns: { [Player]: SpawnLocation } = {}
+
+local function makeSpawn(plr: Player, origin: Vector3): SpawnLocation
+	local sp = Instance.new("SpawnLocation")
+	sp.Name = "Spawn_" .. plr.UserId
+	sp.Anchored = true
+	sp.Size = Vector3.new(6, 0.2, 6)
+	sp.CFrame = CFrame.new(origin + Vector3.new(0, 1, -4)) -- exactly where buildClean puts the StartPad
+	sp.Transparency = 1
+	sp.CanCollide = false
+	sp.CanTouch = false
+	sp.CastShadow = false
+	sp.Duration = 0
+	sp.Neutral = true
+	sp.Enabled = true
+	sp.Parent = workspace
+	return sp
+end
+
+local function dropSpawn(plr: Player)
+	local sp = spawns[plr]
+	if sp then
+		sp:Destroy()
+		spawns[plr] = nil
+	end
+end
+
 local function onCharacter(plr: Player, char: Model)
 	local frames = 0
 	while char.Parent == nil and frames < SPAWN_WAIT_FRAMES do
@@ -1330,6 +2051,13 @@ local function onCharacter(plr: Player, char: Model)
 end
 
 Players.PlayerAdded:Connect(function(plr)
+	-- The hall's index and the player's spawn come FIRST, before anything yields (loadProfile does): a
+	-- character that loads during the yield must already have its RespawnLocation, or the engine puts it
+	-- on the first enabled SpawnLocation it finds, which is someone else's hall.
+	local index = acquireZoneIndex()
+	spawns[plr] = makeSpawn(plr, zoneOrigin(index))
+	plr.RespawnLocation = spawns[plr]
+
 	local prof = loadProfile(plr)
 
 	-- GHOST-SESSION GUARD. loadProfile YIELDS inside UpdateAsync. If the player left during
@@ -1345,26 +2073,37 @@ Players.PlayerAdded:Connect(function(plr)
 			saveProfile(plr, true) -- release the lock we just claimed
 			profiles[plr] = nil
 		end
+		dropSpawn(plr)
+		releaseZoneIndex(index)
 		return
 	end
 
 	profiles[plr] = prof
 
+	-- The saved run, if there is one (owner decision 2026-09-30): its Day and, on the first pass, its
+	-- live pass. Without one this is a fresh run of this session's own.
+	local run = prof.run
+	local startDay = if run then run.day else Config.Progression.StartDay
+	-- Whether this session saves the run: the break's idle caption promises "saved" only when it does.
+	plr:SetAttribute("SavesRun", prof.canSave)
+
 	-- leaderstats
 	local ls = Instance.new("Folder")
 	ls.Name = "leaderstats"
-	local day = Instance.new("IntValue"); day.Name = "Day"; day.Value = Config.Progression.StartDay; day.Parent = ls
+	local day = Instance.new("IntValue"); day.Name = "Day"; day.Value = startDay; day.Parent = ls
 	local best = Instance.new("IntValue"); best.Name = "Best"; best.Value = prof.bestDay; best.Parent = ls
 	ls.Parent = plr
 
 	-- private zone (index recycled from the free list, so origins never drift far out)
 	local zone = Instance.new("Model")
 	zone.Name = "Concourse_" .. plr.UserId
-	zone:SetAttribute("Index", acquireZoneIndex())
+	zone:SetAttribute("Index", index)
 	zone.Parent = workspace
 	zones[plr] = zone
+	buildBoard(plr, zoneOrigin(tonumber(zone:GetAttribute("Index")) or 0))
+	task.spawn(publishGuide, plr, false) -- a profile from before the board has a count waiting
 	passState[plr] = {
-		day = Config.Progression.StartDay,
+		day = startDay,
 		clean = true,
 		anomalyId = nil,
 		serial = 0,
@@ -1372,13 +2111,16 @@ Players.PlayerAdded:Connect(function(plr)
 		-- per-session salt: same sequence within this session, a different one next time
 		salt = saltSource:NextInteger(0, 2147483646),
 		startedAt = os.clock(),
+		runId = if run then run.id else newSessionToken(),
+		ownRun = run == nil,
+		hinted = false,
 	}
 
 	plr.CharacterAdded:Connect(function(char)
 		onCharacter(plr, char)
 	end)
 
-	beginPass(plr)
+	beginPass(plr, run and run.pass)
 	notifyReadOnly(plr) -- R5: say so ONCE if this session can't save
 end)
 
@@ -1387,6 +2129,7 @@ Players.PlayerRemoving:Connect(function(plr)
 	if leaving then
 		-- R9: always flush the final best day, throttle or not — this is the last chance.
 		publishBest(plr, true)
+		publishGuide(plr, true)
 		-- R7: mark CLOSED before the releasing save, so an autosave renew (in flight or about
 		-- to start) can never land afterwards and re-arm the lock for a player who has left.
 		leaving.closing = true
@@ -1401,6 +2144,8 @@ Players.PlayerRemoving:Connect(function(plr)
 	if info then
 		info:Destroy()
 	end
+	dropBoard(plr)
+	dropSpawn(plr)
 	profiles[plr] = nil
 	zones[plr] = nil
 	passState[plr] = nil
@@ -1411,6 +2156,7 @@ game:BindToClose(function()
 		local prof = profiles[plr]
 		if prof then
 			publishBest(plr, true) -- R9: final flush; no-op unless the best day actually moved
+			publishGuide(plr, true)
 			prof.closing = true -- R7
 		end
 		saveProfile(plr, true)
@@ -1437,6 +2183,7 @@ task.spawn(function()
 				local ghost = profiles[plr]
 				if ghost then
 					publishBest(plr, true) -- R9: final flush before we drop the profile
+					publishGuide(plr, true)
 					ghost.closing = true -- R7
 				end
 				saveProfile(plr, true)
@@ -1445,10 +2192,13 @@ task.spawn(function()
 					releaseZoneIndex(tonumber(zone:GetAttribute("Index")) or 0)
 					zone:Destroy()
 				end
+				dropBoard(plr)
+				dropSpawn(plr)
 				profiles[plr] = nil
 				zones[plr] = nil
 				passState[plr] = nil
 			elseif profiles[plr].canSave then
+				publishGuide(plr, true) -- a count the throttle held back
 				saveProfile(plr, false)
 			else
 				-- R1: read-only session — try to WIN the lock instead of staying mute forever.
@@ -1457,6 +2207,7 @@ task.spawn(function()
 				retryClaim(plr)
 			end
 		end
+		refreshPublicBoards() -- the public board, re-read at most once a window, on every sign showing it
 	end
 end)
 

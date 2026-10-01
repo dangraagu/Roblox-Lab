@@ -21,6 +21,8 @@ local FxClient = require(ReplicatedStorage:WaitForChild("FxClient"))
 -- Roblox and makes the whole LocalScript fail to load.
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
+-- Only for NightSky.bragEmoji (the Best line's band emoji, owner decision 2026-09-30): pure, no state.
+local NightSky = require(ReplicatedStorage:WaitForChild("NightSky"))
 local Remotes = ReplicatedStorage:WaitForChild("AnomalyRemotes")
 local StateRemote = Remotes:WaitForChild("State") :: RemoteEvent
 local RevealRemote = Remotes:WaitForChild("Reveal") :: RemoteEvent
@@ -682,7 +684,9 @@ end
 StateRemote.OnClientEvent:Connect(function(s)
 	if typeof(s) ~= "table" then return end
 	dayLbl.Text = "DAY " .. tostring(s.day)
-	bestLbl.Text = "Best: Day " .. tostring(s.best)
+	-- the brag: the emoji of the highest night-sky band the Best Day has reached (Deep Sky is 🔭)
+	local brag = if type(s.best) == "number" and Config.Sky then NightSky.bragEmoji(Config.Sky.Bands, s.best) else ""
+	bestLbl.Text = "Best: Day " .. tostring(s.best) .. (if brag ~= "" then " " .. brag else "")
 	codexLbl.Text = "Field Guide: " .. tostring(s.codexCount) .. "/" .. tostring(s.codexTotal)
 	hintLbl.Text = "Hints: " .. tostring(s.hintTokens) .. "  (H at start pad)"
 	-- the collapsed phone toggle doubles as the day readout, so it follows dayLbl
@@ -739,7 +743,10 @@ RevealRemote.OnClientEvent:Connect(function(r)
 		-- the server tells us how many tokens survived the spend; show it so the player can
 		-- budget the last hint instead of guessing.
 		local left = ""
-		if type(r.remaining) == "number" then
+		if r.again then
+			-- the second press on the same hall: shown again, not charged again (the server says so)
+			left = "  (this hall's hint, no extra cost)"
+		elseif type(r.remaining) == "number" then
 			local n = math.max(0, math.floor(r.remaining))
 			left = "  (" .. tostring(n) .. (if n == 1 then " hint left)" else " hints left)")
 		end

@@ -26,8 +26,10 @@
 --   * on a phone it draws no caption over the hall that the player did not ask for (a caption there
 --     sits on the right-hand wall, and this is spot-the-difference); its news waits for the break, and
 --     the button carries a steady highlight meanwhile, never a blink ("The Flicker" is an anomaly);
---   * it never tells the player the Day is "safe": the streak lives only for the session, and Roblox
---     disconnects a player idle for ~20 minutes. Once Player.Idled fires, a break says so;
+--   * it never tells the player the Day is "safe". Roblox disconnects a player idle for ~20 minutes;
+--     once Player.Idled fires, a break says so, and says the Day and the hall are saved ONLY when the
+--     server says this session saves the run (the player's SavesRun attribute, owner decision
+--     2026-09-30); otherwise it says saving is off;
 --   * it creates no Light and nothing collidable, touchable or ray-queryable.
 -- Headless checks: robloxemu/check_anomalyobservatory_{sky,rest,hud,events,cap,occlusion,shots}.luau.
 -- Design: EYECANDY.md.
@@ -192,9 +194,11 @@ local art = nil -- SkyArt, once the player's hall exists
 local restState = Rest.new()
 local deathBeatUntil = -1
 local captionText, captionUntil = "", 0
--- News waiting for the next break: { band = index } or { intro = true }. The button is highlighted
--- (steadily) while there is some; the break's caption says it, and seeing it clears it.
-local pending: any = nil
+-- News waiting for the next break. Both kinds can wait at once (review 2026-09-30, finding 4: one slot
+-- let a phone's first band overwrite its join tip, and a wrong call then cleared the only invitation).
+-- The button is highlighted (steadily) while any waits; a break shows ONE, the join tip first (it
+-- explains the rest), and the next break shows the next one.
+local pending: { intro: boolean, band: number? } = { intro = false, band = nil }
 local breakNews: string? = nil -- the news this break is showing
 -- Roblox has reported the player idle (Player.Idled) and there has been no input since.
 local idle = false
@@ -256,12 +260,19 @@ end
 applyLayout()
 camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
 
-local function pendingNews(): string?
-	if pending == nil then return nil end
-	if pending.band then
-		return NightSky.bandNews(bands[pending.band], layout.compact)
+local function hasPending(): boolean
+	return pending.intro or pending.band ~= nil
+end
+
+-- The news the next break shows, and which kind it is.
+local function nextNews(): (string?, string?)
+	if pending.intro then
+		return NightSky.introNews(layout.compact), "intro"
 	end
-	return NightSky.introNews(layout.compact)
+	if pending.band then
+		return NightSky.bandNews(bands[pending.band], layout.compact), "band"
+	end
+	return nil, nil
 end
 
 local function refreshButton()
@@ -301,6 +312,22 @@ local function atmosphere(): Atmosphere?
 	return nil
 end
 
+-- The band's own light (standard §2): the break's grade for the Day, NightSky.breakLight. Written only on the
+-- break's grade (on only while the camera is out), and only when it changed.
+local worn: string? = nil
+local function wearLight()
+	local g = grade
+	if g == nil then return end
+	local L = NightSky.breakLight(bands, EnvBands, day, View.Grade)
+	local key = string.format("%.2f,%.2f,%.2f|%.4f|%.4f|%.4f", L.tint[1], L.tint[2], L.tint[3], L.brightness, L.contrast, L.saturation)
+	if key == worn then return end
+	worn = key
+	g.TintColor = Color3.fromRGB(math.floor(L.tint[1] + 0.5), math.floor(L.tint[2] + 0.5), math.floor(L.tint[3] + 0.5))
+	g.Brightness = L.brightness
+	g.Contrast = L.contrast
+	g.Saturation = L.saturation
+end
+
 -- Called only while the screen is fully black: take the camera out to the telescope.
 local function goOut()
 	saved = {
@@ -319,16 +346,19 @@ local function goOut()
 	if grade == nil then
 		local g = Instance.new("ColorCorrectionEffect")
 		g.Name = "ObservatoryBreakGrade"
-		g.Saturation = View.Grade.Saturation
-		g.Brightness = View.Grade.Brightness
-		g.Contrast = View.Grade.Contrast
 		g.Enabled = false
 		g.Parent = camera
 		grade = g
 	end
+	wearLight();
 	(grade :: ColorCorrectionEffect).Enabled = true
-	breakNews = pendingNews()
-	pending = nil
+	local text, which = nextNews()
+	breakNews = text
+	if which == "intro" then
+		pending.intro = false
+	elseif which == "band" then
+		pending.band = nil
+	end
 	restClock = 0
 	camera.CameraType = Enum.CameraType.Scriptable
 	camera.FieldOfView = View.FovDegrees
@@ -351,8 +381,8 @@ local function comeBack()
 		camera.FieldOfView = saved.fov
 	end
 	saved = nil
-	-- whatever was announced while out here has been seen
-	pending = nil
+	-- what this break showed has been seen (nextNews/goOut took it off `pending`); anything still
+	-- pending is for the next break
 	breakNews = nil
 end
 
@@ -388,7 +418,9 @@ end
 
 local function breakText(): string
 	return NightSky.breakCaption({
-		day = day, compact = layout.compact, news = pendingNews() or breakNews, idle = idle, kickMinutes = Sky.IdleKickMinutes,
+		day = day, compact = layout.compact, news = breakNews, idle = idle, kickMinutes = Sky.IdleKickMinutes,
+		-- the server's word, not the client's guess: unset or false reads as "saving is off"
+		saved = player:GetAttribute("SavesRun") == true,
 	})
 end
 
@@ -478,13 +510,17 @@ local function onDay(newDay: number)
 	target = targetFor(day)
 	if up then
 		local b = bands[up]
-		pending = { band = up }
+		if view == "sky" or view == "fadingBack" then
+			breakNews = NightSky.bandNews(b, layout.compact) -- out at the telescope: seen right now
+		else
+			pending.band = up
+		end
 		-- a phone's caption would sit on the hall's right-hand wall: its news waits for the break
 		if not layout.compact then
 			say(b.emoji .. " " .. b.name .. " tonight — press 🔭 Break (B) to watch it.", 6)
 		end
-	elseif pending and pending.band and EnvBands.indexAt(bands, day) < pending.band then
-		pending = nil -- a wrong call took the new band away before it was seen
+	elseif pending.band and EnvBands.indexAt(bands, day) < pending.band then
+		pending.band = nil -- a wrong call took the new band away before it was seen (the join tip stays)
 	end
 	refreshButton()
 end
@@ -504,7 +540,7 @@ local function tryBuild()
 		announcedHelp = true
 		if layout.compact then
 			-- not over the hall on a phone: the highlighted button invites, the first break explains
-			pending = pending or { intro = true }
+			pending.intro = true
 		else
 			say("🔭 The sky outside changes as your Day grows. Take a break at the telescope any time (B).", 6)
 		end
@@ -557,6 +593,12 @@ RunService.RenderStepped:Connect(function(rawDt: number)
 		startBreak()
 	elseif r == "woke" then
 		endBreak()
+	elseif r == "dropped" then
+		-- (review 2026-09-30, finding 3) the player walked on, so Rest dropped the request. Without
+		-- this the "queued ... Keep still." caption stayed up for its full 4 s while nothing could
+		-- start: a player who then kept still got no break and no reason.
+		say(if layout.compact then "☕ Break cancelled: you moved."
+			else "☕ Break cancelled: you moved. Press 🔭 Break (B) again when you are standing still.", 3)
 	elseif r == "expired" then
 		say("The break was not taken (you kept moving).", 2.5)
 	end
@@ -573,6 +615,7 @@ RunService.RenderStepped:Connect(function(rawDt: number)
 	elseif view == "sky" then
 		restClock += dt
 		placeRestCamera()
+		wearLight() -- the Day can change during a break; writes nothing when the light is the same
 		if fadeT < View.FadeSeconds then
 			fadeT += dt
 			fade.BackgroundTransparency = math.clamp(fadeT / View.FadeSeconds, 0, 1)
@@ -619,7 +662,7 @@ RunService.RenderStepped:Connect(function(rawDt: number)
 	end
 	if caption.Text ~= text then caption.Text = text end
 	caption.Visible = text ~= "" and breakBtn.Visible
-	local bg = if pending ~= nil and view == "hall" then NEWS else DARK
+	local bg = if hasPending() and view == "hall" then NEWS else DARK
 	if breakBtn.BackgroundColor3 ~= bg then breakBtn.BackgroundColor3 = bg end
 end)
 

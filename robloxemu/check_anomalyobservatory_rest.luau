@@ -250,11 +250,20 @@ truthy(not string.find(string.lower(caption.Text), "disconnect", 1, true), "and 
 truthy(string.find(breakBtn.Text, "Back", 1, true) ~= nil, "the button now reads Back: " .. breakBtn.Text)
 plr.Idled:Fire(120) -- Roblox: the player has been idle for two minutes
 run(0.5)
-truthy(capHas("20") and capHas("Day 1") and capHas("Day 3"),
-	"once Roblox reports the player idle, the caption says a 20-minute idle disconnect starts over at Day 1, and names Day 3: " .. caption.Text)
-truthy(not string.find(string.lower(caption.Text), "safe", 1, true), "and still promises nothing: " .. caption.Text)
+-- (owner decision 2026-09-30) The run is now saved with its live pass while the session holds the save
+-- lock (check_anomaly_rejoin proves a rejoin gets the Day and the hall back), so the idle warning says
+-- so, and it says so only when the server says this session saves (the SavesRun attribute).
+eq(plr:GetAttribute("SavesRun"), true, "this session holds the save lock, and the server says it saves the run")
+truthy(capHas("20") and capHas("Day 3") and capHas("saved") and capHas("rejoin"),
+	"once Roblox reports the player idle, the caption says a 20-minute idle disconnect, and that Day 3 and this hall are saved: " .. caption.Text)
+truthy(not string.find(string.lower(caption.Text), "safe", 1, true), "and never calls it safe: " .. caption.Text)
+plr:SetAttribute("SavesRun", false) -- a session that could not take the save lock
+run(0.5)
+truthy(capHas("saving is off") and not string.find(string.lower(caption.Text), "saved", 1, true),
+	"a session that does not save says saving is off and promises nothing: " .. caption.Text)
+plr:SetAttribute("SavesRun", true)
 run(600, 0.1) -- ten minutes on the roof
-truthy(capHas("Day 1") and capHas("20"), "the warning stays up for as long as nobody touches anything: " .. caption.Text)
+truthy(capHas("saved") and capHas("20"), "the warning stays up for as long as nobody touches anything: " .. caption.Text)
 UIS.InputChanged:Fire({ UserInputType = Enum.UserInputType.MouseMovement, KeyCode = Enum.KeyCode.Unknown }, false)
 run(0.5)
 truthy(not string.find(string.lower(caption.Text), "disconnect", 1, true) and caption.Text ~= "",
@@ -329,6 +338,26 @@ truthy(isOut(), "and starts once the player stands still on the floor")
 breakBtn.Activated:Fire()
 run(1)
 truthy(backHome(), "back")
+
+-- (review 2026-09-30, finding 3) asked for mid-air, then the player lands WALKING: Rest drops the
+-- request (they chose to walk on). It used to keep saying "Break queued ... Keep still." for the rest
+-- of its 4 s while nothing could start, so a player who then did what it said got no break and no
+-- reason. The caption must say the request is gone, and why, as soon as it is.
+hum.FloorMaterial = Enum.Material.Air
+breakBtn.Activated:Fire()
+run(0.2)
+truthy(string.find(caption.Text, "queued", 1, true) ~= nil, "mid-air: the break is queued, and says so: " .. caption.Text)
+hum.MoveDirection = Vector3.new(0, 0, -1)
+hum.FloorMaterial = Enum.Material.Plastic -- lands walking
+run(0.6)
+hum.MoveDirection = Vector3.new(0, 0, 0) -- and then does what the caption said: keeps still
+run(0.4)
+truthy(not isOut(), "a request dropped by walking on does not start later")
+truthy(string.find(caption.Text, "queued", 1, true) == nil and string.find(string.lower(caption.Text), "keep still", 1, true) == nil,
+	"once the request is dropped the caption stops saying it is queued: " .. caption.Text)
+truthy(string.find(string.lower(caption.Text), "cancel", 1, true) ~= nil and string.find(string.lower(caption.Text), "mov", 1, true) ~= nil,
+	"and says the break was cancelled because the player moved: " .. caption.Text)
+run(3)
 
 -- ------------------------------------------------------------------ 3. the death beat
 -- a wrong call: the break cannot start during the beat, it queues and starts after

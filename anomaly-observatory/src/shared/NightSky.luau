@@ -18,8 +18,8 @@
 --     never teach the player that red is normal;
 --   * `engineSizeOk`: sizes Roblox draws as written (a Ball is forced uniform, a Cylinder round, every
 --     Part axis clamped to 2048), which the emulator does not model;
---   * `breakCaption`: what a break may promise (the streak lives only for the session and Roblox
---     disconnects an idle player, so never "safe").
+--   * `breakCaption`: what a break may promise (never "safe"; "saved" only in the idle warning and
+--     only when the session saves the run, owner decision 2026-09-30).
 --
 -- Dependencies (EnvBands, Rest) are passed in: `require("./X")` resolves in the luau CLI and is
 -- INVALID in Roblox. Colours are {r, g, b} 0-255 arrays, never Color3, so this runs in the CLI.
@@ -30,7 +30,24 @@ local NightSky = {}
 
 -- Everything a band can show, each blended 0..1 by EnvBands. `land` (the ridge, the mist in the
 -- valley and its few lights) is not a feature: it is the place, and it is there every night.
-NightSky.FEATURES = { "stars", "moon", "meteors", "aurora", "comet", "storm", "nebula", "planets", "othersky" }
+NightSky.FEATURES = { "stars", "moon", "meteors", "aurora", "comet", "storm", "nebula", "planets", "othersky",
+	"fireflies", "bats", "owl", "geese", "wisps", "thistledown", "snow", "frost", "leaves", "motes" }
+
+-- The critters (docs/complete-game-standard.md §2, 2026-10-01): every band has its own, or says why not
+-- (`critterless`). Each kind is a FEATURE, so it glides in and out with its band like everything else.
+-- They are also this game's harmless RARE events (nothing chases you is the premise, so there are no
+-- hazards): wildlife crossing the night beyond the entrance, one flight at a time, about one every 2-3
+-- minutes. `Style` is how a flock moves: see critterMember.
+NightSky.CRITTERS = { "fireflies", "bats", "owl", "geese", "wisps" }
+NightSky.CRITTER_STYLES = { swarm = true, flutter = true, glide = true, vee = true, circle = true }
+
+-- The weather (docs/complete-game-standard.md §2, 2026-10-01): every band has its own, or says why its sky is
+-- clear (`clearSky`). Each kind is a FEATURE (it glides with its band) and one ParticleEmitter on its own
+-- invisible host out in front of the entrance (Config.Sky.Weather.Kinds). The storm's rain (Config.Sky.Rain,
+-- driven by the `storm` feature) is weather too. A kind falls ("Bottom") or rises ("Top"); nothing is ever
+-- blown toward the hall, and envelopes/validate prove no particle can reach back to the entrance.
+NightSky.WEATHER = { "thistledown", "snow", "frost", "leaves", "motes" }
+NightSky.WEATHER_DIRECTIONS = { Bottom = true, Top = true }
 
 local function isNaN(x: number): boolean
 	return x ~= x
@@ -308,6 +325,61 @@ function NightSky.features(bands: { any }, EnvBands: any, day: number): { [strin
 	return out
 end
 
+-- The weather a band shows (any weight > 0), sorted: its own weather kinds, and "rain" when it has the storm
+-- and the sky has Rain. Empty means a clear sky, which the band must explain (`clearSky`, see validate).
+function NightSky.bandWeather(sky: any, band: any): { string }
+	local out = {}
+	local f = (band and band.features) or {}
+	local kinds = sky.Weather and sky.Weather.Kinds
+	for _, k in NightSky.WEATHER do
+		local w = f[k]
+		if kinds and kinds[k] ~= nil and type(w) == "number" and w > 0 then table.insert(out, k) end
+	end
+	if sky.Rain ~= nil and type(f.storm) == "number" and f.storm > 0 then table.insert(out, "rain") end
+	table.sort(out)
+	return out
+end
+
+local function weight01(w: any): number
+	if type(w) ~= "number" or w ~= w then return 0 end
+	return math.clamp(w, 0, 1)
+end
+
+-- The particles a second each emitter asks for, at these (glided) feature weights: the stars twinkle with the
+-- `stars` weight, the rain falls with the `storm`, each weather kind with its own. SkyArt then holds the whole
+-- set to the budget (EnvBands.capRates: at most MaxEmitters on, at most MaxEmitterRate in total).
+function NightSky.emitterRates(sky: any, weights: { [string]: number }): { [string]: number }
+	local out = {}
+	if sky.Stars then out.stars = sky.Stars.Rate * weight01(weights.stars) end
+	if sky.Rain then out.rain = sky.Rain.Rate * weight01(weights.storm) end
+	local kinds = sky.Weather and sky.Weather.Kinds
+	if kinds then
+		for _, k in NightSky.WEATHER do
+			local K = kinds[k]
+			if K then out[k] = K.Rate * weight01(weights[k]) end
+		end
+	end
+	return out
+end
+
+-- Each band's own light (standard §2): the colour grade of the telescope break, blended by Day like any band
+-- value. The hall must never change, so this is the only light a band has: Sky.client writes it on the break's
+-- grade, which is on only while the camera is out and the hall is out of view. `fallback` (RestView.Grade) is
+-- the untinted grade for bands without a light (validate refuses a sky where only some bands have one).
+-- Returns { tint = {r, g, b}, brightness, contrast, saturation }, a fresh table.
+function NightSky.breakLight(bands: { any }, EnvBands: any, day: number, fallback: any): any
+	local d = if type(day) == "number" and not isNaN(day) then day else 1
+	local L = EnvBands.sample(bands, d, "light")
+	local fb = fallback or {}
+	local tint = L.tint
+	return {
+		tint = if type(tint) == "table" then { tint[1], tint[2], tint[3] } else { 255, 255, 255 },
+		brightness = if type(L.brightness) == "number" then L.brightness else (fb.Brightness or 0),
+		contrast = if type(L.contrast) == "number" then L.contrast else (fb.Contrast or 0),
+		saturation = if type(L.saturation) == "number" then L.saturation else (fb.Saturation or 0),
+	}
+end
+
 -- The band just entered, when newDay's band is HIGHER than prevDay's; nil otherwise (same band, a
 -- reset back down, nonsense input). A NaN previous Day counts as Day 1.
 function NightSky.bandUp(bands: { any }, EnvBands: any, prevDay: number, newDay: number): number?
@@ -335,13 +407,32 @@ function NightSky.describe(bands: { any }, EnvBands: any, day: number): any
 end
 
 -- ------------------------------------------------------------------ the break's words
--- (Review 2026-09-24.) What a break may promise. The Day streak lives only in the server's memory for
--- this session (Best Day is what is saved), and Roblox disconnects a player idle for about 20 minutes,
--- which starts a new session at Day 1. A break IS a player not touching the controls, so the caption
--- never calls the Day "safe"; once Roblox reports the player idle (Player.Idled) it says what the kick
--- costs, until any input clears it. `news` is a line about something new out here (bandNews, or on a
--- phone the join tip, introNews): a phone shows no unrequested caption over the hall, so its news waits
--- for the break, where nothing of the hall is on screen.
+-- What a break may promise. (Review 2026-09-24) Roblox disconnects a player idle for about 20 minutes,
+-- and a break IS a player not touching the controls, so the caption never calls the Day "safe". (Owner
+-- decision 2026-09-30) The run is now saved, with its live pass, while the session holds the save lock
+-- (Main.server.luau; robloxemu/check_anomaly_rejoin.luau): only THEN, and only in the idle warning, does
+-- a caption say the Day and this hall are saved. A session that cannot save says saving is off. Outside
+-- the idle warning a caption promises nothing about keeping progress (review 2026-09-30, finding 2: the
+-- old guard was the single word "safe"). Every template here is pinned word for word in
+-- tests/NightSky.spec.luau: change the words there too, and read what they may promise first.
+-- `news` is a line about something new out here (bandNews, or on a phone the join tip, introNews): a
+-- phone shows no unrequested caption over the hall, so its news waits for the break, where nothing of
+-- the hall is on screen.
+
+-- The brag (owner decision 2026-09-30): the emoji of the highest band a Best Day has FULLY reached, for
+-- the HUD's Best line. The first band (the plain first night) is everyone's, so it shows nothing.
+function NightSky.bragEmoji(bands: { any }, bestDay: number): string
+	if type(bestDay) ~= "number" or isNaN(bestDay) then
+		return ""
+	end
+	local found = ""
+	for i, b in bands do
+		if i > 1 and bestDay >= b.from then
+			found = b.emoji
+		end
+	end
+	return found
+end
 
 -- A new band, as the break announces it.
 function NightSky.bandNews(band: any, compact: boolean): string
@@ -359,16 +450,24 @@ function NightSky.introNews(compact: boolean): string
 	return "🔭 The sky out here changes as your Day grows."
 end
 
--- c = { day, compact, news?, idle, kickMinutes }
+-- c = { day, compact, news?, idle, saved, kickMinutes }. `saved` must be exactly true to promise.
 function NightSky.breakCaption(c: any): string
 	local d = math.floor(saneDay(c.day))
 	local kick = if type(c.kickMinutes) == "number" and not isNaN(c.kickMinutes) then math.floor(c.kickMinutes) else 20
 	if c.idle then
+		local saved = c.saved == true
 		if c.compact then
-			return string.format("☕ Idle %d min = disconnect, back to Day 1. Move!", kick)
+			if saved then
+				return string.format("☕ Idle %d min = disconnect. Day %d is saved. Move!", kick, d)
+			end
+			return string.format("☕ Idle %d min = disconnect; saving is off. Move!", kick)
 		end
-		return string.format("☕ Still there? Roblox disconnects players idle for %d minutes, and a new session starts at Day 1 "
-			.. "(you are on Day %d). Move or press ▶ to go back.", kick, d)
+		if saved then
+			return string.format("☕ Still there? Roblox disconnects players idle for %d minutes. Day %d and this hall are saved: "
+				.. "rejoin to carry on. Move or press ▶ to go back.", kick, d)
+		end
+		return string.format("☕ Still there? Roblox disconnects players idle for %d minutes, and saving is off right now: "
+			.. "Day %d would be lost. Move or press ▶ to go back.", kick, d)
 	end
 	local news = if type(c.news) == "string" and c.news ~= "" then c.news else nil
 	if c.compact then
@@ -441,6 +540,119 @@ function NightSky.boltPath(spec: any, ev: any): { any }
 		table.insert(pts, { az = math.clamp(midAz + jig, az0, az1), el = lerp(top, bottom, f) })
 	end
 	return pts
+end
+
+-- ------------------------------------------------------------------ critters
+-- One flight per slot at most (slotEvent: it starts and ends inside its slot, since every kind's Duration
+-- is at most Critters.Duration), so a flight never overlaps another. On the slot's first frame the sky
+-- decides whether a flight comes and which kind: `critterPick`, from the kinds' CURRENT weights (a band
+-- fading in flies its critters a little at first). u[1] is the start, u[2] the roll, u[3] the kind, u[4..6]
+-- the path. EnvBands.hash01 is affine in its last argument, so u[3..6] are the roll SHIFTED by a constant:
+-- used raw, the kind would follow the roll (measured: one kind of an even pair took 41 % of the flights, not
+-- 50). They go through `jitter` first, which is not linear.
+
+function NightSky.critterKey(kind: string, i: number): string
+	return "Critter_" .. kind .. tostring(i)
+end
+
+-- The kind that flies this slot, or nil. At most Chance of the slots carry a flight however many kinds
+-- share the band; the kinds split them by weight.
+function NightSky.critterPick(sky: any, weights: { [string]: number }, ev: any): string?
+	local Cr = sky.Critters
+	if Cr == nil then return nil end
+	local total = 0
+	for _, k in NightSky.CRITTERS do
+		local w = weights[k]
+		if type(w) == "number" and w > 0 then total += w end
+	end
+	if total <= 0 or ev.roll >= Cr.Chance * math.min(1, total) then
+		return nil
+	end
+	local x = jitter(ev.u[3], 17) * total
+	local last = nil
+	for _, k in NightSky.CRITTERS do
+		local w = weights[k]
+		if type(w) == "number" and w > 0 then
+			if x < w then return k end
+			x -= w
+			last = k
+		end
+	end
+	return last
+end
+
+-- The flock's centre crosses Travel degrees of azimuth, left or right, entirely inside its window, at a
+-- gently changing elevation.
+function NightSky.critterPath(spec: any, K: any, ev: any): any
+	local dir = if jitter(ev.u[4], 19) < 0.5 then -1 else 1
+	local az0, az1 = K.AzRange[1], K.AzRange[2]
+	local lo = if dir > 0 then az0 else az0 + K.Travel
+	local hi = if dir > 0 then az1 - K.Travel else az1
+	local fromAz = lerp(lo, math.max(lo, hi), jitter(ev.u[5], 23))
+	local fromEl = lerp(K.ElRange[1], K.ElRange[2], jitter(ev.u[6], 29))
+	local toEl = math.clamp(fromEl + (jitter(ev.u[6], 5) - 0.5) * 4, K.ElRange[1], K.ElRange[2])
+	return { from = { az = fromAz, el = fromEl }, to = { az = fromAz + dir * K.Travel, el = toEl } }
+end
+
+-- How far (degrees of azimuth, of elevation) a member can be from the flock's centre.
+function NightSky.critterReach(K: any): (number, number)
+	local sAz, sEl = K.Spread[1], K.Spread[2]
+	if K.Style == "flutter" then
+		return ((K.Count - 1) / 2 + 0.3) * sAz, sEl
+	elseif K.Style == "glide" then
+		return 0, sEl
+	elseif K.Style == "vee" then
+		local ranks = math.floor(K.Count / 2)
+		return ranks * sAz, ranks * sEl
+	end
+	return sAz, sEl -- swarm, circle
+end
+
+-- Member `i` of a flight, `f` (0..1) of the way along it, `t` seconds in: where it is (az, el, dist) and how
+-- visible (alpha 0..1). Every member fades in over the first tenth of the flight and out over the last,
+-- so nothing pops in or out.
+--   swarm   (fireflies) a loose cloud drifting, each one wandering round the centre and glowing on and off;
+--   flutter (bats)      a ragged line flapping up and down;
+--   glide   (owl)       one bird, a slow rise and fall;
+--   vee     (geese)     a V: the leader in front, the others in mirrored pairs behind it;
+--   circle  (wisps)     lights turning round their centre as they drift. They are not fireflies.
+function NightSky.critterMember(K: any, path: any, i: number, f: number, t: number): any
+	local az = lerp(path.from.az, path.to.az, f)
+	local el = lerp(path.from.el, path.to.el, f)
+	local dir = if path.to.az >= path.from.az then 1 else -1
+	local sAz, sEl = K.Spread[1], K.Spread[2]
+	local alpha = math.clamp(math.min(f, 1 - f) / 0.1, 0, 1)
+	local style = K.Style
+	if style == "swarm" then
+		local ph = i * 2.39996
+		az += sAz * math.sin(t * 0.9 + ph)
+		el += sEl * math.cos(t * 0.7 + ph * 1.3)
+		local blink = K.BlinkSeconds or 1.3
+		alpha *= 0.35 + 0.65 * (0.5 + 0.5 * math.sin(2 * math.pi * t / blink + ph))
+	elseif style == "flutter" then
+		az += (i - (K.Count + 1) / 2) * sAz + 0.3 * sAz * math.sin(t * 7 + i * 1.9)
+		el += sEl * math.sin(t * 11 + i * 2.3)
+	elseif style == "glide" then
+		el += sEl * math.sin(2 * math.pi * t / 3)
+	elseif style == "vee" then
+		local rank = math.floor(i / 2)
+		local side = if i % 2 == 0 then 1 else -1
+		az -= dir * rank * sAz
+		el += side * rank * sEl
+	else -- circle
+		local a = 2 * math.pi * (i - 1) / K.Count + t * 0.8
+		az += sAz * math.cos(a)
+		el += sEl * math.sin(a)
+	end
+	return { az = az, el = el, dist = K.Distance, alpha = math.clamp(alpha, 0, 1) }
+end
+
+-- How visible a member is, given its own alpha and its kind's current weight. A flight fades with its band:
+-- at weight 0.5 and up it is fully drawn (two kinds sharing a band are not dimmed), below that it dims, so
+-- when a band glides away mid-flight and SkyArt drops the kind's folder (weight 0.003) the flight is already
+-- all but invisible. (The sky check's climb caught fireflies vanishing at transparency 0.48 on the first build.)
+function NightSky.critterAlpha(alpha: number, weight: number): number
+	return math.clamp(alpha, 0, 1) * math.clamp(2 * (weight or 0), 0, 1)
 end
 
 -- ------------------------------------------------------------------ the telescope break
@@ -673,6 +885,21 @@ function NightSky.layout(sky: any, origin: Vec): { any }
 			color = R.Color, transparency = 1, emitter = "rain",
 		})
 	end
+	-- the weather: one invisible host per kind, out in front of the entrance like the rain's
+	local W = sky.Weather
+	if W and W.Kinds then
+		for _, k in NightSky.WEATHER do
+			local K = W.Kinds[k]
+			if K then
+				piece(out, {
+					key = "WeatherHost_" .. k, feature = k, shape = "Block",
+					pos = { x = origin.x + K.Offset[1], y = origin.y + K.Offset[2], z = origin.z + K.Offset[3] },
+					size = { x = K.Size[1], y = K.Size[2], z = K.Size[3] },
+					color = K.Color, transparency = 1, emitter = "weather", weather = k,
+				})
+			end
+		end
+	end
 
 	-- deep sky: nebula clouds, the Milky Way, a distant galaxy
 	local N = sky.Nebula
@@ -753,6 +980,25 @@ function NightSky.layout(sky: any, origin: Vec): { any }
 			local pos = NightSky.spiralPoint(Sp, eye, sc, i, 0)
 			local sd = 2 * Sp.StarRadius
 			piece(out, { key = "Turning" .. i, feature = "othersky", shape = "Ball", pos = pos, size = { x = sd, y = sd, z = sd }, color = Sp.Color, live = true, role = "spiral" })
+		end
+	end
+
+	-- the critters: a pool of one part per member for each kind, parked mid-window and invisible until a
+	-- flight (SkyArt moves them along NightSky.critterMember)
+	local Cr = sky.Critters
+	if Cr and Cr.Kinds then
+		for _, kind in NightSky.CRITTERS do
+			local K = Cr.Kinds[kind]
+			if K then
+				local c = NightSky.skyPoint(eye, (K.AzRange[1] + K.AzRange[2]) / 2, (K.ElRange[1] + K.ElRange[2]) / 2, K.Distance)
+				for i = 1, K.Count do
+					piece(out, {
+						key = NightSky.critterKey(kind, i), feature = kind, shape = K.Shape or "Block", pos = c,
+						size = { x = K.Size[1], y = K.Size[2], z = K.Size[3] }, color = K.Color, material = K.Material,
+						transparency = 1, live = true, role = "critter",
+					})
+				end
+			end
 		end
 	end
 
@@ -848,11 +1094,44 @@ function NightSky.envelopes(sky: any, origin: Vec): { any }
 			max = { x = c.x + R.Size[1] / 2 + drift, y = c.y + R.Size[2] / 2, z = c.z + R.Size[3] / 2 + drift },
 		})
 	end
+	local W = sky.Weather
+	if W and W.Kinds then
+		for _, k in NightSky.WEATHER do
+			local K = W.Kinds[k]
+			if K and type(K.Offset) == "table" and type(K.Size) == "table" and type(K.Speed) == "table"
+				and type(K.Lifetime) == "table" then
+				local L = K.Lifetime[2]
+				local reach = K.Speed[2] * L
+				local drift = reach * math.sin(math.rad(math.clamp(K.SpreadDegrees or 0, 0, 90)))
+				local wind = 0.5 * math.abs(K.Wind or 0) * L * L
+				local pad = K.ParticleSize or 0
+				local c = { x = origin.x + K.Offset[1], y = origin.y + K.Offset[2], z = origin.z + K.Offset[3] }
+				local down = if K.Direction == "Top" then drift else reach
+				local up = if K.Direction == "Top" then reach else drift
+				add("Weather_" .. k, {
+					min = { x = c.x - K.Size[1] / 2 - drift - wind - pad, y = c.y - K.Size[2] / 2 - down - pad, z = c.z - K.Size[3] / 2 - drift - pad },
+					max = { x = c.x + K.Size[1] / 2 + drift + wind + pad, y = c.y + K.Size[2] / 2 + up + pad, z = c.z + K.Size[3] / 2 + drift + pad },
+				})
+			end
+		end
+	end
 	local O = sky.OtherSky
 	if O then
 		local Sp = O.Spiral
 		local sc = NightSky.skyPoint(eye, Sp.Azimuth, Sp.Elevation, Sp.Distance)
 		add("Spiral", boxOf({ sc }, Sp.Radius + Sp.StarRadius))
+	end
+	local Cr = sky.Critters
+	if Cr and Cr.Kinds then
+		for _, kind in NightSky.CRITTERS do
+			local K = Cr.Kinds[kind]
+			if K then
+				local rAz, rEl = NightSky.critterReach(K)
+				local pad = math.max(K.Size[1], K.Size[2], K.Size[3])
+				add("Critters_" .. kind, boxOf(windowPoints({ K.AzRange[1] - rAz, K.AzRange[2] + rAz },
+					{ K.ElRange[1] - rEl, K.ElRange[2] + rEl }, K.Distance), pad))
+			end
+		end
 	end
 	local S = sky.Stars
 	if S then
@@ -867,6 +1146,25 @@ function NightSky.envelopes(sky: any, origin: Vec): { any }
 end
 
 -- ------------------------------------------------------------------ validate
+
+-- What the layout builds with every feature on at once (review 2026-09-30, finding 5): one Part per
+-- piece, SkyArt's Beams (Aurora.Count curtains on the aurora host, two on the comet's head: the tail and
+-- its core) and one Trail per pooled meteor. validate refuses a config over budget, so the budget is
+-- held in code and not only by a test; check_anomalyobservatory_sky measures the real counts.
+NightSky.COMET_BEAMS = 2
+function NightSky.budgetOf(sky: any, pieces: { any }): any
+	local b = { parts = #pieces, beams = 0, trails = 0 }
+	for _, p in pieces do
+		if p.role == "auroraHost" then
+			b.beams += (sky.Aurora and sky.Aurora.Count) or 0
+		elseif p.role == "cometHead" then
+			b.beams += NightSky.COMET_BEAMS
+		elseif p.role == "meteor" then
+			b.trails += 1
+		end
+	end
+	return b
+end
 
 local function checkColour(sky: any, key: any, where: string): string?
 	if type(key) ~= "string" or sky.Palette == nil or sky.Palette[key] == nil then
@@ -899,6 +1197,26 @@ function NightSky.validate(sky: any, EnvBands: any, Rest: any): (boolean, string
 			return false, "band " .. tostring(b.id) .. " needs a name and an emoji"
 		end
 		if type(b.features) ~= "table" then return false, "band " .. tostring(b.id) .. " has no features" end
+		-- the band's own light (the break's grade): all bands or none, gentle, never red
+		if (b.light ~= nil) ~= (bands[1].light ~= nil) then
+			return false, "band " .. tostring(b.id) .. ": either every band has its own light or none does"
+		end
+		local L = b.light
+		if L ~= nil then
+			local where = "band " .. tostring(b.id) .. " light"
+			local t = L.tint
+			if type(t) ~= "table" or #t ~= 3 then return false, where .. ".tint must be {r, g, b}" end
+			for _, v in t do
+				if type(v) ~= "number" or isNaN(v) or v < 0 or v > 255 then return false, where .. ".tint has a channel outside 0..255" end
+			end
+			if NightSky.isReddish(t) then return false, where .. " is reddish; red is how two anomalies read" end
+			local function within(v: any, lim: number): boolean
+				return type(v) == "number" and not isNaN(v) and v >= -lim and v <= lim
+			end
+			if not within(L.brightness, 0.2) then return false, where .. ".brightness must be in [-0.2, 0.2]" end
+			if not within(L.contrast, 0.5) then return false, where .. ".contrast must be in [-0.5, 0.5]" end
+			if not within(L.saturation, 1) then return false, where .. ".saturation must be in [-1, 1]" end
+		end
 		for _, k in NightSky.FEATURES do
 			local v = b.features[k]
 			if type(v) ~= "number" or isNaN(v) or v < 0 or v > 1 then
@@ -925,6 +1243,92 @@ function NightSky.validate(sky: any, EnvBands: any, Rest: any): (boolean, string
 		if e then return false, e end
 		if type(sky.Moon.MaxTurnPerSecond) ~= "number" or sky.Moon.MaxTurnPerSecond <= 0 then
 			return false, "Moon.MaxTurnPerSecond must be > 0: an uncapped phase glide races through new moon on a reset"
+		end
+	end
+
+	-- critters (standard §2): every band flies its own or says why not; a flight never outlasts its slot
+	local Cr = sky.Critters
+	if Cr ~= nil then
+		if type(Cr.SlotSeconds) ~= "number" or Cr.SlotSeconds <= 0 then return false, "Critters.SlotSeconds must be > 0" end
+		if type(Cr.Chance) ~= "number" or Cr.Chance <= 0 or Cr.Chance > 1 then return false, "Critters.Chance must be in (0, 1]" end
+		if type(Cr.Duration) ~= "number" or Cr.Duration <= 0 or Cr.Duration >= Cr.SlotSeconds then
+			return false, "Critters.Duration must be > 0 and shorter than SlotSeconds, or two flights could overlap"
+		end
+		if type(Cr.Kinds) ~= "table" then return false, "no Critters.Kinds" end
+		for _, kind in NightSky.CRITTERS do
+			local K = Cr.Kinds[kind]
+			local where = "Critters.Kinds." .. kind
+			if type(K) ~= "table" then return false, where .. " missing" end
+			if type(K.Count) ~= "number" or K.Count < 1 or K.Count ~= math.floor(K.Count) then
+				return false, where .. ".Count must be a whole number >= 1"
+			end
+			if type(K.Duration) ~= "number" or K.Duration <= 0 or K.Duration > Cr.Duration then
+				return false, where .. ".Duration must be > 0 and at most Critters.Duration"
+			end
+			if not NightSky.CRITTER_STYLES[K.Style] then
+				return false, where .. ".Style '" .. tostring(K.Style) .. "' is not a known style"
+			end
+			if type(K.AzRange) ~= "table" or type(K.ElRange) ~= "table" or type(K.Spread) ~= "table" or type(K.Size) ~= "table"
+				or type(K.Distance) ~= "number" then
+				return false, where .. " needs AzRange, ElRange, Spread, Size and Distance"
+			end
+			if type(K.Travel) ~= "number" or K.Travel <= 0 or K.Travel > K.AzRange[2] - K.AzRange[1] then
+				return false, where .. ".Travel must be > 0 and fit inside its AzRange"
+			end
+			local e = checkColour(sky, K.Color, "critter " .. kind)
+			if e then return false, e end
+		end
+		for _, b in bands do
+			local total = 0
+			for _, kind in NightSky.CRITTERS do total += b.features[kind] or 0 end
+			if total <= 0 and not (type(b.critterless) == "string" and b.critterless ~= "") then
+				return false, "band " .. tostring(b.id) .. " has no critters and does not say why (critterless)"
+			end
+		end
+	end
+
+	-- weather (standard §2): every band shows its own or says why its sky is clear; every kind falls or rises,
+	-- emits, fits the particle budget on its own, and is drawn in a palette colour (so never red)
+	local W = sky.Weather
+	if W ~= nil then
+		if type(W.Kinds) ~= "table" then return false, "no Weather.Kinds" end
+		local B = sky.Budget
+		local maxRate = (type(B) == "table" and type(B.MaxEmitterRate) == "number") and B.MaxEmitterRate or math.huge
+		local function range(t: any): boolean
+			return type(t) == "table" and type(t[1]) == "number" and type(t[2]) == "number" and not isNaN(t[1])
+				and not isNaN(t[2]) and t[1] >= 0 and t[1] <= t[2]
+		end
+		local function vec3(t: any): boolean
+			return type(t) == "table" and type(t[1]) == "number" and type(t[2]) == "number" and type(t[3]) == "number"
+				and not isNaN(t[1]) and not isNaN(t[2]) and not isNaN(t[3])
+		end
+		for _, k in NightSky.WEATHER do
+			local K = W.Kinds[k]
+			local where = "Weather.Kinds." .. k
+			if type(K) ~= "table" then return false, where .. " missing" end
+			if not NightSky.WEATHER_DIRECTIONS[K.Direction] then
+				return false, where .. ".Direction must be Bottom (falls) or Top (rises), never toward the hall"
+			end
+			if type(K.Rate) ~= "number" or isNaN(K.Rate) or K.Rate <= 0 or K.Rate > maxRate then
+				return false, where .. ".Rate must be > 0 and at most Budget.MaxEmitterRate"
+			end
+			if not range(K.Speed) then return false, where .. ".Speed must be {min, max} with 0 <= min <= max" end
+			if not range(K.Lifetime) or K.Lifetime[1] <= 0 then return false, where .. ".Lifetime must be {min, max} with 0 < min <= max" end
+			if type(K.SpreadDegrees) ~= "number" or isNaN(K.SpreadDegrees) or K.SpreadDegrees < 0 or K.SpreadDegrees > 90 then
+				return false, where .. ".SpreadDegrees must be in [0, 90]"
+			end
+			if type(K.Wind) ~= "number" or isNaN(K.Wind) then return false, where .. ".Wind must be a number (0 for still air)" end
+			if type(K.ParticleSize) ~= "number" or isNaN(K.ParticleSize) or K.ParticleSize <= 0 then
+				return false, where .. ".ParticleSize must be > 0"
+			end
+			if not vec3(K.Offset) or not vec3(K.Size) then return false, where .. " needs Offset and Size" end
+			local e = checkColour(sky, K.Color, "weather " .. k)
+			if e then return false, e end
+		end
+		for _, b in bands do
+			if #NightSky.bandWeather(sky, b) == 0 and not (type(b.clearSky) == "string" and b.clearSky ~= "") then
+				return false, "band " .. tostring(b.id) .. " has no weather and does not say why its sky is clear (clearSky)"
+			end
 		end
 	end
 
@@ -984,6 +1388,16 @@ function NightSky.validate(sky: any, EnvBands: any, Rest: any): (boolean, string
 	end
 	if B.MaxLights ~= 0 then
 		return false, "Budget.MaxLights must be 0: a sky that casts light changes how the hall is lit"
+	end
+	local built = NightSky.budgetOf(sky, NightSky.layout(sky, origin))
+	if built.parts > B.MaxParts then
+		return false, string.format("the layout builds %d parts with every feature on, over Budget.MaxParts %d", built.parts, B.MaxParts)
+	end
+	if built.beams > B.MaxBeams then
+		return false, string.format("the layout builds %d beams, over Budget.MaxBeams %d", built.beams, B.MaxBeams)
+	end
+	if built.trails > B.MaxTrails then
+		return false, string.format("the layout builds %d meteor trails, over Budget.MaxTrails %d", built.trails, B.MaxTrails)
 	end
 	return true, nil
 end

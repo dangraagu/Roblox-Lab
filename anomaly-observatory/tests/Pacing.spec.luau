@@ -100,5 +100,41 @@ for i = 2, #bands do
 	truthy(mins.slow[i] > n[i], "a slow player is slower to every sky (" .. bands[i].id .. ")")
 end
 
+-- ------------------------------------------------------------------ the Field Guide (standard §2/§3, 2026-10-01)
+-- The long-term goal beyond the headline sky, and what the highscore board ranks: anomaly TYPES caught.
+-- A type can only be caught once the pool has grown to it (Anomaly.poolSize: all 24 from Day 33), so the
+-- last few need a long streak, and a wrong call still resets the streak. Same model, simulated (no closed
+-- form: which types are still missing matters), from a fresh profile.
+truthy(type(NightModel.simulateGuide) == "function", "NightModel.simulateGuide exists")
+if type(NightModel.simulateGuide) == "function" then
+	local total = Anomaly.count(Config)
+	local marks = { 1, Config.Anomaly.StartPool, 16, total }
+	local g = {}
+	for name, runs in { fast = 300, normal = 300, slow = 40 } do
+		g[name] = NightModel.simulateGuide(Config, Anomaly, profiles[name], marks, runs, Rng.new(20261001))
+	end
+	print("   Field Guide                        fast    normal      slow   (expected minutes to first reach)")
+	for _, m in marks do
+		print(string.format("   %2d of %2d types caught          %8.1f  %8.1f  %8.1f", m, total, g.fast[m] / 60, g.normal[m] / 60, g.slow[m] / 60))
+	end
+	local gn = g.normal
+	truthy(gn[1] / 60 <= 2, string.format("a normal player catches a first anomaly within 2 minutes (%.1f)", gn[1] / 60))
+	truthy(gn[total] >= 2 * n[headline] * 60,
+		string.format("the full Field Guide (%d/%d) is a long-term goal: %.0f min, at least twice the headline sky (%.1f)", total, total,
+			gn[total] / 60, n[headline]))
+	truthy(g.fast[total] / 60 <= 90, string.format("and a skilled player can finish it in an evening: %.1f min", g.fast[total] / 60))
+	for _, m in marks do
+		truthy(g.fast[m] < gn[m] and gn[m] < g.slow[m], string.format("%d types: fast < normal < slow", m))
+	end
+	-- the model responds to the game: with the pool growing half as fast, the last type waits for a longer streak
+	local slower = table.clone(Config.Anomaly)
+	slower.PoolPerDay = Config.Anomaly.PoolPerDay / 2
+	local cfg2 = table.clone(Config)
+	cfg2.Anomaly = slower
+	local g2 = NightModel.simulateGuide(cfg2, Anomaly, profiles.fast, { total }, 100, Rng.new(20261001))
+	truthy(g2[total] > g.fast[total], string.format("a slower-growing pool pushes the full guide later (%.1f > %.1f min, fast)",
+		g2[total] / 60, g.fast[total] / 60))
+end
+
 print(string.format("Pacing: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Pacing tests failed")

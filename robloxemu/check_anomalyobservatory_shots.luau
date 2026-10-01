@@ -26,15 +26,22 @@
 --   * §9's note about the pan (what a capture 20 s into a break looks like) has the right direction.
 --
 -- The list as first written is kept in the scratch log of this review (13 of 42 assertions failed:
--- every left/right callout, the avatar at sx -0.97 sy -1.44, the pan note); SHOTS is the corrected list.
+-- every left/right callout, the avatar at sx -0.97 sy -1.44, the pan note).
 --
--- SHOTS below is §9 as data. Edit both or neither.
+-- (review 2026-09-30, finding 6) There is ONE copy of the list now: anomaly-observatory/marketing/
+-- ShotList.luau, required below, which EYECANDY.md §9 prints for the night shift. The old SHOTS table
+-- here was a second copy of §9's prose, and since the luau CLI cannot read markdown, the prose could
+-- drift (every left/right swapped) with this check green. This file now also asserts that no free text
+-- in the list names a side of the frame (only measured `where` fields may), that every printed number
+-- (`at`, the avatar's centre, the flash count, the pan) is what it measures, and that the printed table
+-- carries every measured side.
 
 local Harness = require("./emu/harness")
 local Config = require("../anomaly-observatory/src/shared/Config")
 local NightSky = require("../anomaly-observatory/src/shared/NightSky")
 
 local Sky = Config.Sky
+local List = require("../anomaly-observatory/marketing/ShotList")
 
 local passed, failed = 0, 0
 local function eq(a, b, msg)
@@ -44,63 +51,54 @@ local function eq(a, b, msg)
 end
 local function truthy(c, msg) if c then passed += 1 else failed += 1; print("FAIL: " .. msg) end end
 
--- ------------------------------------------------------------------ the shot list, as data (§9)
--- where: "upper left" | "upper right" | "lower left" | "lower right" (halves), "left" | "right" |
--- "centre" (thirds across), "top" | "bottom" (thirds up), combined with a space, e.g. "upper right".
--- A callout is a part name, a pattern ("^Ridge%d": the group's centre, `min` members in frame) or a
--- beam pattern ("beam:^Aurora%d": beams with both ends in frame, their centre).
-local VERSION = "review fix 2026-09-24"
-local SHOTS = {
-	{ n = 1, title = "The caretaker at the door", day = 10, moonWords = "waxing gibbous",
-		-- from inside the hall, 12 studs back from the entrance, looking out through the doorway
-		cam = { kind = "custom", from = { 2, 5.5, -2 }, at = { -12, 21, 96 } },
-		avatar = { at = { -5.5, 3.5, 8.5 }, lookAt = { -90, 3.5, 700 }, where = "lower right third" },
-		rim = true,
-		must = {
-			{ "Moon", "upper right" },
-			{ "beam:^Aurora%d", "", min = 2 },
-			{ "^Ridge%d", "", min = 3 },
-			{ "^ValleyLight%d", "lower", min = 3 },
-		} },
-	{ n = 2, title = "The Great Comet", day = 17, moonWords = "waning gibbous", cam = { kind = "break" },
-		must = {
-			{ "CometHead", "upper left" },
-			{ "beam:^CometTail$", "upper left", min = 1 },
-			{ "Moon", "upper right" },
-			{ "^Ridge%d", "bottom", min = 3 },
-		} },
-	{ n = 3, title = "Storm Front", day = 25, cam = { kind = "custom", from = { 6, 4, 16 }, at = { -20, 11, 112 } },
-		bolt = true, rain = true,
-		must = {
-			{ "^StormCloud%d", "", min = 7 },
-		} },
-	{ n = 4, title = "Deep Sky", day = 33, moonWords = "waxing crescent", cam = { kind = "break" },
-		must = {
-			{ "^Nebula%d", "upper left", min = 5 },
-			{ "Galaxy", "upper right" },
-			{ "MilkyWay", "upper" },
-			{ "Moon", "upper right" },
-			{ "^Ridge%d", "bottom", min = 3 },
-		} },
-	{ n = 5, title = "The Alignment", day = 44, moonWords = "full", cam = { kind = "break" },
-		must = {
-			{ "Mercury", "lower right" },
-			{ "Saturn", "upper left" },
-			{ "Venus", "right" }, { "Mars", "" }, { "Jupiter", "" },
-		},
-		moonAbove = "Venus" },
-	{ n = 6, title = "The Other Sky", day = 52, moonWords = "waning crescent",
-		cam = { kind = "custom", from = { 0, 10, 20 }, at = { 0, 84, 87 } },
-		must = {
-			{ "^RingArc%d", "upper", min = 6 },
-			{ "Moon2", "left" },
-			{ "^Turning%d", "right", min = 12 },
-			{ "Moon", "lower right" },
-		} },
-}
--- §9's pan note: captured 20 s into a break, the view has panned this way (objects drift the other way)
-local PAN_20S = "left"
-local WAIT_SECONDS = 45
+-- ------------------------------------------------------------------ the shot list (marketing/ShotList.luau)
+local VERSION = List.version
+local SHOTS = List.shots
+local PAN_20S = List.pan.toward
+local WAIT_SECONDS = List.waitSeconds
+local AT_TOL = 0.05 -- a printed sx / sy must be within this of the measurement
+-- the word a shot's note must use for its weather (2026-10-01, pass 2)
+local WEATHER_WORD = { thistledown = "thistledown", snow = "snow", frost = "frost", rain = "rain", leaves = "leaves",
+	motes = "motes", clear = "clear sky" }
+
+-- No free text names a side of the frame: sides enter the prose only through measured `where` fields.
+local function sideWordIn(text: string): string?
+	local low = string.lower(text)
+	for _, w in List.SIDE_WORDS do
+		if string.find(low, "%f[%a]" .. w .. "%f[%A]") then return w end
+	end
+	return nil
+end
+do
+	local named = {}
+	for _, t in List.freeText(List) do
+		local w = sideWordIn(t)
+		if w then table.insert(named, string.format("'%s' in: %s", w, t)) end
+	end
+	eq(#named, 0, "no free text in the shot list names a side of the frame (only measured `where` may): " .. table.concat(named, " | "))
+	-- CONTROL: the scan finds a side word planted in a copy of the list
+	local copy = table.clone(List)
+	copy.shots = table.clone(List.shots)
+	copy.shots[1] = table.clone(List.shots[1])
+	copy.shots[1].note = List.shots[1].note .. " The moon is on the left."
+	local found = 0
+	for _, t in List.freeText(copy) do
+		if sideWordIn(t) then found += 1 end
+	end
+	eq(found, 1, "CONTROL: the side-word scan finds one planted in a copy of the list")
+	-- the printed table carries every measured side and every title
+	local printed = List.render()
+	local missing = {}
+	for _, shot in SHOTS do
+		if not string.find(printed, shot.title, 1, true) then table.insert(missing, shot.title) end
+		for _, c in shot.must do
+			if c[2] ~= "" and not string.find(printed, List.calloutText(shot, c), 1, true) then
+				table.insert(missing, List.calloutText(shot, c))
+			end
+		end
+	end
+	eq(#missing, 0, "the printed table carries every shot and every measured callout: " .. table.concat(missing, " | "))
+end
 
 -- ------------------------------------------------------------------ the place, as the operator has it
 local h = Harness.new({
@@ -145,8 +143,9 @@ local function v3(t): Vector3
 	return Vector3.new(t[1], t[2], t[3])
 end
 
--- the settled sky, to prove the wait: every non-moving part's transparency, position and size
-local LIVE = { "^Meteor%d", "^Bolt%d", "^Turning%d" }
+-- the settled sky, to prove the wait: every non-moving part's transparency, position and size (the critters
+-- fly on the sky's clock, like the meteors: 2026-10-01)
+local LIVE = { "^Meteor%d", "^Bolt%d", "^Turning%d", "^Critter_" }
 local function settledPrint(): string
 	local rows = {}
 	for _, d in folder:GetDescendants() do
@@ -247,7 +246,7 @@ local function callout(c): (boolean, string)
 		end
 		if n < (c.min or 1) then return false, string.format("%s: %d in frame, want %d", what, n, c.min or 1) end
 		sx, sy = sx / n, sy / n
-		return matches(where, sx, sy), string.format("%s (%d beams) at sx %+.2f sy %+.2f, want %q", what, n, sx, sy, where)
+		return matches(where, sx, sy), string.format("%s (%d beams) at sx %+.2f sy %+.2f, want %q", what, n, sx, sy, where), sx, sy
 	elseif string.sub(what, 1, 1) == "^" then
 		local n, sx, sy = 0, 0, 0
 		for _, d in folder:GetDescendants() do
@@ -262,14 +261,14 @@ local function callout(c): (boolean, string)
 		end
 		if n < (c.min or 1) then return false, string.format("%s: %d shown in frame, want %d", what, n, c.min or 1) end
 		sx, sy = sx / n, sy / n
-		return matches(where, sx, sy), string.format("%s (%d) centre at sx %+.2f sy %+.2f, want %q", what, n, sx, sy, where)
+		return matches(where, sx, sy), string.format("%s (%d) centre at sx %+.2f sy %+.2f, want %q", what, n, sx, sy, where), sx, sy
 	end
 	local d = folder:FindFirstChild(what, true)
 	if d == nil or not isShown(d) then return false, what .. " is not shown" end
 	local x, y, dep = project(d.Position)
 	if not inFrame(x, y, dep) then return false, string.format("%s is out of frame (sx %+.2f sy %+.2f)", what, x, y) end
 	if not throughDoor(d.Position) then return false, what .. " is hidden by the hall (not seen through the doorway)" end
-	return matches(where, x, y), string.format("%s at sx %+.2f sy %+.2f, want %q", what, x, y, where)
+	return matches(where, x, y), string.format("%s at sx %+.2f sy %+.2f, want %q", what, x, y, where), x, y
 end
 
 -- the camera of a shot
@@ -345,9 +344,14 @@ for _, shot in SHOTS do
 
 	aim(shot)
 	for _, c in shot.must do
-		local ok, why = callout(c)
+		local ok, why, mx, my = callout(c)
 		print(string.format("   shot %d  %s  %s", shot.n, if ok then "ok  " else "FAIL", why))
 		truthy(ok, tag .. ": " .. why)
+		if c.at then
+			truthy(mx ~= nil and math.abs(mx - c.at[1]) <= AT_TOL and math.abs(my - c.at[2]) <= AT_TOL,
+				string.format("%s: the printed position of %s (sx %+.2f, sy %+.2f) is the measured one (sx %s, sy %s)",
+					tag, c[1], c.at[1], c.at[2], if mx then string.format("%+.2f", mx) else "?", if my then string.format("%+.2f", my) else "?"))
+		end
 	end
 	if shot.moonAbove then
 		local m = folder:FindFirstChild("Moon", true)
@@ -385,6 +389,9 @@ for _, shot in SHOTS do
 		print(string.format("   shot %d  avatar centre sx %+.2f sy %+.2f (%s)", shot.n, cx, cy, if allIn then "wholly in frame" else "CUT BY THE FRAME"))
 		truthy(allIn, string.format("%s: the whole avatar is in the frame (centre sx %+.2f sy %+.2f)", tag, cx, cy))
 		truthy(matches(shot.avatar.where, cx, cy), string.format("%s: the avatar is in the %s (centre sx %+.2f sy %+.2f)", tag, shot.avatar.where, cx, cy))
+		truthy(math.abs(cx - shot.avatar.sxy[1]) <= AT_TOL and math.abs(cy - shot.avatar.sxy[2]) <= AT_TOL,
+			string.format("%s: the printed avatar centre (sx %+.2f, sy %+.2f) is the measured one (sx %+.2f, sy %+.2f)",
+				tag, shot.avatar.sxy[1], shot.avatar.sxy[2], cx, cy))
 	end
 	if shot.rim then
 		local d = doorOf()
@@ -401,6 +408,24 @@ for _, shot in SHOTS do
 			if e:IsA("ParticleEmitter") and e.Parent and e.Parent.Name == "RainHost" and e.Enabled and e.Rate > 0 then rainOn = true end
 		end
 		truthy(rainOn, tag .. ": the rain is falling")
+	end
+	-- (2026-10-01, pass 2) every band has its own weather now, and it falls in front of the lens: each shot names
+	-- the weather in its frame (a kind, "rain", or "clear") and its note tells the night shift; the emitters on
+	-- at the shot are exactly that
+	do
+		local on = {}
+		for _, e in folder:GetDescendants() do
+			if e:IsA("ParticleEmitter") and e.Enabled and e.Rate > 0 then
+				local k = if e.Name == "Rain" then "rain" else string.match(e.Name, "^Weather_(%a+)$")
+				if k then table.insert(on, k) end
+			end
+		end
+		table.sort(on)
+		local got = if #on == 0 then "clear" else table.concat(on, "+")
+		eq(tostring(shot.weather), got, tag .. ": the shot list names the weather falling at the shot")
+		local word = WEATHER_WORD[got] or got
+		truthy(type(shot.note) == "string" and string.find(string.lower(shot.note), word, 1, true) ~= nil,
+			tag .. ": and its note tells the night shift (" .. word .. ")")
 	end
 	if shot.bolt then
 		-- §9: record a minute and pull the frame; a flash is 0.14 s, about 11 a minute
@@ -425,6 +450,8 @@ for _, shot in SHOTS do
 		end
 		print(string.format("   shot %d  %d flashes in a minute, %d wholly in frame", shot.n, flashes, inside))
 		truthy(inside >= 3, string.format("%s: a minute of recording catches lightning in frame (%d of %d flashes wholly in frame)", tag, inside, flashes))
+		eq(flashes, shot.bolt.flashes, tag .. ": the printed flash count is the measured one")
+		eq(inside, flashes, tag .. ": every flash of the minute is wholly in frame, as printed")
 	end
 	if shot.cam.kind == "break" and shot.n == 5 then
 		-- §9's pan note, measured on this shot: 20 s into the break
@@ -434,6 +461,9 @@ for _, shot in SHOTS do
 		local x20 = project(m.Position)
 		local panned = if x20 > x1 then "left" else "right" -- the view turns one way, objects drift the other
 		eq(panned, PAN_20S, string.format("§9's pan note: 20 s into a break the view has panned %s (Mercury sx %+.2f -> %+.2f)", PAN_20S, x1, x20))
+		truthy(math.abs(x1 - List.pan.mercuryFrom) <= AT_TOL and math.abs(x20 - List.pan.mercuryTo) <= AT_TOL,
+			string.format("the printed pan numbers (Mercury sx %+.2f -> %+.2f) are the measured ones (%+.2f -> %+.2f)",
+				List.pan.mercuryFrom, List.pan.mercuryTo, x1, x20))
 	end
 	unaim(shot)
 	if shot.avatar then

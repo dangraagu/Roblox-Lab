@@ -184,6 +184,13 @@ local function isLive(name: string): boolean
 	end
 	return false
 end
+-- The critters (2026-10-01) move and fade on the sky's clock, so they are left out of the settled prints and
+-- of the one-frame step rule (a bat's 0.5 s fade-in is a 0.07 step at 30 fps, and fireflies blink). They are
+-- NOT left out of the pop rules: a flight must never appear already visible, nor vanish while still visible
+-- (a band whose folder is dropped mid-flight). check_anomalyobservatory_critters.luau checks the rest.
+local function isCritter(name: string): boolean
+	return string.match(name, "^Critter_") ~= nil
+end
 
 local function colourOf(c): { number }
 	return { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) }
@@ -246,7 +253,7 @@ local function watch()
 			local last = lastT[d]
 			if last == nil then
 				if t < 0.97 then table.insert(popIn, d.Name .. " @" .. currentLabel .. string.format(" (%.2f)", t)) end
-			else
+			elseif not isCritter(d.Name) then
 				local step = math.abs(t - last)
 				if step > maxStep then
 					maxStep = step
@@ -282,7 +289,7 @@ local function skyPrint(): string
 	local rows = { "button=" .. tostring(breakBtn and breakBtn.Text) }
 	if folder == nil then return table.concat(rows, "\n") end
 	for _, d in folder:GetDescendants() do
-		if d:IsA("BasePart") and not isLive(d.Name) then
+		if d:IsA("BasePart") and not isLive(d.Name) and not isCritter(d.Name) then
 			local c = colourOf(d.Color)
 			table.insert(rows, string.format("%s/%s|T%.4f|P%.3f,%.3f,%.3f|S%.2f,%.2f,%.2f|C%d,%d,%d",
 				d.Parent.Name, d.Name, d.Transparency, d.Position.X, d.Position.Y, d.Position.Z,

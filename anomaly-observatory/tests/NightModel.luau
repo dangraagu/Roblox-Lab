@@ -71,4 +71,48 @@ function NightModel.simulate(cfg: any, Anomaly: any, profile: any, target: numbe
 	return total / runs
 end
 
+-- The Field Guide (2026-10-01): mean seconds until a fresh player has caught each of `marks` anomaly TYPES
+-- (e.g. { 1, 8, 16, 24 }), over `runs` players. Same passes as above, plus WHICH anomaly: uniform over the
+-- day's pool (Anomaly.poolSize), exactly as Anomaly.rollPass draws it, and a type counts once it is
+-- spotted (TURN BACK on it). No closed form: which types are still missing changes the odds.
+function NightModel.simulateGuide(cfg: any, Anomaly: any, profile: any, marks: { number }, runs: number, rng: any): { [number]: number }
+	local out = {}
+	for _, m in marks do out[m] = 0 end
+	local want = 0
+	for _, m in marks do want = math.max(want, m) end
+	local obvious = profile.ObviousCount or cfg.Anomaly.StartPool
+	for _ = 1, runs do
+		local day, t, n = 1, 0, 0
+		local caught, reached = {}, {}
+		while n < want do
+			t += profile.passSeconds
+			local ok
+			if rng:next() < Anomaly.chance(cfg, day) then
+				local idx = rng:below(Anomaly.poolSize(cfg, day))
+				ok = rng:next() < (if idx <= obvious then profile.spotObvious else profile.spotSubtle)
+				if ok and not caught[idx] then
+					caught[idx] = true
+					n += 1
+				end
+			else
+				ok = rng:next() >= profile.falseAlarm
+			end
+			if ok then
+				day += 1
+			else
+				t += profile.deathSeconds
+				day = 1
+			end
+			for _, m in marks do
+				if n >= m and not reached[m] then
+					reached[m] = true
+					out[m] += t
+				end
+			end
+		end
+	end
+	for _, m in marks do out[m] /= runs end
+	return out
+end
+
 return NightModel

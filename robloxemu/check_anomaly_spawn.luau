@@ -187,6 +187,102 @@ h:advance(1.0)
 local ok6, why6 = onPad(p1, pad1)
 truthy(ok6, "and is still there a second after the respawn -- " .. why6)
 
+--============================================================ the engine's own answer is the pad
+-- (docs/complete-game-standard.md §1; robloxemu/SPAWN-ORDER.md §3, the preferred pattern) The player's
+-- RespawnLocation is a real, enabled SpawnLocation on their OWN start pad, so the engine places them there
+-- itself: no frame in the void over the world origin before onCharacter's teleport. It must be set BEFORE
+-- PlayerAdded yields (the profile load), or a character that loads during the yield goes to whichever
+-- enabled SpawnLocation the engine finds first: someone else's hall.
+do
+	for _, pp in { { p1, pad1, "p1" }, { p2, pad2, "p2" } } do
+		local plr, pad, who = pp[1], pp[2], pp[3]
+		local rl = plr.RespawnLocation
+		truthy(rl ~= nil and rl:IsA("SpawnLocation") and rl.Enabled == true and rl:IsDescendantOf(workspace),
+			who .. "'s RespawnLocation is a real, enabled SpawnLocation in the world (" .. tostring(rl and rl.ClassName) .. ")")
+		if rl ~= nil then
+			truthy(math.abs(rl.Position.X - pad.Position.X) < 0.01 and math.abs(rl.Position.Z - pad.Position.Z) < 0.01,
+				who .. "'s spawn is on their own start pad (" .. fmt(rl.Position) .. " vs " .. fmt(pad.Position) .. ")")
+			truthy(rl.Transparency >= 1 and rl.CanCollide == false and rl.Duration == 0,
+				who .. "'s spawn is invisible and intangible, with no force-field bubble (the pad is what they see and stand on)")
+		end
+	end
+	-- the ordering: make the profile load yield, and look while PlayerAdded is parked in it
+	local store = h.game:GetService("DataStoreService"):GetDataStore("AnomalyObs_v1")
+	rawset(store, "UpdateAsync", function(self, ...)
+		task.wait(1)
+		return getmetatable(self).UpdateAsync(self, ...)
+	end)
+	local co = coroutine.create(function() h:join("Slowpoke", 626262) end)
+	local okCo = coroutine.resume(co)
+	local slow = h.Players:GetPlayerByUserId(626262)
+	local rl = slow and slow.RespawnLocation
+	truthy(okCo and slow ~= nil and rl ~= nil and rl:IsA("SpawnLocation"),
+		"while the profile is still loading, the new player's RespawnLocation is already set")
+	rawset(store, "UpdateAsync", nil)
+	h:advance(1.5)
+	local zs = slow and zoneOf(slow)
+	local padS = zs and zs:FindFirstChild("StartPad")
+	truthy(padS ~= nil and rl ~= nil and math.abs(rl.Position.X - padS.Position.X) < 0.01,
+		"and it is on the start pad of the hall that player then gets")
+	h:leave(slow)
+	h:advance(0.2)
+	truthy(rl == nil or rl.Parent == nil, "a player who leaves takes their spawn with them")
+end
+
+--============================================================ the entrance is not a cliff
+-- (review 2026-09-30, finding 7) The hall is open at +Z so the player can turn round at the start pad
+-- and look out at the sky, and beyond z = +10 there is nothing: the floor ends at the entrance plane
+-- and the zone is 100 studs over the void. Walking 14 studs back from the spawn dropped the player off
+-- the world (a respawn: seconds, not the Day, but nobody said why). robloxemu has no physics, so this is
+-- measured as geometry: from the start pad, every way out through the opening (a grid over the doorway,
+-- floor to ceiling, so a jump does not clear it either) meets something COLLIDABLE before the floor ends.
+do
+	local zone = zoneOf(p1)
+	local o = pad1.Position - Vector3.new(0, 1, -4) -- zone origin: the pad sits at origin + (0, 1, -4)
+	local floor = zone:FindFirstChild("Floor")
+	local floorEnd = floor.Position.Z + floor.Size.Z / 2 -- the entrance plane
+	-- does the segment a -> b pass through part's box?
+	local function segHits(part, a: Vector3, b: Vector3): boolean
+		local la, lb = part.CFrame:PointToObjectSpace(a), part.CFrame:PointToObjectSpace(b)
+		local half = part.Size / 2
+		local t0, t1 = 0, 1
+		for _, axis in { "X", "Y", "Z" } do
+			local s, e, hx = la[axis], lb[axis], half[axis]
+			local d = e - s
+			if math.abs(d) < 1e-9 then
+				if s < -hx or s > hx then return false end
+			else
+				local u0, u1 = (-hx - s) / d, (hx - s) / d
+				if u0 > u1 then u0, u1 = u1, u0 end
+				t0, t1 = math.max(t0, u0), math.min(t1, u1)
+				if t0 > t1 then return false end
+			end
+		end
+		return true
+	end
+	local open, total = {}, 0
+	for x = -9, 9, 1.5 do
+		for y = 1, 15, 1 do
+			total += 1
+			-- from just past the start pad's back edge (the pad itself must not count as a wall)
+			local a = Vector3.new(o.X + x, o.Y + y, pad1.Position.Z + pad1.Size.Z / 2 + 0.5)
+			local b = Vector3.new(o.X + x, o.Y + y, floorEnd + 0.01) -- just past the last of the floor
+			local blocked = false
+			for _, d in zone:GetDescendants() do
+				if d:IsA("BasePart") and d.CanCollide and segHits(d, a, b) then
+					blocked = true
+					break
+				end
+			end
+			if not blocked then table.insert(open, string.format("(%.1f, %.0f)", x, y)) end
+		end
+	end
+	print(string.format("   entrance: %d of %d lines out of the hall are blocked before the floor ends",
+		total - #open, total))
+	truthy(#open == 0, string.format("nothing walks or jumps off the end of the floor: %d of %d lines out through the doorway are open, e.g. %s",
+		#open, total, table.concat(open, " ", 1, math.min(#open, 6))))
+end
+
 --============================================================
 truthy(not h:hadErrors(), "no runtime errors")
 for _, e in h:errors() do print("   ERR " .. e) end

@@ -117,8 +117,24 @@ Config.Milestones = { 10, 25, 50, 100, 250 }
 Config.Save = {
 	Store = "AnomalyObs_v1", -- per-player profile
 	LeaderStore = "AnomalyObsBest_v1", -- OrderedDataStore for best-day leaderboard
+	-- OrderedDataStore for the Field Guide board (queued job A, owner design 2026-09-16): key u_<userId>,
+	-- value = types caught * 2e9 + (2e9 - reachedAtUnix), see src/shared/Highscore.luau
+	GuideStore = "AnomalyObsGuide_v1",
 	AutosaveSeconds = 20,
 	SessionLockSeconds = 45, -- soft session-lock TTL, renewed by autosave
+}
+
+-- ------------------------------------------------------------------ The Field Guide board
+-- A sign at the start pad ranks players on anomaly TYPES caught (the Field Guide, 0..the catalog's size),
+-- ties broken by who reached that count first. The prompt on it switches public / friends.
+Config.Guide = {
+	BoardSize = 10, -- rows on the sign
+	PublicCacheSeconds = 60, -- one GetSortedAsync per server per window, however often signs are used
+	FriendsCacheSeconds = 120, -- per player: GetFriendsAsync + one GetAsync per friend
+	FriendsFailSeconds = 15, -- a failed friends fetch is retried after this, not at once
+	FriendsCap = 200, -- friends looked up, at most
+	MinGetBudget = 10, -- stop looking friends up when the server's GetAsync budget falls to this
+	PublishMinSeconds = 6, -- between board writes for one player (the autosave flushes what waits)
 }
 
 -- Base seed folded into the per-player, per-pass Rng seed (kept for reproducibility).
@@ -138,7 +154,9 @@ Config.WorldSeed = 20260906
 -- Colours are {R, G, B} 0-255 (no Color3 here: this module also runs in the luau CLI).
 -- Azimuth is degrees from straight out of the entrance (+Z) toward +X; elevation is up from level.
 local function features(t: { [string]: number }): { [string]: number }
-	local out = { stars = 0, moon = 0, meteors = 0, aurora = 0, comet = 0, storm = 0, nebula = 0, planets = 0, othersky = 0 }
+	local out = { stars = 0, moon = 0, meteors = 0, aurora = 0, comet = 0, storm = 0, nebula = 0, planets = 0, othersky = 0,
+		fireflies = 0, bats = 0, owl = 0, geese = 0, wisps = 0,
+		thistledown = 0, snow = 0, frost = 0, leaves = 0, motes = 0 }
 	for k, v in t do
 		out[k] = v
 	end
@@ -162,22 +180,39 @@ Config.Sky = {
 	-- pacing curve (tests/Pacing.spec.luau): each band takes ~2.5x as long to first reach as the one
 	-- before; Deep Sky is the headline a normal player reaches in 30-45 min.
 	Bands = {
+		-- The critter kinds (fireflies .. wisps, see Critters below) are features too: each band has its own.
+		-- So are the weather kinds (thistledown .. motes, see Weather below; the storm's rain is `storm`): each
+		-- band has its own weather, or says why its sky is clear (`clearSky`).
+		-- `light` is the band's own light: the telescope break's colour grade (NightSky.breakLight). It is the
+		-- only light a band may have, because the hall must never change: the sky casts no light and writes no
+		-- Lighting while a pass can be seen, only on a break, with the camera out and the hall out of view.
 		{ id = "clear", name = "Clear Night", emoji = "🌙", from = 0, fade = 0,
-			features = features({ stars = 0.55, moon = 1 }) },
+			features = features({ stars = 0.55, moon = 1, fireflies = 1, thistledown = 1 }),
+			light = { tint = { 228, 236, 255 }, brightness = 0.03, contrast = 0.05, saturation = 0.3 } },
 		{ id = "meteors", name = "Meteor Shower", emoji = "🌠", from = 4, fade = 2,
-			features = features({ stars = 0.7, moon = 1, meteors = 1 }) },
+			features = features({ stars = 0.7, moon = 1, meteors = 1, bats = 1 }),
+			light = { tint = { 215, 228, 255 }, brightness = 0.02, contrast = 0.08, saturation = 0.25 },
+			clearSky = "a meteor shower is watched under a clear, dry sky: only the meteors fall tonight" },
 		{ id = "aurora", name = "Aurora", emoji = "🌌", from = 9, fade = 2,
-			features = features({ stars = 0.7, moon = 0.9, meteors = 0.3, aurora = 1 }) },
+			features = features({ stars = 0.7, moon = 0.9, meteors = 0.3, aurora = 1, geese = 1, snow = 1 }),
+			light = { tint = { 215, 255, 232 }, brightness = 0.04, contrast = 0.06, saturation = 0.4 } },
 		{ id = "comet", name = "The Great Comet", emoji = "☄️", from = 15, fade = 3,
-			features = features({ stars = 0.8, moon = 1, meteors = 0.2, aurora = 0.35, comet = 1 }) },
+			features = features({ stars = 0.8, moon = 1, meteors = 0.2, aurora = 0.35, comet = 1, owl = 1, frost = 1 }),
+			light = { tint = { 225, 245, 255 }, brightness = 0.06, contrast = 0.05, saturation = 0.3 } },
 		{ id = "storm", name = "Storm Front", emoji = "⛈️", from = 22, fade = 3,
-			features = features({ stars = 0.25, moon = 0.35, comet = 0.3, storm = 1 }) },
+			features = features({ stars = 0.25, moon = 0.35, comet = 0.3, storm = 1 }),
+			light = { tint = { 210, 216, 228 }, brightness = -0.04, contrast = 0.12, saturation = -0.15 },
+			critterless = "every animal shelters from a storm: its life is the rain and the silent lightning" },
 		{ id = "deepsky", name = "Deep Sky", emoji = "🔭", from = 31, fade = 3,
-			features = features({ stars = 1, moon = 0.6, meteors = 0.15, nebula = 1 }) },
+			features = features({ stars = 1, moon = 0.6, meteors = 0.15, nebula = 1, fireflies = 0.5, owl = 0.5 }),
+			light = { tint = { 226, 222, 255 }, brightness = -0.02, contrast = 0.15, saturation = 0.35 },
+			clearSky = "the clearest, driest night of all: any weather would veil the faint nebulae and the galaxy" },
 		{ id = "alignment", name = "The Alignment", emoji = "🪐", from = 40, fade = 4,
-			features = features({ stars = 1, moon = 1, meteors = 0.15, aurora = 0.2, nebula = 0.4, planets = 1 }) },
+			features = features({ stars = 1, moon = 1, meteors = 0.15, aurora = 0.2, nebula = 0.4, planets = 1, geese = 0.5, bats = 0.5, leaves = 1 }),
+			light = { tint = { 255, 242, 220 }, brightness = 0.03, contrast = 0.06, saturation = 0.3 } },
 		{ id = "othersky", name = "The Other Sky", emoji = "👁️", from = 50, fade = 5,
-			features = features({ stars = 1, moon = 1, meteors = 0.3, aurora = 0.3, nebula = 0.5, planets = 0.3, othersky = 1 }) },
+			features = features({ stars = 1, moon = 1, meteors = 0.3, aurora = 0.3, nebula = 0.5, planets = 0.3, othersky = 1, wisps = 1, motes = 1 }),
+			light = { tint = { 220, 255, 238 }, brightness = 0, contrast = 0.1, saturation = -0.1 } },
 	},
 
 	-- ---------------------------------------------------------------- the pieces
@@ -231,6 +266,66 @@ Config.Sky = {
 			PeriodSeconds = 180, Color = "spiral" },
 	},
 
+	-- ---------------------------------------------------------------- critters (standard §2, 2026-10-01)
+	-- Every band has its own critters (the Storm Front says why it has none), and they are this game's
+	-- harmless RARE events: there are no hazards (nothing chases you is the premise), so instead, now and
+	-- then, something flies past out there. One flight at a time (each starts and ends inside its slot),
+	-- about one every 2.5 minutes at full weight (60 / SlotSeconds x Chance = 0.4 a minute). Everything is
+	-- beyond the entrance, casts no light, is not red and cannot be touched, like the rest of the sky.
+	-- Placed where the telescope break looks (tests/SkyConfig.spec.luau projects every window into it):
+	-- fireflies low over the valley, bats across the moon, geese high under the aurora, the owl along the
+	-- ridge, wisps near the second moon. Distances are from the hall's eye point.
+	Critters = {
+		SlotSeconds = 45, Chance = 0.3, Duration = 12, Salt = 37,
+		Kinds = {
+			fireflies = { Count = 6, Duration = 12, Distance = 180, AzRange = { -30, 30 }, ElRange = { -2, 3 }, Travel = 8,
+				Spread = { 5, 1.5 }, Size = { 1.6, 1.6, 1.6 }, Shape = "Ball", Color = "firefly", Style = "swarm", BlinkSeconds = 1.3 },
+			bats = { Count = 3, Duration = 5, Distance = 240, AzRange = { -44, -4 }, ElRange = { 24, 31 }, Travel = 34,
+				Spread = { 1.8, 0.8 }, Size = { 2.6, 0.4, 1.2 }, Shape = "Block", Color = "bat", Material = "SmoothPlastic", Style = "flutter" },
+			owl = { Count = 1, Duration = 9, Distance = 150, AzRange = { -45, 45 }, ElRange = { 3, 8 }, Travel = 50,
+				Spread = { 0, 0.6 }, Size = { 4, 0.5, 1.6 }, Shape = "Block", Color = "owl", Transparency = 0.3, Style = "glide" },
+			geese = { Count = 5, Duration = 12, Distance = 320, AzRange = { -45, 45 }, ElRange = { 30, 40 }, Travel = 60,
+				Spread = { 1.4, 0.8 }, Size = { 3, 0.4, 1.4 }, Shape = "Block", Color = "goose", Transparency = 0.45, Style = "vee" },
+			wisps = { Count = 4, Duration = 10, Distance = 160, AzRange = { -30, 30 }, ElRange = { 8, 16 }, Travel = 20,
+				Spread = { 4, 3 }, Size = { 1.8, 1.8, 1.8 }, Shape = "Ball", Color = "wisp", Style = "circle" },
+		},
+	},
+
+	-- ---------------------------------------------------------------- weather (standard §2, 2026-10-01)
+	-- Every band has its own weather, or says why its sky is clear (`clearSky` on the band: the Meteor Shower and
+	-- Deep Sky, whose sights need a clear sky). Each kind is a FEATURE and one ParticleEmitter on its own
+	-- invisible host out in front of the entrance, where the storm's rain (`Rain` above) always fell: the player
+	-- sees it from the start pad looking out, and stands in it on a break (RestView.Offset is inside every
+	-- kind's fall). Offsets are from the hall's origin, like Rain's. NightSky.envelopes grows each host by how far
+	-- its particles can travel (Speed max x Lifetime max: the fall or rise; x sin(SpreadDegrees): the drift;
+	-- 0.5 x Wind x Lifetime^2: the breeze, along X only; plus a particle), and validate refuses one that can
+	-- reach back to the entrance. Direction is "Bottom" (falls) or "Top" (rises), never toward the hall.
+	-- No Light, no red, and the emitter budget (Budget below) is enforced in code by EnvBands.capRates.
+	Weather = {
+		Kinds = {
+			-- Clear Night: a still late-summer night; thistledown drifts past on the breeze, with the fireflies
+			thistledown = { Offset = { 0, 36, 64 }, Size = { 80, 2, 50 }, Rate = 5, Speed = { 1.5, 3 }, Lifetime = { 10, 14 },
+				SpreadDegrees = 20, Direction = "Bottom", Wind = 0.4, ParticleSize = 0.35, Transparency = 0.3, LightEmission = 0.3,
+				Spin = 40, Color = "thistledown" },
+			-- Aurora: a cold northern night; light snow under the curtains
+			snow = { Offset = { 0, 36, 64 }, Size = { 80, 2, 50 }, Rate = 20, Speed = { 3, 5 }, Lifetime = { 8, 10 },
+				SpreadDegrees = 12, Direction = "Bottom", Wind = 0.3, ParticleSize = 0.45, Transparency = 0.2, LightEmission = 0.4,
+				Spin = 0, Color = "snow" },
+			-- The Great Comet: diamond dust, ice crystals glittering in still, frozen air
+			frost = { Offset = { 0, 30, 64 }, Size = { 80, 20, 50 }, Rate = 12, Speed = { 0.5, 1.5 }, Lifetime = { 6, 9 },
+				SpreadDegrees = 45, Direction = "Bottom", Wind = 0, ParticleSize = 0.18, Transparency = 0.1, LightEmission = 1,
+				Spin = 0, Color = "frost" },
+			-- The Alignment: an autumn dusk; a few dry leaves blow past
+			leaves = { Offset = { 0, 36, 64 }, Size = { 80, 2, 50 }, Rate = 4, Speed = { 2, 4 }, Lifetime = { 8, 10 },
+				SpreadDegrees = 15, Direction = "Bottom", Wind = 1.5, ParticleSize = 0.6, Transparency = 0, LightEmission = 0,
+				Spin = 120, Color = "leaf" },
+			-- The Other Sky: pale motes rising, slowly, the wrong way
+			motes = { Offset = { 0, 8, 64 }, Size = { 80, 2, 50 }, Rate = 8, Speed = { 1, 2 }, Lifetime = { 10, 14 },
+				SpreadDegrees = 25, Direction = "Top", Wind = 0, ParticleSize = 0.3, Transparency = 0.25, LightEmission = 0.8,
+				Spin = 0, Color = "mote" },
+		},
+	},
+
 	-- No reddish colour anywhere (NightSky.isReddish): "Red Shift" and "Blood Moon" are anomalies.
 	Palette = {
 		moon = { 228, 232, 240 }, moonShade = { 22, 26, 36 }, ridge = { 12, 14, 22 }, mist = { 150, 165, 190 },
@@ -243,6 +338,9 @@ Config.Sky = {
 		mercury = { 170, 168, 160 }, venus = { 250, 244, 220 }, mars = { 210, 150, 95 }, jupiter = { 215, 185, 145 },
 		saturn = { 228, 208, 155 }, saturnRing = { 210, 195, 160 }, moon2 = { 200, 232, 215 }, ring = { 205, 215, 240 },
 		spiral = { 220, 230, 255 },
+		firefly = { 200, 240, 120 }, bat = { 26, 26, 36 }, owl = { 226, 222, 206 }, goose = { 120, 130, 150 }, wisp = { 170, 235, 200 },
+		thistledown = { 225, 222, 205 }, snow = { 235, 240, 250 }, frost = { 200, 225, 255 }, leaf = { 190, 160, 90 },
+		mote = { 175, 230, 205 },
 	},
 
 	-- ---------------------------------------------------------------- the telescope break (rest)
@@ -255,9 +353,10 @@ Config.Sky = {
 	Rest = { WakeOnMove = true, BlockWhileThreat = true, IdleSeconds = 0, PendingSeconds = 4, WakeGraceSeconds = 0.3,
 		RequireGrounded = true },
 	DeathBeatSeconds = 3.0, -- the server pauses 2.5 s after a wrong call before the next pass
-	-- Roblox disconnects a player idle for about 20 minutes, and the Day streak lives only for the
-	-- session (Best Day is what is saved). A break is a player not touching anything, so its caption
-	-- never calls the Day "safe" and, once Player.Idled fires, says what idling costs (NightSky.breakCaption).
+	-- Roblox disconnects a player idle for about 20 minutes. The run (the Day and the live hall) is saved only
+	-- while this session holds the save lock (Main.server.luau, `SavesRun`). A break is a player not touching
+	-- anything, so its caption never calls the Day "safe" and, once Player.Idled fires, says what idling costs
+	-- and whether the run is saved (NightSky.breakCaption).
 	IdleKickMinutes = 20,
 	RestView = {
 		Offset = { 0, 22, 64 }, -- 54 studs out past the entrance, above the roof line
@@ -265,10 +364,13 @@ Config.Sky = {
 		FovDegrees = 70, MaxAspect = 3.6, FadeSeconds = 0.3,
 		-- only while the camera is out at the telescope, restored before it comes back
 		Atmosphere = { Density = 0.2, Haze = 0.6 },
+		-- the grade a band without its own `light` would get (every band has one; NightSky.breakLight)
 		Grade = { Saturation = 0.3, Brightness = 0.03, Contrast = 0.05 },
 	},
 
-	Budget = { MaxParts = 140, MaxEmitters = 2, MaxEmitterRate = 60, MaxBeams = 8, MaxTrails = 4, MaxLights = 0 },
+	-- 140 parts: the whole layout with every feature on at once is 126 (102 + the critters' pool of 19 + the five
+	-- weather hosts). Three emitters: the stars and two weathers while one band's weather glides into the next.
+	Budget = { MaxParts = 140, MaxEmitters = 3, MaxEmitterRate = 60, MaxBeams = 8, MaxTrails = 4, MaxLights = 0 },
 
 	-- ---------------------------------------------------------------- pacing model (tests only)
 	-- Assumptions of tests/NightModel.luau. Not telemetry: retune `normal` first when data exists.

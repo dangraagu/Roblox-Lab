@@ -16,9 +16,12 @@
 -- Pooling: a feature's parts are built the first time it shows and UNPARENTED (not destroyed) when
 -- its weight reaches zero, so a band you are not in costs no draw calls. Meteors are a pool of
 -- `Meteors.Pool` parts that alternate by slot; lightning is one three-segment bolt; the aurora is one
--- host part carrying Beams; the comet's tail is two Beams on its head. Writes are skipped when a value
--- has not changed, so a settled sky costs a handful of writes per frame (the turning stars and the
--- aurora sway at 10 Hz, and whatever meteor or bolt is in flight).
+-- host part carrying Beams; the comet's tail is two Beams on its head; the critters are one pooled part per
+-- flock member for each kind, and at most one flight is in the sky at a time. The weather is one
+-- ParticleEmitter per kind on its own invisible host (Config.Sky.Weather), switched like the stars and the
+-- rain: NightSky.emitterRates, held to the budget by EnvBands.capRates. Writes are skipped when a
+-- value has not changed, so a settled sky costs a handful of writes per frame (the turning stars and the
+-- aurora sway at 10 Hz, and whatever meteor, bolt or flight is in the air).
 --
 -- Dependencies are arguments: `require("./X")` is invalid in Roblox.
 
@@ -81,6 +84,7 @@ function SkyArt.new(parent: Instance, sky: any, NightSky: any, EnvBands: any, or
 	self.trails = {}
 	self.meteor = { slot = -1, events = {} }
 	self.bolt = { slot = -1, ev = nil, lit = false }
+	self.critter = { slot = -1, kind = nil, ev = nil, path = nil }
 	self.swayClock = -1
 
 	-- the land is the place, not a band: it is there every night (it still fades in at join, with
@@ -141,6 +145,8 @@ function SkyArt:_build(feature: string)
 			self:_starEmitter(part)
 		elseif p.emitter == "rain" then
 			self:_rainEmitter(part)
+		elseif p.emitter == "weather" then
+			self:_weatherEmitter(part, p.weather)
 		elseif p.role == "meteor" then
 			self:_meteorTrail(part)
 		elseif p.role == "auroraHost" then
@@ -202,6 +208,39 @@ function SkyArt:_rainEmitter(host: BasePart)
 	end)
 	e.Parent = host
 	self.emitters.rain = e
+end
+
+-- One weather kind (Config.Sky.Weather.Kinds[kind]): it falls (Bottom) or rises (Top) from its host, drifts
+-- by its spread, and the breeze (Wind) pushes it along X only, never toward the hall. NightSky.envelopes
+-- bounds exactly these numbers, and check_anomalyobservatory_weather measures them off this instance.
+function SkyArt:_weatherEmitter(host: BasePart, kind: string)
+	local K = self.sky.Weather.Kinds[kind]
+	local e = Instance.new("ParticleEmitter")
+	e.Name = "Weather_" .. kind
+	e.Rate = 0
+	e.Enabled = false
+	e.EmissionDirection = if K.Direction == "Top" then Enum.NormalId.Top else Enum.NormalId.Bottom
+	e.Speed = NumberRange.new(K.Speed[1], K.Speed[2])
+	e.SpreadAngle = Vector2.new(K.SpreadDegrees, K.SpreadDegrees)
+	e.Lifetime = NumberRange.new(K.Lifetime[1], K.Lifetime[2])
+	e.Acceleration = Vector3.new(K.Wind, 0, 0)
+	e.Color = ColorSequence.new(rgb(self.sky, K.Color))
+	e.Size = NumberSequence.new(K.ParticleSize)
+	-- fade in and out over the first and last tenth of a particle's life, so nothing pops
+	e.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.1, K.Transparency),
+		NumberSequenceKeypoint.new(0.9, K.Transparency),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	e.LightEmission = K.LightEmission or 0
+	pcall(function()
+		(e :: any).LightInfluence = 0; -- a night lit for horror would turn it black
+		(e :: any).Rotation = NumberRange.new(0, 360);
+		(e :: any).RotSpeed = NumberRange.new(-(K.Spin or 0), K.Spin or 0)
+	end)
+	e.Parent = host
+	self.emitters[kind] = e
 end
 
 function SkyArt:_meteorTrail(part: BasePart)
@@ -354,12 +393,9 @@ function SkyArt:setWeights(weights: { [string]: number }, settled: boolean?)
 			end
 		end
 	end
-	-- emitters: blended rates, capped to the budget in code (EnvBands.capRates)
+	-- emitters (the stars, the rain, the weather): blended rates, capped to the budget in code (EnvBands.capRates)
 	local B = self.sky.Budget
-	local want = {
-		stars = self.sky.Stars.Rate * (self.weights.stars or 0),
-		rain = self.sky.Rain.Rate * (self.weights.storm or 0),
-	}
+	local want = self.NightSky.emitterRates(self.sky, self.weights)
 	local on = self.EnvBands.capRates(want, B.MaxEmitters, B.MaxEmitterRate, 0.05)
 	for kind, e in self.emitters do
 		local rate = on[kind]
@@ -490,6 +526,58 @@ function SkyArt:_lightning(clock: number)
 	end
 end
 
+-- The critters (standard §2, 2026-10-01): on the first frame of each slot, NightSky.critterPick decides
+-- from the kinds' current weights whether a flight comes and which kind; the flock then flies along
+-- NightSky.critterMember, fading in and out. One flight per slot, so never two at once.
+function SkyArt:_hideFlight()
+	local c = self.critter
+	local K = c.kind and self.sky.Critters.Kinds[c.kind]
+	if K then
+		for i = 1, K.Count do
+			self:_show(self.NightSky.critterKey(c.kind, i), 1)
+		end
+	end
+	c.kind = nil
+end
+
+function SkyArt:_critters(clock: number)
+	local Cr = self.sky.Critters
+	local NS = self.NightSky
+	local c = self.critter
+	local slot = NS.slotOf(Cr, clock)
+	if slot ~= c.slot then
+		c.slot = slot
+		self:_hideFlight()
+		local ev = NS.slotEvent(Cr, slot, self.sky.Seed, self.EnvBands)
+		local kind = NS.critterPick(self.sky, self.weights, ev)
+		if kind then
+			c.kind, c.ev, c.path = kind, ev, NS.critterPath(Cr, Cr.Kinds[kind], ev)
+		end
+	end
+	local kind = c.kind
+	if kind == nil then return end
+	local K = Cr.Kinds[kind]
+	local t = clock - c.ev.start
+	local f = t / K.Duration
+	if f < 0 then return end
+	if f > 1 then
+		self:_hideFlight()
+		return
+	end
+	local dir = if c.path.to.az >= c.path.from.az then 1 else -1
+	for i = 1, K.Count do
+		local key = NS.critterKey(kind, i)
+		local part = self.parts[key]
+		if part then
+			local m = NS.critterMember(K, c.path, i, f, t)
+			local at = NS.skyPoint(self.eye, m.az, m.el, m.dist)
+			local ahead = NS.skyPoint(self.eye, m.az + dir, m.el, m.dist)
+			part.CFrame = CFrame.lookAt(v3(at), v3(ahead))
+			self:_show(key, faded(K.Transparency or 0, NS.critterAlpha(m.alpha, self.weights[kind] or 0)))
+		end
+	end
+end
+
 -- Slow motion at 10 Hz: the aurora's curtains sway, the other sky's stars turn.
 function SkyArt:_sway(clock: number)
 	local tick = math.floor(clock * SWAY_HZ)
@@ -528,6 +616,9 @@ function SkyArt:step(clock: number)
 		self:_lightning(clock)
 	end
 	self:_sway(clock)
+	if self.sky.Critters then
+		self:_critters(clock)
+	end
 end
 
 -- ------------------------------------------------------------------ measuring

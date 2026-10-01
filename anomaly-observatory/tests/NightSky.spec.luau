@@ -369,6 +369,178 @@ do
 	truthy(boltDown, "a bolt runs downward")
 end
 
+-- ------------------------------------------------------------------ critters (standard §2, 2026-10-01)
+-- docs/complete-game-standard.md §2 asks every band for its own critters, and a genre with no place for
+-- hazards (nothing chases you is this game's premise) for harmless RARE events instead. Both are one
+-- thing here: wildlife crossing the night outside the entrance, AT MOST ONE flight at a time, about one
+-- every 2-3 minutes, the kind following the band. Deterministic from the sky's own clock, like meteors.
+local critterSpec = {
+	SlotSeconds = 45, Chance = 0.3, Duration = 12, Salt = 37,
+	Kinds = {
+		fireflies = { Count = 6, Duration = 12, Distance = 180, AzRange = { -30, 30 }, ElRange = { -2, 3 }, Travel = 8,
+			Spread = { 5, 1.5 }, Size = { 1.6, 1.6, 1.6 }, Shape = "Ball", Color = "moon", Style = "swarm", BlinkSeconds = 1.3 },
+		bats = { Count = 3, Duration = 5, Distance = 240, AzRange = { -44, -4 }, ElRange = { 24, 31 }, Travel = 34,
+			Spread = { 1.8, 0.8 }, Size = { 2.6, 0.4, 1.2 }, Shape = "Block", Color = "shade", Style = "flutter" },
+		owl = { Count = 1, Duration = 9, Distance = 150, AzRange = { -45, 45 }, ElRange = { 3, 8 }, Travel = 50,
+			Spread = { 0, 0.6 }, Size = { 4, 0.5, 1.6 }, Shape = "Block", Color = "moon", Style = "glide" },
+		geese = { Count = 5, Duration = 12, Distance = 320, AzRange = { -45, 45 }, ElRange = { 30, 40 }, Travel = 60,
+			Spread = { 1.4, 0.8 }, Size = { 3, 0.4, 1.4 }, Shape = "Block", Color = "shade", Style = "vee" },
+		wisps = { Count = 4, Duration = 10, Distance = 160, AzRange = { -30, 30 }, ElRange = { 8, 16 }, Travel = 20,
+			Spread = { 4, 3 }, Size = { 1.8, 1.8, 1.8 }, Shape = "Ball", Color = "moon", Style = "circle" },
+	},
+}
+do
+	local C = NightSky.CRITTERS
+	truthy(type(C) == "table" and #C == 5, "NightSky lists five critter kinds")
+	local inFeatures = {}
+	for _, k in NightSky.FEATURES do inFeatures[k] = true end
+	local allIn = true
+	for _, k in (C or {}) do
+		if not inFeatures[k] then allIn = false end
+		truthy(critterSpec.Kinds[k] ~= nil, "the spec's config covers kind " .. tostring(k))
+	end
+	truthy(allIn, "every critter kind is a band FEATURE, so it glides in and out with its band like everything else")
+	truthy(type(NightSky.critterPick) == "function" and type(NightSky.critterPath) == "function"
+		and type(NightSky.critterMember) == "function" and type(NightSky.critterReach) == "function"
+		and type(NightSky.critterKey) == "function", "the critter functions exist")
+end
+if type(NightSky.critterPick) == "function" then
+	local sky = { Critters = critterSpec, Hall = hall }
+	local function rate(weights, n): (number, { [string]: number })
+		local hits, by = 0, {}
+		for slot = 0, n - 1 do
+			local ev = NightSky.slotEvent(critterSpec, slot, 4242, EnvBands)
+			local k = NightSky.critterPick(sky, weights, ev)
+			if k then
+				hits += 1
+				by[k] = (by[k] or 0) + 1
+			end
+		end
+		return hits / n, by
+	end
+	local n = 20000
+	local r0 = rate({}, n)
+	eq(r0, 0, "no critter weight, no flights (the Storm Front)")
+	local r1, by1 = rate({ bats = 1 }, n)
+	print(string.format("   critters: %d of %d slots carry a flight at full weight (%.3f; %.2f a minute)", math.floor(r1 * n + 0.5), n, r1,
+		r1 * 60 / critterSpec.SlotSeconds))
+	approx(r1, 0.3, "one kind at full weight: Chance of the slots carry a flight", 0.02)
+	eq(by1.bats, math.floor(r1 * n + 0.5), "and every one of them is that kind")
+	local r2, by2 = rate({ bats = 0.5, owl = 0.5 }, n)
+	approx(r2, 0.3, "two kinds sharing a band (0.5 + 0.5) fly as often as one", 0.02)
+	approx((by2.bats or 0) / (r2 * n), 0.5, "and split the flights between them", 0.03)
+	local r3 = rate({ bats = 0.25 }, n)
+	approx(r3, 0.075, "a kind fading in (weight 0.25) flies a quarter as often", 0.01)
+	local r4 = rate({ bats = 1, owl = 1 }, n)
+	approx(r4, 0.3, "two full kinds (a transition) never fly more than Chance allows", 0.02)
+	approx(60 / critterSpec.SlotSeconds * critterSpec.Chance, 0.4, "so, at full weight, 0.4 flights a minute: one every 2.5 min")
+
+	-- one at a time: every flight, of every kind, starts and ends inside its own slot
+	local inside = true
+	for _, k in NightSky.CRITTERS do
+		local K = critterSpec.Kinds[k]
+		for slot = 0, 1999 do
+			local ev = NightSky.slotEvent(critterSpec, slot, 99, EnvBands)
+			if ev.start < slot * 45 - 1e-9 or ev.start + K.Duration > (slot + 1) * 45 + 1e-9 then inside = false end
+		end
+	end
+	truthy(inside, "every flight starts and ends inside its slot: never two at once")
+
+	-- paths: the centre of the flock stays in its window and travels Travel degrees, either way
+	local winOk, travelOk, bothWays = true, true, { [-1] = false, [1] = false }
+	for _, k in NightSky.CRITTERS do
+		local K = critterSpec.Kinds[k]
+		for slot = 0, 2999 do
+			local ev = NightSky.slotEvent(critterSpec, slot, 7, EnvBands)
+			local path = NightSky.critterPath(critterSpec, K, ev)
+			for _, pt in { path.from, path.to } do
+				if pt.az < K.AzRange[1] - 1e-9 or pt.az > K.AzRange[2] + 1e-9 or pt.el < K.ElRange[1] - 1e-9 or pt.el > K.ElRange[2] + 1e-9 then
+					winOk = false
+				end
+			end
+			if math.abs(math.abs(path.to.az - path.from.az) - K.Travel) > 1e-6 then travelOk = false end
+			bothWays[if path.to.az > path.from.az then 1 else -1] = true
+		end
+	end
+	truthy(winOk, "a flight's centre starts and ends inside its kind's window of sky")
+	truthy(travelOk, "and crosses exactly Travel degrees")
+	truthy(bothWays[1] and bothWays[-1], "flights go both ways")
+
+	-- members: fade in and out (no pop), stay within critterReach of the centre, keep their formation
+	local fadeOk, midOk, reachOk, veeOk = true, true, true, true
+	for _, k in NightSky.CRITTERS do
+		local K = critterSpec.Kinds[k]
+		local rAz, rEl = NightSky.critterReach(K)
+		for slot = 0, 199 do
+			local ev = NightSky.slotEvent(critterSpec, slot, 11, EnvBands)
+			local path = NightSky.critterPath(critterSpec, K, ev)
+			local dir = if path.to.az > path.from.az then 1 else -1
+			for i = 1, K.Count do
+				if NightSky.critterMember(K, path, i, 0, 0).alpha ~= 0 or NightSky.critterMember(K, path, i, 1, K.Duration).alpha ~= 0 then
+					fadeOk = false
+				end
+				for step = 0, 40 do
+					local f = step / 40
+					local m = NightSky.critterMember(K, path, i, f, f * K.Duration)
+					local cAz = path.from.az + (path.to.az - path.from.az) * f
+					local cEl = path.from.el + (path.to.el - path.from.el) * f
+					if math.abs(m.az - cAz) > rAz + 1e-9 or math.abs(m.el - cEl) > rEl + 1e-9 then reachOk = false end
+					if not (m.alpha >= 0 and m.alpha <= 1) then fadeOk = false end
+					if math.abs(m.dist - K.Distance) > 1e-9 then reachOk = false end
+				end
+				local mid = NightSky.critterMember(K, path, i, 0.5, 0.5 * K.Duration)
+				if mid.alpha < (if K.Style == "swarm" then 0.3 else 0.99) then midOk = false end
+				if K.Style == "vee" and i > 1 then
+					local lead = NightSky.critterMember(K, path, 1, 0.5, 0.5 * K.Duration)
+					if (mid.az - lead.az) * dir >= 0 then veeOk = false end -- behind the leader
+				end
+			end
+			if K.Style == "vee" and K.Count >= 3 then
+				local a = NightSky.critterMember(K, path, 2, 0.5, 0.5 * K.Duration)
+				local b = NightSky.critterMember(K, path, 3, 0.5, 0.5 * K.Duration)
+				local lead = NightSky.critterMember(K, path, 1, 0.5, 0.5 * K.Duration)
+				if math.abs((a.el - lead.el) + (b.el - lead.el)) > 1e-9 or math.abs(a.az - b.az) > 1e-9 then veeOk = false end
+			end
+		end
+	end
+	truthy(fadeOk, "every member is invisible at the first and last instant of its flight (it fades, never pops)")
+	truthy(midOk, "and shown mid-flight (fireflies blink, but never out)")
+	truthy(reachOk, "every member stays within critterReach of the flock's centre, at the kind's Distance")
+	truthy(veeOk, "geese fly a V: the leader in front, the others in mirrored pairs behind it")
+
+	-- a flight fades with its band: when the band's weight glides to nothing mid-flight, SkyArt drops the
+	-- kind's folder at weight 0.003, so the flight must be (nearly) invisible by then, not cut off mid-air
+	truthy(type(NightSky.critterAlpha) == "function", "NightSky.critterAlpha exists")
+	if type(NightSky.critterAlpha) == "function" then
+		approx(NightSky.critterAlpha(1, 1), 1, "a kind at full weight flies fully visible")
+		approx(NightSky.critterAlpha(0.8, 0.5), 0.8, "and at half weight too (two kinds sharing a band are not dimmed)")
+		approx(NightSky.critterAlpha(0.6, 0.25), 0.3, "a kind fading out dims with its weight")
+		truthy(NightSky.critterAlpha(1, 0.003) <= 0.01, "at the weight where its folder is dropped it is all but gone: "
+			.. tostring(NightSky.critterAlpha(1, 0.003)))
+		approx(NightSky.critterAlpha(1, 0), 0, "and at weight 0, gone")
+	end
+
+	-- the pool: one live part per member, invisible until it flies
+	local lay = NightSky.layout(sky, NightSky.hallOrigin(hall, 1))
+	local per, okPiece = {}, true
+	for _, p in lay do
+		if p.role == "critter" then
+			per[p.feature] = (per[p.feature] or 0) + 1
+			if not p.live or p.transparency ~= 1 or p.key ~= NightSky.critterKey(p.feature, per[p.feature]) then okPiece = false end
+		end
+	end
+	for _, k in NightSky.CRITTERS do
+		eq(per[k], critterSpec.Kinds[k].Count, "the layout pools one part per " .. k .. " member")
+	end
+	truthy(okPiece, "each is live, invisible at rest, and named by critterKey")
+	eq(NightSky.budgetOf(sky, lay).parts, 19, "budgetOf counts the critter pool (6 + 3 + 1 + 5 + 4 parts)")
+	local env = {}
+	for _, e in NightSky.envelopes(sky, NightSky.hallOrigin(hall, 1)) do env[e.key] = e end
+	for _, k in NightSky.CRITTERS do
+		truthy(env["Critters_" .. k] ~= nil, "an envelope bounds every " .. k .. " flight")
+	end
+end
+
 -- ------------------------------------------------------------------ the telescope break
 local view = { Offset = { 0, 22, 64 }, PitchDegrees = 17, PitchSwayDegrees = 3, YawSwayDegrees = 6, SwayPeriod = 80, FovDegrees = 70, MaxAspect = 3.6 }
 do
@@ -501,6 +673,89 @@ do
 		s.Stars = { Distance = 820, Azimuth = 0, Elevation = 38, Size = { 2200, 700, 20 }, Rate = 10, Lifetime = { 5, 9 }, ParticleSize = 2.2, Color = "moon" }
 	end, "2048", "a piece longer than Roblox's 2048-stud Part limit (it would be drawn clamped)")
 	rejectsFor(function(s) s.IdleKickMinutes = nil end, "IdleKickMinutes", "no idle-disconnect minutes for the break caption to state")
+
+	-- (review 2026-09-30, finding 5) the part, beam and trail budgets are enforced IN CODE: validate
+	-- counts what the layout would build with every feature on at once and refuses a config over
+	-- budget (the sky is then off, with a warning), instead of leaving it to a test nobody ran.
+	truthy(type(NightSky.budgetOf) == "function", "NightSky.budgetOf exists")
+	if type(NightSky.budgetOf) == "function" then
+		local s = goodSky()
+		s.Meteors = { SlotSeconds = 2, Chance = 0.45, Duration = 0.8, AzRange = { -40, 40 }, ElRange = { 20, 55 }, Length = 16,
+			Distance = 680, Pool = 2, Size = { 1.2, 1.2, 9 }, TrailSeconds = 0.45, Color = "moon", Salt = 11 }
+		s.Aurora = { Count = 4, AzRange = { -60, 55 }, ElRange = { 7, 16 }, Distance = 700, Width = { 90, 150 }, SwaySeconds = 23,
+			SwayStuds = 60, Colors = { "moon" }, Transparency = { 0.35, 0.85 } }
+		s.Comet = { Azimuth = 20, Elevation = 31, Distance = 740, HeadRadius = 4, ComaRadius = 11, ComaTransparency = 0.7, TailAzimuth = 40,
+			TailElevation = 22, TailLength = 300, TailWidth = { 16, 90 }, Color = "moon", ComaColor = "moon", TailColor = "moon" }
+		local b = NightSky.budgetOf(s, NightSky.layout(s, NightSky.hallOrigin(hall, 1)))
+		eq(b.beams, 6, "budgetOf: 4 aurora curtains + the comet's 2 tail beams")
+		eq(b.trails, 2, "budgetOf: one trail per pooled meteor")
+		truthy(b.parts >= 2 + 2 + 2, "budgetOf counts every piece the layout builds (" .. tostring(b.parts) .. ")")
+		local okAll = NightSky.validate(s, EnvBands, Rest)
+		truthy(okAll, "that sky fits the goodSky budget")
+		rejectsFor(function(t)
+			for k, v in s do t[k] = v end
+			t.Budget = table.clone(s.Budget); t.Budget.MaxParts = b.parts - 1
+		end, "MaxParts", "a layout with more parts than the budget is refused")
+		rejectsFor(function(t)
+			for k, v in s do t[k] = v end
+			t.Budget = table.clone(s.Budget); t.Budget.MaxBeams = 5
+		end, "MaxBeams", "a layout with more beams than the budget is refused")
+		rejectsFor(function(t)
+			for k, v in s do t[k] = v end
+			t.Budget = table.clone(s.Budget); t.Budget.MaxTrails = 1
+		end, "MaxTrails", "a layout with more meteor trails than the budget is refused")
+	end
+end
+
+-- (standard §2, 2026-10-01) critters: once a sky has them, every band flies its own or says why not, and
+-- no flight can reach the entrance or outlast its slot
+do
+	local function critterSky()
+		local s = goodSky()
+		s.Critters = table.clone(critterSpec)
+		s.Critters.Kinds = table.clone(critterSpec.Kinds)
+		local cb = {}
+		for i, b in bands do
+			local nb = table.clone(b)
+			nb.features = table.clone(b.features)
+			nb.features[({ "fireflies", "bats", "owl" })[i]] = 1
+			cb[i] = nb
+		end
+		s.Bands = cb
+		return s
+	end
+	local okC, errC = NightSky.validate(critterSky(), EnvBands, Rest)
+	truthy(okC, "a sky whose every band has critters validates (" .. tostring(errC) .. ")")
+	local function critterRejects(mut, needle, why)
+		local s = critterSky()
+		mut(s)
+		local ok2, err2 = NightSky.validate(s, EnvBands, Rest)
+		truthy(not ok2 and string.find(string.lower(tostring(err2)), string.lower(needle), 1, true) ~= nil, why .. " (err: " .. tostring(err2) .. ")")
+	end
+	critterRejects(function(s) s.Bands[2].features.bats = 0 end, "critter", "a band with no critters and no reason is refused")
+	do
+		local s = critterSky()
+		s.Bands[2].features.bats = 0
+		s.Bands[2].critterless = "every animal shelters from a storm"
+		local okR, errR = NightSky.validate(s, EnvBands, Rest)
+		truthy(okR, "a band without critters validates when it says why (" .. tostring(errR) .. ")")
+	end
+	critterRejects(function(s) s.Bands[2].features.bats = 0; s.Bands[2].critterless = "" end, "critter", "an empty reason is no reason")
+	critterRejects(function(s)
+		s.Critters.Kinds.bats = table.clone(critterSpec.Kinds.bats); s.Critters.Kinds.bats.Duration = 20
+	end, "Duration", "a flight longer than the slot's Duration could overlap the next one")
+	critterRejects(function(s) s.Critters.Duration = 50 end, "Duration", "a Duration longer than the slot")
+	critterRejects(function(s)
+		s.Critters.Kinds.owl = table.clone(critterSpec.Kinds.owl); s.Critters.Kinds.owl.Distance = 8
+	end, "owl", "an owl that could fly back to the entrance is refused")
+	critterRejects(function(s)
+		s.Critters.Kinds.wisps = table.clone(critterSpec.Kinds.wisps); s.Critters.Kinds.wisps.Style = "dive"
+	end, "Style", "an unknown flight style")
+	critterRejects(function(s) s.Critters.Kinds.geese = nil end, "geese", "a missing kind")
+	critterRejects(function(s)
+		s.Critters.Kinds.bats = table.clone(critterSpec.Kinds.bats); s.Critters.Kinds.bats.Color = "nope"
+	end, "nope", "a critter colour the palette does not have")
+	critterRejects(function(s) s.Critters.Chance = 1.5 end, "Chance", "a Chance above 1")
 end
 
 -- ------------------------------------------------------------------ engine size rules (review 2026-09-24)
@@ -525,11 +780,33 @@ do
 	truthy(not (NightSky.engineSizeOk(piece("Ball", 0 / 0, 1, 1))), "a NaN size is not")
 end
 
--- ------------------------------------------------------------------ the break caption (review 2026-09-24)
--- The streak lives only in the server's memory for one session (Best Day is what is saved), and
--- Roblox disconnects a player who is idle for about 20 minutes, which starts a new session at Day 1.
--- A break is, by definition, a player not touching the controls. So the caption must never promise
--- that the Day is "safe", and once Roblox reports the player idle it must say what the kick costs.
+-- ------------------------------------------------------------------ the brag (owner decision 2026-09-30)
+-- The HUD shows, next to Best, the emoji of the highest sky band that Best Day has fully reached (the
+-- first night, which everyone has, shows nothing). Pure: it reads only `from` and `emoji`.
+do
+	truthy(type(NightSky.bragEmoji) == "function", "NightSky.bragEmoji exists")
+	if type(NightSky.bragEmoji) == "function" then
+		eq(NightSky.bragEmoji(bands, 0), "", "Best Day 0: nothing to brag about")
+		eq(NightSky.bragEmoji(bands, 3), "", "Best Day 3: still the first night")
+		eq(NightSky.bragEmoji(bands, bands[2].from), bands[2].emoji, "the Day a band is full, its emoji")
+		eq(NightSky.bragEmoji(bands, bands[3].from - 1), bands[2].emoji, "the Day before the next band: still the one before")
+		eq(NightSky.bragEmoji(bands, 1e6), bands[#bands].emoji, "past the last band: the last")
+		eq(NightSky.bragEmoji(bands, 0 / 0), "", "a nonsense Best Day brags about nothing")
+	end
+end
+
+-- ------------------------------------------------------------------ the break caption
+-- (review 2026-09-24) The break never calls the Day "safe". (Owner decision 2026-09-30) The run is now
+-- SAVED while the session holds the save lock, with its live pass, and restored on a rejoin
+-- (robloxemu/check_anomaly_rejoin.luau proves it). So once Roblox reports the player idle, the caption
+-- states the 20-minute disconnect and then EITHER that this Day and this hall are saved (only when the
+-- session saves: `saved`) OR that saving is off and the Day would be lost.
+-- (review 2026-09-30, finding 2) The old guard was the one word "safe": "your streak is kept while you
+-- rest, nothing is lost" passed every gate. Now:
+--   * outside the idle warning a caption promises NOTHING about keeping progress (a wide deny-list);
+--   * an unsaved session's captions never claim anything is saved, kept or safe;
+--   * every template is pinned below WORD FOR WORD. A wording edit must come through this file, where
+--     its reader is told what the words may and may not promise.
 do
 	local band = { id = "meteors", emoji = "🌠", name = "Meteor Shower" }
 	truthy(type(NightSky.breakCaption) == "function" and type(NightSky.bandNews) == "function", "breakCaption and bandNews exist")
@@ -539,48 +816,287 @@ do
 	local intro = NightSky.introNews(true)
 	truthy(type(intro) == "string" and #intro > 0, "there is an intro line for the first break on a phone")
 
-	local promises, tooLong, noKick, noDay1, noDay, alarm, lostNews, bad = {}, {}, {}, {}, {}, {}, {}, 0
-	for _, d in { 1, 7, 31, 52 } do
+	-- the pinned templates (Day 7, 20-minute kick)
+	local function cap(t)
+		t.day = t.day or 7
+		t.kickMinutes = 20
+		local ok, text = pcall(NightSky.breakCaption, t)
+		return if ok then text else "(error: " .. tostring(text) .. ")"
+	end
+	local GOLDEN = {
+		{ { compact = false, idle = false }, "☕ On a break: your hall is waiting, exactly as you left it. Move or press ▶ to go back." },
+		{ { compact = true, idle = false }, "☕ Break · your hall waits. Move to go back." },
+		{ { compact = false, idle = false, news = "🌠 Meteor Shower tonight." },
+			"🌠 Meteor Shower tonight. ☕ On a break: your hall is waiting, exactly as you left it. Move or press ▶ to go back." },
+		{ { compact = true, idle = false, news = "🌠 Meteor Shower" }, "🌠 Meteor Shower · Move to go back." },
+		{ { compact = false, idle = true, saved = true },
+			"☕ Still there? Roblox disconnects players idle for 20 minutes. Day 7 and this hall are saved: rejoin to carry on. Move or press ▶ to go back." },
+		{ { compact = false, idle = true, saved = false },
+			"☕ Still there? Roblox disconnects players idle for 20 minutes, and saving is off right now: Day 7 would be lost. Move or press ▶ to go back." },
+		{ { compact = true, idle = true, saved = true }, "☕ Idle 20 min = disconnect. Day 7 is saved. Move!" },
+		{ { compact = true, idle = true, saved = false }, "☕ Idle 20 min = disconnect; saving is off. Move!" },
+	}
+	for i, g in GOLDEN do
+		local args = table.clone(g[1])
+		eq(cap(args), g[2], "pinned caption " .. i)
+	end
+
+	-- the rules, over every combination
+	local PROMISE = { "safe", "saved", "kept", "nothing is lost", "not lost", "won't lose", "will not lose", "protect", "surviv", "guarantee", "secure" }
+	local function promises(text: string): string?
+		local low = string.lower(text)
+		for _, w in PROMISE do
+			if string.find(low, w, 1, true) then return w end
+		end
+		return nil
+	end
+	local restPromise, unsavedPromise, tooLong, noKick, savedNoPromise, unsavedNoLoss, noDay, alarm, lostNews, bad = {}, {}, {}, {}, {}, {}, {}, {}, {}, 0
+	for _, d in { 1, 7, 31, 52, 500 } do
 		for _, compact in { false, true } do
 			for _, idle in { false, true } do
-				for _, news in { "", NightSky.bandNews(band, compact), NightSky.introNews(compact) } do
-					local ok, text = pcall(NightSky.breakCaption, {
-						day = d, compact = compact, idle = idle, kickMinutes = 20, news = if news == "" then nil else news,
-					})
-					if not ok or type(text) ~= "string" or text == "" then
-						bad += 1
-						continue
-					end
-					local tag = string.format("[day %d %s%s] %s", d, if compact then "phone" else "desk", if idle then " idle" else "", text)
-					local low = string.lower(text)
-					if string.find(low, "safe", 1, true) then table.insert(promises, tag) end
-					local n = utf8.len(text) or #text
-					if n > (if compact then 56 else 170) then table.insert(tooLong, tag .. " (" .. n .. ")") end
-					if idle then
-						if not string.find(text, "20", 1, true) then table.insert(noKick, tag) end
-						if not string.find(text, "Day 1", 1, true) then table.insert(noDay1, tag) end
-						if not compact and not string.find(text, "Day " .. d, 1, true) then table.insert(noDay, tag) end
-					else
-						if string.find(low, "disconnect", 1, true) then table.insert(alarm, tag) end
-						if news ~= "" and not string.find(text, news, 1, true) then table.insert(lostNews, tag) end
+				for _, saved in { false, true } do
+					for _, news in { "", NightSky.bandNews(band, compact), NightSky.introNews(compact) } do
+						local ok, text = pcall(NightSky.breakCaption, {
+							day = d, compact = compact, idle = idle, saved = saved, kickMinutes = 20, news = if news == "" then nil else news,
+						})
+						if not ok or type(text) ~= "string" or text == "" then
+							bad += 1
+							continue
+						end
+						local tag = string.format("[day %d %s%s%s] %s", d, if compact then "phone" else "desk", if idle then " idle" else "",
+							if saved then " saved" else "", text)
+						local low = string.lower(text)
+						local n = utf8.len(text) or #text
+						if n > (if compact then 56 else 170) then table.insert(tooLong, tag .. " (" .. n .. ")") end
+						if not idle then
+							if promises(text) then table.insert(restPromise, tag) end
+							if string.find(low, "disconnect", 1, true) then table.insert(alarm, tag) end
+							if news ~= "" and not string.find(text, news, 1, true) then table.insert(lostNews, tag) end
+						else
+							if not string.find(text, "20", 1, true) then table.insert(noKick, tag) end
+							if not saved and promises(text) then table.insert(unsavedPromise, tag) end
+							if saved and not (string.find(low, "saved", 1, true) and string.find(text, "Day " .. d, 1, true)) then
+								table.insert(savedNoPromise, tag)
+							end
+							if not saved and not string.find(low, "saving is off", 1, true) then table.insert(unsavedNoLoss, tag) end
+							if not compact and not string.find(text, "Day " .. d, 1, true) then table.insert(noDay, tag) end
+						end
 					end
 				end
 			end
 		end
 	end
 	eq(bad, 0, "breakCaption returns text for every combination")
-	eq(#promises, 0, "the break never promises the Day is 'safe' (it is lost on an idle disconnect): " .. table.concat(promises, " | "))
+	eq(#restPromise, 0, "outside the idle warning a break promises nothing about keeping progress: " .. table.concat(restPromise, " | "))
+	eq(#unsavedPromise, 0, "a session that does not save never claims anything is saved, kept or safe: " .. table.concat(unsavedPromise, " | "))
 	eq(#tooLong, 0, "every caption fits its box (phone <= 56 chars, desktop <= 170): " .. table.concat(tooLong, " | "))
 	eq(#noKick, 0, "an idle player is told the disconnect minutes: " .. table.concat(noKick, " | "))
-	eq(#noDay1, 0, "and that a new session starts at Day 1: " .. table.concat(noDay1, " | "))
-	eq(#noDay, 0, "and, on a desktop, which Day they would lose: " .. table.concat(noDay, " | "))
+	eq(#savedNoPromise, 0, "a saving session's idle warning says this Day is saved: " .. table.concat(savedNoPromise, " | "))
+	eq(#unsavedNoLoss, 0, "an unsaved session's idle warning says saving is off: " .. table.concat(unsavedNoLoss, " | "))
+	eq(#noDay, 0, "and, on a desktop, names the Day: " .. table.concat(noDay, " | "))
 	eq(#alarm, 0, "a player who is not idle is not warned (the warning is kept for when it matters): " .. table.concat(alarm, " | "))
 	eq(#lostNews, 0, "news (a new band, the intro) is shown on the break: " .. table.concat(lostNews, " | "))
-	local k15 = NightSky.breakCaption({ day = 4, compact = false, idle = true, kickMinutes = 15 })
+	-- CONTROL for the deny-list: the reviewer's mutant sentence is caught by it
+	truthy(promises("☕ On a break: your streak is kept while you rest, nothing is lost.") ~= nil,
+		"CONTROL: the deny-list catches the reviewer's reworded promise")
+	local k15 = NightSky.breakCaption({ day = 4, compact = false, idle = true, saved = true, kickMinutes = 15 })
 	truthy(string.find(k15, "15", 1, true) ~= nil, "the minutes come from the argument: " .. k15)
-	local okNaN, tNaN = pcall(NightSky.breakCaption, { day = 0 / 0, compact = false, idle = true, kickMinutes = 20 })
+	local okNaN, tNaN = pcall(NightSky.breakCaption, { day = 0 / 0, compact = false, idle = true, saved = true, kickMinutes = 20 })
 	truthy(okNaN and string.find(tNaN, "Day 1", 1, true) ~= nil, "a nonsense Day reads as Day 1: " .. tostring(tNaN))
+	local unset = NightSky.breakCaption({ day = 4, compact = true, idle = true, kickMinutes = 20 })
+	truthy(string.find(string.lower(unset), "saving is off", 1, true) ~= nil, "not knowing whether the session saves reads as unsaved: " .. unset)
 end
 
+-- ------------------------------------------------------------------ weather (standard §2, 2026-10-01 pass 2)
+-- docs/complete-game-standard.md §2: every band has its own light, colour, scenery, critters AND weather. The
+-- weather is one ParticleEmitter per kind on an invisible host out in front of the entrance (where the storm's
+-- rain already fell). Each kind is a FEATURE, so it glides in and out with its band like everything else; the
+-- storm's rain (`Rain`, driven by the `storm` feature) counts as weather too. A band whose sky is clear says
+-- why (`clearSky`), and validate refuses a band with neither. `emitterRates` is what SkyArt asks of the
+-- emitters before EnvBands.capRates holds them to the budget.
+local weatherSpec = {
+	Kinds = {
+		thistledown = { Offset = { 0, 36, 64 }, Size = { 80, 2, 50 }, Rate = 5, Speed = { 1.5, 3 }, Lifetime = { 10, 14 },
+			SpreadDegrees = 20, Direction = "Bottom", Wind = 0.4, ParticleSize = 0.35, Transparency = 0.3, Color = "moon" },
+		snow = { Offset = { 0, 36, 64 }, Size = { 80, 2, 50 }, Rate = 20, Speed = { 3, 5 }, Lifetime = { 8, 10 },
+			SpreadDegrees = 12, Direction = "Bottom", Wind = 0.3, ParticleSize = 0.45, Transparency = 0.2, Color = "moon" },
+		frost = { Offset = { 0, 30, 64 }, Size = { 80, 20, 50 }, Rate = 12, Speed = { 0.5, 1.5 }, Lifetime = { 6, 9 },
+			SpreadDegrees = 45, Direction = "Bottom", Wind = 0, ParticleSize = 0.18, Transparency = 0.1, Color = "moon" },
+		leaves = { Offset = { 0, 36, 64 }, Size = { 80, 2, 50 }, Rate = 4, Speed = { 2, 4 }, Lifetime = { 8, 10 },
+			SpreadDegrees = 15, Direction = "Bottom", Wind = 1.5, ParticleSize = 0.6, Transparency = 0, Color = "shade" },
+		motes = { Offset = { 0, 8, 64 }, Size = { 80, 2, 50 }, Rate = 8, Speed = { 1, 2 }, Lifetime = { 10, 14 },
+			SpreadDegrees = 25, Direction = "Top", Wind = 0, ParticleSize = 0.3, Transparency = 0.25, Color = "moon" },
+	},
+}
+local rainSpec = { Offset = { 0, 40, 60 }, Size = { 70, 2, 60 }, Rate = 40, Speed = 70, Lifetime = 1.2, SpreadDegrees = 2, Color = "moon" }
+do
+	local W = NightSky.WEATHER
+	truthy(type(W) == "table" and #W == 5, "NightSky lists five weather kinds")
+	local inFeatures = {}
+	for _, k in NightSky.FEATURES do inFeatures[k] = true end
+	local allIn = true
+	for _, k in (W or {}) do
+		if not inFeatures[k] then allIn = false end
+		truthy(weatherSpec.Kinds[k] ~= nil, "the spec's config covers weather kind " .. tostring(k))
+	end
+	truthy(allIn, "every weather kind is a band FEATURE, so it glides in and out with its band")
+	truthy(type(NightSky.bandWeather) == "function" and type(NightSky.emitterRates) == "function",
+		"bandWeather and emitterRates exist")
+	truthy(NightSky.WEATHER_DIRECTIONS ~= nil and NightSky.WEATHER_DIRECTIONS.Bottom and NightSky.WEATHER_DIRECTIONS.Top
+		and not NightSky.WEATHER_DIRECTIONS.Front, "weather falls (Bottom) or rises (Top), never toward the hall")
+end
+if type(NightSky.bandWeather) == "function" and type(NightSky.emitterRates) == "function" then
+	local sky = { Weather = weatherSpec, Rain = rainSpec, Stars = { Rate = 10 } }
+	local function list(t) return table.concat(t, ",") end
+	eq(list(NightSky.bandWeather(sky, { features = feats({ snow = 1 }) })), "snow", "a snowy band's weather is snow")
+	eq(list(NightSky.bandWeather(sky, { features = feats({ storm = 1 }) })), "rain", "a stormy band's weather is the rain")
+	eq(list(NightSky.bandWeather({ Weather = weatherSpec }, { features = feats({ storm = 1 }) })), "",
+		"the storm feature is only rain when the sky has Rain")
+	eq(list(NightSky.bandWeather(sky, { features = feats({ stars = 1, moon = 1, meteors = 1 }) })), "",
+		"stars, the moon and meteors are not weather")
+	eq(list(NightSky.bandWeather(sky, { features = feats({ snow = 0.5, frost = 0.25, storm = 0.1 }) })), "frost,rain,snow",
+		"a blended band lists every weather it shows, sorted")
+	eq(list(NightSky.bandWeather(sky, { features = feats({ snow = 0 }) })), "", "weight 0 is no weather")
+
+	local r = NightSky.emitterRates(sky, { stars = 0.5, storm = 0.25, snow = 1, frost = 0.5 })
+	approx(r.stars, 5, "stars: Stars.Rate x the stars weight")
+	approx(r.rain, 10, "rain: Rain.Rate x the storm weight")
+	approx(r.snow, 20, "snow: its Rate x its weight")
+	approx(r.frost, 6, "frost at half weight: half its Rate")
+	approx(r.thistledown, 0, "a weather kind with no weight asks for nothing")
+	approx(r.motes, 0, "nor does a missing one")
+	local odd = NightSky.emitterRates(sky, { stars = 0 / 0, snow = 3, frost = -1 })
+	approx(odd.stars, 0, "a NaN weight asks for nothing")
+	approx(odd.snow, 20, "a weight above 1 counts as 1")
+	approx(odd.frost, 0, "a negative weight counts as 0")
+	local bare = NightSky.emitterRates({}, { stars = 1, storm = 1, snow = 1 })
+	approx(bare.stars or 0, 0, "a sky without Stars, Rain or Weather wants no emitters (stars)")
+	approx(bare.rain or 0, 0, "(rain)")
+	approx(bare.snow or 0, 0, "(snow)")
+
+	-- envelopes: every kind's host box, grown by what its particles can travel
+	local origin = NightSky.hallOrigin(hall, 2)
+	local env = {}
+	for _, e in NightSky.envelopes({ Hall = hall, Weather = weatherSpec }, origin) do env[e.key] = e end
+	for _, k in (NightSky.WEATHER or {}) do
+		truthy(env["Weather_" .. k] ~= nil, "weather " .. k .. " declares an envelope")
+	end
+	local sn = env.Weather_snow
+	if sn then
+		local K = weatherSpec.Kinds.snow
+		local reach = K.Speed[2] * K.Lifetime[2]
+		local drift = reach * math.sin(math.rad(K.SpreadDegrees))
+		approx(sn.min.z - origin.z, K.Offset[3] - K.Size[3] / 2 - drift - K.ParticleSize, "snow's box reaches back by its drift + a flake", 1e-6)
+		approx(sn.min.y - origin.y, K.Offset[2] - K.Size[2] / 2 - reach - K.ParticleSize, "snow falls its full reach", 1e-6)
+		approx(sn.max.y - origin.y, K.Offset[2] + K.Size[2] / 2 + drift + K.ParticleSize, "and rises only by its drift", 1e-6)
+		local wind = 0.5 * K.Wind * K.Lifetime[2] ^ 2
+		approx(sn.max.x - origin.x, K.Offset[1] + K.Size[1] / 2 + drift + wind + K.ParticleSize, "the wind carries it sideways (x)", 1e-6)
+	end
+	local mo = env.Weather_motes
+	if mo then
+		local K = weatherSpec.Kinds.motes
+		local reach = K.Speed[2] * K.Lifetime[2]
+		approx(mo.max.y - origin.y, K.Offset[2] + K.Size[2] / 2 + reach + K.ParticleSize, "motes rise their full reach", 1e-6)
+	end
+
+	-- validate: a sky with weather; every band has its own or says why its sky is clear
+	local function weatherSky()
+		local s = goodSky()
+		s.Weather = weatherSpec
+		s.Rain = rainSpec
+		s.Bands = {
+			{ id = "a", name = "Alpha", emoji = "A", from = 0, fade = 0, features = feats({ stars = 0.5, moon = 1, thistledown = 1 }) },
+			{ id = "b", name = "Beta", emoji = "B", from = 4, fade = 1, features = feats({ stars = 0.7, moon = 1, meteors = 1 }),
+				clearSky = "a shower is watched on a clear night" },
+			{ id = "c", name = "Gamma", emoji = "C", from = 10, fade = 4, features = feats({ stars = 1, moon = 0.5, aurora = 1, snow = 1 }) },
+		}
+		return s
+	end
+	local okW, errW = NightSky.validate(weatherSky(), EnvBands, Rest)
+	truthy(okW, "a sky whose every band has weather or a reason validates (" .. tostring(errW) .. ")")
+	local function rejectsW(mut, why)
+		local s = weatherSky()
+		mut(s)
+		local ok2, err2 = NightSky.validate(s, EnvBands, Rest)
+		truthy(not ok2, why .. " (err: " .. tostring(err2) .. ")")
+	end
+	local function kind(s, k)
+		s.Weather = { Kinds = table.clone(s.Weather.Kinds) }
+		s.Weather.Kinds[k] = table.clone(s.Weather.Kinds[k])
+		return s.Weather.Kinds[k]
+	end
+	rejectsW(function(s) s.Bands[2].clearSky = nil end, "a band with no weather and no clearSky reason")
+	rejectsW(function(s) s.Bands[2].clearSky = "" end, "an empty clearSky reason")
+	rejectsW(function(s) s.Weather = { Kinds = table.clone(s.Weather.Kinds) }; s.Weather.Kinds.frost = nil end, "a weather kind missing from Weather.Kinds")
+	rejectsW(function(s) kind(s, "snow").Offset = { 0, 36, 30 } end, "snow whose drift reaches back to the entrance")
+	rejectsW(function(s) kind(s, "snow").SpreadDegrees = 80 end, "snow spread so wide it drifts back to the entrance")
+	rejectsW(function(s) kind(s, "motes").Direction = "Front" end, "weather blown toward the hall")
+	rejectsW(function(s) kind(s, "snow").Rate = 61 end, "one kind over the particle budget on its own")
+	rejectsW(function(s) kind(s, "snow").Rate = 0 end, "a kind that never emits")
+	rejectsW(function(s) kind(s, "snow").Speed = { 5, 3 } end, "a speed range upside down")
+	rejectsW(function(s) kind(s, "snow").Lifetime = { 0, 0 } end, "a lifetime of 0")
+	rejectsW(function(s) kind(s, "snow").ParticleSize = 0 end, "a particle of size 0")
+	rejectsW(function(s) kind(s, "snow").Color = "nope" end, "a weather colour the palette does not have")
+	rejectsW(function(s) kind(s, "leaves").Wind = 0 / 0 end, "a NaN wind")
+	rejectsW(function(s) s.Bands[1].features = feats({ stars = 0.5, moon = 1, thistledown = 1.5 }) end, "a weather weight above 1")
+end
+-- ------------------------------------------------------------------ each band's own light (standard §2, 2026-10-01 pass 2)
+-- The hall must never change, so the sky casts no light and writes no Lighting while a pass can be seen. A
+-- band's own light is the telescope break's colour grade: the only time the sky writes Lighting, with the
+-- camera out and the hall out of view. breakLight blends it by Day like any band value; a band without one
+-- uses the fallback (RestView.Grade, no tint), and validate refuses half-lit bands, red tints and wild grades.
+do
+	truthy(type(NightSky.breakLight) == "function", "breakLight exists")
+end
+if type(NightSky.breakLight) == "function" then
+	local fallback = { Saturation = 0.3, Brightness = 0.03, Contrast = 0.05 }
+	local lit = {
+		{ id = "a", name = "Alpha", emoji = "A", from = 0, fade = 0, features = feats({ stars = 0.5, moon = 1 }),
+			light = { tint = { 200, 220, 255 }, brightness = 0.02, contrast = 0.1, saturation = 0.3 } },
+		{ id = "b", name = "Beta", emoji = "B", from = 4, fade = 2, features = feats({ stars = 0.7, moon = 1, meteors = 1 }),
+			light = { tint = { 255, 255, 255 }, brightness = -0.02, contrast = 0, saturation = -0.2 } },
+	}
+	local function same(l, tint, b, c, s, msg)
+		local ok = type(l) == "table" and type(l.tint) == "table" and math.abs(l.tint[1] - tint[1]) < 1e-6
+			and math.abs(l.tint[2] - tint[2]) < 1e-6 and math.abs(l.tint[3] - tint[3]) < 1e-6
+			and math.abs(l.brightness - b) < 1e-6 and math.abs(l.contrast - c) < 1e-6 and math.abs(l.saturation - s) < 1e-6
+		truthy(ok, msg .. string.format(" (got tint %s, %s, %s, %s)", if l and l.tint then table.concat(l.tint, ",") else "nil",
+			tostring(l and l.brightness), tostring(l and l.contrast), tostring(l and l.saturation)))
+	end
+	same(NightSky.breakLight(lit, EnvBands, 1, fallback), { 200, 220, 255 }, 0.02, 0.1, 0.3, "Day 1 is band a's light")
+	same(NightSky.breakLight(lit, EnvBands, 3, fallback), { 227.5, 237.5, 255 }, 0, 0.05, 0.05, "Day 3 is half way into b's (smoothstep 0.5)")
+	same(NightSky.breakLight(lit, EnvBands, 9, fallback), { 255, 255, 255 }, -0.02, 0, -0.2, "Day 9 is b's light")
+	same(NightSky.breakLight(lit, EnvBands, 0 / 0, fallback), { 200, 220, 255 }, 0.02, 0.1, 0.3, "a NaN Day is the first band's light")
+	local l = NightSky.breakLight(lit, EnvBands, 1, fallback)
+	l.tint[1] = 0
+	l.brightness = 9
+	same(NightSky.breakLight(lit, EnvBands, 1, fallback), { 200, 220, 255 }, 0.02, 0.1, 0.3, "breakLight hands out a copy")
+	same(NightSky.breakLight(bands, EnvBands, 5, fallback), { 255, 255, 255 }, 0.03, 0.05, 0.3,
+		"bands without a light of their own get the fallback grade, untinted")
+
+	local function litSky()
+		local s = goodSky()
+		s.Bands = {
+			{ id = "a", name = "Alpha", emoji = "A", from = 0, fade = 0, features = lit[1].features, light = table.clone(lit[1].light) },
+			{ id = "b", name = "Beta", emoji = "B", from = 4, fade = 2, features = lit[2].features, light = table.clone(lit[2].light) },
+		}
+		return s
+	end
+	local okL, errL = NightSky.validate(litSky(), EnvBands, Rest)
+	truthy(okL, "a sky whose every band has its own light validates (" .. tostring(errL) .. ")")
+	local function rejectsL(mut, why)
+		local s = litSky()
+		mut(s)
+		local ok2, err2 = NightSky.validate(s, EnvBands, Rest)
+		truthy(not ok2, why .. " (err: " .. tostring(err2) .. ")")
+	end
+	rejectsL(function(s) s.Bands[2].light = nil end, "one band lit and the next not (half the bands would use the fallback)")
+	rejectsL(function(s) s.Bands[2].light.tint = { 255, 120, 120 } end, "a red tint (red is how two anomalies read)")
+	rejectsL(function(s) s.Bands[2].light.tint = { 255, 255 } end, "a tint that is not {r, g, b}")
+	rejectsL(function(s) s.Bands[2].light.tint = { 255, 255, 300 } end, "a tint channel over 255")
+	rejectsL(function(s) s.Bands[2].light.brightness = 0.5 end, "a grade so bright it washes the sky out")
+	rejectsL(function(s) s.Bands[2].light.contrast = -0.6 end, "a contrast out of range")
+	rejectsL(function(s) s.Bands[2].light.saturation = 0 / 0 end, "a NaN saturation")
+end
 print(string.format("NightSky: %d passed, %d failed", passed, failed))
 assert(failed == 0, "NightSky tests failed")
