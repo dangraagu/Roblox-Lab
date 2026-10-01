@@ -12,7 +12,9 @@
 --     level walking out costs nothing at all. A sign on the door says so while, and only while, it
 --     is true — with a margin for the payload's network delay, since the client's clock starts
 --     when the level's payload ARRIVES and the server's started before it was sent — and never while
---     the run holds a "Hjelp meg" guide bought for it, which a walk-out loses (review fix);
+--     the run has a "Hjelp meg" guide active (review fix, 24.09: a walk-out then lost it; since the owner's
+--     decision of 30.09 the buyer keeps it until the level is cleared, but a guided run is no plain fresh
+--     start, and in a shared run the guide may be someone else's, so the sign keeps out of it);
 --   * rest is never available inside a run (mayRest fails closed).
 -- Leaving a run ends it: the run's clock is thrown away, no time is recorded, and the next attempt
 -- starts a fresh clock. Nothing is dodged, because nothing is paused.
@@ -39,9 +41,8 @@ function BreakRoom.validate(cfg: any, Rest: any): (boolean, string?)
 end
 
 -- Is walking out through the Lobby door free, `elapsed` seconds after this level's payload arrived?
--- `run` (optional) = what this run holds that a walk-out would lose: `guideActive` = a "Hjelp meg" guide
--- was bought for this run. The guide belongs to the run (the server builds it into the run's maze and a
--- walk-out tears that down, no refund), so with one active the walk-out is not free, whatever the clock.
+-- `run` (optional): `guideActive` = a "Hjelp meg" guide is active in this run. The sign then says nothing, whatever
+-- the clock: the sign only speaks for a plain fresh run (see the header; a buyer keeps the guide since 30.09).
 function BreakRoom.freeBreak(elapsed: number, cfg: any, run: any?): boolean
 	if type(elapsed) ~= "number" or elapsed ~= elapsed or elapsed < 0 then return false end
 	if type(run) == "table" and run.guideActive == true then return false end
@@ -49,7 +50,7 @@ function BreakRoom.freeBreak(elapsed: number, cfg: any, run: any?): boolean
 end
 
 -- The door sign's opacity: 1, fading out over SignFadeSeconds, gone exactly when the free window ends
--- (or at once, while the run holds something a walk-out would lose: see freeBreak).
+-- (or at once, while a guide is active: see freeBreak).
 function BreakRoom.signAlpha(elapsed: number, cfg: any, run: any?): number
 	if not BreakRoom.freeBreak(elapsed, cfg, run) then return 0 end
 	local fadeStart = cfg.FreeBreakSeconds - cfg.SignFadeSeconds

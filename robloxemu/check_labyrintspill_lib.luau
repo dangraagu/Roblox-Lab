@@ -47,7 +47,7 @@ end
 -- Every client script the game ships, as the live game runs them.
 Lib.ALL_CLIENTS = {
 	"HudClient", "MinimapClient", "LeaderboardClient", "AssistClient", "AdminBroadcastClient", "ShopClient",
-	"PerkClient", "LobbyClient", "GodModeClient", "LightingClient", "SoundClient", "Biome", "RestClient",
+	"PerkClient", "LobbyClient", "GodModeClient", "LightingClient", "SoundClient", "Biome", "RestClient", "BoardClient",
 }
 -- The same without SoundClient, for checks that FINISH levels: the emulator's Sound has no :Play(), and
 -- the emulator calls a client's remote handler inline inside the server's FireClient, so SoundClient's
@@ -55,7 +55,7 @@ Lib.ALL_CLIENTS = {
 -- (robloxemu/emu is not ours to change), not a game defect; SoundClient plays sounds and nothing else.
 Lib.CLIENTS_NO_SOUND = {
 	"HudClient", "MinimapClient", "LeaderboardClient", "AssistClient", "AdminBroadcastClient", "ShopClient",
-	"PerkClient", "LobbyClient", "GodModeClient", "LightingClient", "Biome", "RestClient",
+	"PerkClient", "LobbyClient", "GodModeClient", "LightingClient", "Biome", "RestClient", "BoardClient",
 }
 
 -- opts = { accepted, clients = { names }, viewport = {w,h}, touch, userId, beforeClients = fn(ctx) }
@@ -110,13 +110,13 @@ function Lib.boot(opts: any): any
 		end
 	end
 	function ctx.folder(): Instance?
-		local name = plr:GetAttribute("MazeFolder")
+		local name = ctx.plr:GetAttribute("MazeFolder") -- ctx.plr: a check may rejoin as a new Player
 		return name and h.workspace:FindFirstChild(name) or nil
 	end
 	function ctx.startRun(level: number)
 		if ctx.folder() ~= nil then ctx.toLobby() end
 		local sr = h.ReplicatedStorage:WaitForChild("LobbyRemotes"):WaitForChild("StartRun")
-		sr:simulateFireServer(plr, level, "solo")
+		sr:simulateFireServer(ctx.plr, level, "solo")
 		ctx.run(0.2)
 	end
 	function ctx.toLobby()
@@ -124,18 +124,31 @@ function Lib.boot(opts: any): any
 		local door = f and f:FindFirstChild("LobbyDoor")
 		local prompt = door and door:FindFirstChildOfClass("ProximityPrompt")
 		if prompt then
-			prompt.Triggered:Fire(plr)
+			prompt.Triggered:Fire(ctx.plr)
 		end
 		-- a player needs well over a second to walk from the lobby spawn to a door; LightingClient's
 		-- 0.55 s lobby fade must finish before the next run starts, exactly as it does in the game
 		ctx.run(1.0)
 	end
-	-- finish the current level: touch its exit (the server's own finishRun, then advanceInstance)
+	-- finish the current level: touch its exit (the server's own finishRun, then advanceInstance). Since 2026-10-01
+	-- the server's walk guard (CONFIG.WalkGuard, Progression.minClearSeconds) refuses an exit reached faster than
+	-- anyone can walk there, so this stands at the start until that time has passed (frames keep running, as for a
+	-- player on their way) and then touches the exit, the way check_labyrintspill_journey walks it for real.
 	function ctx.finishLevel()
 		local f = ctx.folder()
 		local exit = f and f:FindFirstChild("Exit")
 		assert(exit, "no exit to touch")
-		exit.Touched:Fire(ctx.hrp)
+		local lc = h.ReplicatedStorage:WaitForChild("HudRemotes"):WaitForChild("LevelComplete")
+		local n0 = #lc:sentTo(ctx.plr)
+		local waited = 0
+		ctx.guardWaits = ctx.guardWaits or {}
+		for _ = 1, 400 do
+			exit.Touched:Fire(ctx.hrp)
+			if #lc:sentTo(ctx.plr) > n0 then break end
+			ctx.run(0.25)
+			waited += 0.25
+		end
+		table.insert(ctx.guardWaits, waited)
 		ctx.run(0.1)
 	end
 	function ctx.moveTo(pos: Vector3)

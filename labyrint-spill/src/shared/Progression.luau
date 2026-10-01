@@ -24,6 +24,17 @@ function Progression.recordEligible(hadGod: boolean?, usedAssist: boolean?): boo
 	return not (hadGod or usedAssist)
 end
 
+-- Gå-vakta (01.10, docs/complete-game-standard.md §3: topplista rangerer på noe et skript ikke kan blåse opp).
+-- Bevegelse er klientens, så et teleport-skript kunne rørt hver utgang med en gang. Serveren godtar derfor ikke en
+-- utgang nådd raskere enn noen kan GÅ dit: `fineSteps` = korteste rute fra start til utgang i fin-rutenettet med
+-- ALLE hemmelige dører åpne (hver fin-celle er `cellSize` studs). Selv en løper som skjærer hvert hjørne på skrå går
+-- minst fineSteps * cellSize / sqrt(2) studs (trappa gjennom hjørnene er det korteste en 4-sammenhengende rute kan
+-- bli); én celle trekkes fra i hver ende. `maxSpeed` = raskeste gangfart (med speed-perken), `slack` < 1 er margin.
+function Progression.minClearSeconds(fineSteps: number, cellSize: number, maxSpeed: number, slack: number?): number
+	local studs = math.max(0, fineSteps * cellSize / math.sqrt(2) - 2 * cellSize)
+	return studs / maxSpeed * (slack or 1)
+end
+
 -- Seed accepted fra spillerens personlige rekorder ved migrering: høyeste N slik
 -- at bestByLevel["1"] .. ["N"] alle finnes (lengste sammenhengende rekke fra 1).
 -- DataStore lagrer heltalls-nøkler som tekst, derfor tostring().

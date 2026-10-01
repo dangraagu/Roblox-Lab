@@ -14,7 +14,9 @@
 --      secret door dressed exactly like the plain wall it pretends to be — even when it sinks;
 --   §5 inertness + leaks: nothing built is collidable/queryable/touchable, no remote fired or added,
 --      no attribute written on anything the server built, no light in a maze;
---   §6 back in the lobby, everything the client tinted is back at its live value.
+--   §6 back in the lobby, everything the client tinted is back at its live value;
+--   §7 (second review) no decor on the Lobby door's wall, in front of the free-break sign;
+--   §8 (01.10) no critter there either: none lives in the start cell.
 -- Headless limits: nothing renders, there is no physics. Whether it LOOKS right is on the Studio list.
 
 local Lib = require("./check_labyrintspill_lib")
@@ -48,6 +50,8 @@ do
 	eq(num("TorchRange = (%d+)"), Biomes.Base.locked.TorchRange, "CONFIG.TorchRange is the locked torch range")
 	eq(num("MinRunSeconds = (%d+)"), Biomes.Rest.ServerMinRunSeconds, "CONFIG.Assist.MinRunSeconds is the free-break rule the door sign relies on")
 	eq(num("INSTANCE_FOG = (%d+)"), 45, "the instances' fog distance is 45")
+	eq(num("MonsterSpeedMax = (%d+)"), Biomes.Hazards.MonsterSpeedMax,
+		"CONFIG.Curve.MonsterSpeedMax is the fastest monster the stagger radius is sized for (owner decision 30.09)")
 	local warn = { string.match(src, "warn%s*=%s*{%s*Color = Color3.fromRGB%((%d+), (%d+), (%d+)%)") }
 	local deadly = { string.match(src, "deadly%s*=%s*{%s*Color = Color3.fromRGB%((%d+), (%d+), (%d+)%)") }
 	for c = 1, 3 do
@@ -62,6 +66,34 @@ do
 		if sv ~= v then table.insert(drift, k .. "=" .. tostring(sv) .. "/" .. tostring(v)) end
 	end
 	eq(#drift, 0, "tests/MazeWalker.CURVE (the pacing model) is the server's live curve (" .. table.concat(drift, ",") .. ")")
+	-- (second review) the step-on palette the ring is kept away from is the server's own: the four secret-button
+	-- colours in order, the guide dots, the coin, the gem and the exit pad
+	local server = {}
+	local pairBlock = string.match(src, "local PAIR_COLORS = (%b{})")
+	truthy(pairBlock ~= nil, "the server's PAIR_COLORS block is found")
+	for r, g, b in string.gmatch(pairBlock or "", "{%s*(%d+),%s*(%d+),%s*(%d+)%s*}") do
+		table.insert(server, { tonumber(r), tonumber(g), tonumber(b) })
+	end
+	eq(#server, 4, "four secret-button colours on the server")
+	-- the live builder is buildInstance (the old buildLevel above it is unused and has a red locked exit)
+	local live = string.sub(src, (string.find(src, "local function buildInstance(inst)", 1, true) or 1))
+	for _, name in { "GuideDot", "Coin", "Gem", "Exit" } do
+		local at = string.find(live, 'Name = "' .. name .. '"', 1, true)
+		local block = at and string.sub(live, at, (string.find(live, "})", at, true) or at))
+		local r, g, b = string.match(block or "", "Color = Color3.fromRGB%((%d+), (%d+), (%d+)%)")
+		truthy(r ~= nil, "the server's " .. name .. " colour is found")
+		table.insert(server, { tonumber(r), tonumber(g), tonumber(b) })
+	end
+	local S = Biomes.StepOnColors or {}
+	eq(#S, #server, "Biomes.StepOnColors lists every step-on colour the server builds")
+	local off = {}
+	for i, c in server do
+		local m = S[i] and S[i].rgb
+		if not (m and m[1] == c[1] and m[2] == c[2] and m[3] == c[3]) then
+			table.insert(off, string.format("%d: server %s,%s,%s", i, tostring(c[1]), tostring(c[2]), tostring(c[3])))
+		end
+	end
+	eq(#off, 0, "Biomes.StepOnColors mirrors the server's palette in order (" .. table.concat(off, "; ") .. ")")
 end
 
 --================================================================ §1 the live look
@@ -485,9 +517,13 @@ do
 				end
 				eq(onSunk, 0, tag .. ": walking away and back puts no decor on a sunk door (released, not kept at transparency 1)")
 				-- a sunk door must not take up the decor budget either: with the cap forced to 2 (the client reads
-				-- Biomes.Budget live), the 2 nearest STANDING dressed faces are shown, not a sunk door's slots
+				-- Biomes.Budget live), the 2 nearest STANDING dressed faces are shown, not a sunk door's slots.
+				-- (2026-10-01) critters share the cap (a critter takes a decor slot), so the cap is forced to 2 wall
+				-- pieces PLUS the critters this level wants; the wall pieces are what this assertion is about.
 				local savedCap = Biomes.Budget.MaxDecorPieces
-				Biomes.Budget.MaxDecorPieces = 2
+				local critterSlots = 0
+				for _, n in Biomes.crittersAt(EnvBands, found.level) do critterSlots += n end
+				Biomes.Budget.MaxDecorPieces = 2 + critterSlots
 				ctx.moveTo(gg.world(1, 1))
 				ctx.run(0.5)
 				ctx.moveTo(stand)
@@ -609,6 +645,134 @@ do
 	eq(room.lights, 1, "back in the lobby, the campfire burns again (its one light)")
 	eq(room.emitters, 2, "with flames and smoke")
 	near(L.FogEnd, 520, 1, "and LightingClient's own lobby fog is untouched by the biome layer")
+end
+
+--================================================================ §7 (second review) the Lobby door's wall stays clear
+
+-- Every level starts beside the server's 🚪 Lobby door, on the start cell's back wall, and for its first seconds
+-- RestClient's free-break sign hangs in front of it ("Need a break? Walk out now"). The review found decor on that
+-- wall face standing in front of the sign's words (a sconce at L2 and L5, glass crystals at L103 and L108) and grates
+-- sinking into the top of the door (L50, L55); L3 and L51 are controls where nothing was there. Measured through the
+-- real server and client, standing at the start: decor parts between the sign and the start cell that overlap the
+-- sign's 9 x 2.2-stud face, and decor parts inside the door's slab.
+do
+	local inFront, inDoor = {}, {}
+	for _, L in { 2, 5, 103, 108, 50, 55, 3, 51 } do
+		ctx.startRun(L)
+		ctx.run(1.2)
+		local door = ctx.folder():FindFirstChild("LobbyDoor")
+		local sign = h.workspace:FindFirstChild("LabyrintBreakRoom") and h.workspace.LabyrintBreakRoom:FindFirstChild("BreakSign")
+		truthy(door ~= nil and sign ~= nil and sign.Adornee == door, "L" .. L .. ": the free-break sign hangs on this run's Lobby door")
+		local dp, ds = door.Position, door.Size
+		local signY = dp.Y + (sign and sign.StudsOffset.Y or 7)
+		local nFront, nDoor = 0, 0
+		for _, p in decorParts() do
+			local pp, hs = p.Position, p.Size / 2
+			local r = math.max(hs.X, hs.Y, hs.Z) -- a generous half-extent whatever the part's rotation
+			-- in front of the sign: nearer the start cell than the sign's plane, overlapping its face
+			if pp.Z + r > dp.Z and pp.Z < dp.Z + 2 and math.abs(pp.X - dp.X) < 4.5 + r and math.abs(pp.Y - signY) < 1.1 + r then
+				nFront += 1
+			end
+			-- inside the door slab
+			if math.abs(pp.X - dp.X) < ds.X / 2 + r and math.abs(pp.Y - dp.Y) < ds.Y / 2 + r and math.abs(pp.Z - dp.Z) < ds.Z / 2 + r then
+				nDoor += 1
+			end
+		end
+		inFront[L], inDoor[L] = nFront, nDoor
+		print(string.format("   L%d: %d decor parts in front of the sign, %d in the door slab", L, nFront, nDoor))
+	end
+	for _, L in { 2, 5, 103, 108, 50, 55, 3, 51 } do
+		eq(inFront[L], 0, "L" .. L .. ": no decor stands in front of the free-break sign")
+		eq(inDoor[L], 0, "L" .. L .. ": no decor sits inside the Lobby door")
+	end
+	ctx.toLobby()
+end
+
+--================================================================ §8 (01.10) and no critter in front of it either
+
+-- The critters added on 01.10 (Biomes.Critters) are client-built dressing too, and their first version could make
+-- its home in the start cell once the player had walked out of it: a crypt spider then climbed the Lobby door's wall
+-- straight through the door slab and the free-break sign. Found by the pass-1 re-run on 01.10 (a probe over
+-- L150-245: a spider in front of the sign while it was up on 28 of 96 levels, nearly all on the walk below). The
+-- walk a player makes when they think about the sign: 2 s out along the route to the exit, then back toward the
+-- door, every frame of the sign's window (Biomes.Rest.FreeBreakSeconds, on the level clock; the sign itself can go
+-- early on a slow machine, RestClient also reads wall time). Counted: critter parts in §7's box in front of the sign,
+-- inside the door slab, and anywhere in the start cell. Exposure, so a 0 means something: the sign is up, and critters
+-- are on show around the player, on these walks.
+do
+	local LOCAL = h.workspace:FindFirstChild("LabyrintBiomeLocal")
+	local function route(g, from, to)
+		local key = function(x, y) return x .. "," .. y end
+		local prev, q, head = { [key(from[1], from[2])] = false }, { from }, 1
+		while head <= #q do
+			local cur = q[head]; head += 1
+			if cur[1] == to[1] and cur[2] == to[2] then break end
+			for _, dd in { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } } do
+				local nx, ny = cur[1] + dd[1], cur[2] + dd[2]
+				if nx >= 0 and ny >= 0 and nx < g.gCols and ny < g.gRows and not g.walls[key(nx, ny)] and prev[key(nx, ny)] == nil then
+					prev[key(nx, ny)] = cur
+					table.insert(q, { nx, ny })
+				end
+			end
+		end
+		local path, cur = {}, to
+		while cur do table.insert(path, 1, cur); cur = prev[key(cur[1], cur[2])] end
+		return path
+	end
+	local WINDOW = Biomes.Rest.FreeBreakSeconds
+	local front, slab, inStart, signFrames, critterFrames, frames = 0, 0, 0, 0, 0, 0
+	local levelsFront = {}
+	for L = 161, 200 do -- the Haunted Crypt: spiders climb walls there
+		ctx.startRun(L)
+		local f = ctx.folder()
+		local g = Lib.grid(f)
+		local door = f:FindFirstChild("LobbyDoor")
+		local dp, ds = door.Position, door.Size
+		local signY = dp.Y + 7
+		local sx, sz = g.world(1, 1).X, g.world(1, 1).Z
+		local pts = {}
+		for _, c in route(g, { 1, 1 }, { g.fine(f:FindFirstChild("Exit").Position) }) do table.insert(pts, g.world(c[1], c[2])) end
+		local function posAt(dist)
+			local i = math.floor(dist / g.S) + 1
+			if i >= #pts then return pts[#pts] end
+			return pts[i] + (pts[i + 1] - pts[i]) * ((dist - (i - 1) * g.S) / g.S)
+		end
+		local t0, t = ctx.clock, 0
+		while t < WINDOW do
+			ctx.moveTo(posAt(if t < 2 then 16 * t else math.max(0, 32 - 16 * (t - 2))))
+			ctx.frame(1 / 30)
+			t = ctx.clock - t0
+			frames += 1
+			if h.workspace.LabyrintBreakRoom:FindFirstChild("BreakSign") then signFrames += 1 end
+			local any = false
+			for _, d in LOCAL:GetDescendants() do
+				if d:IsA("BasePart") and string.sub(d.Name, 1, 8) == "Critter_" then
+					any = true
+					local pp, hs = d.Position, d.Size / 2
+					local r = math.max(hs.X, hs.Y, hs.Z)
+					if pp.Z + r > dp.Z and pp.Z < dp.Z + 2 and math.abs(pp.X - dp.X) < 4.5 + r and math.abs(pp.Y - signY) < 1.1 + r then
+						front += 1
+						levelsFront[L] = true
+					end
+					if math.abs(pp.X - dp.X) < ds.X / 2 + r and math.abs(pp.Y - dp.Y) < ds.Y / 2 + r and math.abs(pp.Z - dp.Z) < ds.Z / 2 + r then
+						slab += 1
+					end
+					if math.abs(pp.X - sx) < g.S / 2 and math.abs(pp.Z - sz) < g.S / 2 then inStart += 1 end
+				end
+			end
+			if any then critterFrames += 1 end
+		end
+	end
+	local nl = 0
+	for _ in levelsFront do nl += 1 end
+	print(string.format("   §8 L161-200, out and back in the sign's %.0f s: %d frames (sign up in %d, critters on show in %d); critter part-frames: %d in front of the sign (%d levels), %d in the door slab, %d in the start cell",
+		WINDOW, frames, signFrames, critterFrames, front, nl, slab, inStart))
+	truthy(signFrames > frames / 2, "§8 the sign is up for most of these walks")
+	truthy(critterFrames > frames / 2, "§8 critters are on show around the player for most of these walks")
+	eq(front, 0, "§8 no critter stands in front of the free-break sign (part-frames)")
+	eq(slab, 0, "§8 no critter is inside the Lobby door (part-frames)")
+	eq(inStart, 0, "§8 no critter lives in the start cell, the Lobby door's cell (part-frames)")
+	ctx.toLobby()
 end
 
 print("")

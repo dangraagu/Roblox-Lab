@@ -152,6 +152,10 @@ do
 		B.MaxDecorPieces, B.MaxPrimsPerPiece, B.MaxHazardsShown, maxView, bound, B.MaxLocalParts))
 	truthy(maxView >= 5, "the largest hazard view was really built (" .. maxView .. " parts)")
 	truthy(bound <= B.MaxLocalParts, string.format("whatever the position, the maze's local parts stay within budget (%d <= %d)", bound, B.MaxLocalParts))
+	-- (second review) Biomes.validate enforces the budget with Biomes.partBound(), which trusts MaxHazardViewParts:
+	-- the real builder must never make a view bigger than that number, or validate's bound would be a lie
+	truthy(maxView <= (B.MaxHazardViewParts or -1), string.format("every real hazard view fits Budget.MaxHazardViewParts (%d <= %s)", maxView, tostring(B.MaxHazardViewParts)))
+	eq(Biomes.partBound(), bound, "Biomes.partBound() (what validate enforces) is the bound the real builder gives")
 end
 
 --================================================================ hop between biomes through the lobby
@@ -196,6 +200,14 @@ do
 		end
 		local n = 0
 		for id, parts in byId do n += parts / #Biomes.Pieces[id].prims end
+		-- (2026-10-01) a critter takes a decor slot: MaxDecorPieces caps wall dressing and critters together
+		local slots = {}
+		for _, d in LOCAL:GetDescendants() do
+			if d:IsA("BasePart") and string.sub(d.Name, 1, 8) == "Critter_" and d:GetAttribute("CritterSlot") then
+				slots[d:GetAttribute("CritterSlot")] = true
+			end
+		end
+		for _ in slots do n += 1 end
 		return n
 	end
 	ctx.startRun(200)
@@ -210,7 +222,7 @@ do
 	ctx.startRun(200)
 	ctx.moveTo(Lib.grid(ctx.folder()).world(2 * (g.cols // 2) + 1, 2 * (g.rows // 2) + 1))
 	ctx.run(1.0)
-	eq(piecesShown(), 5, "with MaxDecorPieces forced to 5, exactly 5 pieces are shown")
+	eq(piecesShown(), 5, "with MaxDecorPieces forced to 5, exactly 5 pieces are shown (wall dressing and critters together)")
 	B.MaxDecorPieces = saved
 	ctx.startRun(200)
 	ctx.moveTo(Lib.grid(ctx.folder()).world(2 * (g.cols // 2) + 1, 2 * (g.rows // 2) + 1))

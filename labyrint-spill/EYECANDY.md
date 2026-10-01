@@ -11,8 +11,34 @@ times from a shared seed.** So the rule was: the maze may look different, it may
 in any way that touches solvability, trap timing, how far you can see, or the fairness of medal times.
 
 **State: built, unit-tested, headless-tested through the real server and clients, mutation-tested with
-controls, adversarially reviewed, and every review finding closed (§12). NOT seen in Studio.** Nothing
-committed, pushed or published. The server script is untouched (`git diff` on `src/server`: empty).
+controls, adversarially reviewed twice, and every finding of both reviews closed (§12, §13). Every open owner
+decision is taken (§10, §13). NOT seen in Studio.** The eye-candy work is committed (`a983d11`); the 30.09 pass
+is not committed, pushed or published. The server script changed in the 30.09 pass for the first time in this
+work: two small rules (a Friends host can rejoin their own run; a bought guide is kept until its level is cleared).
+
+**Pass 2, 01.10 (§15): complete against `docs/complete-game-standard.md`.** Pass 2's cut-off work is finished and
+documented: a public + friends highscore board by the spawn (ties to whoever got there first), a session lock with an
+owner token on every save, a walk guard on the exit, critters in every biome, `RespawnLocation`, a headless walk of the
+whole player path, HUD rule 4b asserted. New in the resume: one falling hazard at a time is enforced in code, the board
+says so when its store is down (and retries a lost write), the README has the store text (984 characters), MARKETING.md
+a 9-clip list, the Studio and thumbnail lists are current, and `tests/docs_check.py` holds all four documents to the
+game. Pass 2's assertions had never been mutation-tested; they are now (§15). Every gate green. Not committed, not
+published, not seen in Studio.
+
+**Pass 1 re-run, 01.10 (§14):** the five second-review findings were measured again on the current tree, which also
+holds pass 2's uncommitted, undocumented work from 01.10 00:09-00:50 (critters, a highscore board, save locks, new
+checks; cut off before its docs). Four findings do not reproduce. Finding 4 came back in a new form: the new critters
+could make their home in the start cell, and a crypt spider climbed straight through the Lobby door and the
+free-break sign (37 of 481 levels). Closed test-first: the start cell is no critter's home. The 30.09 pass's 47
+mutations were re-run on the current tree with the new ones (§14). No owner decision is open.
+
+**Second review + owner decisions, 30.09 (§13):** a Friends host who walks out under the free-break sign can get
+back to their friends; the ring can no longer be retuned into a colour the maze asks you to step on (a CIE delta E
+floor against the buttons, the guide dots, coins, gems and the exit, through every biome grade); the biome card
+waits for the daily-reward popup too; no decor on the Lobby door's wall face; the part, emitter and light budgets are
+enforced by `Biomes.validate`, not only measured. Owner decisions: a bought "Hjelp meg" guide is **kept** until its
+level is cleared; a hazard hit is a **stagger**, never a knock-down, when a monster is close enough to catch you;
+the ring stays blue; no themed trap skins; the later biomes stay where they are, now held by a pacing assertion.
 
 **Review fixes, 24.09 (§12):** the door sign no longer promises "nothing is lost" while a bought "Hjelp meg"
 guide would be lost; a sinking secret door's dressing fades and is released instead of leaving spires and
@@ -41,7 +67,10 @@ it), added a compile gate and a tested shot-list helper, and ran a 42-mutation s
 | `src/client/RestClient.client.luau` | the lobby campfire corner (rest), the biome board, the free-break sign on each level's Lobby door. |
 | `tests/` | new specs `Biomes`, `CellHazards`, `BreakRoom`, `Pacing`, plus the template's `EnvBands`, `Rest` specs verbatim; `MazeWalker.luau` (test-side player model). |
 | `robloxemu/check_labyrintspill_*.luau` | `biomes`, `hazards`, `rest`, `cards`, `budget`, `layout`, `hud` (the stock HUD gate with all 13 clients), `lib` (shared boot); **resume session:** `compile`, `shots`. |
-| `src/server/*` | **nothing.** |
+| `src/server/*` | **nothing** in the eye-candy work. 30.09 (§13): a Friends host may rejoin their own run (`findFriendsInstance`), and a bought guide is kept until its level is cleared (`applyKeptGuide`, saved as `guideLevel`). 01.10 (§15): the highscore board, the session lock and owner token, the walk guard, `RespawnLocation`. |
+| `src/shared/Board.luau`, `BoardConfig.luau`, `src/client/BoardClient.client.luau` | (01.10, §15) the highscore board: +1 Jump's template, this game's settings, the board drawn per player. |
+| `tests/Board.spec.luau`, `tests/docs_check.py` | (01.10, §15) the board's pure rules; the four ship-and-market documents held to the game (Python: the luau CLI cannot read a file). |
+| `robloxemu/check_labyrintspill_*` (01.10) | `board`, `boarddown`, `critters`, `journey`, `overlap`, `save` (§15). |
 
 Existing files: none edited. `check_labyrint.luau` still loads only the 11 original clients (its one-line
 comment change dates from 2026-09-17 and is not this work); `check_labyrintspill_hud.luau` runs the same
@@ -158,7 +187,14 @@ hazards OFF with a warning, never half on):
   teaches players that yellow is survivable. The server's own palette already refused the trap's yellow for
   the secret-door colours for the same reason. `Biomes.validate` holds the ring cool under every biome grade
   (blue/red ≥ 1.5, at least 1.0 above either trap phase), and the banner and biome card take their words from
-  `Biomes.hazardBanner/hazardIntro`, which the layout check measures.
+  `Biomes.hazardBanner/hazardIntro`, which the layout check measures. **Never a "step here" colour either (second
+  review, §13):** on this floor a glowing blue disc is a secret button and the guide's cyan dots say "walk here".
+  `validate` keeps the ring at least CIE76 delta E 25 from every colour the maze asks you to step on or walk to
+  (`Biomes.StepOnColors`: the four button colours, the guide dots, coin, gem, exit pad, which
+  `check_labyrintspill_biomes` §0 reads back out of the server script), through every biome grade. The shipped ring
+  keeps 31.8 from its nearest, the deep-blue button; the cyan button and the guide dots, which players already
+  tell apart, are 11.0 apart. A readable blue cannot get much further: the brightest blues sit between the
+  deep-blue button, the cyan button and the gem.
 * **The hit rule:** at the impact instant, your root within 4.2 studs horizontally of the cell centre
   (strike radius 3.2 + player radius 1.0) **and at most 20 studs above the floor** (resume session: a jump
   never dodges, but a god-mode flyer over the maze is not knocked out of the air). The zone is 8.4 studs
@@ -168,9 +204,14 @@ hazards OFF with a warning, never half on):
   impact (4 studs at most), never upward; camera shake and a white flash. `validate` proves the farthest
   knock cannot carry you onto the neighbouring cell's trap (8.2 studs from the hazard centre at most; the
   next trap's edge, player radius included, is 13.5 away). Nothing is taken: no death, no coins, no time
-  penalty beyond the 0.8 s. **One real consequence, stated:** a player who takes a hit with a monster on
-  their heels loses 0.8 s of their lead, and a monster within ~12 studs can then catch them. The warning
-  (3 s, visible from the passage before the cell) is what makes that avoidable.
+  penalty beyond the 0.8 s.
+* **Never with a monster close (owner decision, 30.09, §13).** A knock-down with a monster on your heels could let
+  it catch you, and the owner's standard is "a hit costs a little, never a run". So when a monster is within
+  `MonsterSafeRadius` (24 studs, horizontal) at the impact, the hit is a **stagger**: the same shake, flash and
+  shove, and you keep your feet (no `PlatformStand`). `CellHazards.validate` refuses a radius under the worst case:
+  the fastest monster (the server's `MonsterSpeedMax` 15, parsed back out of the server) closing for the whole
+  0.8 s, the 5 studs/s shove toward it, and a 4-stud reach: (15 + 5) × 0.8 + 4 = 20 studs. The client reads the
+  server's replicated `Monster` models in the player's own maze, only at the instant of a hit.
 
 **Measured** (`tests/Pacing.spec.luau`: 40 levels spread over every hazard biome, one normal walk each,
 1 443 minutes walked, 3 672 hazards in 122 200 cells = 3.00 %). A *near-hit* is an impact within 12 studs
@@ -220,12 +261,20 @@ the clock (and hand out free medal time). So rest lives **between runs** (`Break
   least 1.5 s of network margin), and its clock is the larger of frame time and wall time, so a stalled
   client's sign can only vanish early, never linger. Proven end to end against the server's own counter, burning real seconds: a walk-out under the
   sign or after a 6.3 s stall adds no failed attempt; after 8 s one is added, and no sign promised otherwise.
-  **Not while a guide is active (review fix, §12):** a "Hjelp meg" guide is bought for ONE run and the server
-  tears it down with the run, no refund, so a walk-out then does lose something. While the server's
-  `AssistState` says a guide is active, the sign is not shown (`BreakRoom.freeBreak(elapsed, cfg, run)`
-  returns false), and it goes at once if the guide is bought while it is up. Proven end to end: three counted
-  walk-outs at L42, the server offers the guide, it is bought 0.5 s into the run, the sign is gone on the next
-  frame and stays gone; the walk-out then loses the guide without a refund (server rule, unchanged).
+  **Not while a guide is active (review fix, §12):** a "Hjelp meg" guide used to be bought for ONE run and a
+  walk-out lost it with no refund. While the server's `AssistState` says a guide is active, the sign is not
+  shown (`BreakRoom.freeBreak(elapsed, cfg, run)` returns false), and it goes at once if the guide is bought while
+  it is up. **Since 30.09 (owner decision, §13) the buyer keeps the guide** until its level is cleared: dying or
+  walking out no longer loses it, and the next attempt at that level starts with it, free. The sign still stays
+  down while a guide is active: a guided run is no plain fresh start, and in a shared run the guide may be
+  someone else's. Proven end to end: three counted walk-outs at L42, the guide offered and bought 0.5 s into the
+  run, the sign gone on the next frame and staying gone; after the walk-out the next attempt at L42 has the guide
+  again at no cost (and no sign), and L41 has neither.
+  **In a shared run too (second review, §13):** the server lets you into a Friends run only if you are a friend
+  of its host, and Roblox never counts you as your own friend, so a HOST who walked out could not get back (the
+  Friends door opened a picker to host a new run and left the friends alone). The Friends door and the picker's
+  own route now put a host back into their own run first; strangers still get a picker. A Group player who walks
+  out is matched back into the same run by the Group door (asserted as well).
 * Inside a run, rest does not exist: the prompt is off, and `BreakRoom.mayRest` fails closed if it fires
   anyway.
 * Roblox's own ~20-minute idle disconnect still applies in the lobby; nothing is lost by it (progress is
@@ -237,7 +286,8 @@ the clock (and hand out free medal time). So rest lives **between runs** (`Break
    attempt starts a fresh clock with the same maze (levels are deterministic). No clock is ever frozen.
 2. **The only promise the sign makes is the server's own**, and it expires before the server's rule does.
    Walking out after the sign is gone costs exactly what it always cost (one counted attempt, which only
-   ever moves the "Hjelp meg" offer closer). It never shows while a bought guide would be lost.
+   ever moves the "Hjelp meg" offer closer). It never shows while a guide is active (and since 30.09 a buyer's
+   guide is kept through a walk-out anyway, §13), and a Friends host who walks out can get back in (§13).
 3. **Nothing can happen while resting.** Resting is only possible in the lobby, any movement ends it, and it
    sends nothing to the server (checked: zero remote calls).
 4. **Hazards are part of the level, not the player**, so there is nothing to dodge by resting: the hazard
@@ -252,12 +302,14 @@ the clock (and hand out free medal time). So rest lives **between runs** (`Break
 | colour grade, air particles, decor, title cards, biome board, campfire, door sign | **client** (`Biome.client`, `RestClient`, `BiomeArt`) | cosmetic and per-player (each player is in their own maze instance at their own level); costs the server nothing and replicates nothing |
 | falling hazards: cells, timeline, telegraph, hit test, knock | **client** | a hazard only harms the local player, whose character physics the client already owns. Nothing is awarded, removed or recorded by it. An exploiter who deletes hazards saves at most 0.66 s per hazard, far less than the teleport exploit `CLAUDE.md` already lists as a platform limit |
 | rest | **client** (lobby only) | it pauses nothing; it sits you down |
-| runs, run clock, medals, records, `accepted`, traps, monsters, the Assist counter, saves | **server, unchanged** | authoritative, as before |
+| runs, run clock, medals, records, `accepted`, traps, monsters, the Assist counter, saves | **server** | authoritative, as before; changed only by two 30.09 rules (§13): a Friends host may rejoin their own run, and a bought guide is kept (saved as `guideLevel`) until its level is cleared |
 
 **Leak review.** The clients read: the `LevelInfo` payload (level, the player's own `accepted`), the
 player's own maze folder (walls and secret doors *into one table without their names*, trap parts, the
 floor, the Lobby door), the player's own character and `Lighting`; and (review fix) the player's own
-`AssistState`, which the server already sends to that player alone, for the door sign. Decor never depends on
+`AssistState`, which the server already sends to that player alone, for the door sign; and (owner decision 30.09)
+the positions of the `Monster` models in the player's own maze, which the server replicates to everyone in it,
+only at the instant of a hazard hit (stagger or knock-down). Decor never depends on
 a wall's kind (the rename control in §2), only on where a wall is (a sinking door is visibly moving for
 everyone); hazards and decor are drawn only near the player, inside the torch. The clients
 fire no remote and add none (checked by hooking every `RemoteEvent` on the server side), set no attribute
@@ -333,6 +385,12 @@ find a maximum, so the documented peak comes from here):
 4 parts + 2 hazard views × 9 parts (the largest kind, the chandelier: ring, inner disc, shadow, hoop, four
 candles, flames) + 1 air box = **123 parts**, under the 140 budget. The every-cell peak is a measurement at
 cell centres (decor is re-selected on entering a cell, from the entry point); the bound is the guarantee.
+**Enforced in code since 30.09 (second review, §13):** `Biomes.validate` refuses any budget whose worst case,
+`Biomes.partBound()` = MaxDecorPieces × MaxPrimsPerPiece + MaxHazardsShown × MaxHazardViewParts + 1, exceeds
+`MaxLocalParts` (a decor cap of 40 is refused: 179 parts), any budget where two air kinds plus one burst per
+hazard view exceed `MaxEmitters`, and any maze light at all; and the client turns the whole biome layer off rather
+than run such a config. `MaxHazardViewParts` (9) is held to the real `BiomeArt` views by `check_labyrintspill_budget`.
+The campfire's light exists only while `MaxLobbyLights` ≥ 1.
 
 | metric | measured peak (any frame of any check) | budget (`Biomes.Budget`) |
 |---|---|---|
@@ -361,44 +419,50 @@ not frame rate: phone frame time is on the Studio list.
 
 ## 7. Gates
 
+(01.10: the pass-1 re-run's counts, with pass 2's new gates, are in §14; the final counts after pass 2 are in §15.)
+
 "Before" is the committed game (`git archive HEAD`, rebuilt and run in a scratch copy). "Previous session"
 is the last gate log the cut-off session wrote (`scratchpad/labyrint_eyecandy/gates_after1.txt`); its last
 source edit came 35 s after that run and was never built or gated (§11). "Resume" is that session's final
 run on its final tree. "Review fix" is the final run after the adversarial review's findings were closed (§12),
-on bundle md5 `5d8c2b9b9c7cc2fcc3153cb7ddac9c7a`.
+on bundle md5 `5d8c2b9b9c7cc2fcc3153cb7ddac9c7a`. "Second review + decisions" is the final run of the 30.09 pass (§13),
+on bundle md5 `0c9940195b2afcd4a1c9de8180fc4ed8`; a second full run gave identical summaries.
 
-| gate | before | previous session | **resume (final)** | **review fix (final)** |
-|---|---|---|---|---|
-| `tests/Assist.spec` | 70 / 0 | 70 / 0 | 70 / 0 | 70 / 0 |
-| `tests/Contributors.spec` | 18 / 0 | 18 / 0 | 18 / 0 | 18 / 0 |
-| `tests/Hazard.spec` (the lava pulse) | 36 / 0 | 36 / 0 | 36 / 0 | 36 / 0 |
-| `tests/Progression.spec` | 33 / 0 | 33 / 0 | 33 / 0 | 33 / 0 |
-| `tests/lightingpresets.spec` | 41 / 0 | 41 / 0 | 41 / 0 | 41 / 0 |
-| `tests/mazeref.spec` | 27 / 0 | 27 / 0 | 27 / 0 | 27 / 0 |
-| `tests/responsive.spec` | 70 / 0 | 70 / 0 | 70 / 0 | 70 / 0 |
-| `tests/touchtarget.spec` | 52 / 0 | 52 / 0 | 52 / 0 | 52 / 0 |
-| `tests/Biomes.spec` | — | 1 115 / 0 | **1 121 / 0** | **1 183 / 0** |
-| `tests/CellHazards.spec` | — | 66 / 0 | **73 / 0** | 73 / 0 |
-| `tests/BreakRoom.spec` | — | 28 / 0 | 28 / 0 | **35 / 0** |
-| `tests/EnvBands.spec` (template) | — | 124 / 0 | 124 / 0 | 124 / 0 |
-| `tests/Rest.spec` (template) | — | 55 / 0 | 55 / 0 | 55 / 0 |
-| `tests/Pacing.spec` | — | 278 / 0 | 278 / 0 | 278 / 0 |
-| **spec total** | **347 / 0** | **2 013 / 0** | **2 026 / 0** | **2 095 / 0** |
-| `robloxemu/check_labyrint` (HUD fit, 11 clients) | PASS | PASS | PASS | PASS |
-| `robloxemu/check_labyrint_spawn` | 34 / 0 | 34 / 0 | 34 / 0 | 34 / 0 |
-| `robloxemu/check_lighting` | 19 / 0 | 19 / 0 | 19 / 0 | 19 / 0 |
-| `robloxemu/check_secretdoors` | 50 / 0 | 50 / 0 | 50 / 0 | 50 / 0 |
-| `robloxemu/check_themes` | 23 / 0 | 23 / 0 | 23 / 0 | 23 / 0 |
-| `robloxemu/check_labyrintspill_hud` (HUD fit, all 13 clients) | — | PASS | PASS | PASS |
-| `robloxemu/check_labyrintspill_biomes` | — | 259 / 0 | 259 / 0 | **291 / 0** |
-| `robloxemu/check_labyrintspill_hazards` | — | 48 / 0 | **50 / 0** | **66 / 0** |
-| `robloxemu/check_labyrintspill_rest` | — | 53 / 0 | **55 / 0** | **67 / 0** |
-| `robloxemu/check_labyrintspill_cards` | — | 14 / 0 | **17 / 0** | 17 / 0 |
-| `robloxemu/check_labyrintspill_budget` | — | 12 / 0 | **15 / 0** | **26 / 0** |
-| `robloxemu/check_labyrintspill_layout` | — | 266 / 0 | 266 / 0 | 266 / 0 |
-| `robloxemu/check_labyrintspill_compile` | — | — | **46 / 0** (new) | 46 / 0 |
-| `robloxemu/check_labyrintspill_shots` | — | — | **54 / 0** (new) | 54 / 0 |
-| **headless check total** | **126 / 0 + PASS** | **778 / 0 + 2 PASS** | **888 / 0 + 2 PASS** | **959 / 0 + 2 PASS** |
+| gate | before | previous session | **resume (final)** | **review fix (final)** | **second review + decisions (30.09)** |
+|---|---|---|---|---|---|
+| `tests/Assist.spec` | 70 / 0 | 70 / 0 | 70 / 0 | 70 / 0 | **78 / 0** |
+| `tests/Contributors.spec` | 18 / 0 | 18 / 0 | 18 / 0 | 18 / 0 | 18 / 0 |
+| `tests/Hazard.spec` (the lava pulse) | 36 / 0 | 36 / 0 | 36 / 0 | 36 / 0 | 36 / 0 |
+| `tests/Progression.spec` | 33 / 0 | 33 / 0 | 33 / 0 | 33 / 0 | 33 / 0 |
+| `tests/lightingpresets.spec` | 41 / 0 | 41 / 0 | 41 / 0 | 41 / 0 | 41 / 0 |
+| `tests/mazeref.spec` | 27 / 0 | 27 / 0 | 27 / 0 | 27 / 0 | 27 / 0 |
+| `tests/responsive.spec` | 70 / 0 | 70 / 0 | 70 / 0 | 70 / 0 | 70 / 0 |
+| `tests/touchtarget.spec` | 52 / 0 | 52 / 0 | 52 / 0 | 52 / 0 | 52 / 0 |
+| `tests/Biomes.spec` | — | 1 115 / 0 | **1 121 / 0** | **1 183 / 0** | **1 216 / 0** |
+| `tests/CellHazards.spec` | — | 66 / 0 | **73 / 0** | 73 / 0 | **83 / 0** |
+| `tests/BreakRoom.spec` | — | 28 / 0 | 28 / 0 | **35 / 0** | 35 / 0 |
+| `tests/EnvBands.spec` (template) | — | 124 / 0 | 124 / 0 | 124 / 0 | 124 / 0 |
+| `tests/Rest.spec` (template) | — | 55 / 0 | 55 / 0 | 55 / 0 | 55 / 0 |
+| `tests/Pacing.spec` | — | 278 / 0 | 278 / 0 | 278 / 0 | **280 / 0** |
+| **spec total** | **347 / 0** | **2 013 / 0** | **2 026 / 0** | **2 095 / 0** | **2 148 / 0** |
+| `robloxemu/check_labyrint` (HUD fit, 11 clients) | PASS | PASS | PASS | PASS | PASS |
+| `robloxemu/check_labyrint_spawn` | 34 / 0 | 34 / 0 | 34 / 0 | 34 / 0 | 34 / 0 |
+| `robloxemu/check_lighting` | 19 / 0 | 19 / 0 | 19 / 0 | 19 / 0 | 19 / 0 |
+| `robloxemu/check_secretdoors` | 50 / 0 | 50 / 0 | 50 / 0 | 50 / 0 | 50 / 0 |
+| `robloxemu/check_themes` | 23 / 0 | 23 / 0 | 23 / 0 | 23 / 0 | 23 / 0 |
+| `robloxemu/check_labyrintspill_hud` (HUD fit, all 13 clients) | — | PASS | PASS | PASS | PASS |
+| `robloxemu/check_labyrintspill_biomes` | — | 259 / 0 | 259 / 0 | **291 / 0** | **324 / 0** |
+| `robloxemu/check_labyrintspill_hazards` | — | 48 / 0 | **50 / 0** | **66 / 0** | **72 / 0** |
+| `robloxemu/check_labyrintspill_rest` | — | 53 / 0 | **55 / 0** | **67 / 0** | **69 / 0** |
+| `robloxemu/check_labyrintspill_cards` | — | 14 / 0 | **17 / 0** | 17 / 0 | 17 / 0 |
+| `robloxemu/check_labyrintspill_budget` | — | 12 / 0 | **15 / 0** | **26 / 0** | **28 / 0** |
+| `robloxemu/check_labyrintspill_layout` | — | 266 / 0 | 266 / 0 | 266 / 0 | 266 / 0 |
+| `robloxemu/check_labyrintspill_compile` | — | — | **46 / 0** (new) | 46 / 0 | 46 / 0 |
+| `robloxemu/check_labyrintspill_shots` | — | — | **54 / 0** (new) | 54 / 0 | 54 / 0 |
+| `robloxemu/check_labyrintspill_friends` | — | — | — | — | **26 / 0** (new) |
+| `robloxemu/check_labyrintspill_guide` | — | — | — | — | **30 / 0** (new) |
+| `robloxemu/check_labyrintspill_popups` | — | — | — | — | **9 / 0** (new) |
+| **headless check total** | **126 / 0 + PASS** | **778 / 0 + 2 PASS** | **888 / 0 + 2 PASS** | **959 / 0 + 2 PASS** | **1 067 / 0 + 2 PASS** |
 
 Stability: the emulator's `Random` is unseeded where the game does not seed it (monster wander), so every
 headless check was run three more times after the final run: identical summaries all three times. (Review
@@ -533,6 +597,35 @@ Not mutated here: `EnvBands.luau` and `Rest.luau` are byte-identical to +1 Jump'
     at the longer range?
 15. **"Sky Ruins" inside a black-fog maze**: does night-sky blue with columns and cloud puffs read as ruins
     in the sky, or just as "blue"?
+16. **(30.09) The stagger**: a hit with a monster within 24 studs keeps you on your feet (shake, flash, a 5 studs/s
+    shove that the humanoid's own control may cancel at once). Does it still read as being hit? Is 24 studs the
+    right distance in a real chase (monsters path around walls; the radius is straight-line)?
+17. **(30.09) A Friends run with two real accounts**: the host walks out under the sign and takes the Friends door
+    back. The server no longer depends on what `IsFriendsWith(own id)` returns, but the whole flow has only been
+    seen headless with a modelled friendship.
+18. **(30.09) The kept guide's lobby card** ("💡 Guide kept ... It lights up again when you go back in") on a phone,
+    and the guide lighting up at once when the player walks back into that level.
+19. **(01.10, pass 2) The TopBoard at the spawn.** Its SurfaceGui (560 x 400 px at 40 px a stud, LightInfluence 0) seen
+    from the pad 15 studs away and on a phone: readable? Does the prompt show at 10 studs, does E or a tap toggle PUBLIC
+    and FRIENDS, and does the board crowd the doors or the Content Contributors pole?
+20. **A real OrderedDataStore and real friends.** `GetSortedAsync`, `GetFriendsAsync` (paged, capped at 200) and
+    `GetNameFromUserIdAsync` have only run headless (the emulator has no `GetFriendsAsync`; the checks supply one). With
+    API access on in the published place: the public top 10 with real names, and one real account's Friends view
+    (look, never film it). With API access off: "Couldn't load the board right now. It will try again in a minute."
+    when the store's calls fail, or "No one on the board yet..." when the store cannot be opened at all: which one
+    Studio does is for Studio to show.
+21. **The critters** (pass 2: rats, butterflies, bats, salamanders, beetles, spiders, swallows, star jellies; 2-3 per
+    band, sharing the decor slots). Under one torch, do they read as living things, do the motions (scurry, climb,
+    flutter, glide, float) look natural, and is any of them ever mistaken for a monster at a glance?
+22. **The session lock with two real servers.** Join server A, then server B with the same account: B must say "Your
+    progress is open in another server right now, so this session will not be saved." Leave A, rejoin: progress is
+    there. And Studio with API access off: the "could not be loaded" banner, read on a phone. (`check_labyrintspill_save`
+    models both; real DataStore timing and `game.JobId` only exist on Roblox.)
+23. **The walk guard on a real fast player.** With the speed perk and corner cutting, a clean run must never get "Too
+    fast: nobody can run this maze in ..." (the floor is `Progression.minClearSeconds` at 0.85 slack; the model's fast
+    player needs at least twice the floor, `Progression.spec`). Try the fastest real runs of the smallest levels.
+24. **The records panel over a bought minimap on a tablet** (pass 2 fix in `LeaderboardClient`, measured headless at
+    1024 x 768 only): the panel must move aside when the minimap is shown.
 
 ---
 
@@ -540,6 +633,10 @@ Not mutated here: `EnvBands.luau` and `Rest.luau` are byte-identical to +1 Jump'
 
 *Not tried in Studio yet.* The two snippets below were run headless against the real server and clients
 (`check_labyrintspill_shots`, 54 / 0) on every shot level; step 1-4 are plain Studio.
+
+**Every thumbnail is 1920x1080** (16:9, what the experience page shows): size the Studio viewport to 16:9 before
+shooting (or crop to it) and export at 1920x1080. The short vertical clips (1080x1920) are a separate list, in
+`MARKETING.md` ("Clip list"), and use the same place and helpers.
 
 **Why there are no coordinates here:** the emulator's `Random` is not Roblox's, so no maze position measured
 headless is valid in Studio. The helper reads the live maze instead.
@@ -663,6 +760,10 @@ first 0.3 s after it, so take a fast burst at the impact; marble columns and clo
 ☕ **The break room** (lobby, no level): the campfire corner at (24, 0, -4) with its benches and the biome
 board beside it; sit by the fire (`Rest by the fire`) for the soft-focus rest look. With `accepted = 480`
 the board shows every biome ticked.
+🏆 **The TOP MAZE RUNNERS board** (lobby, pass 2): it stands at (-15, 5, 2), facing the spawn pad, with a gold trim.
+Camera from the pad, 12-15 studs out, the board and the three doors behind in frame. In the shots place
+(`SaveData = false`, so no board store) it says "No one on the board yet. Clear level 1 and be the first!"; for a
+fuller board, shoot the published place's Studio session with API access on (the public view only: real usernames).
 
 ---
 
@@ -671,25 +772,39 @@ the board shows every biome ticked.
 * **The adversarial review is done and its six findings are closed (§12).** The fixes themselves have not had
   a second independent pass: they are small and each is held by a failing-first test and a mutation sweep with
   controls, but the captain-mode rule (a reviewer before anything ships) applies to them too.
-* **Owner decisions, not taken for him:**
-  * **A guide bought, then a walk-out** (§4, §12 finding 1). Today the server tears a bought "Hjelp meg" guide
-    down with the run, no refund; the fix only stops the sign from promising otherwise. Keeping the guide for
-    the next attempt on the same level would be kinder to a stuck child, but it is a server change to the
-    Assist economy (and needs its own exploit review: a guide must not be banked for a later level).
-  * **The ring's colour** (§3, §12 finding 4) changed from the trap's yellow to blue on the reviewer's
-    reasoning and the server's own palette rule; Studio decides whether this blue reads well in every biome.
-  * **Themed trap skins** (in the original theme direction) were deliberately **not** built. The trap's plate
-    and its yellow/orange phases are the survival signal and live on the server; a client skin around the
-    plate would either make traps easier to spot in the dark (a difficulty change) or muddy the signal. If
-    Gustav wants them, the safe version is a non-glowing rim outside the 7-stud plate, checked against the
-    signal rule.
-  * **How far the later biomes are.** The first three arrive at 5, 13 and 41 minutes; Crystal at ~2.4 h,
-    Crypt ~6 h, Sky Ruins ~17 h, Astral ~39 h of play in the model (no deaths). That makes the last two the
-    long-term brag, like +1 Jump's galaxy. The knob is `from` in `Biomes.Bands`.
-  * **The knock with a monster behind** (§3): keep it (the brief says hazards knock you down), or make it a
-    stagger without `PlatformStand`.
-* Not committed, not pushed, not published. Studio not opened.
+* **Owner decisions.** The owner decided on 2026-09-30: "take the recommended option for all". Where no option
+  was marked as recommended, the one that best serves the brief (fair, fun, never punishing, never exploitable)
+  was taken, and the reason is given. Details, tests and mutants in §13.
+  * **A guide bought, then a walk-out** (§4, §12 finding 1). **DECIDED 2026-09-30 (owner: take recommended):
+    the guide is KEPT** until its level is cleared: dying or walking out no longer loses it, the next attempt at
+    that level starts with it at no cost, and it is saved with the player's data. No option was marked; this is
+    the one the text called kinder to a stuck child, and "never punishing" decides it. Its exploit review (§13):
+    it lights only on the level it was bought for (never banked for a harder one), cannot be bought twice, is
+    used up by a clear, and a guided run still gives no time record.
+  * **The ring's colour** (§3, §12 finding 4). **DECIDED 2026-09-30 (owner: take recommended): blue stays**, as
+    built on the reviewer's reasoning and the server's own palette rule, now also held at least delta E 25 from
+    every colour the maze asks you to step on (second review, §13). Studio still judges how it reads (§8, 4).
+  * **Themed trap skins.** **DECIDED 2026-09-30 (owner: take recommended): not built.** The text recommended
+    against them: the trap's plate and its yellow/orange phases are the survival signal, and a skin would either
+    make traps easier to spot in the dark or muddy that signal.
+  * **How far the later biomes are.** **DECIDED 2026-09-30 (owner: take recommended): they stay where they are**
+    (Forge at 40.6 min, Crystal ~2.4 h, Crypt ~6.3 h, Sky Ruins ~17.5 h, Astral ~38.9 h of normal play in the
+    model), the last two being the long-term goal. `Pacing.spec` now holds it: exactly one biome's fanfare lands
+    30-45 min into normal play (the owner's brag window: the Lava Forge, 40.6), and the last two stay over 10 h away.
+  * **The knock with a monster behind** (§3). **DECIDED 2026-09-30 (owner: take recommended): a stagger, but only
+    when a monster is close enough to catch you** (within 24 studs); otherwise the knock-down stays. No option was
+    marked; the owner's standard says "a hit costs a little, never a run", which a knock-down with a monster on
+    your heels breaks, while the brief's knock-down is kept everywhere it cannot cost the run.
+* **Re-checked 01.10 (pass 1 re-run, §14):** no owner decision is open. Each of the five above is recorded as
+  "DECIDED 2026-09-30 (owner: take recommended)", and the mutations that hold them (O1-O5) were re-run on the
+  current tree and still kill. The "open items" in `docs/superpowers/specs/2026-07-25-lobby-modes-design.md` §10
+  were planning choices for the lobby modes, settled by the build (doors with prompts, the friends check), not
+  owner decisions.
+* The 30.09 pass and the 01.10 re-run are not committed, pushed or published. Studio not opened.
 * §8 in full.
+* **01.10, pass 2 (§15):** the standard's items are all built or have a written reason; what is left is the night
+  shift's (§8, §9, `MARKETING.md` "Clip list"), the clip scenarios marked **new** in `tools/film_game.py` (the tools
+  owner's), and replacing the live store text with `tools/store_text.py` after the next publish.
 
 ---
 
@@ -801,3 +916,384 @@ summaries. A lint for writes to undeclared globals is clean on every `src/shared
 §9-§11), `_budget.luau` (every-cell sweep, bound), `_cards.luau` and `_layout.luau` (texts from the shared
 helpers), and the rebuilt `build/labyrint-spill.luau`. Scratch: `scratchpad/lab_fix` (mirrors, sweep harness,
 logs). Not committed, not pushed, not published, Studio not opened.
+
+---
+
+## 13. Second review and the owner's decisions (30.09.2026)
+
+A second independent reviewer reported five findings, all low. The same day the owner decided every open
+question in §10: "take the recommended option for all". This pass was the only writer in `labyrint-spill`.
+Each finding was **reproduced first on the unchanged tree** (numbers below), then closed test-first: the new
+assertion was run against the unfixed build and watched failing for the stated reason, then the game (never the
+test) was changed. Each owner decision got its assertions first too. Two rules changed on the server this time.
+
+| # | finding | reproduced (unchanged tree) | fix | failed first |
+|---|---|---|---|---|
+| 1 | A Friends host who walks out under "it's free, nothing is lost" cannot get back to their friends. | New `check_labyrintspill_friends` (Roblox's friendship modelled in the check: A and B friends, nobody their own friend): A hosts L31, the sign is up 1.0 s in, B joins, A walks out 1.5 s in; the Friends door leaves A in no maze and sends A a picker; StartRun("friends") puts A in a new `Maze_2`; B stays alone in `Maze_1`. | `findFriendsInstance` on the server: the player's own Friends run first, then a friend's, never a stranger's or a full one; used by the Friends door and by StartRun. Group runs already kept the promise (asserted). | 4 failures, e.g. "the Friends door puts the host back in the same run as their friend -> got nil, want Maze_1"; "StartRun(friends) ... -> got Maze_2". |
+| 2 | The ring is only held away from the trap's colours; a ring in a "step on this" colour passes every gate. | RGB distances through every grade, exactly the reviewer's: deep-blue button 51.2-52.8, cyan button 56.6-61.9, guide dots 64.8-69.3; `Biomes.validate` accepted RingColor (70,110,255) and (90,235,255). | `Biomes.StepOnColors` (the server's four button colours, guide dots, coin, gem, exit pad; `_biomes` §0 parses them back out of the server script) and a `validate` rule: the ring stays at least CIE76 delta E 25 from each, through every biome grade (`Biomes.lab/deltaE/graded`, pinned to known values). The shipped ring passes: nearest is the deep-blue button at 31.8 (the game's own cyan button and guide dots are 11.0 apart). | `Biomes.spec`: the colour maths absent, "a ring in the deep-blue secret button's own colour is rejected -> got true", and the same for the guide cyan, the cyan button and a half-way blue (12 failures in that section). |
+| 3 | The biome card does not wait for the daily-reward popup; on a phone the popup covers it. | New `check_labyrintspill_popups` (800x360, touch, the Group door 1.6 s after spawn, L26): card and popup both visible **2.67 s** (the reviewer's figure), 0.00 s of card after the popup. | `Biome.client` waits for both centre cards (`OppsummeringsKort`, `DagligBelonning`), and a card already on screen steps aside when one pops over it and comes back whole afterwards, without a second fanfare flash (a card that has waited 8 s is shown regardless). After: **0.03 s** (the one frame in which the popup appears), 3.53 s of card after it, one flash. | 2 failures: "never on screen together for more than one frame (2.67 s)", "shown in full once the popup has gone (0.00 s)". |
+| 4 | Decor stands in front of the free-break sign on some levels. | Pure count: `decorFor` dressed the Lobby door's face (fine cell 1,0, +Z) on **220 of 500** levels. New §7 of `_biomes`, real server and client: 2 parts in front of the sign at L2 and L5, 3 at L103 and L108, 1 at L50 and L55 plus 1 inside the door slab; the controls L3 and L51 had 0. | `Biomes.reservedFace`: `decorFor` never dresses the start cell's back wall (the server always starts a maze in cell 0,0 and puts the door on its -Z wall); a rule on grid position, like every decor rule. After: 0 everywhere; the same face one wall along and the door wall's other side are still dressed. | `Biomes.spec` "no level dresses the Lobby door's face -> got 220, want 0"; `_biomes` §7: 8 failures. |
+| 5 | The 140-part budget is not enforced by any code in the game. | `Biomes.validate` accepted MaxDecorPieces = 40 (worst case 179 parts) and MaxHazardsShown = 9; MaxLocalParts, MaxEmitters, MaxMazeLights and MaxLobbyLights were read by nothing shipped. | `validate` refuses a worst case (`Biomes.partBound()` = decor cap x parts per piece + hazard views x `MaxHazardViewParts` + 1 air box) over `MaxLocalParts` (123 <= 140 shipped), air + bursts over `MaxEmitters`, and any maze light; the client then keeps the biome layer off. `_budget` holds `MaxHazardViewParts` (9) to the real views; the campfire's light exists only while `MaxLobbyLights` >= 1. | `Biomes.spec`: 13 failures, e.g. "a decor cap of 40 is rejected -> got true". |
+
+**The owner's decisions** (recorded in §10 as "DECIDED 2026-09-30 (owner: take recommended)"):
+
+| decision | taken | why | held by |
+|---|---|---|---|
+| A guide bought, then a walk-out | **The guide is kept** until its level is cleared: dying or walking out no longer loses it; the next attempt at that level starts with it at no cost; a run that moves on into that level lights it; it is saved with the player (`guideLevel`); the lobby card says "Guide kept", and the offer no longer says "for this run". | No option was marked. "Never punishing": a stuck child who bought a guide and was then caught by a monster lost up to 250 coins. Exploit review: it lights only on the level it was bought for (never banked for a harder one), cannot be bought twice (`inst.assist`), is used up by a clear (`Assist.afterClear`, for everyone in the clearing run), is decided by the server from saved data, and a guided run still gives no time record. In a shared run a kept guide lights for the whole run, exactly as buying it there would. | `Assist.spec` (8 new), `check_labyrintspill_guide` (new, 30), `check_labyrintspill_rest` §7 (D), whose two assertions of the old rule (the guide lost on a walk-out, the next attempt without it) now expect the new rule: the only existing assertions changed, because the rule changed. |
+| The ring's colour | **Blue stays**, now also at least delta E 25 from every step-on colour (finding 2). | The recommendation in §10 (the reviewer's reasoning and the server's palette rule); Studio still judges how it reads. | `Biomes.spec`, `_hazards` §1. |
+| Themed trap skins | **Not built.** | The recommendation in §10: the trap's plate and phases are the survival signal. | Unchanged code; the trap-signal rules in `Biomes.validate`. |
+| How far the later biomes are | **They stay**: Forge 40.6 min, Crystal ~2.4 h, Crypt ~6.3 h, Sky Ruins ~17.5 h, Astral ~38.9 h of normal play in the model. | The recommendation in §10 (the long-term brag), and the owner's standard: a brag moment 30-45 min in, a long-term goal beyond. | `Pacing.spec`: exactly one biome's fanfare lands 30-45 min in (the Lava Forge, 40.6), and the last two stay over 10 h away (17.5 h, 38.9 h). |
+| The knock with a monster behind | **A stagger when a monster is within 24 studs** (the same shake, flash and shove, on your feet); the knock-down everywhere else. | No option was marked. The standard says "a hit costs a little, never a run"; a knock-down with a monster on your heels breaks it, and the brief's knock-down is kept wherever it cannot. `CellHazards.validate` holds the radius over the worst case: (15 + 5) x 0.8 + 4 = 20 studs. | `CellHazards.spec` (10 new), `_hazards` §12 (a monster at 10 and at 23 studs: no `PlatformStand`, still a flash and a 5 studs/s shove; at 26: knocked down). Every other `_hazards` section now parks the run's monsters far away first: headless they never move, and on L60 a monster stood within 24 studs of the cells tested, which turned 6 knock-down assertions into staggers until it was parked. |
+
+**Mutation sweep** (`scratchpad/lab_p1_0930/sweep.py` + `muts.py`, `muts2.py`; logs `sweep_r1.log`, `sweep_r2.log`).
+Same harness as §12: four workers on scratch copies verified byte-identical to the real tree; for every
+mutation exactly one occurrence in its file and in the baseline bundle, the rebuilt bundle proved equal to the
+baseline with that single replacement, all 31 suites run (14 specs, 17 checks), the original bytes restored and
+md5-checked; every worker's copy was identical to the real tree at the end, and the real tree's sha256 was
+unchanged across both rounds. **40 mutations: 40 killed, 40 reached the bundle. 5 controls: 5 survived.**
+
+| id | mutation | killed by |
+|---|---|---|
+| F1a / F1b / F1c | the host's own run not looked for / the Friends door never joins / a stranger may join | `_friends` |
+| F2a | the step-on rule off | `Biomes.spec` |
+| F2b / F2c | the ring in the deep-blue button's / the guide dots' colour (the reviewer's two survivors) | `Biomes.spec`; `validate` then turns the biome layer off, so 7 checks too |
+| F2d / F2e | the mirror drifts / the server's palette changes without it | `Biomes.spec` + 7 checks / `_biomes` §0 |
+| F2f / F2g | delta E floor 5 / a wrong Lab conversion | `Biomes.spec` |
+| F3a / F3b / F3c | the card waits only for the summary card / never steps aside / flashes again | `_popups` |
+| F4a / F4b / F4c | no reserved face / the wrong face / `decorFor` ignores it | `Biomes.spec`, `_biomes` §7 |
+| F5a / F5d / F5e | the part bound / the emitter rule / the maze-light rule off | `Biomes.spec` |
+| F5b | the reviewer's O5: decor cap 40 | `Biomes.spec` + 7 checks |
+| F5c | `MaxHazardViewParts` 8 (under the real 9) | `Biomes.spec`, `_budget` |
+| F5f | `MaxLobbyLights` 0 | `_biomes` §6, `_rest` |
+| O5a / O5d / O5e | `hitMode` always knocks / the safe-radius rule off / radius 12 | `CellHazards.spec` (O5a also `_hazards`; O5e also 3 checks, with hazards then off) |
+| O5b / O5c | the client ignores `hitMode` / sees no monsters | `_hazards` §12 |
+| O5f | `MonsterSpeedMax` mirrored as 12 | `_biomes` §0 |
+| O1a / O1f / O1g | a kept guide never lit / buying forgets the level / a run moving on into the level does not light it | `_guide` (and `_rest` for O1a, O1f) |
+| O1b / O1c | the guide lights on any level / is never used up | `Assist.spec`, `_guide` (+ `_rest` for O1b) |
+| O1d / O1e / O1h / O1i / O1j | a clear does not use it up / not saved / no lobby card / AssistState never says kept / the offer still says "for this run" | `_guide` |
+| O4a / O4b | the Forge moved to L66 / Sky Ruins to L181 | `Pacing.spec` |
+| CONTROL x5 | the ring (100,161,255); safe radius 23; delta E floor 26; two punctuation changes in the guide texts | survived |
+
+**Gates** (§7, last column): specs **2 148 / 0** (14 files), headless checks **1 067 / 0 + 2 PASS** (17 files), on
+bundle md5 `0c9940195b2afcd4a1c9de8180fc4ed8`; a second full run gave identical summaries. The lint for writes to
+undeclared globals is clean on every `src` file.
+
+**Files written in this pass:** `labyrint-spill/src/server/MazeGame.server.luau`, `src/shared/Biomes.luau`,
+`CellHazards.luau`, `Assist.luau`, `BreakRoom.luau` (comments only), `src/client/Biome.client.luau`,
+`RestClient.client.luau`, `AssistClient.client.luau`, `tests/Biomes.spec.luau`, `CellHazards.spec.luau`,
+`Assist.spec.luau`, `Pacing.spec.luau`, `EYECANDY.md`, `CLAUDE.md`; in robloxemu, `check_labyrintspill_friends.luau`,
+`_guide.luau`, `_popups.luau` (new), `_biomes.luau` (§0 mirrors, §7), `_budget.luau`, `_hazards.luau` (§12, parked
+monsters), `_rest.luau` (§7 D), `_lib.luau` (its helpers follow `ctx.plr`, so a check can rejoin), and the rebuilt
+`build/labyrint-spill.luau`. Not committed, not pushed, not published; Studio not opened.
+
+**Not done here** (the complete-game standard, left for a later pass): the highscore board is public only (no
+Friends board, key `tostring(userId)` rather than `u_<userId>`, no reached-first tie-break); saves use `SetAsync`
+without a session lock or owner token; the README has no store description of at most 1000 characters; `MARKETING.md`
+has no 5-10 clip list in the standard's form.
+
+---
+
+## 14. Pass 1 re-run (01.10.2026)
+
+The workflow ran pass 1 again. The tree it found was not the tree §13 left: pass 2 had worked in `labyrint-spill`
+from 01.10 00:09 to 00:50 and was cut off before writing any docs. Its uncommitted work is still there, untouched by
+this re-run except for one rule below: critters in every band (`Biomes.Critters`, `Biome.client`, `BiomeArt`), a
+highscore board (`Board.luau`, `BoardConfig.luau`, `BoardClient`), server changes (save locks, a walk guard), and the
+checks `_board`, `_critters`, `_journey`, `_overlap` and `_save`. Every gate was green on it before this re-run
+touched anything (first column below). Each of the five second-review findings was measured again on that tree.
+
+| # | finding | measured on the current tree (before any edit) | verdict |
+|---|---|---|---|
+| 1 | A Friends host who walks out under the free-break sign cannot get back. | The reviewer's scenario through the real server (friendship modelled as in `_friends`): the sign reads "Need a break? Walk out now — it's free, nothing is lost" 1.0 s in; B joins `Maze_1`; A walks out at 1.5 s and is in no maze; the Friends door puts A back in `Maze_1`, **0** OpenPicker sent, B still in `Maze_1`. | Does not reproduce (closed 30.09). |
+| 2 | A ring in a "step on this" colour passes every gate. | `Biomes.validate` refuses RingColor (70,110,255) ("looks like the deep-blue secret button") and (90,235,255) ("looks like the cyan secret button"), and the positive control (255,205,60). The shipped ring keeps CIE76 delta E **31.8** from its nearest step-on colour (the deep-blue button) through every grade. | Does not reproduce (closed 30.09). |
+| 3 | The biome card does not wait for the daily-reward popup. | `_popups` (800x360, touch, the Group door 1.6 s after spawn): card and popup on screen together **0.03 s** (the reviewer measured 2.67 s), 3.53 s of card after the popup. | Does not reproduce (closed 30.09). |
+| 4 | Something client-built stands in front of the free-break sign. | **Decor:** `decorFor` dresses the Lobby door's face on **0** of 500 levels (220 with `reservedFace` switched off in the probe); `_biomes` §7 counts 0 decor parts in front of the sign and 0 in the door slab at L2, L5, L103, L108, L50, L55 and the controls L3, L51. **Critters (pass 2's new dressing): reproduces.** A probe over L1-481 through the real server and clients (two walks a level in the sign's 6 s: away along the route to the exit, and 2 s out then back toward the door): a crypt **spider** climbing the start cell's back wall stood in front of the sign while it was up on **37 levels** (39 walks); **12 843** critter part-frames inside the door slab (rats, salamanders, spiders), **209 864** in the start cell. Cause: `findHome` could home a critter in the start cell once the player had walked out of it. | **Reproduced in a new form; fixed.** |
+| 5 | The 140-part budget is not enforced in code. | `validate` refuses MaxDecorPieces 40 (179 parts) and MaxHazardsShown 9 (186 parts); the shipped bound is 123 <= 140. Critters take decor slots, and `validate` holds MaxCritters <= MaxDecorPieces and every critter to MaxPrimsPerPiece parts, so the bound still covers them. | Does not reproduce (closed 30.09). |
+
+**The fix (finding 4, critters).** `Biomes.critterHomeFree(fx, fy)`: the open cell the reserved face looks into (the
+start cell, fine 1,1) is no critter's home; `Biome.client`'s `findHome` asks it. A rule on grid position only, like
+`reservedFace`. Nothing visible is lost: the player starts in that cell and a critter never shares the player's cell.
+Failing first, on the unfixed tree: `Biomes.spec` 2 failures ("the cell the Lobby door's face looks into ... is no
+critter's home -> got true"; "exactly one open cell of a 30 x 30 maze is closed to critters -> got 0, want 1");
+`_biomes` §8 (new: L161-200, the out-and-back walk, every frame of the sign's window) 3 failures: **559** critter
+part-frames in front of the sign on 13 of 40 levels, **2 329** in the door slab, **16 620** in the start cell.
+After: 0, 0 and 0, with the sign up in 6 933 of 7 213 frames and critters on show in all 7 213 (the exposure is
+asserted, so a 0 is not a walk without critters). The whole-game probe after the fix: **0** walks with a critter in
+front of the sign, **0** part-frames in the door slab, **0** in the start cell, on all 481 levels (179 446 frames).
+
+**Owner decisions.** None open. The five in §10 are recorded "DECIDED 2026-09-30 (owner: take recommended)", and
+every mutation that holds them still kills on the current tree (below). The "open items" in
+`docs/superpowers/specs/2026-07-25-lobby-modes-design.md` §10 were planning choices for the lobby modes, settled by
+the build; no owner decision is pending there.
+
+**Mutation sweep** (`scratchpad/lab_p1r_1001/sweep.py` + `muts_r.py`, log `sweep_r1.log`, results `sweep_r1.json`;
+the 30.09 harness). Five workers on scratch copies verified byte-identical to the real tree; each worker's first job
+was a no-op run that had to come out green on all 37 suites (it did, five times). For every mutation: exactly one
+occurrence in its file and in the baseline bundle, the rebuilt bundle proved equal to the baseline with that single
+replacement, all 37 suites run (15 specs, 22 checks), the original bytes restored and md5-checked. Every worker's
+copy was identical to the real tree at the end, and the real tree's 80 source, test and check files had the same
+sha256 after the sweep as before it. **43 mutations: 43 killed, 43 reached the bundle. 11 controls: 11 survived.**
+
+| id | mutation | killed by |
+|---|---|---|
+| N1 | the client homes critters in the start cell again | `_biomes` §8 |
+| N2 | `critterHomeFree` closes nothing | `Biomes.spec`, `_biomes` §8 |
+| N3 | it closes the next cell in instead of the start cell | `Biomes.spec`, `_biomes` §8 |
+| F1a-c, F2a-g, F3a-c, F4a-c, F5a-f, O1a-j, O4a-b, O5a-f | §13's 40 mutations, re-run on the current tree (F1b retargeted to its one line: the server script has CRLF line ends since pass 2, and the bundle carries LF) | all killed, by the same suites as in §13, plus pass 2's new checks wherever a mutant turns the biome layer off |
+| CONTROL | one spider leg 1/255 redder (new); §13's five controls; five no-op baselines | survived |
+
+**Gates** (bundle md5 `1efe2dcd03d264bd9b64a96a099d12ca`; a second full run gave identical summaries):
+
+| gate | start of the re-run (pass 2's tree, bundle `1cb110bf...`) | end of the re-run |
+|---|---|---|
+| `tests/Assist.spec` | 78 / 0 | 78 / 0 |
+| `tests/Biomes.spec` | 1 367 / 0 | **1 371 / 0** |
+| `tests/Board.spec` (pass 2) | 66 / 0 | 66 / 0 |
+| `tests/BreakRoom.spec` | 35 / 0 | 35 / 0 |
+| `tests/CellHazards.spec` | 83 / 0 | 83 / 0 |
+| `tests/Contributors.spec` | 18 / 0 | 18 / 0 |
+| `tests/EnvBands.spec` | 124 / 0 | 124 / 0 |
+| `tests/Hazard.spec` | 36 / 0 | 36 / 0 |
+| `tests/Pacing.spec` | 280 / 0 | 280 / 0 |
+| `tests/Progression.spec` | 43 / 0 | 43 / 0 |
+| `tests/Rest.spec` | 55 / 0 | 55 / 0 |
+| `tests/lightingpresets.spec` | 41 / 0 | 41 / 0 |
+| `tests/mazeref.spec` | 27 / 0 | 27 / 0 |
+| `tests/responsive.spec` | 70 / 0 | 70 / 0 |
+| `tests/touchtarget.spec` | 52 / 0 | 52 / 0 |
+| **spec total (15 files)** | **2 375 / 0** | **2 379 / 0** |
+| `check_labyrint` | PASS | PASS |
+| `check_labyrint_spawn` | 36 / 0 | 36 / 0 |
+| `check_labyrintspill_biomes` | 324 / 0 | **329 / 0** |
+| `check_labyrintspill_board` (pass 2) | 74 / 0 | 74 / 0 |
+| `check_labyrintspill_budget` | 28 / 0 | 28 / 0 |
+| `check_labyrintspill_cards` | 17 / 0 | 17 / 0 |
+| `check_labyrintspill_compile` | 49 / 0 (41 sources) | 49 / 0 |
+| `check_labyrintspill_critters` (pass 2) | 53 / 0 | 53 / 0 |
+| `check_labyrintspill_friends` | 26 / 0 | 26 / 0 |
+| `check_labyrintspill_guide` | 30 / 0 | 30 / 0 |
+| `check_labyrintspill_hazards` | 72 / 0 | 72 / 0 |
+| `check_labyrintspill_hud` | PASS | PASS |
+| `check_labyrintspill_journey` (pass 2) | 52 / 0 | 52 / 0 |
+| `check_labyrintspill_layout` | 266 / 0 | 266 / 0 |
+| `check_labyrintspill_overlap` (pass 2) | 28 / 0 | 28 / 0 |
+| `check_labyrintspill_popups` | 9 / 0 | 9 / 0 |
+| `check_labyrintspill_rest` | 69 / 0 | 69 / 0 |
+| `check_labyrintspill_save` (pass 2) | 63 / 0 | 63 / 0 |
+| `check_labyrintspill_shots` | 54 / 0 | 54 / 0 |
+| `check_lighting` | 19 / 0 | 19 / 0 |
+| `check_secretdoors` | 50 / 0 | 50 / 0 |
+| `check_themes` | 23 / 0 | 23 / 0 |
+| **headless check total (22 files)** | **1 342 / 0 + 2 PASS** | **1 347 / 0 + 2 PASS** |
+
+The lint for writes to undeclared globals is clean on both changed source files.
+
+**Files written in the re-run:** `labyrint-spill/src/shared/Biomes.luau` (`critterHomeFree`),
+`src/client/Biome.client.luau` (`findHome` asks it; a comment), `tests/Biomes.spec.luau` (4 assertions),
+`EYECANDY.md` (the state paragraph, §7 and §10 notes, this section), `CLAUDE.md` (one bullet); in robloxemu,
+`check_labyrintspill_biomes.luau` (§8, 5 assertions) and the rebuilt `build/labyrint-spill.luau`. Not committed,
+not pushed, not published; Studio not opened. Pass 2's own work still needs its docs (CLAUDE.md and this file say
+nothing about the board, the save locks, the walk guard or the critters beyond this section).
+
+---
+
+## 15. Pass 2: complete against the standard (01.10.2026)
+
+Pass 2 worked in this game from 01.10 00:09 to 00:50 and was cut off by a usage limit before writing any docs; pass 1
+then re-ran (06:40-07:35, §14) on top of its uncommitted work. This resume (from 07:36) read every changed and new
+file, ran every gate first (identical to §14's end: specs **2 379 / 0** in 15 files, checks **1 347 / 0 + 2 PASS** in
+22 files, bundle `1efe2dcd...`), checked the game against every item of `docs/complete-game-standard.md` itself, built
+what was missing test-first, mutation-tested pass 2's assertions (never swept before) and its own, and wrote the docs.
+Not committed, pushed or published; Studio not opened.
+
+### What pass 2 had built (found complete, now documented)
+
+* **The highscore board** (`Board.luau` = +1 Jump's template, `BoardConfig.luau`, `BoardClient`, the server's board
+  section): metric `accepted`, the highest level cleared in sequence, measured by the server at the exit behind the
+  walk guard, never by a god-mode run; `LabyrintTopp_v3`, key `u_<userId>`, value `level * 2e9 + (2e9 - reachedAtUnix)`
+  (`acceptedAt` is saved with the profile), written only when it rises (`writeBoard` + `Board.keepHigher` in an
+  `UpdateAsync`); the public top 10 fetched at most every 60 s and shown both on the old HUD panel and on the board;
+  friends only on demand (`GetFriendsAsync`, at most 200, cached 300 s, every friend's value cached 120 s, a 40 + 1/s
+  read limiter that leaves 10 of Roblox's budget); a physical board ("TOP MAZE RUNNERS", lobby (-15, 5, 2), 15 studs
+  from the pad, facing it, gold trim) with a ProximityPrompt (E) that toggles PUBLIC and FRIENDS per player; names from
+  the server, the friends list or `GetNameFromUserIdAsync`, cached in memory, never stored; useful notes for an empty
+  public board, no friends, friends with no levels, a failed friends fetch, and "checking N of M". The old
+  `LabyrintTopp_v2` (raw level) is carried over once per server start. Held by `tests/Board.spec` (66) and
+  `check_labyrintspill_board`.
+* **Session lock and owner token** (`loadPlayer`, `savePlayer`, `grantOnce`): one `UpdateAsync` to load, which takes
+  the lock unless another live server holds it (then the session is read-only and the player is told); every save an
+  `UpdateAsync` that lands only while the record carries this session's token (otherwise the session stops saving and
+  says so); the autosave (60 s) renews the 180 s lock, leaving releases it, an expired lock is taken over; the
+  starter gift, the contributor reward and the daily reward are granted inside one write or rolled back.
+  `check_labyrintspill_save` (63).
+* **The walk guard** (`Progression.minClearSeconds`, `CONFIG.WalkGuard`, slack 0.85): an exit reached faster than the
+  shortest route (secret doors open, corners cut) can be walked at the top speed does not count, and the player is
+  told "Too fast: nobody can run this maze in ... s". `tests/Progression.spec` (43), `check_labyrintspill_journey`.
+* **`plr.RespawnLocation`** = the lobby pad, set on join and for players who were in before the lobby existed.
+* **Critters in every biome** (`Biomes.Critters`, `crittersAt`, `critterPose`, `BiomeArt`, `Biome.client`): rats,
+  butterflies, bats, salamanders, beetles, spiders, swallows, star jellies; 2-3 near the player, inert, in open cells,
+  never the start cell (§14), sharing the decor cap. `Biomes.spec`, `check_labyrintspill_critters` (53).
+* **HUD rule 4b asserted** by `check_labyrintspill_overlap` (28), with the reason it is not switched on in the stock
+  gate written in `check_labyrintspill_hud` (re-measured here: with `overlap = true` the stock gate reports **13**
+  overlaps, every one a closed ScreenGui counted as shown or a `UISizeConstraint` ignored). Its first run found a
+  real defect, fixed in pass 2: `LeaderboardClient` looked for the minimap's `Kart` frame at its old place, so on a
+  tablet the records panel lay over a bought minimap (120 x 120 px on 1024 x 768).
+* **The whole player path, walked** (`check_labyrintspill_journey`, 52): joins before the server script runs, is
+  spawned on the pad by the engine, walks to the Solo door, uses the prompt, picks Continue, walks level 1 cell by
+  cell over every coin to the exit, is refused a teleport to level 2's exit (and told why), walks it, walks out
+  through the Lobby door, buys the Longer torch with the coins it earned, leaves (the lock is released), rejoins:
+  coins, trophies, the perk, `accepted` 2 and the board entry are all there.
+
+### The standard, item by item (checked on this tree)
+
+| § | item | state | held by |
+|---|---|---|---|
+| 1 | core loop reachable from join, whole path walked headless (spawn, objective, loop, earn, spend, rejoin) | done (pass 2) | `check_labyrintspill_journey` |
+| 1 | `plr.RespawnLocation` at a real, enabled SpawnLocation | done (pass 2) | `check_labyrint_spawn` (36), `_journey` |
+| 1 | server-authoritative, nothing secret replicates | holds; one written reason | the maze is geometry every player sees, and a secret wall is coloured like its button on purpose; the server sets one attribute (`MazeFolder`, the player's own maze). **No salt on `WorldSeed`, by the owner's design**: every player gets the same mazes so medal times are fair; memorising a visible maze is learning a route, and the board ranks levels cleared in order, not luck (`CLAUDE.md`, "Feller å kjenne til") |
+| 1 | DataStore: pcall, lock, owner token, string keys, one-time grants in one atomic write | done (pass 2) | `check_labyrintspill_save` |
+| 1 | no silent no-ops | done; one gap closed here | a refused exit, a read-only session, a failed friends fetch say why; **new**: a board whose store is down says so instead of "Loading..." for ever (`_boarddown`) |
+| 2 | Fx preset and signature particles | done (before) | `Fx.applyLighting(Fx.Presets.Maze)`; coins and gems Neon and spinning; biome air, impact bursts, the campfire |
+| 2 | 5+ bands with light, colour, scenery, critters, weather | done (8 biomes; critters pass 2) | light is hue only, on purpose (darkness is the mechanic, §2 rule 1); `Biomes.spec`, `_biomes`, `_critters` |
+| 2 | hazards rare, telegraphed, ring marks the zone, one at a time, a hit costs a little | done; one rule enforced here | one near-hit per 2.59 min (`Pacing.spec`); ring blue and stagger near a monster (owner, §13); **new**: one at a time is enforced in `CellHazards.validate` |
+| 2 | rest / pause that is no exploit | done (before) | §4; `BreakRoom.spec`, `_rest` |
+| 2 | budgets measured and capped in code | done (30.09) | `Biomes.validate` (`partBound` 123 <= 140), `_budget` |
+| 2 | brag moment in 30-45 min, long-term goal beyond | done (30.09) | `Pacing.spec`: exactly one biome fanfare in the window, the Lava Forge at 40.6 min (normal player, no deaths: a lower bound); Sky Ruins 17.5 h, Astral Labyrinth 38.9 h, and the board |
+| 2 | phone first: UIScale root, nothing under the thumbstick or jump, 44 px, rule 4b | done | stock gate (`check_labyrint`, `_hud`), `touchtarget.spec` (52), `_overlap` with the written reason in `_hud` |
+| 3 | public + friends board, first-reached tie-break, physical board with toggle | done (pass 2); two gaps closed here | `Board.spec`, `_board` (**new**: god-mode users never on it), `_boarddown` (**new**) |
+| 3 | promo codes public, no Robux cost, no gambling or pay-to-win | holds | no codes; `RobuxConfig.EnableRobux = false`; perks are bought with coins earned in play |
+| 4 | README store text (<= 1000 chars, honest, no coloured squares) | **new** | `tests/docs_check.py`: 984 characters, every number checked against the source |
+| 4 | EYECANDY needs-Studio list and 1920x1080 thumbnail shot list | updated | §8 (24 items: 6 new for pass 2), §9 (1920x1080, a board shot) |
+| 4 | clip list: 5-10 clips, 7-15 s, vertical 1080x1920, with staging | **new** | `MARKETING.md` "Clip list": 9 clips (2 exist, 7 new), `docs_check.py` |
+| 4 | CLAUDE.md: every gate and the traps | updated | the gate table and "Feller å kjenne til"; `docs_check.py` fails if a gate file is not named |
+| 4 | every gate green, TDD, mutation-tested with a control | done | below |
+| 5 | Studio, thumbnails, clips, publish, marketing | night shift | §8, §9, `MARKETING.md` |
+
+### What this pass built, each test first
+
+1. **One falling hazard at a time, enforced** (`CellHazards.validate`). It held already: two hazard cells are at
+   least `MinSpacing` (3) maze cells apart, 54 studs, more than two `ShowRadius` (52), so no spot has two near it.
+   Measured: the closest two hazard cells on any of 400 levels are 56.9 studs apart, and a probe through
+   `Pacing.spec`'s walks (240 levels, 1 430 min, every 0.05 s) found **0** frames with two warnings inside the banner's
+   20 studs or inside `ShowRadius`. But no rule kept a retune from breaking it. Failing first: `CellHazards.spec` 3
+   failures (`MinSpacing` 2 and `ShowRadius` 28 accepted; a config without `ShowRadius` accepted). Now `validate`
+   refuses `MinSpacing * 2 * CellSize <= 2 * ShowRadius` and a missing `ShowRadius`.
+2. **The board while its store is down** (`refreshPublic`, the autosave, `BoardConfig.Text.PublicFailed`). Found here:
+   when a server's first `GetSortedAsync` failed, the board said "Loading..." for as long as the store was down, and a
+   board write lost to the outage waited for the player's next join. Failing first, in a new check (the emulator runs
+   one harness per process, and `_board` needs a store that works): `check_labyrintspill_boarddown` 5 failures
+   ("Loading..." with the store down; no note; `u_601` never written once the store answered; the board empty). Now
+   the board says "Couldn't load the board right now. It will try again in a minute." while it has never had rows to
+   show (a later failure keeps the last list), and the autosave retries a write that is owed (`writeBoard` makes no
+   call when nothing is). 9 / 0.
+3. **The ship-and-market documents, held to the game** (`tests/docs_check.py`; Python because the luau CLI cannot read
+   a file). Failing first: **75** failures (no store text, no clip list, no 1920x1080, a needs-Studio list without
+   pass 2, `CLAUDE.md` not naming 28 gates). Then: the README store text (984 characters, ASCII; 25 numbers checked
+   against the source, from the biome levels and trap timings to the perk prices and the pacing model's 41 minutes,
+   which it runs), the 9-clip list in `MARKETING.md`, §8 items 19-24, §9's size and board shot, and `CLAUDE.md`'s gate
+   table and traps. **146 / 0.**
+4. **Test gaps the sweep found** (the behaviour was right; each assertion passes on the real build and was then
+   watched failing on its mutant in round 2): god-mode users never stand on the board (`_board`, S2); the critter cap
+   may not exceed the decor cap (K1), no band may want more critters than the cap (K3), and the seam trim holds a forced
+   cap of 2 (K5) (`Biomes.spec`).
+5. `check_labyrintspill_hud`'s comment now says where rule 4b is asserted and why not there (13 artifacts, measured).
+
+### Mutation sweep
+
+Same harness as §13-§14 (`scratchpad/lab_p2b_1001/sweep.py`, `muts.py`, `sweep_r1.log`/`.json`; round 2 `sweep2.py`,
+which also takes several replacements in one file, `muts2.py`, `sweep_r2.log`/`.json`). Five workers on scratch copies
+verified byte-identical to the real tree; each worker's first job a no-op run that had to be green on all 38 suites
+(15 specs, 23 checks); for every mutation exactly one occurrence in its file and in the baseline bundle, the rebuilt
+bundle proved equal to the baseline with that replacement, all 38 suites run, the original bytes restored and checked.
+Every worker's copy was identical to the real tree at the end of both rounds, and the real tree's sources, tests and
+checks had the same sha256 after each round as before it (the one difference after round 1 is the god-mode assertion,
+written into `_board` while round 1 ran on its own copies).
+
+**Round 1: 33 mutations of pass 2's work and this pass's, all 33 reached the bundle. 26 killed for the stated reason,
+1 "killed" only because the mutated server did not load (W3), 6 survived. All 8 controls survived (5 no-op runs, 3
+real edits).**
+
+| id | mutation | round 1 | round 2 |
+|---|---|---|---|
+| P1 | `Board.encode`: a later reach of the same level ranks higher | `Board.spec`, `_board` | |
+| P2 | `keepHigher`: a same-level later reach overwrites the first | `Board.spec` | |
+| P3 | `friendsView`: the viewer's own row not pinned below the shown rows | `Board.spec` | |
+| P4 | an empty friends board (no friend has a level) says nothing | `Board.spec`, `_board` | |
+| P5 | key `tostring(userId)`, not `u_<userId>` | `Board.spec`, `_board`, `_boarddown`, `_journey` | |
+| S1 | the public top 10 fetched every 5 s, not 60 | `_board` §4 | |
+| S2 | god-mode users written to the board | **SURVIVED** (no assertion) | killed by `_board`'s new section: `got 80240000000, want nil` |
+| S3 | written on every call, not only when the level rose | `_board` §3 | |
+| S4 | the friends loop's own cap removed | **SURVIVED: equivalent** (two more guards hold 200) | S4b, the cap raised to 250: killed by `_board` §8 (`got 250, want 200`) |
+| S5 | the prompt never switches to Friends | `_board` | |
+| S6 | (this pass) the outage note removed | `_boarddown` | |
+| S7 | (this pass) the autosave's retry removed | `_boarddown` | |
+| L1 | a live server's lock overwritten at load | `_save` | |
+| L2 | saved without checking the owner token | `_save` | |
+| L3 | leaving never releases the lock | `_save`, `_journey` | |
+| L4 | an expired lock blocks for ever | `_save` | |
+| L5 | `grantOnce` keeps a grant it could not save | `_save` | |
+| L6 | `canSave = true` after a failed load | **SURVIVED: equivalent** (the missing session token still stops every write) | L6c, both guards gone: killed by `_save` §8 (`the stored record is intact -> got 150, want 42`: the default profile plus a daily reward over the real one) |
+| W1 | `minClearSeconds` returns 0 | `Progression.spec`, `_journey` | |
+| W2 | `finishRun` ignores the walk guard | `_journey` | |
+| W3 | a refused exit says nothing | 23 checks failed because the mutated server did not load (a statement opening with a parenthesis): **not a kill** | W3b, `local _ = ...`: killed by `_journey` alone (`the player is told why: nil`) |
+| W4 | the walk clock not restarted when the run moves on | `_journey` | |
+| R1 | `RespawnLocation` never set | `_spawn`, `_journey` | |
+| K1 | `validate`: the critter cap may exceed the decor cap | **SURVIVED** (no assertion) | killed by `Biomes.spec` |
+| K3 | `validate`: a band may want more critters than the cap | **SURVIVED** (the old assertion was refused by a different clause) | killed by `Biomes.spec` |
+| K4 | `validate`: a critter in a signal colour | `Biomes.spec` | |
+| K5 | `crittersAt` does not trim a seam's blend to the cap | **SURVIVED** (the shipped cap never binds) | killed by `Biomes.spec` (cap forced to 2: `got 171, want 0`) |
+| K6 | the client's critters ignore the shared decor slots | `_critters` | |
+| K7 | the wall dressing leaves no slots for critters | `_biomes` | |
+| K8 | critters stay when the player walks out to the lobby | `_critters` | |
+| V1 | `LeaderboardClient` looks for `Kart` at its old place | `_overlap` | |
+| H1 | (this pass) one-at-a-time rule off | `CellHazards.spec` | |
+| H2 | (this pass) `ShowRadius` no longer required | `CellHazards.spec` | |
+| controls | 5 no-op runs; the board's trim 1/255 greener; the outage note reworded; a rat's fur 1/255 redder | survived | 2 no-op runs and the trim: survived |
+
+The survivors were closed in the order a test gap allows: the assertion written, passing on the real build, then
+watched failing on its mutant in round 2. **Round 2: 7 mutations (S2, S4b, L6c, W3b, K1, K3, K5), 7 killed, 7 reached
+the bundle; 3 controls survived.** S4 and L6 are equivalent mutants (the code guards those rules twice and three
+times); S4b and L6c show the assertions behind them are live.
+
+**The documents' check** (`scratchpad/lab_p2b_1001/docmut.py`): one replacement at a time in README, MARKETING,
+EYECANDY or CLAUDE.md, `docs_check.py` run, the bytes restored (sha256 verified for all four files after the run).
+**11 killed**: the Forge's level 51 to 50; the store text over 1000 characters (1026); a blue-square emoji; a clip of
+9-16 s; a `new` clip marked `exists`; both 1920x1080 mentions removed from §9 (D6b; D6, removing one of the two, is
+equivalent and survived); 41 minutes to 30; the torch at 250; a gate missing from `CLAUDE.md`'s table; a clip without
+its staging entry; the needs-Studio list without the critters. **2 controls survived** (the README's last full stop
+made an exclamation mark; a clip description reworded).
+
+### Gates
+
+Final run on bundle md5 `f339d37c07635379dda336f823e966a9`:
+
+| gate | start of this pass | end |
+|---|---|---|
+| `tests/Biomes.spec` | 1 371 / 0 | **1 376 / 0** |
+| `tests/CellHazards.spec` | 83 / 0 | **88 / 0** |
+| the other 13 specs (Assist 78, Board 66, BreakRoom 35, Contributors 18, EnvBands 124, Hazard 36, Pacing 280, Progression 43, Rest 55, lightingpresets 41, mazeref 27, responsive 70, touchtarget 52) | unchanged | unchanged |
+| **spec total (15 files)** | **2 379 / 0** | **2 389 / 0** |
+| `check_labyrintspill_board` | 74 / 0 | **77 / 0** |
+| `check_labyrintspill_boarddown` | — | **9 / 0** (new) |
+| the other 21 checks (check_labyrint PASS, _spawn 36, _biomes 329, _budget 28, _cards 17, _compile 49, _critters 53, _friends 26, _guide 30, _hazards 72, _hud PASS, _journey 52, _layout 266, _overlap 28, _popups 9, _rest 69, _save 63, _shots 54, lighting 19, secretdoors 50, themes 23) | unchanged | unchanged |
+| **headless check total** | **1 347 / 0 + 2 PASS (22 files)** | **1 359 / 0 + 2 PASS (23 files)** |
+| `tests/docs_check.py` | — (75 failures, written first) | **146 / 0** (new) |
+
+A second full run of every gate gave identical summaries.
+
+The lint for writes to undeclared globals is clean on the three changed source files (`CellHazards.luau`,
+`BoardConfig.luau`, `MazeGame.server.luau`).
+
+**Files written in this pass:** `src/shared/CellHazards.luau` (the one-at-a-time rule), `src/shared/BoardConfig.luau`
+(`PublicFailed`), `src/server/MazeGame.server.luau` (`refreshPublic`'s outage note; the autosave retries `writeBoard`),
+`tests/CellHazards.spec.luau`, `tests/Biomes.spec.luau`, `tests/docs_check.py` (new), `README.md`, `MARKETING.md`,
+`EYECANDY.md`, `CLAUDE.md`; in robloxemu, `check_labyrintspill_board.luau` (the god-mode section),
+`check_labyrintspill_boarddown.luau` (new), `check_labyrintspill_hud.luau` (a comment) and the rebuilt bundle.
+
+### Still open
+
+* The night shift (§5 of the standard): §8 (24 items), §9 (6 shots + variants, 1920x1080), and the 9 clips of
+  `MARKETING.md`, 7 of which need a scenario in `tools/film_game.py` first (the tools owner's).
+* The live store text (`docs/marketing/store-text.json`) is replaced with `tools/store_text.py` after the next publish,
+  not before.
+* Nothing is committed, pushed or published, and Studio was not opened.

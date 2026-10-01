@@ -8,7 +8,8 @@
 --   3. decor pieces on the walls within 24 studs (inside the torch's 28), pooled, faded in, and faded out
 --      and released when their wall (a secret door) sinks into the floor;
 --   4. the level's falling hazards (CellHazards): fixed cells and a fixed cycle on the LEVEL clock,
---      so everyone on a level meets the same ones; drawn only near you; a hit knocks you down;
+--      so everyone on a level meets the same ones; drawn only near you; a hit knocks you down (a stagger
+--      instead when a monster is close enough to catch you while you are down: owner decision 30.09);
 --   5. a title card when you enter a biome, and a warning banner when a hazard near you is due.
 --
 -- What it must NEVER do (Biomes.luau, rule 1-3; robloxemu/check_labyrintspill_*.luau hold it to them):
@@ -158,13 +159,20 @@ do
 	applyLayout()
 end
 
--- The level-complete card (HudClient) owns the middle of the screen for ~4.5 s after every level;
--- on a phone it is tall enough to reach this slot, so ours waits for it.
-local function summaryCardVisible(): boolean
+-- HudClient's two centre cards own the middle of the screen while they show: the level-complete card (~4.5 s
+-- after every level) and the daily-reward popup (~6.3 s, 2.5 s after the day's first spawn). On a phone both
+-- reach this slot, so ours waits for them. (Second review: it waited only for the first, and a returning player
+-- who walked straight into a new biome saw its fanfare under the reward popup for 2.67 s.)
+local CENTRE_CARDS = { "OppsummeringsKort", "DagligBelonning" }
+local function centreCardVisible(): boolean
 	local hud = playerGui:FindFirstChild("MedaljeHud")
 	local r = hud and hud:FindFirstChild("Root")
-	local c = r and r:FindFirstChild("OppsummeringsKort")
-	return c ~= nil and (c :: any).Visible == true
+	if r == nil then return false end
+	for _, name in CENTRE_CARDS do
+		local c = r:FindFirstChild(name)
+		if c ~= nil and (c :: any).Visible == true then return true end
+	end
+	return false
 end
 
 --------------------------------------------------------------------------- state
@@ -308,6 +316,7 @@ end
 local active: { [string]: any } = {}   -- key "fx,fy,face" -> { piece, pid, wall, face, born, wallPos, sinkAt }
 local pool: { [string]: { any } } = {}
 local lastDecorCell = ""
+local critterWant = 0 -- (2026-10-01) critters the band wants now: they take decor slots, so the dressing leaves them room
 local decorAt = 0
 
 local function release(key: string)
@@ -372,7 +381,7 @@ local function updateDecor(pos: Vector3, now: number, force: boolean)
 		end
 		table.sort(want, function(a, b) return a.d < b.d end)
 		local keep = {}
-		for i = 1, math.min(#want, BUDGET.MaxDecorPieces) do
+		for i = 1, math.min(#want, math.max(0, BUDGET.MaxDecorPieces - critterWant)) do
 			keep[want[i].key] = want[i]
 		end
 		for key, a in active do
@@ -447,6 +456,25 @@ local function releaseKnock(hum: Humanoid?)
 	end
 end
 
+-- (owner decision 30.09) the nearest monster of this run, horizontal studs (nil: none). Read only at a hit, from
+-- the server's replicated Monster models in the player's own maze folder.
+local function nearestMonster(pos: Vector3): number?
+	local best: number? = nil
+	local f = index and index.folder
+	if f == nil then return nil end
+	for _, m in f:GetChildren() do
+		if m:IsA("Model") and m.Name == "Monster" then
+			local r = m:FindFirstChild("HumanoidRootPart")
+			if r and r:IsA("BasePart") then
+				local dx, dz = r.Position.X - pos.X, r.Position.Z - pos.Z
+				local d = math.sqrt(dx * dx + dz * dz)
+				if best == nil or d < (best :: number) then best = d end
+			end
+		end
+	end
+	return best
+end
+
 local function updateHazards(pos: Vector3, hum: Humanoid?, rootPart: BasePart?, now: number)
 	local t = now - state.levelStart
 	local t0 = lastT or t
@@ -474,7 +502,11 @@ local function updateHazards(pos: Vector3, hum: Humanoid?, rootPart: BasePart?, 
 					local v, stand = CellHazards.knock(cc, pp, HZ)
 					local rp = rootPart :: BasePart
 					local h2 = hum :: Humanoid
-					h2.PlatformStand = true
+					-- a knock-down, unless a monster is close enough to catch you while you are down: then a
+					-- stagger (the same shake, flash and shove, on your feet). A hit costs a little, never a run.
+					if CellHazards.hitMode(nearestMonster(pos), HZ) == "knock" then
+						h2.PlatformStand = true
+					end
 					local cur = rp.AssemblyLinearVelocity
 					local vy = if cur then math.min(cur.Y, 0) else 0 -- a hazard never lifts you
 					rp.AssemblyLinearVelocity = Vector3.new(v.x, vy, v.z)
@@ -496,7 +528,7 @@ local function updateHazards(pos: Vector3, hum: Humanoid?, rootPart: BasePart?, 
 			BiomeArt.hideHazardView(views[i])
 		end
 	end
-	if bannerKind and not summaryCardVisible() then
+	if bannerKind and not centreCardVisible() then
 		banner.Text = Biomes.hazardBanner(bannerKind)
 		banner.Visible = true
 	else
@@ -510,6 +542,7 @@ local shownBand: number? = nil
 local fanfared: { [number]: boolean } = {} -- the "YOU REACHED" fanfare plays once per biome per session
 local pendingCard: any = nil
 local cardUntil = 0
+local cardShown: any = nil -- { title, sub } of the card on screen, so a centre card that pops over it can hand it back
 
 local function queueCard(idx: number, frontier: boolean)
 	local b = BANDS[idx]
@@ -525,7 +558,7 @@ local function queueCard(idx: number, frontier: boolean)
 end
 
 local function updateCard(now: number)
-	if pendingCard ~= nil and (not summaryCardVisible() or now - pendingCard.queued > 8) then
+	if pendingCard ~= nil and (not centreCardVisible() or now - pendingCard.queued > 8) then
 		card.Text = pendingCard.title
 		cardSub.Text = pendingCard.sub
 		card.TextTransparency = 0
@@ -537,13 +570,24 @@ local function updateCard(now: number)
 			FxClient.flash(Color3.fromRGB(255, 250, 235), 0.3, 0.7)
 			FxClient.fovPunch(5)
 		end
+		-- forced: shown after waiting 8 s with a centre card still up; it stays, so a stuck card can never hold ours off
+		cardShown = { title = pendingCard.title, sub = pendingCard.sub, forced = centreCardVisible() }
 		pendingCard = nil
+	end
+	-- a centre card popped up over ours (the daily reward arrives on its own clock): step aside and come back,
+	-- whole, once it has gone. The fanfare's flash has played; the comeback is the words only.
+	if card.Visible and cardShown ~= nil and not cardShown.forced and pendingCard == nil and centreCardVisible() then
+		card.Visible = false
+		cardSub.Visible = false
+		pendingCard = { title = cardShown.title, sub = cardShown.sub, frontier = false, queued = now }
+		cardShown = nil
 	end
 	if card.Visible then
 		local left = cardUntil - now
 		if left <= 0 then
 			card.Visible = false
 			cardSub.Visible = false
+			cardShown = nil
 		elseif left < 0.6 then
 			card.TextTransparency = 1 - left / 0.6
 			cardSub.TextTransparency = 1 - left / 0.6
@@ -555,9 +599,145 @@ end
 
 --------------------------------------------------------------------------- level payloads
 
+--------------------------------------------------------------------------- critters (2026-10-01)
+-- docs/complete-game-standard.md §2: each band has its own critters (Biomes.Critters). A few live around the player,
+-- each at home in one open passage cell (never a wall, a trap or a falling-hazard cell, never the player's own cell,
+-- never the start cell, where the Lobby door and its free-break sign are: Biomes.critterHomeFree),
+-- inside the decor radius, moving with Biomes.critterPose. They take decor slots (Budget.MaxDecorPieces counts both)
+-- and are rehomed when the player walks away from them. Purely local and inert, like the decor.
+local critterSlots: { [number]: any } = {} -- [slot] = { kind, piece, fx, fy, face, phase, born, centre, run, last }
+local critterPool: { [string]: { any } } = {}
+local critterLevel = -1
+local critterList: { string } = {}
+local critterEpoch = 0
+
+local function releaseCritter(i: number)
+	local c = critterSlots[i]
+	if c == nil then return end
+	BiomeArt.setCritterParent(c.piece, false)
+	critterPool[c.kind] = critterPool[c.kind] or {}
+	table.insert(critterPool[c.kind], c.piece)
+	critterSlots[i] = nil
+end
+
+local function releaseCritters()
+	for i in critterSlots do releaseCritter(i) end
+	critterLevel = -1
+end
+
+local function cellCentre(fx: number, fy: number): Vector3
+	return Vector3.new(index.origin.X + (fx - (index.gCols - 1) / 2) * index.S, index.floorTop,
+		index.origin.Z + (fy - (index.gRows - 1) / 2) * index.S)
+end
+
+-- a new home for slot `i`: an open passage cell near the player, free of traps, falling hazards and other critters
+local function findHome(i: number, kind: string, pos: Vector3): any
+	local def = Biomes.Critters[kind]
+	local needWall = def.motion == "scurry" or def.motion == "climb"
+	local S = index.S
+	local fx0, fy0 = index.fine(pos)
+	local rc = math.floor(BUDGET.DecorRadius / S)
+	local hazardCells = {}
+	for _, hz in hazards do hazardCells[hz.hz.cx .. "," .. hz.hz.cy] = true end
+	local taken = {}
+	for j, c in critterSlots do
+		if j ~= i then taken[c.fx .. "," .. c.fy] = true end
+	end
+	critterEpoch += 1
+	local best, bestScore = nil, -1
+	for fx = fx0 - rc, fx0 + rc do
+		for fy = fy0 - rc, fy0 + rc do
+			if fx % 2 == 1 and fy % 2 == 1 and fx > 0 and fy > 0 and fx < index.gCols - 1 and fy < index.gRows - 1
+				and index.walls[fx .. "," .. fy] == nil and not taken[fx .. "," .. fy] and Biomes.critterHomeFree(fx, fy) then
+				local key = ((fx - 1) // 2) .. "," .. ((fy - 1) // 2)
+				local c = cellCentre(fx, fy)
+				local dx, dz = c.X - pos.X, c.Z - pos.Z
+				local d = math.sqrt(dx * dx + dz * dz)
+				if d <= BUDGET.DecorRadius - S / 2 and d >= S * 0.9 and not index.trapSet[key] and not hazardCells[key] then
+					local face = nil
+					if needWall then
+						local start = math.floor(EnvBands.hash01(fx, fy, i, Biomes.Seed + critterEpoch) * 4)
+						for k = 0, 3 do
+							local f = (start + k) % 4 + 1
+							local n = Biomes.FACES[f]
+							if index.walls[(fx + n[1]) .. "," .. (fy + n[2])] ~= nil then face = f; break end
+						end
+					end
+					if not needWall or face ~= nil then
+						local score = EnvBands.hash01(fx, fy, i * 7 + critterEpoch, Biomes.Seed)
+						if score > bestScore then
+							best, bestScore = { fx = fx, fy = fy, face = face or 1, centre = c }, score
+						end
+					end
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function updateCritters(pos: Vector3, now: number)
+	if index == nil then return end
+	if critterLevel ~= state.level then
+		critterLevel = state.level
+		local want = Biomes.crittersAt(EnvBands, state.level)
+		local kinds = {}
+		for kind in want do table.insert(kinds, kind) end
+		table.sort(kinds)
+		critterList = {}
+		for _, k in kinds do
+			for _ = 1, want[k] do table.insert(critterList, k) end
+		end
+		critterWant = #critterList
+	end
+	-- room: never more than the decor cap together with the wall dressing on show
+	local decorShown = 0
+	for _ in active do decorShown += 1 end
+	local room = math.max(0, math.min(BUDGET.MaxCritters, #critterList, BUDGET.MaxDecorPieces - decorShown))
+	for i = 1, BUDGET.MaxCritters do
+		local c = critterSlots[i]
+		if c ~= nil then
+			local dx, dz = c.centre.X - pos.X, c.centre.Z - pos.Z
+			if i > room or c.kind ~= critterList[i] or c.run ~= state.run
+				or math.sqrt(dx * dx + dz * dz) > BUDGET.DecorRadius then
+				releaseCritter(i)
+				c = nil
+			end
+		end
+		if c == nil and i <= room then
+			local kind = critterList[i]
+			local home = findHome(i, kind, pos)
+			if home ~= nil then
+				local list = critterPool[kind]
+				local piece = if list and #list > 0 then table.remove(list) else BiomeArt.buildCritter(kind, Biomes.Critters[kind], folder)
+				c = { kind = kind, piece = piece, fx = home.fx, fy = home.fy, face = home.face, centre = home.centre,
+					phase = EnvBands.hash01(home.fx, home.fy, i, Biomes.Seed) * 6.2832, born = now, run = state.run, last = nil }
+				critterSlots[i] = c
+			end
+		end
+		if c ~= nil then
+			local x, y, z = Biomes.critterPose(c.kind, now - c.born, c.phase, index.S, c.face)
+			local p = c.centre + Vector3.new(x, y, z)
+			local dir = if c.last then p - c.last else Vector3.new(0, 0, 0)
+			local flat = Vector3.new(dir.X, 0, dir.Z)
+			local cf
+			if flat.Magnitude > 1e-4 then
+				cf = CFrame.lookAt(p, p + flat)
+			else
+				local n = Biomes.FACES[c.face]
+				cf = CFrame.lookAt(p, p + Vector3.new(n[1], 0, n[2])) -- still, or climbing: face its wall
+			end
+			c.last = p
+			BiomeArt.placeCritter(c.piece, cf, i)
+			BiomeArt.setCritterParent(c.piece, true)
+		end
+	end
+end
+
 local function leaveMaze()
 	state.inMaze = false
 	releaseAll()
+	releaseCritters()
 	airOff()
 	hideViews()
 	hazards = {}
@@ -668,7 +848,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 		local fresh = buildIndex(f)
 		if fresh then
 			if prev == nil or prev.folder ~= f or prev.count ~= fresh.count or prev.run ~= state.run then
-				if prev ~= nil and prev.folder ~= f then releaseAll() end
+				if prev ~= nil and prev.folder ~= f then releaseAll(); releaseCritters() end
 				index = fresh
 				hazardRun = -1
 			else
@@ -682,6 +862,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 	end
 	if index ~= nil then
 		updateDecor(pos, now, false)
+		updateCritters(pos, now)
 		-- 4. hazards
 		updateHazards(pos, hum, rootPart, now)
 	end

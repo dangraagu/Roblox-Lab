@@ -13,8 +13,10 @@
 --      would count as a failed attempt. The server times runs with os.clock() (real time even here),
 --      so this section burns real seconds on purpose;
 --   §6 the biome board lists what you reached, and what is next;
---   §7 (review fix) once a "Hjelp meg" guide is bought for the run, the sign stays down: walking out would
---      lose the guide, so it is no longer "free, nothing is lost" (burns real seconds too).
+--   §7 (review fix) once a "Hjelp meg" guide is bought for the run, the sign stays down (burns real seconds too).
+--      Since the owner's decision of 30.09 a walk-out no longer loses a guide you bought (it waits for you on that
+--      level until you clear it: check_labyrintspill_guide), but a guide still makes the run something other than
+--      the plain fresh start the sign speaks about, and in a shared run the guide may be someone else's.
 
 local Lib = require("./check_labyrintspill_lib")
 local T = Lib.counter("labyrintspill rest")
@@ -204,10 +206,11 @@ end
 
 --================================================================ §7 (review fix) a paid guide: the sign stays down
 
--- The "Hjelp meg" guide is bought for ONE run; walking out loses it with no refund (the server tears the run's
--- instance down, and the next attempt starts without it). The adversarial review reproduced exactly that
--- under the sign's "nothing is lost". So once a guide is active the sign must not show. END TO END: the real
--- server counts the failed attempts, offers the guide, takes the coins; the real RestClient hears AssistState.
+-- The "Hjelp meg" guide used to be bought for ONE run; walking out lost it with no refund, and the adversarial
+-- review reproduced exactly that under the sign's "nothing is lost". So once a guide is active the sign must not
+-- show. (Owner decision 30.09: the guide is now KEPT until its level is cleared, so the walk-out below keeps it;
+-- the sign stays down while a guide is active all the same.) END TO END: the real server counts the failed
+-- attempts, offers the guide, takes the coins; the real RestClient hears AssistState.
 do
 	-- two more counted walk-outs at L42 (B above left one): the server offers the guide after three
 	for k = 1, 2 do
@@ -236,8 +239,13 @@ do
 	eq(lastAssist and lastAssist.fails, 3, "(D) the quick walk-out itself still adds no failed attempt")
 	start(42)
 	ctx.run(0.3)
-	eq(lastAssist and lastAssist.active, false, "(D) the guide did not survive the walk-out (server rule, unchanged: that is what the sign must not hide)")
-	eq(lastAssist and lastAssist.coins, coinsPaid, "(D) and was not refunded")
+	eq(lastAssist and lastAssist.active, true, "(D) (owner decision 30.09) the guide survived the walk-out: it is kept until L42 is cleared")
+	eq(lastAssist and lastAssist.coins, coinsPaid, "(D) and cost nothing again")
+	eq(sign(), nil, "(D) with the kept guide active, the sign stays down")
+	ctx.toLobby()
+	start(41)
+	ctx.run(0.3)
+	eq(lastAssist and lastAssist.active, false, "(D) the kept guide is for L42 only")
 	truthy(sign() ~= nil, "(D) a run without a guide shows the sign again")
 	ctx.toLobby()
 end

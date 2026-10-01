@@ -64,6 +64,22 @@ for i = 2, #bands do
 		string.format("%s lasts at least 5 minutes for a normal player (%.1f)", bands[i - 1].name, startMin.normal[i] - startMin.normal[i - 1]))
 	truthy(startMin.fast[i] <= startMin.normal[i] and startMin.normal[i] <= startMin.slow[i], "fast <= normal <= slow at " .. bands[i].name)
 end
+-- (owner decision 30.09, "take the recommended option": keep how far the later biomes are) The owner's standard
+-- asks for a brag moment within about 30-45 minutes of normal play and a long-term goal beyond it. Here the brag is a
+-- biome's "YOU REACHED" fanfare inside that window, and the last two biomes stay the long-term goal (like +1 Jump's
+-- galaxy): more than ten hours of normal play away. Moving a biome's `from` so that either stops holding fails here.
+do
+	local brag = {}
+	for i = 2, #bands do
+		if startMin.normal[i] >= 30 and startMin.normal[i] <= 45 then
+			table.insert(brag, string.format("%s at %.1f min", bands[i].name, startMin.normal[i]))
+		end
+	end
+	eq(#brag, 1, "exactly one biome's fanfare lands 30-45 min into normal play: the brag moment (" .. table.concat(brag, ", ") .. ")")
+	truthy(startMin.normal[#bands - 1] >= 600 and startMin.normal[#bands] >= 600,
+		string.format("the last two biomes stay the long-term goal, over 10 h of normal play away (%.1f h, %.1f h)",
+			startMin.normal[#bands - 1] / 60, startMin.normal[#bands] / 60))
+end
 
 --================================================================ rarity
 

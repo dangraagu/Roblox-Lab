@@ -6,7 +6,11 @@
 -- (LabyrintBiome, LabyrintBreak) must fit every viewport the gate knows, and adding them must not push
 -- anything else out. Their text labels start hidden, so check_labyrintspill_layout.luau measures them
 -- again with each one shown.
--- NOT opted in to panel-overlap rule 4b, for the reason check_labyrint.luau gives.
+-- NOT opted in to panel-overlap rule 4b here, for the reason check_labyrint.luau gives (emu/hudcheck counts a
+-- ScreenGui with Enabled = false as shown and ignores UISizeConstraint; measured 2026-10-01 with overlap = true: 13
+-- reported overlaps, every one of them one of those two artifacts). The rule IS asserted for this game, with both
+-- corrected, by check_labyrintspill_overlap.luau (the lobby, a run, the minimap, the Hjelp meg offer; ten viewports).
+-- The transient cards are held apart by check_labyrintspill_cards and _popups.
 require("./emu/hudcheck").run({
 	game = "labyrint-spill",
 	bundle = require("./build/labyrint-spill"),
@@ -25,5 +29,6 @@ require("./emu/hudcheck").run({
 		"client/SoundClient.client",
 		"client/Biome.client",
 		"client/RestClient.client",
+		"client/BoardClient.client",
 	},
 })

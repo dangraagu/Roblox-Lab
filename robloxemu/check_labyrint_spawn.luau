@@ -17,9 +17,10 @@
 --
 -- WHAT IT PINS, and why each one rather than a position alone:
 --
---   1. The world offers the engine exactly ONE answer. Labyrinth never sets
---      Player.RespawnLocation, so the engine falls to rule 2 — pick among the enabled
---      SpawnLocations in the Workspace. There is exactly one, the lobby pad, and every maze
+--   1. The world offers the engine exactly ONE answer. Since 2026-10-01 the server also points
+--      Player.RespawnLocation at the lobby pad (SPAWN-ORDER.md rule 1, the engine's first choice;
+--      docs/complete-game-standard.md §1), so the engine never has to fall to rule 2 — pick among
+--      the enabled SpawnLocations in the Workspace. There is exactly one, the lobby pad, and every maze
 --      instance deliberately marks its start with a plain Part instead ("Vanlig Part, ikke
 --      SpawnLocation ... en ekte SpawnLocation ville blandet seg inn i hvor Roblox respawner
 --      folk", buildInstance). That comment is load-bearing and nothing enforced it.
@@ -199,6 +200,7 @@ if hrp ~= nil and pad ~= nil then
 end
 
 eq(me:GetAttribute("MazeFolder"), nil, "a player in the lobby is not attributed to any maze")
+eq(me.RespawnLocation, pad, "plr.RespawnLocation points at the lobby pad (the engine's first choice, SPAWN-ORDER.md)")
 
 --============================================================== entering a run: their own maze
 
@@ -271,6 +273,7 @@ end
 -- It is safe for STATE, and this is the assertion that says so out loud.
 print("  MazeFolder attr  : " .. tostring(me:GetAttribute("MazeFolder")) .. "  (was " .. tostring(mazeBefore) .. ")")
 truthy(mazeBefore ~= nil, "they really were in a maze before dying (the check above was not vacuous)")
+eq(me.RespawnLocation, pad, "and RespawnLocation still points at the lobby pad after a death in a maze")
 eq(me:GetAttribute("MazeFolder"), nil, "dying in a maze takes the player OUT of it")
 if typeof(mazeBefore) == "string" then
 	eq(h.workspace:FindFirstChild(mazeBefore), nil, "and the empty solo maze was torn down")

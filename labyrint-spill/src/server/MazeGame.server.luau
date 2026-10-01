@@ -48,6 +48,11 @@ local CONFIG = {
 	-- MERK: virker bare i publisert spill, eller i Studio hvis
 	-- Game Settings -> Security -> "Enable Studio Access to API Services" er på.
 	SaveData = true,
+	-- Økt-lås (docs/complete-game-standard.md §1, 01.10): lasten tar låsen med et eier-token, hver lagring
+	-- lander bare mens posten fortsatt bærer tokenet, og autolagringen fornyer låsen. To autolagringer må
+	-- rekke innenfor én lås (check_labyrintspill_save §0), ellers kan en levende økt miste låsen sin.
+	SessionLockSeconds = 180,
+	AutosaveSeconds = 60,
 
 	------------------------------------------------------------------
 	-- PROGRESJONSKURVE  (level 1  ->  500)
@@ -101,11 +106,23 @@ local CONFIG = {
 	-- "HJELP MEG"-GUIDEN
 	-- Hvert nivå er vanskeligere enn forrige, så før eller siden treffer alle en
 	-- vegg. Har du feilet samme nivå OfferAfterFails ganger, tilbyr spillet en
-	-- lysende rute til utgangen for MYNTER — for ÉN kjøring.
+	-- lysende rute til utgangen for MYNTER. Eierbeslutning 30.09: den beholdes til nivået
+	-- er klart (dør du eller går ut, venter den der), aldri på et annet nivå (Assist.keptFor).
 	-- Den hopper IKKE over noe: du må fortsatt gå ut selv, og en guide-kjøring
 	-- gir ingen tidsrekord (se Progression.recordEligible). Enabled = false slår
 	-- hele mekanikken av. Kun lobby-modus (CONFIG.UseLobby).
 	------------------------------------------------------------------
+	-- GÅ-VAKTA (01.10, docs/complete-game-standard.md §3): topplista rangerer på `accepted`, og bevegelse er
+	-- klientens. En utgang nådd raskere enn noen kan gå dit (Progression.minClearSeconds: korteste rute med alle
+	-- hemmelige dører åpne, hjørner skåret på skrå, i toppfart med speed-perken) teller ikke, og spilleren får vite
+	-- hvorfor. Slack < 1 er margin; tests/Progression.spec viser at modellens raske spiller bruker minst 2x gulvet.
+	-- Gude-runder hoppes over (de teller uansett ikke). Enabled = false slår vakta av.
+	WalkGuard = {
+		Enabled = true,
+		Slack = 0.85,
+		NoticeEverySeconds = 3,
+	},
+
 	Assist = {
 		Enabled = true,
 		OfferAfterFails = 3,   -- ekte, server-talte mislykkede forsøk på SAMME nivå
@@ -129,6 +146,16 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:GetService("TextChatService")
 local TextService = game:GetService("TextService")
+local HttpService = game:GetService("HttpService") -- bare GenerateGUID (eier-token for økt-låsen); ingen HTTP
+
+-- ÉN veggklokke for topplista-cachene og gå-vakta (samme mønster som plus1-jump og fork-tower): GetServerTimeNow
+-- der den finnes, ellers tick() (motorer uten den, og den hodeløse harnessen, der tick er den virtuelle klokka).
+-- Spillets medalje-tider bruker fortsatt os.clock() som før; denne er bare for de nye reglene.
+local clock
+do
+	local ok, t = pcall(function() return workspace:GetServerTimeNow() end)
+	clock = if ok and typeof(t) == "number" then function() return workspace:GetServerTimeNow() end else tick
+end
 
 local Themes = require(ReplicatedStorage:WaitForChild("Themes"))
 local ShopService = require(ReplicatedStorage:WaitForChild("ShopService"))
@@ -144,6 +171,8 @@ local Assist = require(ReplicatedStorage:WaitForChild("Assist"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
 local LightingPresets = require(ReplicatedStorage:WaitForChild("LightingPresets"))
 local MazeRef = require(ReplicatedStorage:WaitForChild("MazeRef"))
+local Board = require(ReplicatedStorage:WaitForChild("Board"))             -- +1 Jumps mal, ordrett
+local BoardConfig = require(ReplicatedStorage:WaitForChild("BoardConfig"))
 
 -- Presetene lagrer farger som {r, g, b} 0-255 så de kan enhetstestes uten Roblox-API.
 local function rgb(c: { number }): Color3
@@ -161,6 +190,13 @@ local TRAP_CFG = (function()
 		warn("[Labyrint] CONFIG.Traps rettet for å holde nivåene løsbare: " .. f)
 	end
 	return cfg
+end)()
+
+-- Gå-vakta (CONFIG.WalkGuard): den raskeste en spiller kan gå = gangfarten + den største speed-perken.
+local MAX_WALK_SPEED = (function()
+	local bonus = 0
+	for _, p in ipairs(PerkDefs.List) do bonus = math.max(bonus, p.speedBonus or 0) end
+	return CONFIG.PlayerWalkSpeed + bonus
 end)()
 
 -- Visuell polish (kun kode, KONSERVATIV): Maze-presetet setter BEVISST ingen Lighting-
@@ -199,21 +235,20 @@ if CONFIG.SaveData then
 end
 local recordCache = {}  -- [level] = { time = number?, name = string? }
 
--- Global toppliste: HØYESTE nivå hver spiller har nådd, delt på tvers av alle
--- servere (OrderedDataStore). Vises på en tavle ved starten av hvert nivå. Egen
--- store så den ikke blandes med per-nivå-tidsrekordene over.
-local topStore = nil
+-- Global toppliste (docs/complete-game-standard.md §3, 01.10): HØYESTE nivå hver spiller har klart i sekvens
+-- (`accepted`, gud-fritt, bak gå-vakta), delt på tvers av alle servere. v3 = +1 Jumps mal (Board.luau):
+-- nøkkel u_<userId>, verdi nivå * 2e9 + (2e9 - nåddUnix), så uavgjort går til den som nådde nivået FØRST.
+-- v2 (nøkkel tostring(userId), rått nivå) leses bare for å bære over topp-10 én gang per serverstart.
+local boardStore, legacyBoardStore = nil, nil
 if CONFIG.SaveData then
-	local ok, ds = pcall(function()
-		-- v2: nytt navn for en REN topp-liste basert på "accepted" (sekvensielt,
-		-- gud-fritt). v1 kunne ha carry-/gud-oppblåste tall — de arves ikke.
-		return DataStoreService:GetOrderedDataStore("LabyrintTopp_v2")
-	end)
-	if ok then topStore = ds end
+	local ok, ds = pcall(function() return DataStoreService:GetOrderedDataStore(BoardConfig.Store) end)
+	if ok then boardStore = ds end
+	local ok2, ds2 = pcall(function() return DataStoreService:GetOrderedDataStore(BoardConfig.LegacyStore) end)
+	if ok2 then legacyBoardStore = ds2 end
 end
-local leaderboardCache = {}   -- { { name = string, level = number }, ... } høyest først
-local nameCache = {}          -- [userId] = navn (unngå gjentatte navne-oppslag)
-local leaderboardEvent        -- RemoteEvent (fylles ut i HUD-seksjonen): sender topplista til klientene
+local nameCache = {}          -- [userId] = navn (i minnet, aldri lagret)
+local leaderboardEvent        -- RemoteEvent (fylles ut i HUD-seksjonen): HUD-panelets topp 10
+local boardEvent              -- RemoteEvent (fylles ut i HUD-seksjonen): den fysiske tavlas visning, per spiller
 
 -- Normaliser lagret rekord-data til en liste { {time, name}, ... }. Bakover-
 -- kompatibel: gammelt format var ÉN {time, name}; nytt format er en array.
@@ -289,6 +324,8 @@ local currentPassages = {}    -- Vector3-punkter for tilfeldig monster-vandring
 
 local playerData = {}         -- [player] = {coins, gems, trophies, best}
 local startClock = {}         -- [player] = os.clock() ved level-start
+local runStartAt = {}         -- [player] = clock() da spilleren ble satt på starten av nivået (gå-vakta)
+local guardNoticeAt = {}      -- [player] = clock() da gå-vakta sist sa fra (ikke spam banneret)
 local shieldUsed = {}         -- [player] = true hvis skjold-perk er brukt på gjeldende nivå
 local invulnUntil = {}        -- [player] = os.clock()-tid uskadelig til (kort vindu etter skjold)
 local godActive = {}          -- [player] = true hvis gudemodus er på (kun GodUsers)
@@ -555,77 +592,254 @@ local function refreshStats(plr)
 	s.BestTime.Value = (d.best < math.huge) and fmtTime(d.best) or "-"
 end
 
---========================  TOPPLISTE (PÅ SKJERM)  ================--
--- Send gjeldende topp-liste til klientene, som tegner den i et panel PÅ SKJERMEN
--- (mye lettere å SE enn en tavle inne i den mørke labyrinten). Med `plr` = bare
--- til den ene (ved innlogging); uten = til alle.
+--===================  TOPPLISTE: OFFENTLIG + VENNER  =============--
+-- (docs/complete-game-standard.md §3, eier 16.09; bygget 01.10 etter +1 Jumps mal.) Metrikken er `accepted`,
+-- målt av serveren ved utgangen (finishRun, bak gå-vakta Progression.minClearSeconds), skrevet bare når den stiger
+-- (writeBoard), kodet med tidspunktet den ble nådd (Board.encode). Offentlig topp 10 hentes høyst én gang per
+-- PublicCacheSeconds og vises BÅDE i HUD-panelet (LeaderboardClient, som før) og på tavla ved spawn i lobbyen.
+-- Venner hentes først når en spiller ber om dem på tavla (ProximityPrompt), capet, cachet og strupet. Tavla
+-- tegnes av klienten (BoardClient): hver spiller ser sin egen visning. Navn slås opp og huskes i minnet, aldri lagret.
+local BC = BoardConfig
+local boardMode = {}          -- [plr] = "public" | "friends"
+local publicView = { rows = {}, note = BC.Text.Loading }
+
+-- Navn: fra spillere på serveren, venne-lista eller GetNameFromUserIdAsync; husket i minnet, aldri lagret.
+local function nameOf(userId)
+	-- en spiller på serveren først (som den gamle resolveName): et navn som er byttet siden sist, vises riktig
+	local here = Players:GetPlayerByUserId(userId)
+	if here then
+		nameCache[userId] = here.Name
+		return here.Name
+	end
+	local cached = nameCache[userId]
+	if cached then return cached end
+	local ok, res = pcall(function() return Players:GetNameFromUserIdAsync(userId) end)
+	if ok and typeof(res) == "string" and res ~= "" then
+		nameCache[userId] = res
+		return res
+	end
+	return "#" .. tostring(userId) -- ikke husket: neste visning prøver igjen
+end
+local function withNames(rows)
+	local out = {}
+	for i, r in ipairs(rows) do
+		out[i] = { rank = r.rank, userId = r.userId, tier = r.tier, you = r.you, name = nameOf(r.userId) }
+	end
+	return out
+end
+
+-- En spillers egen verdi fra minnet (ferskere enn datastoren). Gude-spillere står aldri på tavla.
+local function liveValue(plr)
+	local d = plr and playerData[plr]
+	if not d or (d.accepted or 0) <= 0 or GodUsers.has(plr) then return 0 end
+	return Board.encode(d.accepted, d.acceptedAt or os.time(), BC)
+end
+
+-- HUD-panelet (LeaderboardClient) får samme offentlige topp 10 i sin gamle form: { { name, level } }.
 local function broadcastLeaderboard(plr)
 	if not leaderboardEvent then return end
-	if plr then
-		leaderboardEvent:FireClient(plr, leaderboardCache)
-	else
-		leaderboardEvent:FireAllClients(leaderboardCache)
+	local list = {}
+	for i, r in ipairs(publicView.rows) do list[i] = { name = r.name, level = r.tier } end
+	if plr then leaderboardEvent:FireClient(plr, list) else leaderboardEvent:FireAllClients(list) end
+end
+
+local function sendBoard(plr, mode, view)
+	-- `viewer`: FireClient når bare denne spilleren i Roblox; feltet lar klienten se bort fra alt annet.
+	if boardEvent then
+		boardEvent:FireClient(plr, { viewer = plr.UserId, mode = mode, rows = view.rows, note = view.note })
 	end
 end
 
--- Navn fra userId (online spiller først; ellers cachet API-oppslag). Faller pent
--- tilbake til "Player" hvis oppslaget feiler.
-local function resolveName(userId)
-	local online = Players:GetPlayerByUserId(userId)
-	if online then return online.Name end
-	if nameCache[userId] then return nameCache[userId] end
-	local nm = "Player"
-	local ok, res = pcall(function() return Players:GetNameFromUserIdAsync(userId) end)
-	if ok and typeof(res) == "string" and res ~= "" then nm = res end
-	nameCache[userId] = nm
-	return nm
+local function refreshPublic()
+	if not boardStore then
+		publicView = Board.publicView({}, BC)
+		return
+	end
+	-- Feiler hentingen, beholdes forrige liste. Har tavla aldri fått noe å vise (den første hentingen etter oppstart
+	-- feilet: utfall, eller Studio uten API-tilgang), sier den det i stedet for å stå på "Loading..." for alltid.
+	local function failed()
+		if #publicView.rows == 0 then publicView = { rows = {}, note = BC.Text.PublicFailed } end
+	end
+	local ok, page = pcall(function() return boardStore:GetSortedAsync(false, BC.PublicRows) end)
+	if not ok or not page then failed(); return end
+	local okPage, items = pcall(function() return page:GetCurrentPage() end)
+	if not okPage or typeof(items) ~= "table" then failed(); return end
+	local entries = {}
+	for _, e in ipairs(items) do
+		local uid = Board.userIdOf(tostring(e.key))
+		if uid and typeof(e.value) == "number" then table.insert(entries, { userId = uid, value = e.value }) end
+	end
+	local view = Board.publicView(entries, BC)
+	publicView = { rows = withNames(view.rows), note = view.note }
 end
 
--- Hent topp 10 (høyeste nivå) og oppdater cachen + tavla. Kjøres asynkront så den
--- aldri bremser nivå-byggingen; alt er pcall-et (DataStore kan feile/strupe).
--- Struped så raske nivå-hopp ikke spammer GetSortedAsync (les-grense pr minutt).
-local lastLeaderboardRefresh = -1e9
-local function refreshLeaderboard()
-	if not topStore then return end
-	local now = os.clock()
-	if now - lastLeaderboardRefresh < 12 then return end
-	lastLeaderboardRefresh = now
-	task.spawn(function()
-		local ok, pages = pcall(function()
-			return topStore:GetSortedAsync(false, 10)  -- false = synkende: høyest nivå først
-		end)
-		if not ok or not pages then return end
-		local ok2, top = pcall(function() return pages:GetCurrentPage() end)
-		if not ok2 or typeof(top) ~= "table" then return end
-		local list = {}
-		for _, entry in ipairs(top) do
-			local uid = tonumber(entry.key)
-			local lvl = tonumber(entry.value)
-			if uid and lvl then
-				list[#list + 1] = { name = resolveName(uid), level = lvl }
+local function pushPublic()
+	broadcastLeaderboard()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if (boardMode[p] or "public") == "public" then sendBoard(p, "public", publicView) end
+	end
+end
+
+-- Skriv spillerens `accepted` når den har steget over det som sist ble skrevet (boardLevel), og aldri lavere enn
+-- det som står der (Board.keepHigher avbryter). Bare en økt som holder låsen skriver; gude-spillere aldri.
+local function writeBoard(plr)
+	local d = playerData[plr]
+	if not boardStore or not d or d.canSave == false or not d.session or GodUsers.has(plr) then return end
+	local level = d.accepted or 0
+	if level <= (d.boardLevel or 0) then return end
+	local value = Board.encode(level, d.acceptedAt or os.time(), BC)
+	local ok = pcall(function()
+		boardStore:UpdateAsync(Board.key(plr.UserId), function(old) return Board.keepHigher(old, value) end)
+	end)
+	if ok then d.boardLevel = math.max(d.boardLevel or 0, level) end -- også når keepHigher avbrøt
+end
+
+-- Den gamle tavla (v2) sin topp 10 bæres over én gang per serverstart. Når de ble nådd er ukjent, men det var
+-- før BC.LegacyReachedAt. keepHigher gjør det trygt å gjøre om igjen: et like høyt eller høyere v3-tall står.
+local function carryLegacyBoard()
+	if not boardStore or not legacyBoardStore then return end
+	local ok, page = pcall(function() return legacyBoardStore:GetSortedAsync(false, BC.PublicRows) end)
+	if not ok or not page then return end
+	local okPage, items = pcall(function() return page:GetCurrentPage() end)
+	if not okPage or typeof(items) ~= "table" then return end
+	for _, e in ipairs(items) do
+		local uid, lvl = tonumber(e.key), tonumber(e.value)
+		if uid and lvl and lvl >= 1 then
+			local value = Board.encode(math.floor(lvl), BC.LegacyReachedAt, BC)
+			pcall(function()
+				boardStore:UpdateAsync(Board.key(uid), function(old) return Board.keepHigher(old, value) end)
+			end)
+		end
+	end
+end
+
+-- Venner: kun på forespørsel, capet på FriendsCap, cachet per spiller. En feilet henting prøves igjen etter et
+-- minutt, ikke på hvert trykk.
+local friendsCache = Board.newCache(BC.FriendsCacheSeconds)
+local friendsFailed = Board.newCache(60)
+local scoreCache = Board.newCache(BC.ScoreCacheSeconds)
+local readLimiter = Board.newLimiter(BC.ReadsBurst, BC.ReadsPerSecond, clock())
+local boardFetching = {}
+
+local function friendIdsOf(plr)
+	local now = clock()
+	local hit = Board.cacheGet(friendsCache, plr.UserId, now)
+	if hit then return hit, false end
+	if Board.cacheHas(friendsFailed, plr.UserId, now) then return {}, true end
+	local ok, pages = pcall(function() return Players:GetFriendsAsync(plr.UserId) end)
+	local ids = {}
+	local broken = not ok or pages == nil
+	while not broken and #ids < BC.FriendsCap do
+		local okPage, items = pcall(function() return pages:GetCurrentPage() end)
+		if not okPage or typeof(items) ~= "table" then
+			broken = #ids == 0
+			break
+		end
+		for _, item in ipairs(items) do
+			local id = tonumber(item.Id)
+			if id and #ids < BC.FriendsCap then
+				table.insert(ids, id)
+				if typeof(item.Username) == "string" then nameCache[id] = item.Username end
 			end
 		end
-		leaderboardCache = list
-		broadcastLeaderboard()
+		if pages.IsFinished or #ids >= BC.FriendsCap then break end
+		if not pcall(function() pages:AdvanceToNextPageAsync() end) then break end
+	end
+	if broken then
+		Board.cachePut(friendsFailed, plr.UserId, true, now)
+		return {}, true
+	end
+	Board.cachePut(friendsCache, plr.UserId, ids, now)
+	return ids, false
+end
+
+-- La alltid BudgetReserve GetAsync stå igjen i Roblox-budsjettet (kan det ikke leses, gjelder bare begrenseren).
+local function budgetLeft()
+	local ok, budget = pcall(function()
+		return DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetAsync)
+	end)
+	return not (ok and typeof(budget) == "number" and budget < BC.BudgetReserve)
+end
+
+-- En venns lagrede verdi (0 = har ikke klart et nivå), eller nil når lesingen er strupet (prøv igjen senere). En
+-- lesing som feiler teller som 0 uten å caches, så én dårlig nøkkel ikke stopper lista.
+local function friendValue(userId)
+	local here = Players:GetPlayerByUserId(userId)
+	if here and playerData[here] then return liveValue(here) end
+	local now = clock()
+	if Board.cacheHas(scoreCache, userId, now) then return Board.cacheGet(scoreCache, userId, now) end
+	if not boardStore then return 0 end
+	if not budgetLeft() or not Board.take(readLimiter, now) then return nil end
+	local ok, v = pcall(function() return boardStore:GetAsync(Board.key(userId)) end)
+	if not ok then return 0 end
+	local value = (typeof(v) == "number") and v or 0
+	Board.cachePut(scoreCache, userId, value, now)
+	return value
+end
+
+local function showFriends(plr)
+	if boardFetching[plr] then
+		sendBoard(plr, "friends", { rows = {}, note = BC.Text.Loading }) -- den som går, sender snart
+		return
+	end
+	boardFetching[plr] = true
+	task.spawn(function()
+		sendBoard(plr, "friends", { rows = {}, note = BC.Text.Loading })
+		local ids, failedList = friendIdsOf(plr)
+		local values = {}
+		local status = { friendCount = #ids, checked = 0, failed = failedList }
+		local function push()
+			values[plr.UserId] = liveValue(plr)
+			local view = Board.friendsView(plr.UserId, values, status, BC)
+			sendBoard(plr, "friends", { rows = withNames(view.rows), note = view.note })
+		end
+		local i, lastPush = 1, -math.huge
+		while i <= #ids and plr.Parent == Players and boardMode[plr] == "friends" do
+			local v = friendValue(ids[i])
+			if v == nil then
+				status.checked = i - 1
+				if clock() - lastPush >= 0.5 then
+					push()
+					lastPush = clock()
+				end
+				task.wait(1) -- strupet: vent på begrenseren
+			else
+				values[ids[i]] = v
+				i += 1
+			end
+		end
+		status.checked = i - 1
+		if plr.Parent == Players and boardMode[plr] == "friends" then push() end
+		boardFetching[plr] = nil
 	end)
 end
 
--- Send inn en spillers nådde nivå (bare hvis høyere enn før). Asynkront + pcall.
-local function submitTopScore(userId, level)
-	if not topStore or typeof(level) ~= "number" then return end
-	task.spawn(function()
-		pcall(function()
-			topStore:UpdateAsync(tostring(userId), function(old)
-				if typeof(old) ~= "number" or level > old then
-					return level
-				end
-				return nil  -- ikke høyere: ikke skriv
-			end)
-		end)
-	end)
+local function toggleBoard(plr)
+	boardMode[plr] = if boardMode[plr] == "friends" then "public" else "friends"
+	if boardMode[plr] == "friends" then
+		showFriends(plr)
+	else
+		sendBoard(plr, "public", publicView)
+	end
 end
 
 --============================  LAGRING  ==========================--
+-- Økt-lås + eier-token (docs/complete-game-standard.md §1; mønsteret er fork-tower sitt `old.session`).
+-- Posten er fortsatt FLAT (samme felt som før, der de var) og har fått tre til: `session` (eier-tokenet denne
+-- øktas last skrev), `lockUntil` (unix-sekunder; 0 = sluppet) og `jobId`. Regler:
+--   * lasten er én UpdateAsync: den leser ALLTID ekte data, og tar låsen bare hvis ingen annen levende server
+--     holder den (en annen jobId med lockUntil i framtida). Holder en annen den, spiller økta READ-ONLY med ekte
+--     data og får beskjed; en lås som har gått ut (krasjet server) tas over.
+--   * hver lagring er en UpdateAsync som lander bare mens posten bærer VÅRT token. Har en nyere økt tatt posten,
+--     avbrytes skrivingen, økta slutter å lagre (canSave = false) og spilleren får vite hvorfor.
+--   * autolagringen (AutosaveSeconds) fornyer låsen; å gå ut og BindToClose slipper den (lockUntil = 0).
+--   * engangs-gaver (start-gave, bidragsyter, daglig belønning) gis INNE i én slik skriving (grantOnce): lander
+--     den ikke, rulles gaven tilbake i minnet, så den verken går tapt i en halv tilstand eller kan tas to ganger.
+-- check_labyrintspill_save holder hver av disse.
+local notifyPlayer -- forhånds-deklarert: (plr, tekst) -> banneret øverst hos den ene spilleren (HUD-seksjonen)
+
+local function playerKey(plr) return "p_" .. plr.UserId end
+
 local function loadPlayer(plr)
 	local d = { coins = 0, gems = 0, trophies = 0, best = math.huge,
 		owned = { classic = true }, theme = Themes.default, receipts = {}, bestByLevel = {}, perks = {}, gifts = {},
@@ -636,9 +850,37 @@ local function loadPlayer(plr)
 		bestWithGod = 0 }   -- høyeste nivå nådd inkl. gud-runder (kun skryt, aldri toppliste)
 	local loadOk = true
 	if dataStore then
-		local ok, saved = pcall(function() return dataStore:GetAsync("p_" .. plr.UserId) end)
-		if not ok then loadOk = false end  -- lese-feil: ikke lagre over ekte data senere
-		if ok and typeof(saved) == "table" then
+		local token = HttpService:GenerateGUID(false)
+		local saved, lockedByOther = nil, false
+		local ok, err = pcall(function()
+			dataStore:UpdateAsync(playerKey(plr), function(old)
+				-- Transformen kan kjøres flere ganger; bare siste kjøring teller, så alt settes på nytt hver gang.
+				saved = old
+				local now = os.time()
+				lockedByOther = typeof(old) == "table" and old.session ~= nil
+					and (tonumber(old.lockUntil) or 0) > now and old.jobId ~= game.JobId
+				if lockedByOther then return nil end -- en annen levende server eier posten: ikke rør den
+				local rec = (typeof(old) == "table") and old or {}
+				rec.session = token
+				rec.lockUntil = now + CONFIG.SessionLockSeconds
+				rec.jobId = game.JobId
+				return rec
+			end)
+		end)
+		if not ok then
+			-- Lese-feil: vi vet ikke hva som er lagret, så økta lagrer ingenting (aldri default over ekte data).
+			loadOk = false
+			saved = nil
+			d.pendingNotice = "Your saved progress could not be loaded right now, so this session will not be saved. Rejoin in a minute to keep your progress."
+			warn("[Labyrint] lasten feilet for " .. plr.Name .. " (" .. tostring(err) .. "): økta er read-only")
+		elseif lockedByOther then
+			loadOk = false
+			d.pendingNotice = "Your progress is open in another server right now, so this session will not be saved. Rejoin in a minute to keep your progress."
+			warn("[Labyrint] " .. plr.Name .. " er låst av en annen server: økta er read-only")
+		else
+			d.session = token
+		end
+		if typeof(saved) == "table" then
 			if typeof(saved.coins) == "number" then d.coins = saved.coins end
 			if typeof(saved.gems) == "number" then d.gems = saved.gems end
 			if typeof(saved.trophies) == "number" then d.trophies = saved.trophies end
@@ -674,6 +916,11 @@ local function loadPlayer(plr)
 			if typeof(saved.streak) == "number" then d.streak = saved.streak end
 			if typeof(saved.accepted) == "number" then d.accepted = math.floor(saved.accepted) end
 			if typeof(saved.bestWithGod) == "number" then d.bestWithGod = math.floor(saved.bestWithGod) end
+			-- (eierbeslutning 30.09) nivået en kjøpt "Hjelp meg"-guide venter på (Assist.keptFor)
+			if typeof(saved.guideLevel) == "number" and saved.guideLevel >= 1 then d.guideLevel = math.floor(saved.guideLevel) end
+			-- (01.10) topplista: når `accepted` ble nådd (uavgjort til den som var først), og hva som sist ble skrevet dit
+			if typeof(saved.acceptedAt) == "number" and saved.acceptedAt > 0 then d.acceptedAt = math.floor(saved.acceptedAt) end
+			if typeof(saved.boardLevel) == "number" then d.boardLevel = math.floor(saved.boardLevel) end
 		end
 	end
 	-- Migrering: mangler spilleren "accepted" (nytt felt), seed fra personlige
@@ -683,37 +930,77 @@ local function loadPlayer(plr)
 		d.accepted = Progression.seedAccepted(d.bestByLevel)
 	end
 	d.bestWithGod = math.max(d.bestWithGod, d.accepted, d.level or 0)
+	-- Lagret før 01.10: nivået uten tidspunkt. Når det ble nådd er ukjent, så det stemples med denne økta (det kommer
+	-- på topplista ved første skriving, bak alle som nådde samme nivå før).
+	if d.accepted > 0 and not d.acceptedAt then d.acceptedAt = os.time() end
 	d.owned.classic = true                                    -- classic eies alltid
 	if not d.owned[d.theme] then d.theme = Themes.default end -- kan ikke ha valgt et uleid tema
-	d.canSave = loadOk                                       -- false hvis GetAsync feilet
+	d.canSave = loadOk                                       -- false: lasten feilet, eller en annen server har låsen
 	playerData[plr] = d
 	refreshStats(plr)
 end
 
-local function savePlayer(plr)
+-- `release` = spilleren går / serveren stenger: slipp låsen (lockUntil = 0). Returnerer true når skrivingen
+-- faktisk landet (kjøp med ekte penger og engangs-gaver ruller tilbake ellers).
+local function savePlayer(plr, release)
 	local d = playerData[plr]
 	if not d or not dataStore then return false end
-	if d.canSave == false then return false end  -- lasten feilet: ikke overskriv ekte lagring
+	if d.canSave == false or not d.session then return false end  -- read-only økt: aldri skriv over ekte lagring
+	local lost = false
 	local ok = pcall(function()
-		dataStore:SetAsync("p_" .. plr.UserId, {
-			coins = d.coins, gems = d.gems, trophies = d.trophies,
-			best = (d.best < math.huge) and d.best or nil,
-			owned = d.owned, theme = d.theme, receipts = d.receipts,
-			bestByLevel = d.bestByLevel,
-			perks = d.perks,
-			gifts = d.gifts,
-			level = d.level,
-			rewardDay = d.rewardDay,
-			streak = d.streak,
-			accepted = d.accepted,
-			bestWithGod = d.bestWithGod,
-		})
+		dataStore:UpdateAsync(playerKey(plr), function(old)
+			-- EIERSKAP: lander bare mens posten bærer tokenet denne øktas last skrev. `lost` settes på hver kjøring.
+			if typeof(old) ~= "table" or old.session ~= d.session then
+				lost = true
+				return nil
+			end
+			lost = false
+			return {
+				coins = d.coins, gems = d.gems, trophies = d.trophies,
+				best = (d.best < math.huge) and d.best or nil,
+				owned = d.owned, theme = d.theme, receipts = d.receipts,
+				bestByLevel = d.bestByLevel,
+				perks = d.perks,
+				gifts = d.gifts,
+				level = d.level,
+				rewardDay = d.rewardDay,
+				streak = d.streak,
+				accepted = d.accepted,
+				bestWithGod = d.bestWithGod,
+				guideLevel = d.guideLevel,
+				acceptedAt = d.acceptedAt,
+				boardLevel = d.boardLevel,
+				session = d.session,
+				jobId = game.JobId,
+				lockUntil = (release or d.released) and 0 or (os.time() + CONFIG.SessionLockSeconds),
+			}
+		end)
 	end)
+	if lost then
+		-- En nyere økt eier posten nå. Ingenting denne gjør blir tatt vare på herfra, så den slutter å skrive.
+		d.canSave = false
+		warn("[Labyrint] " .. plr.Name .. ": en nyere økt har tatt over posten; denne økta lagrer ikke lenger")
+		if notifyPlayer and plr.Parent then
+			notifyPlayer(plr, "Your progress is now open in another server, so this session stops saving. Rejoin to keep playing where you left off.")
+		end
+		return false
+	end
 	return ok
 end
 
+-- Engangs-gave: `apply` gir den i minnet, og den står bare hvis den samme skrivingen lander (savePlayer over).
+-- Feiler skrivingen, gjør `undo` den ugjort igjen: aldri en gave som kan tas på nytt, aldri en halv.
+local function grantOnce(plr, apply, undo)
+	local d = playerData[plr]
+	if not d or d.canSave == false then return false end
+	apply(d)
+	if savePlayer(plr) then return true end
+	undo(d)
+	return false
+end
+
 -- Debouncet lagring for hyppige, ikke-kritiske endringer (kjøp/valg av tema).
--- Slår sammen mange raske endringer til én SetAsync, så en klient ikke kan
+-- Slår sammen mange raske endringer til én skriving, så en klient ikke kan
 -- spamme DataStore-skriv og strupe/miste de ekte lagringene (mynter/pokaler).
 local saveScheduled = {}
 local SAVE_DEBOUNCE = 6
@@ -1225,7 +1512,10 @@ onEscape = function(plr)
 			})
 			pd.accepted = res.newAccepted
 			pd.bestWithGod = res.newBestWithGod
-			if res.acceptedGained then acceptedGainers[p] = true end
+			if res.acceptedGained then
+				acceptedGainers[p] = true
+				pd.acceptedAt = os.time() -- topplista: uavgjort til den som nådde nivået først
+			end
 		end
 	end
 
@@ -1241,12 +1531,9 @@ onEscape = function(plr)
 				-- Toppliste bruker ACCEPTED (sekvensielt, gud-fritt) — ikke pd.level.
 				-- Send bare de som faktisk ØKTE accepted denne runden, og aldri
 				-- GodUsers (Mio holdes utenfor den globale tavla uansett).
-				if pd.canSave ~= false and acceptedGainers[p] and not GodUsers.has(p) then
-					submitTopScore(p.UserId, pd.accepted)
-				end
+				if acceptedGainers[p] then task.spawn(writeBoard, p) end -- writeBoard sjekker lås og GodUsers
 			end
 		end
-		refreshLeaderboard()  -- hent oppdatert topp 10 (async) og oppdater tavla
 	end
 	task.wait(0.4)
 	-- advancing MÅ nullstilles selv om buildLevel skulle feile, ellers låser
@@ -1328,12 +1615,22 @@ leaderboardEvent = Instance.new("RemoteEvent")
 leaderboardEvent.Name = "Leaderboard"
 leaderboardEvent.Parent = hudFolder
 
+-- Den fysiske topplista-tavlas visning, per spiller (BoardClient tegner den). Forhånds-deklarert over.
+boardEvent = Instance.new("RemoteEvent")
+boardEvent.Name = "Board"
+boardEvent.Parent = hudFolder
+
 -- Admin-kringkasting (/bc): vises i et gjennomsiktig felt øverst hos ALLE spillere.
 -- Samme RemoteEvent begge veier: klienten FireServer(text) for å be om kringkasting;
 -- serveren verifiserer admin + filtrerer + FireAllClients(navn, tekst) for å vise.
 local broadcastEvent = Instance.new("RemoteEvent")
 broadcastEvent.Name = "Broadcast"
 broadcastEvent.Parent = hudFolder
+
+-- Spillets egne beskjeder til ÉN spiller (aldri stille: en nektet handling sier hvorfor) i samme banner.
+notifyPlayer = function(plr, text)
+	broadcastEvent:FireClient(plr, "Labyrint", text)
+end
 
 -- Admin = spillets eier (deg) ELLER gude-spillerne (Mio). CreatorId gjelder når
 -- spillet er eid av en BRUKER (ikke gruppe) — som her.
@@ -1596,6 +1893,7 @@ local function onCharacterAdded(plr, char)
 	end
 	sendPerkData(plr)
 	broadcastLeaderboard(plr)  -- fyll spillerens topp-liste-panel med gjeldende cache
+	if (boardMode[plr] or "public") == "public" then sendBoard(plr, "public", publicView) end -- tavla ved spawn
 
 	-- Daglig belønning: vis ÉN gang etter at spilleren har spawnet (da er klient-
 	-- HUD-en garantert oppe, så toasten ikke går tapt). Nullstill så den ikke gjentas.
@@ -1607,22 +1905,48 @@ local function onCharacterAdded(plr, char)
 			if plr.Parent then rewardEvent:FireClient(plr, rw) end
 		end)
 	end
+	-- Read-only økt (lasten feilet, eller en annen server har låsen): si det, aldri stille.
+	if d and d.pendingNotice and notifyPlayer then
+		local text = d.pendingNotice
+		d.pendingNotice = nil
+		task.delay(2.5, function()
+			if plr.Parent then notifyPlayer(plr, text) end
+		end)
+	end
+end
+
+-- plr.RespawnLocation = lobby-platen (robloxemu/SPAWN-ORDER.md regel 1, motorens FØRSTE valg). Den er i dag
+-- den eneste SpawnLocation-en i verden, så motoren fant den uansett; nå trenger den ikke lete. Kalles for hver
+-- som blir med, og én gang etter buildLobby for dem som var her før lobbyen fantes (Studio-play).
+local function pointRespawn(plr)
+	local lobby = workspace:FindFirstChild("Lobby")
+	local pad = lobby and lobby:FindFirstChild("LobbySpawn")
+	if pad and pad:IsA("SpawnLocation") then plr.RespawnLocation = pad end
 end
 
 local function onPlayerAdded(plr)
+	pointRespawn(plr)
 	loadPlayer(plr)
+	task.spawn(writeBoard, plr) -- et nivå som aldri kom på tavla (lagret før 01.10, eller en tapt skriving) kommer dit nå
+
+	-- Engangs-gavene under gis alle med grantOnce: i minnet, og står bare hvis den ene skrivingen lander.
+	-- En read-only økt (canSave == false) gir ingenting den ikke kan lagre.
+	local d = playerData[plr]
 
 	-- Del ut start-gaven til spesielle spillere (samme liste som gudemodus).
-	-- Bare hvis lasten gikk bra, ellers kunne vi overskrevet ekte data.
-	local d = playerData[plr]
-	if d and d.canSave ~= false and GodUsers.has(plr) then
+	if d and d.canSave ~= false and GodUsers.has(plr) and not (d.gifts or {})[STARTER_GIFT.id] then
 		d.gifts = d.gifts or {}
-		if not d.gifts[STARTER_GIFT.id] then
-			d.coins += STARTER_GIFT.coins
-			d.gems += STARTER_GIFT.gems
-			d.gifts[STARTER_GIFT.id] = true
+		local granted = grantOnce(plr, function(pd)
+			pd.coins += STARTER_GIFT.coins
+			pd.gems += STARTER_GIFT.gems
+			pd.gifts[STARTER_GIFT.id] = true
+		end, function(pd)
+			pd.coins -= STARTER_GIFT.coins
+			pd.gems -= STARTER_GIFT.gems
+			pd.gifts[STARTER_GIFT.id] = nil
+		end)
+		if granted then
 			refreshStats(plr)
-			savePlayer(plr)  -- lagre straks så gaven ikke deles ut på nytt
 			sendShopData(plr)
 		end
 	end
@@ -1631,37 +1955,48 @@ local function onPlayerAdded(plr)
 	-- (se Contributors-lista) får en engangs-bonus første gang de blir med. Samme
 	-- idempotens-mønster som start-gaven (d.gifts[REWARD.id]). Navnet vises også på
 	-- "Content Contributors"-tavla i lobbyen.
-	if d and d.canSave ~= false and Contributors.has(plr) then
+	if d and d.canSave ~= false and Contributors.has(plr) and Contributors.shouldReward(true, d.gifts or {}) then
 		d.gifts = d.gifts or {}
-		if Contributors.shouldReward(true, d.gifts) then
-			d.coins += Contributors.REWARD.coins
-			d.gems += Contributors.REWARD.gems
-			d.gifts[Contributors.REWARD.id] = true
+		local granted = grantOnce(plr, function(pd)
+			pd.coins += Contributors.REWARD.coins
+			pd.gems += Contributors.REWARD.gems
+			pd.gifts[Contributors.REWARD.id] = true
+		end, function(pd)
+			pd.coins -= Contributors.REWARD.coins
+			pd.gems -= Contributors.REWARD.gems
+			pd.gifts[Contributors.REWARD.id] = nil
+		end)
+		if granted then
 			refreshStats(plr)
-			savePlayer(plr)  -- lagre straks så belønningen ikke deles ut på nytt
 			sendShopData(plr)
 		end
 	end
 
 	-- Daglig belønning (retention): første innlogging på en ny UTC-dag gir mynter,
 	-- og en streak-bonus som vokser den første uka + en liten edelsten-bonus hver
-	-- 7. dag. Stashes i d.pendingReward og vises som en toast ved første spawn.
+	-- 7. dag. Stashes i d.pendingReward og vises som en toast ved første spawn — bare når den er lagret.
 	if d and d.canSave ~= false then
 		local today = math.floor(os.time() / 86400)
 		if d.rewardDay ~= today then
-			if d.rewardDay == today - 1 then
-				d.streak = (d.streak or 0) + 1   -- to dager på rad: streaken vokser
-			else
-				d.streak = 1                     -- hull i rekka (eller første gang): start på nytt
+			local oldDay, oldStreak = d.rewardDay, d.streak
+			local streak = (d.rewardDay == today - 1) and ((d.streak or 0) + 1) or 1 -- hull i rekka: start på nytt
+			local coinReward = 150 * math.min(streak, 7)      -- 150 .. 1050
+			local gemReward = (streak % 7 == 0) and 5 or 0     -- gullbonus hver 7. dag
+			local granted = grantOnce(plr, function(pd)
+				pd.streak = streak
+				pd.rewardDay = today
+				pd.coins += coinReward
+				pd.gems += gemReward
+			end, function(pd)
+				pd.streak = oldStreak
+				pd.rewardDay = oldDay
+				pd.coins -= coinReward
+				pd.gems -= gemReward
+			end)
+			if granted then
+				d.pendingReward = { coins = coinReward, gems = gemReward, streak = streak }
+				refreshStats(plr)
 			end
-			d.rewardDay = today
-			local coinReward = 150 * math.min(d.streak, 7)      -- 150 .. 1050
-			local gemReward = (d.streak % 7 == 0) and 5 or 0     -- gullbonus hver 7. dag
-			d.coins += coinReward
-			d.gems += gemReward
-			d.pendingReward = { coins = coinReward, gems = gemReward, streak = d.streak }
-			refreshStats(plr)
-			savePlayer(plr)  -- lagre straks så belønningen ikke gis to ganger samme dag
 		end
 	end
 
@@ -1702,7 +2037,11 @@ Players.PlayerAdded:Connect(onPlayerAdded)
 for _, plr in ipairs(Players:GetPlayers()) do onPlayerAdded(plr) end
 
 Players.PlayerRemoving:Connect(function(plr)
-	savePlayer(plr)                 -- flush umiddelbart (fanger evt. debouncet endring)
+	-- Flush umiddelbart OG slipp låsen. `released` først: en lagring som allerede er på vei (finishRun,
+	-- debounce) og lander ETTER denne, slipper låsen den også, i stedet for å låse posten igjen i
+	-- SessionLockSeconds så spillerens neste server må spille read-only.
+	if playerData[plr] then playerData[plr].released = true end
+	savePlayer(plr, true)
 	-- Lobby-modus: forlot spilleren en instans, fjern dem (riv om tom, prune lister).
 	if teardownPlayerInstance then teardownPlayerInstance(plr) end
 	playerData[plr] = nil
@@ -1712,10 +2051,33 @@ Players.PlayerRemoving:Connect(function(plr)
 	invulnUntil[plr] = nil
 	godActive[plr] = nil
 	stuckState[plr] = nil
+	boardMode[plr] = nil
+	boardFetching[plr] = nil
+	runStartAt[plr] = nil
+	guardNoticeAt[plr] = nil
 end)
 
 game:BindToClose(function()
-	for _, plr in ipairs(Players:GetPlayers()) do savePlayer(plr) end
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if playerData[plr] then playerData[plr].released = true end
+		savePlayer(plr, true)
+	end
+end)
+
+-- Autolagring: fornyer låsen (to runder rekker innenfor SessionLockSeconds) og tar vare på det som ikke
+-- lagres ved hendelser. En økt som har mistet eller aldri fikk låsen (canSave == false) hoppes over.
+task.spawn(function()
+	while true do
+		task.wait(CONFIG.AutosaveSeconds)
+		for _, p in ipairs(Players:GetPlayers()) do
+			local pd = playerData[p]
+			if pd and pd.canSave ~= false and pd.session then
+				task.spawn(savePlayer, p)
+				-- en tavle-skriving som gikk tapt (utfall) prøves igjen her; writeBoard gjør ingen kall når intet er skyldig
+				task.spawn(writeBoard, p)
+			end
+		end
+	end
 end)
 
 --====================  LOBBY + PER-SPILLER-INSTANSER  ============--
@@ -1807,7 +2169,7 @@ local function buildInstance(inst)
 	inst.spinners = {}
 	inst.passages = {}
 	inst.hadGod = false
-	inst.assist = false   -- "Hjelp meg"-guiden gjelder ÉN kjøring: nullstilles pr nivå
+	inst.assist = false   -- "Hjelp meg"-guiden hører til nivået: nullstilles pr bygging (applyKeptGuide tenner en beholdt)
 	inst.trail = nil
 
 	local diff = MazeGen.getDifficulty(inst.level, CONFIG.Curve)
@@ -2074,6 +2436,19 @@ local function buildInstance(inst)
 	inst.par = Medals.parTime(steps, CONFIG.CellSize, CONFIG.PlayerWalkSpeed)
 	inst.thresholds = Medals.thresholds(inst.par)
 
+	-- Gå-vakta: korteste rute med ALLE planlagte hemmelige dører åpne (også en som ikke fikk knapp: det kan bare
+	-- senke gulvet), i toppfart med den raskeste speed-perken. Se CONFIG.WalkGuard.
+	do
+		local openGrid = {}
+		for y = 0, gRows - 1 do openGrid[y] = table.clone(grid[y]) end
+		for _, k in ipairs(plannedDoors) do
+			local dx, dy = string.match(k, "^(%d+),(%d+)$")
+			if dx and openGrid[tonumber(dy)] then openGrid[tonumber(dy)][tonumber(dx)] = false end
+		end
+		local openSteps = Medals.solveRoute(openGrid, gCols, gRows, startFine, exitFine, {})
+		inst.minClear = openSteps and Progression.minClearSeconds(openSteps, S, MAX_WALK_SPEED, CONFIG.WalkGuard.Slack) or 0
+	end
+
 	-- Ruta til "Hjelp meg"-guiden regnes NÅ (mens vi har grid-en) og lagres som
 	-- ferdige verdens-punkter. Selve merkene tegnes først hvis noen kjøper guiden.
 	-- Medals.dist sendes INN til Assist — delte moduler krever aldri hverandre.
@@ -2157,7 +2532,8 @@ end
 
 --===================  "HJELP MEG"-GUIDEN  ========================--
 -- Se CONFIG.Assist for HVORFOR. Kort: har du feilet samme nivå nok ganger, kan
--- du kjøpe en lysende rute til utgangen for mynter — for ÉN kjøring.
+-- du kjøpe en lysende rute til utgangen for mynter. Den beholdes til nivået er klart
+-- (eierbeslutning 30.09: død eller retur mister den ikke), og tennes bare på det nivået.
 --
 -- SERVER-AUTORITATIVT, og umulig å utnytte til gratis fremgang:
 --   * Klienten sender BARE et ønske (ingen argumenter: ingen pris, intet nivå).
@@ -2173,6 +2549,9 @@ end
 --   * Én guide pr kjøring (inst.assist), og flagget settes i samme steg som
 --     myntene trekkes (ingen yield imellom), så spam-klikk kan ikke belaste to
 --     ganger eller tegne ruta på nytt.
+--   * En beholdt guide (d.guideLevel, lagret) tennes BARE på nivået den ble kjøpt
+--     for (Assist.keptFor), og er brukt opp når nivået klares (Assist.afterClear).
+--     Den koster ingenting igjen og kan ikke kjøpes to ganger (inst.assist).
 local assistFolder = Instance.new("Folder")
 assistFolder.Name = "AssistRemotes"
 assistFolder.Parent = ReplicatedStorage
@@ -2201,6 +2580,7 @@ local function sendAssistState(plr)
 		need = CONFIG.Assist.OfferAfterFails,
 		offered = Assist.shouldOffer(stuck, level, CONFIG.Assist),
 		active = (inst ~= nil) and (inst.assist == true),
+		kept = Assist.keptFor(d.guideLevel, level),   -- en kjøpt guide venter på dette nivået (eierbeslutning 30.09)
 		price = Assist.price(level, CONFIG.Assist),
 		coins = d.coins,
 	})
@@ -2245,6 +2625,7 @@ buyAssistFn.OnServerInvoke = function(plr)
 	local ok, reason, price = Assist.buy(d, stuckState[plr], inst.level, inst.assist == true, CONFIG.Assist)
 	if ok then
 		inst.assist = true                 -- samme steg som trekket: ingen dobbeltkjøp
+		d.guideLevel = inst.level          -- beholdes til nivået er klart (eierbeslutning 30.09, Assist.keptFor)
 		buildAssistTrail(inst)
 		refreshStats(plr)
 		scheduleSave(plr)
@@ -2256,6 +2637,22 @@ buyAssistFn.OnServerInvoke = function(plr)
 		sendAssistState(plr)
 	end
 	return { ok = ok, reason = reason, price = price, coins = d.coins }
+end
+
+-- (Eierbeslutning 30.09, "aldri straffende") En guide spilleren har kjøpt for dette nivået, og ennå ikke brukt
+-- opp ved å klare det, tennes igjen når de går inn på nivået -- etter død, retur til lobbyen eller et nytt besøk.
+-- Serveren avgjør det ut fra det lagrede nivået de betalte for; aldri på et annet nivå. Som et kjøp i en delt
+-- kjøring gjelder guiden hele instansen (og da gir ingen i den tid/rekord, Progression.recordEligible).
+local function applyKeptGuide(plr, inst)
+	local d = playerData[plr]
+	if not d or not CONFIG.Assist.Enabled or inst.assist or not inst.routeWorld then return false end
+	if not Assist.keptFor(d.guideLevel, inst.level) then return false end
+	inst.assist = true
+	buildAssistTrail(inst)
+	for _, p in ipairs(participantList(inst)) do
+		if p ~= plr then sendAssistState(p) end
+	end
+	return true
 end
 
 -- Fjern spilleren fra sin instans (forlot/døde). Tom instans -> riv + prune.
@@ -2302,6 +2699,7 @@ local function placeInInstance(plr, inst)
 	local char = plr.Character
 	if char then pcall(function() char:PivotTo(CFrame.new(inst.spawnPos)) end) end
 	startClock[plr] = os.clock()
+	runStartAt[plr] = clock()
 	shieldUsed[plr] = false
 	-- Merk spilleren med SIN egen labyrint-mappe. Klientene (tema-omfarging, minikart) sto og
 	-- lette etter `workspace.MazeGame`, som bare den ubrukte buildLevel lager -- derfor var
@@ -2311,8 +2709,9 @@ local function placeInInstance(plr, inst)
 	if inst.folder then
 		plr:SetAttribute(MazeRef.ATTRIBUTE, inst.folder.Name)
 	end
+	applyKeptGuide(plr, inst)
 	sendInstanceInfo(plr, inst)
-	sendAssistState(plr)   -- inne i labyrinten: her dukker kjøp-knappen opp
+	sendAssistState(plr)   -- inne i labyrinten: her dukker kjøp-knappen opp (eller den beholdte guiden)
 end
 
 -- Lag en ny instans (bygd) med `plr` som første deltaker.
@@ -2349,15 +2748,32 @@ local function startGroup(plr)
 	if inst then table.insert(groupInstances, inst) end
 end
 
--- Friends: bli med hos en VENN som allerede er vert her; ellers vert selv (velger nivå).
-local function startFriendsJoinOrHost(plr, hostLevel)
-	local d = playerData[plr]; if not d or playerInstance[plr] then return end
+-- Hvilken Friends-instans kan `plr` gå inn i nå? Først VERTENS EGEN (andre review 30.09: Roblox regner deg
+-- aldri som din egen venn, så en vert som gikk ut i løpet av "gratis pause"-sekundene kom seg ikke tilbake --
+-- Friends-døra åpnet velgeren for å være vert for en NY kjøring, og vennene sto igjen alene i den gamle).
+-- Deretter en venns. Aldri en fremmeds, og aldri en full (4) instans.
+local function findFriendsInstance(plr)
+	local function open(inst)
+		return inst.folder and inst.folder.Parent and inst.mode == "friends" and countParticipants(inst) < 4
+	end
 	for _, inst in ipairs(friendsInstances) do
-		if inst.folder and inst.folder.Parent and inst.mode == "friends" and countParticipants(inst) < 4 then
+		if open(inst) and inst.hostUserId == plr.UserId then return inst end
+	end
+	for _, inst in ipairs(friendsInstances) do
+		if open(inst) then
 			local ok, isFriend = pcall(function() return plr:IsFriendsWith(inst.hostUserId) end)
-			if ok and isFriend then placeInInstance(plr, inst); return end
+			if ok and isFriend then return inst end
 		end
 	end
+	return nil
+end
+
+-- Friends: tilbake i din EGEN kjøring, eller bli med hos en VENN som allerede er vert her; ellers vert selv
+-- (velger nivå).
+local function startFriendsJoinOrHost(plr, hostLevel)
+	local d = playerData[plr]; if not d or playerInstance[plr] then return end
+	local join = findFriendsInstance(plr)
+	if join then placeInInstance(plr, join); return end
 	-- Ingen venn er vert: bli vert selv på valgt nivå (<= accepted+1).
 	local lvl = math.clamp(math.floor(hostLevel or (d.accepted + 1)), 1, d.accepted + 1)
 	local inst = createInstance(plr, lvl, "friends")
@@ -2389,11 +2805,13 @@ advanceInstance = function(inst)
 	inst.level += 1
 	local ok, err = pcall(function() buildInstance(inst) end)
 	if not ok then warn("[Labyrint] advance-bygg feilet: " .. tostring(err)); endInstance(inst); return end
+	for _, p in ipairs(participantList(inst)) do applyKeptGuide(p, inst) end
 	for _, p in ipairs(participantList(inst)) do
 		if godActive[p] then inst.hadGod = true end   -- flyr fortsatt inn i nytt nivå = teller ikke
 		local char = p.Character
 		if char then pcall(function() char:PivotTo(CFrame.new(inst.spawnPos)) end) end
 		startClock[p] = os.clock()
+		runStartAt[p] = clock()
 		shieldUsed[p] = false
 		sendInstanceInfo(p, inst)
 		sendAssistState(p)   -- nytt nivå = ny (u)tilbudt guide
@@ -2405,13 +2823,27 @@ end
 finishRun = function(solverPlr, inst)
 	if inst.solving then return end                -- én løsning pr nivå (mange Touched)
 	if not inst.participants[solverPlr] then return end
-	inst.solving = true
-	local level = inst.level
 	-- Effektiv gud-status: inst.hadGod (gud aktivert i løpet av nivået) ELLER en
 	-- deltaker flyr NÅ (aktiverte gud i lobbyen før de gikk inn, eller skrudde av
 	-- rett før mål). Fanger ALLE gud-veier — ellers kunne Mio "rent" løse nivået.
 	local hadGod = inst.hadGod
 	for p in pairs(inst.participants) do if godActive[p] then hadGod = true end end
+	-- Gå-vakta: raskere enn noen kan gå hit = teller ikke (et teleport-skript), og spilleren får vite hvorfor.
+	-- Ingenting endres: løsningen er fortsatt åpen for en ekte ankomst senere.
+	if CONFIG.WalkGuard.Enabled and not hadGod and (inst.minClear or 0) > 0 then
+		local now = clock()
+		local walked = now - (runStartAt[solverPlr] or now)
+		if walked < inst.minClear then
+			if notifyPlayer and now - (guardNoticeAt[solverPlr] or -math.huge) >= CONFIG.WalkGuard.NoticeEverySeconds then
+				guardNoticeAt[solverPlr] = now
+				notifyPlayer(solverPlr, string.format(
+					"Too fast: nobody can run this maze in %.1f s. That exit only counts when you walk there.", walked))
+			end
+			return
+		end
+	end
+	inst.solving = true
+	local level = inst.level
 	-- Ble "Hjelp meg"-guiden kjøpt på dette nivået, teller kjøringen for
 	-- fremgang (du gikk faktisk ut) men gir INGEN tid/rekord — rekordtavla skal
 	-- ikke kunne kjøpes for mynter. Én regel, samme sted som gud: Progression.
@@ -2456,7 +2888,6 @@ finishRun = function(solverPlr, inst)
 		end
 	end
 	-- Accepted til ALLE deltakere (hver tjener bare sitt eget accepted+1, gud-fritt).
-	local anyGain = false
 	for _, p in ipairs(participantList(inst)) do
 		local pd = playerData[p]
 		if pd then
@@ -2465,15 +2896,14 @@ finishRun = function(solverPlr, inst)
 				hadGod = hadGod, usedAssist = usedAssist, mode = inst.mode,
 			})
 			pd.accepted = res.newAccepted; pd.bestWithGod = res.newBestWithGod
+			if res.acceptedGained then pd.acceptedAt = os.time() end -- topplista: uavgjort til den som var først
 			stuckState[p] = Assist.noteClear(stuckState[p], level)  -- klarte det: null forsøk
+			pd.guideLevel = Assist.afterClear(pd.guideLevel, level)  -- en beholdt guide for nivået er brukt opp
 			refreshStats(p)
-			if res.acceptedGained and pd.canSave ~= false and not GodUsers.has(p) then
-				submitTopScore(p.UserId, pd.accepted); anyGain = true
-			end
+			if res.acceptedGained then task.spawn(writeBoard, p) end -- writeBoard sjekker lås og GodUsers
 			task.spawn(function() savePlayer(p) end)
 		end
 	end
-	if anyGain then refreshLeaderboard() end
 	-- Neste
 	-- Alle modus: fortsett til neste nivå (bli i labyrinten). Retur til lobby skjer
 	-- via retur-døra inne i labyrinten (eller død).
@@ -2527,15 +2957,42 @@ local function buildLobby()
 	makeDoor(hub, "FriendsDoor", "🤝 Play with Friends", "Friends",
 		LOBBY_ORIGIN + Vector3.new(16, 5, -22), Color3.fromRGB(200, 140, 70), function(plr)
 			if playerInstance[plr] then return end
-			-- Er en venn allerede vert? bli med direkte. Ellers åpne velger (du blir vert).
-			for _, inst in ipairs(friendsInstances) do
-				if inst.folder and inst.folder.Parent and inst.mode == "friends" and countParticipants(inst) < 4 then
-					local ok, isFriend = pcall(function() return plr:IsFriendsWith(inst.hostUserId) end)
-					if ok and isFriend then placeInInstance(plr, inst); return end
-				end
-			end
+			-- Din egen kjøring, eller en venn som er vert? bli med direkte. Ellers åpne velger (du blir vert).
+			local join = findFriendsInstance(plr)
+			if join then placeInInstance(plr, join); return end
 			openPickerEvent:FireClient(plr, { accepted = (playerData[plr] and playerData[plr].accepted) or 0, mode = "friends" })
 		end)
+
+	-- Topplista-tavla ved spawn (docs/complete-game-standard.md §3): forsiden (lokal -Z) vender mot spawn-platen.
+	-- Serveren bygger bare tavla og prompten; KLIENTEN tegner innholdet (BoardClient), så hver spiller ser sin egen
+	-- visning (Public/Friends). En gull-kant bak: noe interaktivt skal se interaktivt ut.
+	do
+		local bp, bs = BC.Position, BC.Size
+		local centre = LOBBY_ORIGIN + Vector3.new(bp[1], bp[2], bp[3])
+		local facing = Vector3.new(LOBBY_ORIGIN.X, centre.Y, LOBBY_ORIGIN.Z)
+		local board = makePart({ Name = "TopBoard", Size = Vector3.new(bs[1], bs[2], bs[3]),
+			CFrame = CFrame.lookAt(centre, facing), Color = Color3.fromRGB(24, 26, 40),
+			Material = Enum.Material.SmoothPlastic })
+		board.Parent = hub
+		local trim = makePart({ Name = "TopBoardTrim", Size = Vector3.new(bs[1] + 0.8, bs[2] + 0.8, 0.6),
+			CFrame = board.CFrame * CFrame.new(0, 0, 0.35), Color = Color3.fromRGB(255, 205, 90),
+			Material = Enum.Material.Neon, CanCollide = false, CastShadow = false })
+		trim.Parent = board
+		local at = Instance.new("Attachment")
+		at.Name = "PromptAt"
+		at.Position = Vector3.new(0, -bs[2] / 2 + 1.5, -bs[3] / 2 - 0.6)
+		at.Parent = board
+		local bprompt = Instance.new("ProximityPrompt")
+		bprompt.Name = "BoardPrompt"
+		bprompt.ActionText = BC.Text.Prompt
+		bprompt.ObjectText = BC.Text.Object
+		bprompt.HoldDuration = 0
+		bprompt.MaxActivationDistance = BC.PromptDistance
+		bprompt.RequiresLineOfSight = false
+		bprompt.KeyboardKeyCode = Enum.KeyCode.E
+		bprompt.Parent = at
+		bprompt.Triggered:Connect(function(plr) toggleBoard(plr) end)
+	end
 
 	-- "Content Contributors"-tavle: takker hjelpere hvis content-bidrag er brukt
 	-- (navn fra Contributors.list()). BillboardGui = alltid vendt mot kamera, så
@@ -2669,11 +3126,21 @@ if CONFIG.UseLobby then
 	Lighting.FogStart = lobbyLight.FogStart
 	Lighting.FogEnd = lobbyLight.FogEnd
 	buildLobby()
-	refreshLeaderboard()
+	for _, p in ipairs(Players:GetPlayers()) do pointRespawn(p) end -- de som var her før lobbyen fantes
 	print("[Labyrint] Lobby-modus lastet.")
 else
 	applyDarkness()
 	buildLevel()
-	refreshLeaderboard()  -- fyll topplista-tavla ved oppstart
 	print("[Labyrint] Lastet. Level " .. currentLevel .. " bygget. Lykke til!")
 end
+
+-- Topplista: den gamle tavlas topp 10 bæres over, så hentes den offentlige topp 10 høyst én gang per
+-- PublicCacheSeconds og sendes til HUD-panelet og til tavla hos alle som ser på PUBLIC.
+task.spawn(function()
+	carryLegacyBoard()
+	while true do
+		refreshPublic()
+		pushPublic()
+		task.wait(BC.PublicCacheSeconds)
+	end
+end)

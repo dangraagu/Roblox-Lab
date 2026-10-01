@@ -17,6 +17,9 @@
 --   * HOW HARD: knocked down (KnockSeconds) with a small horizontal push away from the impact,
 --     capped so it can never carry you onto the next cell's trap. Only up to MaxHitHeight over the
 --     floor: a jump is no dodge, a god-mode flyer over the maze is not knocked out of the air.
+--     (Owner decision 30.09) Never a knock-down with a monster close enough to catch you during it:
+--     then the hit is a STAGGER (the same shake, flash and shove, and you keep your feet). A hit
+--     costs a little, never a run (hitMode, MonsterSafeRadius).
 -- Vectors are plain { x, y, z } tables. The caller renders and applies the knock.
 
 local CellHazards = {}
@@ -48,7 +51,7 @@ function CellHazards.validate(cfg: any): (boolean, string?)
 	if type(cfg) ~= "table" then return false, "no hazard config" end
 	for _, k in { "CellSize", "Period", "WarnSeconds", "MinWarnSeconds", "DebrisSeconds", "StrikeRadius", "PlayerRadius",
 		"KnockSeconds", "KnockPush", "MaxKnockDisplacement", "Density", "MaxPerLevel", "MinSpacing", "StartClearCells",
-		"GraceSeconds", "MaxHitHeight" } do
+		"GraceSeconds", "MaxHitHeight", "MonsterSpeedMax", "MonsterReach", "MonsterSafeRadius", "ShowRadius" } do
 		if not num(cfg[k]) then return false, k .. " must be a number" end
 	end
 	if cfg.CellSize ~= CellHazards.SERVER_CELL_SIZE then
@@ -75,6 +78,10 @@ function CellHazards.validate(cfg: any): (boolean, string?)
 		return false, "a knock could carry the player onto the neighbouring cell's trap"
 	end
 	if cfg.GraceSeconds < cfg.WarnSeconds then return false, "GraceSeconds must cover the first warning" end
+	-- the fastest monster closing for the whole knock, the shove toward it, and the reach at which its touch kills
+	if cfg.MonsterSafeRadius < (cfg.MonsterSpeedMax + cfg.KnockPush) * cfg.KnockSeconds + cfg.MonsterReach then
+		return false, "MonsterSafeRadius must cover a monster closing in during a knock (a hit must never cost the run)"
+	end
 	if cfg.MaxHitHeight < CellHazards.MIN_HIT_HEIGHT then
 		return false, "MaxHitHeight must be >= " .. CellHazards.MIN_HIT_HEIGHT .. " (a jump must never dodge an impact; stepping out of the ring does)"
 	end
@@ -83,6 +90,11 @@ function CellHazards.validate(cfg: any): (boolean, string?)
 	end
 	if cfg.MaxPerLevel < 0 then return false, "MaxPerLevel must be >= 0" end
 	if cfg.MinSpacing < 1 then return false, "MinSpacing must be >= 1" end
+	-- (2026-10-01) never more than one hazard at a time: two hazard cells are at least MinSpacing maze cells
+	-- (2 * CellSize studs each) apart, so no spot may be within ShowRadius (where a hazard is drawn) of both.
+	if cfg.MinSpacing * 2 * cfg.CellSize <= 2 * cfg.ShowRadius then
+		return false, "MinSpacing too small for ShowRadius: one spot could have two hazards near it at once"
+	end
 	if cfg.StartClearCells < 1 then return false, "StartClearCells must be >= 1" end
 	if type(cfg.Kinds) ~= "table" then return false, "no Kinds" end
 	for name, k in cfg.Kinds do
@@ -191,6 +203,14 @@ function CellHazards.checkHit(hz: any, centre: any, t0: number, t1: number, play
 	local above = (playerPos.y or 0) - (centre.y or 0)
 	if above > cfg.MaxHitHeight then return false end
 	return #CellHazards.impactsBetween(hz, t0, t1, cfg) > 0
+end
+
+-- (Owner decision 30.09) "knock" (down for KnockSeconds) or "stagger" (keep your feet): a stagger whenever a
+-- monster is within MonsterSafeRadius (horizontal studs, nil = none in the maze), because a monster that close
+-- could reach you while you are down, and a hit must cost a little, never the run.
+function CellHazards.hitMode(monsterDistance: number?, cfg: any): string
+	if type(monsterDistance) == "number" and monsterDistance <= cfg.MonsterSafeRadius then return "stagger" end
+	return "knock"
 end
 
 -- (velocity, standSeconds): horizontal, away from the impact, never up.

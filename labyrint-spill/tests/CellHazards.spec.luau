@@ -54,6 +54,14 @@ eq(mutated("Density", 0.5), false, "a hazard in every other cell is rejected (ra
 eq(mutated("CellSize", 7), false, "the cell size must be the server's CONFIG.CellSize (9)")
 eq(mutated("MaxHitHeight", 8), false, "an impact that a jump could clear is rejected (only stepping out of the ring dodges)")
 eq(mutated("MaxHitHeight", nil), false, "a config without MaxHitHeight is rejected")
+-- (2026-10-01, docs/complete-game-standard.md §2: "never more than one hazard at a time") Two hazard cells are at least
+-- MinSpacing maze cells (2 * CellSize studs each) apart, so no spot in the maze has two of them inside ShowRadius, and
+-- the warning banner (NearRadius + 8) is narrower still. validate holds that, so a retune cannot quietly break it.
+eq(mutated("MinSpacing", 2), false, "hazards close enough for one spot to have two inside ShowRadius are rejected (one hazard at a time)")
+eq(mutated("ShowRadius", 28), false, "a ShowRadius wide enough to reach two hazard cells at once is rejected")
+eq(mutated("ShowRadius", nil), false, "a config without ShowRadius is rejected")
+truthy(CFG.MinSpacing * 2 * CFG.CellSize > 2 * CFG.ShowRadius,
+	string.format("two hazard cells are farther apart (%d studs at least) than two ShowRadius (%d)", CFG.MinSpacing * 2 * CFG.CellSize, 2 * CFG.ShowRadius))
 eq(CFG.CellSize, 9, "CellSize mirrors the server")
 truthy(CFG.StrikeRadius + CFG.PlayerRadius <= CFG.CellSize / 2, "the danger zone fits in the cell")
 truthy(CFG.KnockPush * CFG.KnockSeconds <= CFG.MaxKnockDisplacement, "knock displacement is capped")
@@ -97,6 +105,7 @@ do
 	local bad = 0
 	local total, eligibleTotal = 0, 0
 	local spacingBad = 0
+	local closest = math.huge -- studs between the centres of the two closest hazard cells of any one level
 	for L = 1, 400 do
 		local size = 6 + (L % 25)
 		local traps = {}
@@ -116,12 +125,17 @@ do
 			for j = i + 1, #list do
 				local o = list[j]
 				if math.max(math.abs(o.cx - hz.cx), math.abs(o.cy - hz.cy)) < CFG.MinSpacing then spacingBad += 1 end
+				-- a maze cell is 2 fine cells of CellSize studs
+				closest = math.min(closest, 2 * CFG.CellSize * math.sqrt((o.cx - hz.cx) ^ 2 + (o.cy - hz.cy) ^ 2))
 			end
 		end
 		if #list > CFG.MaxPerLevel then bad += 1 end
 	end
 	eq(bad, 0, "never on start, exit, a trap, near the start, outside the maze, or over the per-level cap")
 	eq(spacingBad, 0, "two hazards are never closer than MinSpacing cells")
+	print(string.format("  closest two hazard cells on any of 400 levels: %.1f studs apart (2 x ShowRadius = %d)", closest, 2 * CFG.ShowRadius))
+	truthy(closest < math.huge and closest > 2 * CFG.ShowRadius,
+		string.format("no spot is within ShowRadius of two hazard cells: one hazard at a time (closest pair %.1f studs)", closest))
 	local share = total / eligibleTotal
 	truthy(share > CFG.Density * 0.5 and share <= CFG.Density * 1.05,
 		string.format("about Density of the cells carry a hazard (%.4f vs %.4f)", share, CFG.Density))
@@ -201,6 +215,37 @@ do
 	eq(stand, CFG.KnockSeconds, "for KnockSeconds")
 	local v2 = CellHazards.knock(centre, { x = 100, y = 3, z = 50 }, CFG)
 	approx(math.sqrt(v2.x * v2.x + v2.z * v2.z), CFG.KnockPush, 1e-9, "dead centre still gets a push of the same size")
+end
+
+--================================================================ owner decision 30.09: a hit never hands you to a monster
+
+-- The owner's standard: "a hit costs a little, never a run". A knock-down (0.8 s of PlatformStand) with a monster on
+-- your heels lets it catch you, which costs the run. So a hit is a knock-down only when no monster could reach you
+-- during it; with one inside MonsterSafeRadius it is a STAGGER instead: the same shake, flash and shove, and you keep
+-- your feet. The radius must cover the worst case: the fastest monster (the server's MonsterSpeedMax) closing for
+-- the whole knock, the shove carrying you toward it, and the reach at which its touch kills.
+do
+	local hitMode = CellHazards.hitMode or function(_, _) return "missing" end
+	eq(hitMode(nil, CFG), "knock", "no monster in the maze: knocked down, as the brief says")
+	eq(hitMode(CFG.MonsterSafeRadius and CFG.MonsterSafeRadius + 0.01 or 1e9, CFG), "knock", "a monster just outside the safe radius: knocked down")
+	eq(hitMode(CFG.MonsterSafeRadius or -1, CFG), "stagger", "a monster at the safe radius: a stagger (you keep your feet)")
+	eq(hitMode(3, CFG), "stagger", "a monster right behind you: a stagger")
+	truthy(type(CFG.MonsterSafeRadius) == "number" and type(CFG.MonsterSpeedMax) == "number" and type(CFG.MonsterReach) == "number",
+		"the safe radius, the fastest monster and its reach are configured")
+	local need = ((CFG.MonsterSpeedMax or 0) + CFG.KnockPush) * CFG.KnockSeconds + (CFG.MonsterReach or 0)
+	truthy((CFG.MonsterSafeRadius or 0) >= need, string.format("the safe radius (%s) covers the worst case: (%s + %s) x %s + %s = %.1f studs",
+		tostring(CFG.MonsterSafeRadius), tostring(CFG.MonsterSpeedMax), tostring(CFG.KnockPush), tostring(CFG.KnockSeconds), tostring(CFG.MonsterReach), need))
+	local function with(k, v)
+		local saved = CFG[k]
+		CFG[k] = v
+		local ok = CellHazards.validate(CFG)
+		CFG[k] = saved
+		return ok
+	end
+	eq(with("MonsterSafeRadius", need - 0.1), false, "a safe radius a monster could cross during a knock is rejected")
+	eq(with("MonsterSafeRadius", need), true, "exactly the worst case is accepted")
+	eq(with("MonsterSpeedMax", (CFG.MonsterSpeedMax or 0) + 10), false, "faster monsters without a larger radius are rejected")
+	eq(with("MonsterSafeRadius", nil), false, "a config without the safe radius is rejected")
 end
 
 --================================================================ bands decide the kind

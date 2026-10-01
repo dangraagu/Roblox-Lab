@@ -200,5 +200,22 @@ do
 	eq(route, nil, "unreachable exit -> nil route")
 end
 
+--=============  EIERBESLUTNING 30.09: GUIDEN BEHOLDES  ==============--
+-- En kjøpt guide gjelder nivået den ble kjøpt på til nivået er KLART: dør du, eller går du ut av døra, venter
+-- den på deg neste gang du går inn på SAMME nivå. Aldri på et annet nivå (den kan ikke spares til et vanskeligere),
+-- og den er brukt opp når nivået er klart.
+do
+	local keptFor = Assist.keptFor or function() return "missing" end
+	local afterClear = Assist.afterClear or function() return "missing" end
+	eq(keptFor(nil, 42), false, "no guide bought: nothing is kept")
+	eq(keptFor(42, 42), true, "a guide bought at level 42 is there again on the next attempt at 42")
+	eq(keptFor(42, 41), false, "never on an easier level")
+	eq(keptFor(42, 43), false, "never on a harder level: it cannot be banked for later")
+	eq(keptFor("42", 42), false, "only a real level number counts (a saved value is checked)")
+	eq(afterClear(42, 42), nil, "clearing level 42 uses the guide up")
+	eq(afterClear(42, 41), 42, "clearing another level leaves it kept")
+	eq(afterClear(nil, 42), nil, "no guide: still none")
+end
+
 print(string.format("Assist: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Assist tests failed")

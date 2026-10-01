@@ -17,6 +17,8 @@
 --   §9-§11 (review fix) a knock is released when you leave the maze; a knock never lifts you, even on
 --      a jump's way up; over whole levels where it matters, the real client keeps hazards off the
 --      server's real trap cells (and misses none of the pure rule's). Also in §1: the ring's own colour.
+--   §12 (owner decision 30.09) with a monster inside MonsterSafeRadius a hit is a stagger, never a knock-down.
+--      Every other section runs with the run's monsters parked far away (see parkMonsters).
 -- The level clock here is known exactly: the client's clock is the sum of the frames this file fires.
 
 local Lib = require("./check_labyrintspill_lib")
@@ -35,12 +37,32 @@ local HZ = Biomes.Hazards
 local LOCAL = h.workspace:FindFirstChild("LabyrintBiomeLocal")
 local banner = ctx.plr.PlayerGui:FindFirstChild("LabyrintBiome").Root.HazardBanner
 
+-- (owner decision 30.09) A hit is a knock-down only with no monster inside MonsterSafeRadius; otherwise it is a
+-- stagger (§12). Headless, monsters never move from where the server built them, so on a level with monsters a
+-- hazard cell could sit next to one for the whole file. Every run below therefore parks the run's monsters far
+-- outside the maze, and the knock-down sections test exactly what they always tested; §12 brings them back.
+local function parkMonsters()
+	local f = ctx.folder()
+	local n, nearest = 0, math.huge
+	for i, m in (f and f:GetChildren() or {}) do
+		local root = m:IsA("Model") and m.Name == "Monster" and m:FindFirstChild("HumanoidRootPart")
+		if root then
+			local d = (root.Position - ctx.hrp.Position).Magnitude
+			nearest = math.min(nearest, d)
+			root.CFrame = CFrame.new(root.Position + Vector3.new(0, 0, 2000 + 50 * i))
+			n += 1
+		end
+	end
+	return n, nearest
+end
+
 local levelT0 = 0
 local function start(level)
 	if ctx.folder() ~= nil then ctx.toLobby() end
 	levelT0 = ctx.clock
 	local sr = h.ReplicatedStorage.LobbyRemotes.StartRun
 	sr:simulateFireServer(ctx.plr, level, "solo")
+	parkMonsters()
 	ctx.run(1.0) -- the client reads the grid twice before it places hazards
 end
 local function levelTime() return ctx.clock - levelT0 end
@@ -408,6 +430,62 @@ do
 	truthy(ringsSeen > 0 and missed == 0, string.format("§11 the client draws a ring at every hazard cell the pure rule names with the real traps (%d seen, %d missed)", ringsSeen, missed))
 	truthy(trapsWatched > 0, "§11 trap cells were watched (" .. trapsWatched .. ")")
 	eq(ringOnTrap, 0, "§11 and never a ring on a trap cell, a whole cycle each")
+end
+
+-- §12 (owner decision 30.09) a hit never hands you to a monster. "A hit costs a little, never a run": with a monster
+-- inside MonsterSafeRadius a knock-down (0.8 s helpless) could let it catch you, so the hit is a STAGGER (the same
+-- flash and shove, and PlatformStand is never set); with none that close it is the knock-down the brief asks for.
+-- The server's real monsters, parked by this file around the player (headless there is no physics: a monster stays
+-- where it is put and touches no one).
+respawnIfDead()
+do
+	local L = 60
+	start(L)
+	local monsters = {}
+	for _, m in ctx.folder():GetChildren() do
+		if m:IsA("Model") and m.Name == "Monster" then table.insert(monsters, m) end
+	end
+	truthy(#monsters >= 1, "§12 the level has real monsters to park (" .. #monsters .. ")")
+	local e = expected(L)[1]
+	local first = CellHazards.firstImpact(e.hz, HZ)
+	local c = Vector3.new(e.centre.X + 1, 4, e.centre.Z)
+	-- one monster `d` studs from the player (horizontal); every other one far away
+	local function park(d)
+		for i, m in monsters do
+			local root = m:FindFirstChild("HumanoidRootPart")
+			local away = if i == 1 then d else 300 + 40 * i
+			root.CFrame = CFrame.new(c + Vector3.new(0, 0, away))
+		end
+	end
+	local function flashCount()
+		local n = 0
+		for _, gg in ctx.plr.PlayerGui:GetChildren() do if gg.Name == "FxFlash" then n += 1 end end
+		return n
+	end
+	local function hitWith(d, T)
+		runTo(T - 0.05, c)
+		park(d)
+		local f0 = flashCount()
+		runTo(T + 1 / 30, c)
+		local flashed = flashCount() > f0 -- counted at once: a flash removes itself after its fade
+		local v = ctx.hrp.AssemblyLinearVelocity
+		local down = false
+		runTo(T + HZ.KnockSeconds - 0.1, c, function()
+			if ctx.hum.PlatformStand == true then down = true end
+		end)
+		if ctx.hum.PlatformStand == true then down = true end
+		runTo(T + HZ.KnockSeconds + 0.2, c)
+		ctx.hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		return down, flashed, math.sqrt(v.X * v.X + v.Z * v.Z)
+	end
+	local down1, flash1, push1 = hitWith(10, first)
+	eq(down1, false, "§12 a monster 10 studs away: the hit does not knock you down (a stagger)")
+	truthy(flash1, "§12 the stagger still flashes the screen")
+	near(push1, HZ.KnockPush, 1e-6, "§12 and still shoves you (KnockPush, horizontal)")
+	local down2 = hitWith(HZ.MonsterSafeRadius + 2, first + HZ.Period)
+	eq(down2, true, "§12 a monster just outside MonsterSafeRadius: knocked down, as the brief says")
+	local down3 = hitWith(HZ.MonsterSafeRadius - 1, first + 2 * HZ.Period)
+	eq(down3, false, "§12 a monster just inside MonsterSafeRadius: a stagger")
 end
 
 T.finish(h)

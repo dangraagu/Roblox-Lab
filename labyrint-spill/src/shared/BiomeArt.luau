@@ -115,6 +115,48 @@ function BiomeArt.setPieceParent(piece: any, on: boolean)
 	end
 end
 
+--------------------------------------------------------------------------- critters (2026-10-01)
+
+-- A pooled critter: { kind, parts = { { part, prim } }, parented }. Built from Biomes.Critters (Block/Ball only).
+function BiomeArt.buildCritter(kind: string, def: any, parent: Instance): any
+	local parts = {}
+	for _, prim in def.prims do
+		local p = Instance.new("Part")
+		if prim.shape == "Ball" then p.Shape = Enum.PartType.Ball end
+		inert(p)
+		p.Name = "Critter_" .. kind
+		p.Material = material(prim.material)
+		p.Color = rgb(prim.color)
+		p.Transparency = prim.transparency or 0
+		if prim.shape == "Ball" then
+			local s = math.max(prim.size[1], prim.size[2], prim.size[3])
+			p.Size = Vector3.new(s, s, s)
+		else
+			p.Size = Vector3.new(prim.size[1], prim.size[2], prim.size[3])
+		end
+		table.insert(parts, { part = p, prim = prim })
+	end
+	return { kind = kind, parts = parts, parent = parent, parented = false }
+end
+
+-- Put a critter at `cf` (its origin at the floor, facing its heading). `slot` tags every part (CritterSlot) so a
+-- check can tell two rats apart.
+function BiomeArt.placeCritter(critter: any, cf: CFrame, slot: number)
+	for _, e in critter.parts do
+		local at = e.prim.at
+		e.part.CFrame = cf * CFrame.new(at[1], at[2], -at[3]) -- critter-local +z is forward: CFrame's look is -Z
+		if e.part:GetAttribute("CritterSlot") ~= slot then e.part:SetAttribute("CritterSlot", slot) end
+	end
+end
+
+function BiomeArt.setCritterParent(critter: any, on: boolean)
+	if critter.parented == on then return end
+	critter.parented = on
+	for _, e in critter.parts do
+		e.part.Parent = if on then critter.parent else nil
+	end
+end
+
 --------------------------------------------------------------------------- air (particles)
 
 -- One invisible box around the player; particles are born anywhere inside it.

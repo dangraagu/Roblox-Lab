@@ -281,8 +281,11 @@ local function applyLayout()
 
 	-- Hvor høyt oppe i kolonnen vi får begynne.
 	local top = topY
+	-- (01.10) "Kart" ligger under minikartets skalerings-rot, ikke rett under ScreenGui-en: søk rekursivt. Et direkte
+	-- oppslag fant det aldri, så på nettbrett og desktop la rekord-panelet (DisplayOrder 9) seg OPPÅ det kjøpte
+	-- minikartet (6). Målt av check_labyrintspill_overlap (regel 4b): 120x120 skjerm-px dekket på 1024x768.
 	local mini = playerGui:FindFirstChild("Minikart")
-	local frame = mini and mini:FindFirstChild("Kart")
+	local frame = mini and mini:FindFirstChild("Kart", true)
 	if frame and frame.Visible and frame.Size.Y.Offset > 0 then
 		-- Vi leser Size.Y.Offset og IKKE AbsoluteSize: kartet settes i design-piksler
 		-- under sin egen UIScale, og det er design-piksler vi regner i her inne.
@@ -341,15 +344,25 @@ task.spawn(function()
 		frame:GetPropertyChangedSignal("Size"):Connect(applyLayout)
 		applyLayout()
 	end
+	-- "Kart" ligger under minikartets skalerings-rot: let rekursivt, og vent litt på det om GUI-en er ny.
+	local function kartIn(mini)
+		local f = mini:FindFirstChild("Kart", true)
+		for _ = 1, 50 do
+			if f then break end
+			task.wait(0.1)
+			f = mini:FindFirstChild("Kart", true)
+		end
+		return f
+	end
 	local mini = playerGui:FindFirstChild("Minikart")
 	if mini then
-		local f = mini:FindFirstChild("Kart")
+		local f = kartIn(mini)
 		if f then hookFrame(f) end
 	end
 	-- Minikart-GUI-en kan bli lagd ETTER dette skriptet (perk lastes async).
 	playerGui.ChildAdded:Connect(function(ch)
 		if ch.Name == "Minikart" then
-			local f = ch:WaitForChild("Kart", 5)
+			local f = kartIn(ch)
 			if f then hookFrame(f) end
 		end
 	end)

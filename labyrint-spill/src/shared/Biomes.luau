@@ -57,6 +57,22 @@ Biomes.Signals = {
 	trapDeadly = { 230, 90, 30 },
 }
 
+-- (second review, 30.09) Everything that glows on this maze's floor and asks you to STEP ON it or WALK TO it.
+-- The falling-hazard ring says the opposite ("step OUT of me"), so validate keeps it at least
+-- Hazards.MinRingDeltaE (CIE76, through every biome grade) from each of these. Mirrored from MazeGame.server
+-- (PAIR_COLORS, GuideDot, Coin, Gem, Exit/MazeSpawn); check_labyrintspill_biomes §0 parses them back out of the
+-- server script, so a server palette change cannot leave this list behind.
+Biomes.StepOnColors = {
+	{ name = "cyan secret button", rgb = { 60, 200, 220 } },
+	{ name = "white secret button", rgb = { 245, 245, 255 } },
+	{ name = "deep-blue secret button", rgb = { 70, 110, 255 } },
+	{ name = "pink secret button", rgb = { 255, 90, 200 } },
+	{ name = "Hjelp meg guide dots", rgb = { 90, 235, 255 } },
+	{ name = "coin", rgb = { 250, 205, 50 } },
+	{ name = "gem", rgb = { 170, 90, 240 } },
+	{ name = "exit pad", rgb = { 60, 200, 90 } },
+}
+
 -- Materials a decor piece may use. Neon is deliberately absent.
 Biomes.DecorMaterials = {
 	Metal = true, CorrodedMetal = true, DiamondPlate = true, Wood = true, Slate = true, Fabric = true,
@@ -226,6 +242,69 @@ Biomes.Air = {
 	stardust = { color = { 235, 215, 255 }, lightEmission = 0.9, size = 0.12, transparency = 0.35, speed = 0.3, lifetime = 5, rise = 0.15, drift = 0.4 },
 }
 
+--------------------------------------------------------------------------- critters (2026-10-01)
+-- docs/complete-game-standard.md §2: each band has its own light, colour, scenery, CRITTERS and weather. A critter is
+-- small, never glows (Neon means "interactive" in this maze), carries no light, is inert (BiomeArt), and lives inside
+-- ONE open cell near the player: it never pokes into a wall, never stands in a corridor you need, and is never drawn
+-- beyond the torch. It takes a decor slot (Budget.MaxDecorPieces counts wall dressing and critters together), so
+-- partBound() stays the worst case. Its colours keep CritterMinDeltaE from everything the maze asks you to step on
+-- or dodge (validate). Critter-local studs: x right, y up from the floor, z forward (the way it is heading).
+-- Motions (critterPose): scurry = back and forth along the foot of a wall; climb = up and down a wall face;
+-- flutter = loops at head height; glide = circles up near the wall tops; float = a slow bob.
+Biomes.CritterMotions = { scurry = true, climb = true, flutter = true, glide = true, float = true }
+Biomes.CritterMinDeltaE = 15
+
+Biomes.Critters = {
+	-- a rat along the foot of the wall (dungeon)
+	rat = { motion = "scurry", speed = 1.6, prims = {
+		P("Block", { 0.5, 0.36, 0.9 }, { 0, 0.19, 0 }, "SmoothPlastic", { 92, 84, 78 }),
+		P("Ball", { 0.36, 0.36, 0.36 }, { 0, 0.24, 0.56 }, "SmoothPlastic", { 104, 95, 88 }),
+		P("Block", { 0.08, 0.08, 0.7 }, { 0, 0.12, -0.78 }, "SmoothPlastic", { 150, 122, 118 }),
+	} },
+	-- pale-green butterflies (jungle; the fireflies stay air particles)
+	butterfly = { motion = "flutter", speed = 1.1, prims = {
+		P("Block", { 0.1, 0.1, 0.42 }, { 0, 0, 0 }, "SmoothPlastic", { 44, 38, 32 }),
+		P("Block", { 0.46, 0.04, 0.38 }, { 0.26, 0, 0 }, "Fabric", { 205, 228, 160 }),
+		P("Block", { 0.46, 0.04, 0.38 }, { -0.26, 0, 0 }, "Fabric", { 205, 228, 160 }),
+	} },
+	-- cave bats (ice cellar, and one in the crypt)
+	bat = { motion = "flutter", speed = 1.9, prims = {
+		P("Ball", { 0.34, 0.34, 0.34 }, { 0, 0, 0 }, "SmoothPlastic", { 46, 46, 56 }),
+		P("Block", { 0.55, 0.06, 0.4 }, { 0.36, 0.02, 0 }, "Fabric", { 36, 36, 46 }),
+		P("Block", { 0.55, 0.06, 0.4 }, { -0.36, 0.02, 0 }, "Fabric", { 36, 36, 46 }),
+	} },
+	-- a basalt salamander (forge; dark: nothing warm-and-bright on this floor but the lava's own signal)
+	salamander = { motion = "scurry", speed = 1.0, prims = {
+		P("Block", { 0.34, 0.2, 0.95 }, { 0, 0.1, 0 }, "Basalt", { 58, 40, 36 }),
+		P("Block", { 0.26, 0.16, 0.3 }, { 0, 0.1, 0.6 }, "Basalt", { 70, 44, 38 }),
+		P("Block", { 0.12, 0.08, 0.6 }, { 0, 0.07, -0.74 }, "Basalt", { 104, 44, 32 }),
+	} },
+	-- a violet cave beetle (crystal caverns)
+	beetle = { motion = "scurry", speed = 0.7, prims = {
+		P("Ball", { 0.55, 0.55, 0.55 }, { 0, 0.28, 0 }, "SmoothPlastic", { 72, 52, 92 }),
+		P("Ball", { 0.28, 0.28, 0.28 }, { 0, 0.16, 0.36 }, "SmoothPlastic", { 44, 36, 56 }),
+	} },
+	-- a spider climbing the wall (crypt)
+	spider = { motion = "climb", speed = 0.9, prims = {
+		P("Ball", { 0.42, 0.42, 0.42 }, { 0, 0, 0 }, "SmoothPlastic", { 30, 30, 34 }),
+		P("Block", { 0.9, 0.05, 0.05 }, { 0, 0, 0.1 }, "SmoothPlastic", { 24, 24, 28 }),
+		P("Block", { 0.9, 0.05, 0.05 }, { 0, 0, -0.1 }, "SmoothPlastic", { 24, 24, 28 }),
+	} },
+	-- swallows circling near the wall tops (sky ruins)
+	bird = { motion = "glide", speed = 0.9, prims = {
+		P("Block", { 0.3, 0.26, 0.8 }, { 0, 0, 0 }, "SmoothPlastic", { 44, 48, 72 }),
+		P("Block", { 0.7, 0.06, 0.4 }, { 0.48, 0.04, -0.05 }, "SmoothPlastic", { 38, 42, 64 }),
+		P("Block", { 0.7, 0.06, 0.4 }, { -0.48, 0.04, -0.05 }, "SmoothPlastic", { 38, 42, 64 }),
+		P("Block", { 0.22, 0.12, 0.3 }, { 0, -0.1, 0.12 }, "SmoothPlastic", { 196, 186, 168 }),
+	} },
+	-- star jellies drifting in the dark (astral labyrinth)
+	jelly = { motion = "float", speed = 0.8, prims = {
+		P("Ball", { 0.9, 0.9, 0.9 }, { 0, 0, 0 }, "Glass", { 190, 170, 230 }, 0.45),
+		P("Block", { 0.06, 0.8, 0.06 }, { 0.2, -0.75, 0 }, "Glass", { 176, 160, 214 }, 0.5),
+		P("Block", { 0.06, 0.8, 0.06 }, { -0.2, -0.75, 0 }, "Glass", { 176, 160, 214 }, 0.5),
+	} },
+}
+
 --------------------------------------------------------------------------- the bands
 -- `from` = first level of the band. `fade` = levels over which it blends in BEFORE `from`.
 -- Pacing (tests/Pacing.spec.luau prints it: the MazeWalker model, normal player, no deaths, so a lower
@@ -239,6 +318,7 @@ Biomes.Bands = {
 			atmosDecay = { 30, 30, 45 }, tint = { 230, 225, 235 }, torch = { 255, 235, 190 },
 		},
 		air = { dust = 6 },
+		critters = { rat = 2 },
 		decor = { density = 0.35, kit = { { "chain", 3 }, { "sconce", 2 }, { "crack", 3 }, { "banner", 1 } } },
 		hazard = nil,
 	},
@@ -249,6 +329,7 @@ Biomes.Bands = {
 			atmosDecay = { 21, 35, 21 }, tint = { 210, 234, 203 }, torch = { 237, 242, 168 },
 		},
 		air = { fireflies = 6 },
+		critters = { butterfly = 3 },
 		decor = { density = 0.45, kit = { { "vine", 4 }, { "leaves", 3 }, { "moss", 2 }, { "roots", 2 } } },
 		hazard = nil,
 	},
@@ -259,6 +340,7 @@ Biomes.Bands = {
 			atmosDecay = { 20, 32, 56 }, tint = { 205, 231, 253 }, torch = { 209, 242, 255 },
 		},
 		air = { snow = 16 },
+		critters = { bat = 2 },
 		decor = { density = 0.5, kit = { { "icicles", 5 }, { "frost", 2 }, { "snowcap", 3 } } },
 		hazard = "icicle",
 	},
@@ -269,6 +351,7 @@ Biomes.Bands = {
 			atmosDecay = { 61, 24, 13 }, tint = { 254, 222, 197 }, torch = { 255, 238, 157 },
 		},
 		air = { embers = 10 },
+		critters = { salamander = 2 },
 		decor = { density = 0.4, kit = { { "chain", 2 }, { "grate", 2 }, { "soot", 3 }, { "pipe", 2 } } },
 		hazard = "lavabomb",
 	},
@@ -279,6 +362,7 @@ Biomes.Bands = {
 			atmosDecay = { 42, 25, 62 }, tint = { 239, 220, 255 }, torch = { 241, 233, 255 },
 		},
 		air = { sparkles = 10 },
+		critters = { beetle = 2 },
 		decor = { density = 0.45, kit = { { "crystals", 4 }, { "geode", 2 }, { "spire", 3 } } },
 		hazard = "shard",
 	},
@@ -289,6 +373,7 @@ Biomes.Bands = {
 			atmosDecay = { 22, 34, 27 }, tint = { 208, 234, 210 }, torch = { 212, 246, 204 },
 		},
 		air = { mist = 4 },
+		critters = { spider = 2, bat = 1 },
 		decor = { density = 0.45, kit = { { "skull", 2 }, { "bones", 2 }, { "cobweb", 3 }, { "candles", 2 } } },
 		hazard = "chandelier",
 	},
@@ -299,6 +384,7 @@ Biomes.Bands = {
 			atmosDecay = { 22, 30, 67 }, tint = { 212, 228, 255 }, torch = { 224, 238, 255 },
 		},
 		air = { wisps = 5 },
+		critters = { bird = 2 },
 		decor = { density = 0.45, kit = { { "column", 3 }, { "cloudpuff", 3 }, { "trim", 2 }, { "vine", 2 } } },
 		hazard = "lightning",
 	},
@@ -309,6 +395,7 @@ Biomes.Bands = {
 			atmosDecay = { 49, 21, 75 }, tint = { 242, 218, 255 }, torch = { 254, 229, 255 },
 		},
 		air = { stardust = 12 },
+		critters = { jelly = 3 },
 		decor = { density = 0.45, kit = { { "floatrock", 3 }, { "starbits", 3 }, { "runes", 2 }, { "spire", 1 } } },
 		hazard = "meteor",
 	},
@@ -331,6 +418,11 @@ Biomes.Hazards = {
 	KnockSeconds = 0.8,         -- knocked down (PlatformStand)
 	KnockPush = 5,              -- studs/s, horizontal, away from the impact
 	MaxKnockDisplacement = 4.5, -- KnockPush * KnockSeconds must stay under this
+	-- (owner decision 30.09) never knocked down with a monster close enough to catch you: a stagger instead.
+	-- (15 + 5) x 0.8 + 4 = 20 studs is the worst case (CellHazards.validate); 24 leaves 4 for a monster's lag.
+	MonsterSpeedMax = 15,       -- the server's CONFIG.Curve.MonsterSpeedMax (check_labyrintspill_biomes parses it)
+	MonsterReach = 4,           -- a monster's half-width (1.75) + a character's arm span either side of its root
+	MonsterSafeRadius = 24,
 	Density = 0.03,             -- share of cells with a hazard (tuned in tests/Pacing.spec.luau)
 	MaxPerLevel = 40,
 	MinSpacing = 3,             -- cells between two hazard cells
@@ -344,6 +436,10 @@ Biomes.Hazards = {
 	-- opposite. Cool blue, where both trap phases are warm (validate holds it there under every grade).
 	RingColor = { 100, 160, 255 },
 	RingWord = "blue",          -- what the banner and the biome card call it
+	-- (second review) ...and never like anything you are meant to step on (Biomes.StepOnColors). Delta E 25 is more
+	-- than twice what separates the cyan button from the guide dots (11.0 through the grades), two colours players
+	-- already tell apart; the shipped ring keeps 31.8 from its nearest, the deep-blue button (tests/Biomes.spec).
+	MinRingDeltaE = 25,
 	Kinds = {
 		icicle = { label = "🧊 ICICLE!" },
 		lavabomb = { label = "🌋 LAVA BOMB!" },
@@ -376,7 +472,8 @@ Biomes.Rest = {
 --------------------------------------------------------------------------- budget (mobile)
 Biomes.Budget = {
 	MaxLocalParts = 140,     -- every part this client builds, at once
-	MaxDecorPieces = 26,
+	MaxDecorPieces = 26,     -- wall dressing AND critters together (a critter takes a decor slot)
+	MaxCritters = 3,         -- at once, around the player
 	MaxPrimsPerPiece = 4,
 	DecorRadius = 24,        -- inside the torch's 28 studs: decor never shows a wall the torch does not
 	MaxAirEmitters = 2,
@@ -385,6 +482,8 @@ Biomes.Budget = {
 	MaxMazeLights = 0,       -- a light in the maze would add sight
 	MaxLobbyLights = 1,      -- the campfire
 	MaxHazardsShown = 2,
+	MaxHazardViewParts = 9,  -- the largest hazard view (the chandelier: ring, disc, shadow, hoop, 4 candles, flames);
+	                         -- check_labyrintspill_budget builds every kind with the real BiomeArt and holds it to this
 	LightingHz = 10,
 	GlideHalfLife = 0.6,     -- seconds; a level change glides, it never cuts
 	DecorFadeSeconds = 0.35, -- decor fades in when placed, and out when its wall (a secret door) sinks
@@ -406,6 +505,40 @@ end
 -- (warm, ~0.13-0.3). The denominator never reaches zero, so a black or blue-less colour cannot slip through.
 function Biomes.signalBlueRatio(signal: { number }, tint: { number }): number
 	return (signal[3] * tint[3]) / math.max(1, signal[1] * tint[1])
+end
+
+-- (second review) colour distance as people see it: sRGB (0-255) -> CIE Lab (D65), and CIE76 delta E between two.
+local function linear(c: number): number
+	local v = c / 255
+	if v <= 0.04045 then return v / 12.92 end
+	return ((v + 0.055) / 1.055) ^ 2.4
+end
+local function labF(t: number): number
+	if t > 0.008856 then return t ^ (1 / 3) end
+	return 7.787 * t + 16 / 116
+end
+function Biomes.lab(c: { number }): { number }
+	local r, g, b = linear(c[1]), linear(c[2]), linear(c[3])
+	local x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+	local y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+	local z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+	local fx, fy, fz = labF(x), labF(y), labF(z)
+	return { 116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz) }
+end
+function Biomes.deltaE(a: { number }, b: { number }): number
+	local la, lb = Biomes.lab(a), Biomes.lab(b)
+	return math.sqrt((la[1] - lb[1]) ^ 2 + (la[2] - lb[2]) ^ 2 + (la[3] - lb[3]) ^ 2)
+end
+-- A colour as it reaches the screen through a colour grade (ColorCorrection's tint multiplies each channel).
+function Biomes.graded(c: { number }, tint: { number }): { number }
+	return { c[1] * tint[1] / 255, c[2] * tint[2] / 255, c[3] * tint[3] / 255 }
+end
+
+-- (second review) The most parts this client can ever build in a maze at once: every decor slot holding the largest
+-- piece, every hazard view drawn at its largest, and the one air box. validate holds it under MaxLocalParts.
+function Biomes.partBound(): number
+	local b = Biomes.Budget
+	return b.MaxDecorPieces * b.MaxPrimsPerPiece + b.MaxHazardsShown * b.MaxHazardViewParts + 1
 end
 
 -- The words on screen about a falling hazard (Biome.client shows them; check_labyrintspill_layout measures them).
@@ -455,6 +588,74 @@ end
 
 Biomes.FACES = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }
 
+-- (2026-10-01) { [critterKind] = how many }, blended over the fade like the air, at most Budget.MaxCritters in all.
+function Biomes.crittersAt(EnvBands: any, level: number): { [string]: number }
+	local i, j, t = EnvBands.locate(Biomes.Bands, level)
+	local raw = {}
+	local wi = if j == i then 1 else 1 - t
+	for kind, n in Biomes.Bands[i].critters or {} do raw[kind] = (raw[kind] or 0) + n * wi end
+	if j ~= i then
+		for kind, n in Biomes.Bands[j].critters or {} do raw[kind] = (raw[kind] or 0) + n * t end
+	end
+	local out, total = {}, 0
+	local order = {}
+	for kind, v in raw do
+		local n = math.floor(v + 0.5)
+		if n > 0 then
+			out[kind] = n
+			total += n
+			table.insert(order, kind)
+		end
+	end
+	table.sort(order)
+	while total > Biomes.Budget.MaxCritters do
+		-- trim the most numerous (ties by name, so every client trims the same way)
+		local worst: string? = nil
+		for _, k in order do
+			if out[k] and (worst == nil or out[k] > out[worst :: string]) then worst = k end
+		end
+		local w = worst :: string
+		out[w] -= 1
+		if out[w] == 0 then out[w] = nil end
+		total -= 1
+	end
+	return out
+end
+
+-- (2026-10-01) Where a critter is, `t` seconds into its life: (x, y, z) in studs from the centre of its home cell at
+-- floor level (y up from the floor). `phase` staggers critters; `face` (a Biomes.FACES index) is the wall a scurrying
+-- or climbing critter keeps to. Pure; tests/Biomes.spec holds every part of every critter inside its cell.
+function Biomes.critterPose(kind: string, t: number, phase: number, cellSize: number, face: number): (number, number, number)
+	local def = Biomes.Critters[kind]
+	local half = cellSize / 2
+	local w = def.speed
+	local n = Biomes.FACES[face] or Biomes.FACES[1]
+	local nx, nz = n[1], n[2]
+	local ux, uz = nz, -nx -- along the face
+	local m = def.motion
+	if m == "scurry" then
+		-- a run along the foot of the wall that slows at each end (sin), as if it stops to sniff
+		local along = (half - 1.5) * math.sin(w * t + phase)
+		local off = half - 1.5
+		return nx * off + ux * along, 0, nz * off + uz * along
+	elseif m == "climb" then
+		local along = 1.2 * math.sin(0.5 * w * t + phase)
+		local off = half - 0.6
+		return nx * off + ux * along, 12 + 7 * math.sin(w * t + 2 * phase), nz * off + uz * along
+	elseif m == "flutter" then
+		local r = 2.3
+		local x = r * math.sin(w * t + phase) * math.cos(0.37 * w * t)
+		local z = r * math.sin(0.7 * w * t + 2 * phase)
+		return x, 3.8 + 1.3 * math.sin(1.9 * w * t + phase), z
+	elseif m == "glide" then
+		local r = 2.6
+		return r * math.cos(w * t + phase), 17 + 1.5 * math.sin(0.5 * w * t + phase), r * math.sin(w * t + phase)
+	end
+	-- float
+	local r = 1.4
+	return r * math.cos(0.6 * w * t + phase), 6.5 + 1.2 * math.sin(w * t + phase), r * math.sin(0.4 * w * t + phase)
+end
+
 -- Faces of the wall at fine-grid (fx, fy) that look into an open cell of the grid. `isWall(x, y)`
 -- is the only thing asked about the maze: it treats a secret door as the wall it looks like.
 function Biomes.openFaces(isWall: (number, number) -> boolean, fx: number, fy: number, gCols: number, gRows: number): { number }
@@ -468,11 +669,30 @@ function Biomes.openFaces(isWall: (number, number) -> boolean, fx: number, fy: n
 	return out
 end
 
+-- (second review) A face no decor may take: the start cell's back wall, which carries the server's 🚪 Lobby door
+-- and, for the first seconds of a level, the free-break sign in front of it (RestClient). The server starts every
+-- maze in cell (0, 0), i.e. fine cell (1, 1), and puts the door on its -Z wall: fine cell (1, 0), whose face into
+-- the start cell is +Z (FACES[3]). Decor there stood in front of the sign's words (sconces, glass crystals: 12 of
+-- 500 levels) and inside the top of the door (grates: 13). A rule on grid position only, like everything here.
+function Biomes.reservedFace(fx: number, fy: number, face: number): boolean
+	return fx == 1 and fy == 0 and face == 3
+end
+
+-- (01.10, pass-1 re-run) The same clearance for critters: the open cell the reserved face looks into (the start
+-- cell, fine 1,1) is no critter's home. Their first version could settle there once the player had walked out, and
+-- a crypt spider then climbed the door's wall straight through the door slab and the free-break sign
+-- (check_labyrintspill_biomes §8). The player starts in that cell and never shares a cell with a critter, so nothing
+-- is lost but the one cell the sign needs clear. Grid position only, like reservedFace.
+function Biomes.critterHomeFree(fx: number, fy: number): boolean
+	return not (fx == 1 and fy == 1)
+end
+
 -- Which piece (or nil) dresses face `face` (1..4) of the wall at fine-grid (fx, fy) on `level`.
 -- Deterministic from those four numbers alone. In a fade, a share of the faces equal to the next
 -- band's weight wears the next band's pieces, so the dungeon grows mossier level by level.
 -- Each level also re-weights its band's kit (0.4x..1.6x per piece), so no two levels look alike.
 function Biomes.decorFor(EnvBands: any, level: number, fx: number, fy: number, face: number): string?
+	if Biomes.reservedFace(fx, fy, face) then return nil end
 	local bands = Biomes.Bands
 	local i, j, t = EnvBands.locate(bands, level)
 	local bi, bj = bands[i], bands[j]
@@ -588,6 +808,39 @@ function Biomes.validate(EnvBands: any): (boolean, string?)
 		local pok, perr = pieceOk(id, piece)
 		if not pok then return false, perr end
 	end
+	-- (second review) the phone budget, enforced here and not only measured by a headless check
+	local B = Biomes.Budget
+	-- (2026-10-01) critters: small, no glow, no light, Block/Ball only, a known motion, a decor slot's size at most
+	if type(B.MaxCritters) ~= "number" or B.MaxCritters < 1 or B.MaxCritters > B.MaxDecorPieces then
+		return false, "Budget.MaxCritters must be 1..MaxDecorPieces (a critter takes a decor slot)"
+	end
+	for kind, def in Biomes.Critters do
+		if type(def) ~= "table" or type(def.prims) ~= "table" then return false, "critter " .. kind .. " has no prims" end
+		if #def.prims < 1 or #def.prims > B.MaxPrimsPerPiece then return false, "critter " .. kind .. " has " .. #def.prims .. " parts" end
+		if Biomes.CritterMotions[def.motion] ~= true then return false, "critter " .. kind .. " moves in an unknown way" end
+		if type(def.speed) ~= "number" or not (def.speed > 0) then return false, "critter " .. kind .. " speed" end
+		for _, p in def.prims do
+			if p.material == "Neon" or not Biomes.DecorMaterials[p.material] then
+				return false, "critter " .. kind .. " uses material " .. tostring(p.material)
+			end
+			if p.light ~= nil then return false, "critter " .. kind .. " carries a light" end
+			if p.shape ~= "Block" and p.shape ~= "Ball" then return false, "critter " .. kind .. " shape " .. tostring(p.shape) end
+			if math.max(p.size[1], p.size[2], p.size[3]) > 1.6 then return false, "critter " .. kind .. " is too big" end
+		end
+	end
+	for _, k in { "MaxLocalParts", "MaxDecorPieces", "MaxPrimsPerPiece", "MaxHazardsShown", "MaxHazardViewParts",
+		"MaxAirEmitters", "MaxEmitters", "MaxMazeLights" } do
+		if type(B[k]) ~= "number" or B[k] ~= B[k] or B[k] < 0 then return false, "Budget." .. k .. " must be a number >= 0" end
+	end
+	local bound = Biomes.partBound()
+	if bound > B.MaxLocalParts then
+		return false, string.format("the worst case is %d local parts (%d decor x %d + %d hazard views x %d + 1), over the budget of %d",
+			bound, B.MaxDecorPieces, B.MaxPrimsPerPiece, B.MaxHazardsShown, B.MaxHazardViewParts, B.MaxLocalParts)
+	end
+	if B.MaxAirEmitters + B.MaxHazardsShown > B.MaxEmitters then
+		return false, "air emitters + one burst per hazard view exceed MaxEmitters"
+	end
+	if B.MaxMazeLights ~= 0 then return false, "no light in a maze: a light adds sight" end
 	local ring = Biomes.Hazards.RingColor
 	if type(ring) ~= "table" or #ring ~= 3 or type(Biomes.Hazards.RingWord) ~= "string" then
 		return false, "Hazards.RingColor must be an RGB triple and RingWord a word"
@@ -629,6 +882,13 @@ function Biomes.validate(EnvBands: any): (boolean, string?)
 		if not (ringBR >= 1.5) or not (ringBR - trapBR >= 1.0) then
 			return false, tag .. ": the falling-hazard ring must read cool, far from the trap's warm warning and lava"
 		end
+		local minDE = Biomes.Hazards.MinRingDeltaE
+		if type(minDE) ~= "number" or not (minDE >= 0) then return false, "Hazards.MinRingDeltaE must be a number" end
+		for _, s in Biomes.StepOnColors do
+			if not (Biomes.deltaE(Biomes.graded(ring, tint), Biomes.graded(s.rgb, tint)) >= minDE) then
+				return false, tag .. ": the falling-hazard ring looks like the " .. s.name .. ", which means step here"
+			end
+		end
 		if i <= 2 and b.hazard ~= nil then return false, tag .. " is too early for hazards" end
 		if b.hazard ~= nil and Biomes.Hazards.Kinds[b.hazard] == nil then
 			return false, tag .. " names an unknown hazard " .. tostring(b.hazard)
@@ -646,6 +906,30 @@ function Biomes.validate(EnvBands: any): (boolean, string?)
 		for _, e in b.decor.kit do
 			if Biomes.Pieces[e[1]] == nil then return false, tag .. " kit names unknown piece " .. tostring(e[1]) end
 			if type(e[2]) ~= "number" or e[2] <= 0 then return false, tag .. " kit weight" end
+		end
+		-- (2026-10-01) critters: known kinds, at least one, never more than MaxCritters at once
+		if type(b.critters) ~= "table" then return false, tag .. " has no critters" end
+		local critterTotal = 0
+		for kind, count in b.critters do
+			if Biomes.Critters[kind] == nil then return false, tag .. " names an unknown critter " .. tostring(kind) end
+			if type(count) ~= "number" or count < 1 or count % 1 ~= 0 then return false, tag .. " critter count" end
+			critterTotal += count
+		end
+		if critterTotal < 1 or critterTotal > B.MaxCritters then
+			return false, string.format("%s wants %d critters at once (1..%d)", tag, critterTotal, B.MaxCritters)
+		end
+		-- a critter never looks like something the maze asks you to step on or dodge, under this band's grade
+		for kind, def in Biomes.Critters do
+			for _, prim in def.prims do
+				local g = Biomes.graded(prim.color, tint)
+				local signals = { Biomes.Signals.trapWarn, Biomes.Signals.trapDeadly, ring }
+				for _, st in Biomes.StepOnColors do table.insert(signals, st.rgb) end
+				for _, sig in signals do
+					if not (Biomes.deltaE(g, Biomes.graded(sig, tint)) >= Biomes.CritterMinDeltaE) then
+						return false, tag .. ": the " .. kind .. " is coloured too much like a signal of the maze"
+					end
+				end
+			end
 		end
 	end
 	return true, nil

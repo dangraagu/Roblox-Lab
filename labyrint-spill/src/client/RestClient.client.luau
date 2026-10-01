@@ -9,7 +9,7 @@
 --   * THE DOOR: every level starts beside the 🚪 Lobby door. For its first seconds, walking out does
 --     not count as a failed attempt (the server's own CONFIG.Assist.MinRunSeconds rule), and a sign on
 --     the door says so, only while that is true (BreakRoom.signAlpha, with a network margin), and
---     never while the run holds a bought "Hjelp meg" guide, which a walk-out would lose (AssistState).
+--     never while a "Hjelp meg" guide is active in the run (AssistState; see BreakRoom for why, since 30.09).
 -- It fires no remote, creates none, and touches nothing the server built except reading it.
 
 local Players = game:GetService("Players")
@@ -106,14 +106,18 @@ do
 	smoke.Rate = 5
 	smoke.Enabled = true
 	smoke.Parent = fire
-	-- the lobby is lit already; this is warmth, not sight, and it never reaches a maze (6000+ studs away)
-	local glow = Instance.new("PointLight")
-	glow.Name = "FireGlow"
-	glow.Color = Color3.fromRGB(255, 170, 90)
-	glow.Range = 14
-	glow.Brightness = 1.6
-	glow.Enabled = true
-	glow.Parent = fire
+	-- the lobby is lit already; this is warmth, not sight, and it never reaches a maze (6000+ studs away).
+	-- It is the break room's one light, and exists only while the lobby's light budget allows one (second review:
+	-- the budget used to be a number nothing read).
+	if Biomes.Budget.MaxLobbyLights >= 1 then
+		local glow = Instance.new("PointLight")
+		glow.Name = "FireGlow"
+		glow.Color = Color3.fromRGB(255, 170, 90)
+		glow.Range = 14
+		glow.Brightness = 1.6
+		glow.Enabled = true
+		glow.Parent = fire
+	end
 end
 
 local prompt = Instance.new("ProximityPrompt")
@@ -254,8 +258,8 @@ applyLayout()
 -- while (a hitch, a minimised window) the wall clock keeps counting as the server's does, so the sign can
 -- only disappear early, never linger past the promise.
 local frameClock = 0
--- guideActive: the server says this run holds a "Hjelp meg" guide (AssistState). A walk-out would lose it,
--- so the sign must not promise "nothing is lost" (BreakRoom.freeBreak). Never reset on a level payload: the
+-- guideActive: the server says this run has a "Hjelp meg" guide active (AssistState); the sign then stays down
+-- (BreakRoom.freeBreak). Never reset on a level payload: the
 -- server follows every run change with a fresh AssistState, and a stale `true` can only hide the sign early.
 local where = { inLobby = true, levelStart = 0, levelStartWall = 0, run = 0, guideActive = false }
 local rest = Rest.new()

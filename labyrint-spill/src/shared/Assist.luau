@@ -5,7 +5,8 @@
 --
 -- HVORFOR: hvert nivå er vanskeligere enn det forrige, så før eller siden treffer
 -- alle en vegg og slutter å spille. Guiden er utveien: står du fast, kan du kjøpe
--- en lysende rute til utgangen for MYNTER — for ÉN kjøring.
+-- en lysende rute til utgangen for MYNTER. (Eierbeslutning 30.09: guiden beholdes til nivået er klart, se
+-- Assist.keptFor; før gjaldt den ÉN kjøring og gikk tapt ved død eller retur.)
 --
 -- Guiden gir ALDRI gratis fremgang:
 --   * Den koster mynter du har spilt deg til.
@@ -95,6 +96,19 @@ function Assist.noteClear(stuck: Stuck?, level: number): Stuck?
 		return { level = level, fails = 0 }
 	end
 	return stuck
+end
+
+-- (Eierbeslutning 30.09, "aldri straffende") En kjøpt guide beholdes til nivået den ble kjøpt på er KLART. Dør
+-- du, eller går du ut av døra, venter den neste gang du går inn på SAMME nivå, uten ny betaling. `paid` = nivået
+-- spillerens beholdte guide gjelder (nil = ingen). Aldri et annet nivå: den kan ikke spares til et vanskeligere.
+function Assist.keptFor(paid: any, level: number): boolean
+	return type(paid) == "number" and paid == level
+end
+
+-- Etter at `level` er klart: guiden for det nivået er brukt opp. En guide for et annet nivå blir stående.
+function Assist.afterClear(paid: any, level: number): number?
+	if type(paid) ~= "number" or paid == level then return nil end
+	return paid
 end
 
 -- Tynn ut en rute til høyst `maxPoints` merker, jevnt fordelt, men behold ALLTID

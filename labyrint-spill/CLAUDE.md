@@ -190,11 +190,58 @@ lenger; sjeldne, varslede farer; en måte å hvile på som ikke kan utnyttes; en
   Varselringen er **blå**, aldri fellas gule: gult lys på gulvet betyr "dette gulvet dreper deg straks".
 - **Hvile** = mellom runder: bål i lobbyen ("Rest by the fire") + gratis walk-out de første 6 s av hvert
   nivå (serverens egen `Assist.MinRunSeconds`-regel). Aldri pause inne i en løype — klokka ER medaljen.
-  Skiltet vises ikke når en kjøpt "Hjelp meg"-guide er aktiv (den går tapt ved walk-out).
-- Alt er klient (`Biome.client`, `RestClient`, `BiomeArt`). **Serveren er uendret.**
+  Skiltet vises ikke når en "Hjelp meg"-guide er aktiv.
+- Alt er klient (`Biome.client`, `RestClient`, `BiomeArt`). Serveren var uendret fram til 30.09 (se under).
 - Tester: `tests/Biomes|CellHazards|BreakRoom|Pacing|EnvBands|Rest.spec.luau` + `robloxemu/check_labyrintspill_*.luau`.
 - **Adversarial review 24.09:** seks funn, alle lukket med test først og mutasjonstest (`EYECANDY.md` §12).
   Thumbnail-stedet (`Labyrint-shots.rbxlx`, §9) må **aldri** publiseres.
+- **Andre review + eierbeslutninger 30.09** (`EYECANDY.md` §13; eieren: "take the recommended option for all"):
+  * Friends-vert som går ut under "gratis pause"-skiltet kommer tilbake til vennene sine (`findFriendsInstance` i
+    serveren: egen kjøring først, så en venns; Roblox regner deg aldri som din egen venn).
+  * Ringen holdes minst CIE delta E 25 unna alt man skal tråkke på (knapper, guide-prikker, mynt, edelsten, exit),
+    gjennom hver biome-gradering (`Biomes.StepOnColors`, speilet fra serveren og lest tilbake av `_biomes` §0).
+  * Biome-kortet venter også på daglig-belønning-popupen; ingen pynt på Lobby-dørens vegg (`Biomes.reservedFace`);
+    del-/emitter-/lys-budsjettet håndheves i `Biomes.validate` (`Biomes.partBound()`).
+  * **Guiden beholdes** til nivået er klart (død/retur mister den ikke; lagres som `guideLevel`; aldri på et annet
+    nivå; `Assist.keptFor/afterClear`, `applyKeptGuide` i serveren).
+  * Et fall-treff er en **stagger** (ingen PlatformStand) når et monster er innen 24 studs; ellers knockdown
+    (`CellHazards.hitMode`, `MonsterSafeRadius`). Ringen forblir blå; ingen tema-felle-skins; biomene står der de står
+    (`Pacing.spec` holder brag-vinduet 30-45 min og de to siste over 10 t).
+- **Pass 1 kjørt på nytt 01.10** (`EYECANDY.md` §14): de fem funnene målt på nytt på dagens tre. Fire reproduserer
+  ikke (lukket 30.09, fortsatt lukket). Funn 4 kom tilbake i ny form: smådyrene (pass 2, 01.10, ikke dokumentert
+  ennå) kunne bo i start-cella, og en edderkopp klatret rett gjennom døra og pause-skiltet. Nå er start-cella aldri
+  et hjem for smådyr (`Biomes.critterHomeFree`, `check_labyrintspill_biomes` §8). Ingen åpne eierbeslutninger.
+- **Feller å kjenne til:** headless står monstrene stille, så en sjekk som tester knockdown må parkere dem
+  (`check_labyrintspill_hazards` gjør det i `start`). Emulatorens `IsFriendsWith` svarer alltid false;
+  `check_labyrintspill_friends` definerer Player-klassen på nytt i selve sjekken (aldri i `robloxemu/emu`).
+
+## Komplett-standarden — pass 2 (01.10.2026, IKKE sett i Studio)
+Eierens finish-linje er `docs/complete-game-standard.md` ("lag komplette spill ... inkludert alt vi har diskutert").
+Pass 2 bygde det som manglet (01.10 00:09-00:50, kuttet før dokumentasjonen) og ble fullført samme morgen. Alt står i
+`EYECANDY.md` §15, med en tabell over hvert punkt i standarden og hvor det holdes.
+- **Topplista, offentlig + venner** (`src/shared/Board.luau` = +1 Jumps mal, `BoardConfig.luau`, `BoardClient`):
+  rangert på `accepted` (høyeste nivå klart i rekkefølge, målt av serveren), uavgjort til den som nådde det FØRST,
+  `LabyrintTopp_v3` med nøkkel `u_<userId>`, skrevet bare når nivået stiger. Offentlig topp 10 hentes høyst hvert
+  60. sekund; venner (`GetFriendsAsync`, tak 200) bare når spilleren ber om det, cachet og strupet. En fysisk tavle
+  ved spawn ("TOP MAZE RUNNERS", lobbyen (-15, 5, 2)) med en ProximityPrompt som bytter Public/Friends. Navn slås opp
+  og huskes i minnet, aldri lagret. Den gamle HUD-tavla virker som før, og den gamle `LabyrintTopp_v2` bæres over.
+  Er lageret nede, sier tavla det (ikke "Loading..." for alltid), og en tapt skriving prøves igjen ved autolagring.
+- **Gå-vakta** (`Progression.minClearSeconds`, `CONFIG.WalkGuard`): en utgang nådd raskere enn noen kan gå dit
+  teller ikke, og spilleren får vite hvorfor. Bevegelse er klientens; dette er det serveren kan måle.
+- **Økt-lås + eier-token** (`loadPlayer`/`savePlayer`, mønsteret fra fork-tower): lasten og hver lagring er én
+  `UpdateAsync`; en annen levende server sin lås gjør økta read-only (og spilleren får beskjed); en utløpt lås tas
+  over; å gå slipper låsen; engangs-gaver gis inne i én skriving (`grantOnce`) eller ikke i det hele tatt.
+- **`plr.RespawnLocation`** peker på lobby-platen (`pointRespawn`, `robloxemu/SPAWN-ORDER.md` regel 1).
+- **Smådyr i hver biome** (`Biomes.Critters`: rotter, sommerfugler, flaggermus, salamandere, biller, edderkopper,
+  svaler, stjernemaneter), 2-3 rundt spilleren, i åpne celler, aldri i start-cella, og de deler dekor-taket.
+- **Én fallende fare om gangen** (`CellHazards.validate`): to fare-celler står alltid lenger fra hverandre enn to
+  ganger tegne-radiusen, så ingen plass i labyrinten har to farer nær seg samtidig.
+- **HUD-regel 4b** holdes av `check_labyrintspill_overlap` (med begrunnelsen for hvorfor ikke i selve hudcheck-en);
+  den fant og rettet at rekord-panelet la seg over et kjøpt minikart på nettbrett.
+- **Klar for butikk og markedsføring:** butikk-teksten i `README.md`, klipp-lista i `MARKETING.md`, Studio-lista og
+  thumbnail-lista (1920x1080) i `EYECANDY.md` §8-9, alt holdt av `tests/docs_check.py`.
+- **Hele spillerveien gått headless** (`check_labyrintspill_journey`): join, dør, nivå, utgang, tjene, bruke, rejoin.
+- Ikke committet, pushet eller publisert. Studio ikke åpnet (natt-skiftet: `EYECANDY.md` §8-9, `MARKETING.md`).
 
 ## v2 — resten (ikke bygget ennå)
 Bevisst parkert for å få v1 til å funke først. Lagringen er allerede på plass,
@@ -209,7 +256,7 @@ så saldoen finnes når butikkene bygges.
    en `RemoteFunction`/`RemoteEvent` for kjøp (server validerer og trekker
    valuta), og en klient-`ScreenGui` (i `src/client`) for UI. Lagre eide perks/
    kosmetikk i samme DataStore-tabellen som valutaene.
-4. Global pokal-toppliste (OrderedDataStore) på en `SurfaceGui`-tavle.
+4. ~~Global pokal-toppliste (OrderedDataStore) på en `SurfaceGui`-tavle.~~ BYGGET 01.10 (se under: komplett-standarden).
 
 ## Arkitektur / hvor ting skal
 - `src/server/` → `ServerScriptService` (spill-logikk, autoritativt).
@@ -231,10 +278,73 @@ Ren logikk testes med luau-CLI (ikke Roblox-avhengige biter):
 MERK: `luau-analyze` melder pre-eksisterende TypeErrors i `MazeGen.luau` og
 `Medals.luau` (utypede tabeller) og en ubrukt `LOBBY_FOG` — de er ikke nye.
 
-Headless-sjekkene i `robloxemu/` (bygg bunten først:
-`cd ../robloxemu && py -3 wrap.py --game ../labyrint-spill --out build/labyrint-spill.luau`):
-`check_labyrint` (HUD-passform), `check_lighting`, `check_secretdoors`, `check_themes`
-og `check_labyrint_spawn` (hvor figuren FAKTISK havner).
+Headless-sjekkene i `robloxemu/` og alle andre porter: tabellen under.
+
+### Alle porter (01.10, pass 2: komplett-standarden)
+Bygg bunten først, hver gang en kilde er endret:
+`cd ../robloxemu && py -3 wrap.py --game ../labyrint-spill --out build/labyrint-spill.luau`.
+Kjør så hver port med `luau <fil> 2>&1`: spec-ene fra spillmappa, sjekkene fra `robloxemu/`. Hver skal ende på
+`N passed, 0 failed` eller `PASS`. Tallene står i `EYECANDY.md` §15 (og eldre i §7 og §14).
+
+| port | hvor | hva den holder |
+|---|---|---|
+| `tests/Assist.spec.luau` | spillmappa | "Hjelp meg"-guiden: pris, gating, beholdt til nivået er klart |
+| `tests/Biomes.spec.luau` | spillmappa | biomene, mørke-låsen, pynt, smådyr (`critter`), budsjetter (`validate`) |
+| `tests/Board.spec.luau` | spillmappa | topplista: koding, uavgjort til den første, keepHigher, venne-visning, cache, struping |
+| `tests/BreakRoom.spec.luau` | spillmappa | hvile: bålet, gratis walk-out-skiltet |
+| `tests/CellHazards.spec.luau` | spillmappa | fallende farer: plassering, klokke, sone, knock; én fare om gangen |
+| `tests/Contributors.spec.luau` | spillmappa | bidragsyter-lista og engangsbelønningen |
+| `tests/EnvBands.spec.luau` | spillmappa | +1 Jump-malen, ordrett |
+| `tests/Hazard.spec.luau` | spillmappa | lava-pulsen |
+| `tests/Pacing.spec.luau` | spillmappa | minutter til hver biome (brag-vinduet 30-45 min), sjeldenhet, medalje-rettferd |
+| `tests/Progression.spec.luau` | spillmappa | `accepted`, rekord-rett, gå-vakta (`minClearSeconds`) |
+| `tests/Rest.spec.luau` | spillmappa | +1 Jump-malen, ordrett |
+| `tests/lightingpresets.spec.luau`, `tests/mazeref.spec.luau`, `tests/responsive.spec.luau`, `tests/touchtarget.spec.luau` | spillmappa | lys, labyrint-peker, mobil-skalering, 44 px trykkflater |
+| `tests/docs_check.py` | spillmappa: `py -3 tests/docs_check.py` (sett `LUAU=<sti til luau.exe>` om luau ikke er på PATH) | butikk-teksten i README (maks 1000 tegn, ingen fargede firkanter, hvert tall mot kilden), klipp-lista i MARKETING, 1920x1080 og Studio-lista i EYECANDY, og at denne tabellen nevner hver port |
+| `check_labyrint` | `robloxemu/` | HUD-passform, de 11 opprinnelige klientene |
+| `check_labyrint_spawn` | `robloxemu/` | hvor figuren FAKTISK havner; `RespawnLocation` |
+| `check_labyrintspill_biomes` | `robloxemu/` | biomene gjennom ekte server og klienter, sømmene, siktlåsen, start-cella |
+| `check_labyrintspill_board` | `robloxemu/` | topplista i verden: tavla ved spawn, prompten, Public/Friends, 60 s cache, 200-taket, navn aldri lagret |
+| `check_labyrintspill_boarddown` | `robloxemu/` | tavla når lageret er nede: sier det (ikke "Loading..." for alltid), og en tapt skriving prøves igjen |
+| `check_labyrintspill_budget` | `robloxemu/` | deler/emittere/lys, målt i hver celle; dekor-taket teller smådyr |
+| `check_labyrintspill_cards` | `robloxemu/` | biome-kort, nivå-kort og fare-banner holdes fra hverandre |
+| `check_labyrintspill_compile` | `robloxemu/` | hver kilde kompilerer |
+| `check_labyrintspill_critters` | `robloxemu/` | smådyrene: riktig art, inerte, i åpne celler, beveger seg, borte i lobbyen |
+| `check_labyrintspill_friends` | `robloxemu/` | Friends-døra: verten kommer tilbake til egen kjøring |
+| `check_labyrintspill_guide` | `robloxemu/` | den beholdte guiden |
+| `check_labyrintspill_hazards` | `robloxemu/` | fallende farer gjennom ekte klient: ring, knock, stagger nær monster |
+| `check_labyrintspill_hud` | `robloxemu/` | HUD-passform med alle klientene (regel 4b: se `_overlap`) |
+| `check_labyrintspill_journey` | `robloxemu/` | hele spillerveien: join, dør, nivå gått, utgang, tjene, gå-vakta, lobby, bruke, rejoin |
+| `check_labyrintspill_layout` | `robloxemu/` | tekst-etiketter på hver viewport |
+| `check_labyrintspill_overlap` | `robloxemu/` | HUD-regel 4b (ingen paneler oppå hverandre), med begge gate-artefaktene rettet |
+| `check_labyrintspill_popups` | `robloxemu/` | biome-kortet venter på daglig-belønning-popupen |
+| `check_labyrintspill_rest` | `robloxemu/` | bålet og walk-out-skiltet |
+| `check_labyrintspill_save` | `robloxemu/` | økt-lås, eier-token, lås sluppet/utløpt, engangs-gaver i én skriving, feilet last |
+| `check_labyrintspill_shots` | `robloxemu/` | thumbnail-hjelperne i `EYECANDY.md` §9 |
+| `check_lighting`, `check_secretdoors`, `check_themes` | `robloxemu/` | mørket, hemmelige dører, tema-butikken |
+
+(`check_labyrintspill_lib.luau` er felles oppstart, ikke en port.)
+
+### Feller å kjenne til (komplett-standarden, 01.10)
+- **Frøet har ingen salt, med vilje.** Standarden (§1) vil ha et server-salt på et frø en spiller kan pugge. Her er
+  nivåene deterministiske etter eierens design (samme `WorldSeed` + nivå = samme labyrint for alle), fordi
+  medaljetidene og rekordene bare betyr noe når alle løper den samme banen. Banen er dessuten synlig geometri: å
+  pugge den er å lære en speedrun-rute, ikke å jukse, og topplista rangerer på hvor langt du har klart nivåene i
+  rekkefølge, ikke på flaks. Et salt ville brutt rettferdigheten og ikke stoppet noen.
+- **Gå-vakta og filming:** en utgang nådd raskere enn noen kan gå dit teller ikke (`Progression.minClearSeconds`,
+  `CONFIG.WalkGuard`). Et klipp eller en sjekk som teleporterer til utgangen får "Too fast..." og ingen nivå-kort;
+  gå hele veien (`check_labyrintspill_journey` viser hvordan, `MARKETING.md` "Clip list" for Studio).
+- **Studio uten API-tilgang:** feiler DataStore-kallene, er økta read-only (banneret: "could not be loaded ... will
+  not be saved") og tavla sier "Couldn't load the board right now"; kan lageret ikke åpnes i det hele tatt, lagres
+  ingenting og tavla sier "No one on the board yet". Begge er riktig oppførsel, ikke en feil (`EYECANDY.md` §8, 20/22).
+- **Topplista** er `LabyrintTopp_v3` (nøkkel `u_<userId>`, verdi nivå * 2e9 + (2e9 - nåddUnix)). Den gamle
+  `LabyrintTopp_v2` leses bare for å bære over topp 10. Bytt aldri navn på v3 uten en migrering.
+- **Emulatoren kjører én harness per prosess:** en sjekk som trenger en annen server-start (f.eks. et lager som er
+  nede fra start) må være sin egen fil (`_boarddown`).
+- **`MazeGame.server.luau` har CRLF-linjeslutt, bunten har LF:** en mutasjon eller et skript som erstatter tekst
+  over flere linjer i serveren må bruke én linje (eller `\r\n`), og kan da ikke bevises i bunten.
+- **Film aldri Friends-visningen** med en ekte konto: den viser Roblox-brukernavn.
+
 
 ### ALDRI skriv en CFrame inne i `CharacterAdded`
 Målt i Studio 10.09.2026 (`fork-tower/STUDIO.md`, `robloxemu/SPAWN-ORDER.md`):

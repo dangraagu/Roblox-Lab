@@ -266,6 +266,20 @@ local function render()
 		return
 	end
 
+	-- Eierbeslutning 30.09: en kjøpt guide beholdes til nivået er klart. I lobbyen etter død/retur: si at den
+	-- venter, så ingen tror de må betale igjen.
+	if s.kept and not s.inMaze then
+		if dismissedKey == keyFor(s) then gui.Enabled = false; return end
+		titleLbl.Text = "💡 Guide kept"
+		titleLbl.TextColor3 = Color3.fromRGB(120, 235, 255)
+		bodyLbl.Text = ("Your Guide for Level %d is kept. It lights up again when you go back in, until you clear the level."):format(s.level)
+		buyBtn.Visible = false
+		hideBtn.Visible = true
+		gui.Enabled = true
+		fit()
+		return
+	end
+
 	if not s.offered then gui.Enabled = false; return end
 	if dismissedKey == keyFor(s) then gui.Enabled = false; return end
 
@@ -280,7 +294,7 @@ local function render()
 		bodyLbl.Text = ("You've tried it %d times. Go back in and buy a Guide for %d coins — it lights the whole way to the exit.")
 			:format(s.fails, s.price)
 	elseif have >= s.price then
-		bodyLbl.Text = ("A Guide lights the whole way to the exit, for this run. Costs %d coins (you have %d)."):format(s.price, have)
+		bodyLbl.Text = ("A Guide lights the whole way to the exit, and stays until you clear this level. Costs %d coins (you have %d)."):format(s.price, have)
 		buyBtn.BackgroundColor3 = Color3.fromRGB(60, 130, 190)
 		buyBtn.Text = "💡 Show me the way — " .. s.price
 	else
