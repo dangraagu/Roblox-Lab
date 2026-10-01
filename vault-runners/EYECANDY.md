@@ -10,11 +10,12 @@ shaft of crumbling pads between storeys, and a slack schedule tuned so pressure 
 The crumbling pads must stay readable, the time budget must not change, and rest must not freeze the
 collapse mid-run.
 
-**State: built, unit-tested, headless-tested, mutation-tested, and through one independent
-adversarial review, whose findings are closed or handed to the owner (§12). It has NOT been seen in
-Studio.** Nothing was committed, pushed or published.
-`src/server/Main.server.luau` is byte-identical to HEAD (`git diff` is empty), so every rule a run is
-judged by (the countdown, the collapse, the gems, the pads, the saves) is exactly what it was.
+**State: built, unit-tested, headless-tested, mutation-tested, through two independent adversarial
+reviews (§12, §13) whose findings are all closed, and with the owner's three decisions applied
+(§10, DECIDED 2026-09-30). It has NOT been seen in Studio.** The eye candy up to §12 was committed as
+511793d (2026-09-24). §13 (REVIEW-5, 2026-09-30) is in the working tree, not committed, not pushed,
+not published. The eye candy still never touches a rule; REVIEW-5 changed the server only for the
+obby review (how often it looks at the shaft, REVIEW-5.md §1.3), not for anything on this page.
 
 **Resumed after a usage limit (§11).** The earlier attempt had finished the code and its tests and
 was running its mutation sweep when it stopped. It had printed nothing and had not written this
@@ -31,8 +32,32 @@ things. All five reproduced. Four are fixed, each with a failing test written fi
 * the drop's ring vanished on the Frozen Vault's snow (1.16:1);
 * the hub's stratum signs overlapped the portal labels on a phone.
 
-The fifth (near-hits on a moving runner) is the owner decision already in §10. `Main.server.luau` is
-still byte-identical to HEAD.
+The fifth (near-hits on a moving runner) was the owner decision in §10, now DECIDED.
+
+**Second review round and owner decisions (2026-09-30, §13, REVIEW-5.md).** Three more findings, all
+reproduced and fixed test first: every `Config.Budget` is now a CAP in code, not only a number the
+checks compare against; gems and the exit pad no longer wear the pads' colour (in four strata, not
+the two reported); the stale "uncommitted" text is gone. The owner's decisions: the Frozen Vault (the
+brag) now arrives inside 30-45 minutes; near-hits are left as they are; and the endgame turns through
+three HALLS of the Volcano Temple instead of being one room for ever.
+
+**Pass-1 re-run (2026-10-01, §14).** The workflow ran pass 1 again on the tree above. It treated that
+tree as unverified: every finding was reproduced on HEAD 511793d and measured fixed in the working
+tree, the owner's decisions were re-measured, and the mutation sweep was re-run. It changed one
+comment (`Config.Budget` said the budgets were only measured; they are caps) and the state text, and
+it found one thing the gem rule does not cover: a pad CRUMBLING under a Bronze runner passes 44.6 RGB
+from the orange gem in the Bank Vault (§8.6, on the Studio list). A highscore board was half-built in
+the tree by a later, interrupted pass, with its check red on purpose; pass 2 finished it (§15).
+
+**Pass 2 (2026-10-01, §15): the rest of docs/complete-game-standard.md.** The DEEPEST ESCAPES board
+stands west of the hub spawn (public top 10 or friends, toggled by its ProximityPrompt), built against
+the check the interrupted pass left red, with that pass's tie bug fixed. Four more gaps closed test
+first: a per-session owner token on every profile write, every player's `RespawnLocation` on the hub
+spawn, a shutdown that saves every profile, and a gated store text. And one the reviewer had not listed:
+the standard asks every band for its own **critters**, and the strata had none. Now each has its own
+(§2.5): rats, scarabs, drones, frost bats and salamanders, client-only and inert, inside the maze
+cells around the runner, capped by a new `Budget.MaxCritters`. `MARKETING.md` holds the clip list; §8
+and §9 gained the board and the critters. No drop, rest rule or existing budget changed.
 
 ---
 
@@ -55,7 +80,9 @@ still byte-identical to HEAD.
 | `robloxemu/check_vaultrunners_static.luau` | every bundled source compiles (`loadstring`), no string `require`, the client fires no remote, writes no attribute, and writes only `Color` / `Reflectance` on server parts. |
 | `robloxemu/check_vaultrunners_shaft.luau` | **new in the resume session**: the shaft stays readable (§2). |
 | `robloxemu/check_vaultrunners_cards.luau` | **new in the resume session**, from the mutation sweep: a returning player's title cards (fanfare only when deeper than ever cleared), and the weather cap and the unreadable-pad fallback forced in memory (§7). |
-| `robloxemu/check_vaultrunners_readable.luau` | **new in the review round** (§12): the gems, the exit pad and the drop's ring read against the floor and walls AS PAINTED, in the tomb, the Frozen Vault and the Volcano Temple; the hub's signs never overlap the portal labels (14 175 projected views). |
+| `robloxemu/check_vaultrunners_readable.luau` | **new in the review round** (§12): the gems, the exit pad and the drop's ring read against the floor and walls AS PAINTED, in the tomb, the Frozen Vault and the Volcano Temple; the hub's signs never overlap the portal labels (14 175 projected views). §13 adds: the gems and exit are not the pads' colour. |
+| `robloxemu/check_vaultrunners_budget.luau` | **new in §13**: every budget is a cap. Forced in memory: props in every cell, and budgets below what the scene asks for. |
+| `robloxemu/check_vaultrunners_halls.luau` | **new in §13**: the Volcano Temple's three halls through the real client. |
 
 ---
 
@@ -68,6 +95,27 @@ depth 56), so unlocking Silver or Gold carries on down the strata instead of sta
 bank. `Pacing.spec` checks that no tier unlock ever sends a normal, fast or slow player back to an
 earlier band. The chip, cards and signs read the same number, so they always agree.
 
+**The pad colours changed in §13** (bank gold to marble, tomb cream to gilded gold, volcano bone to
+jade) and the Frozen Vault's gem from sapphire to amethyst, so that no gem or exit pad wears its
+pads' colour (§13.2). The Frozen Vault moved from depth 24 to 18 so the brag arrives inside 30-45
+minutes (§10, DECIDED).
+
+**The endgame turns: halls** (owner decision, §10, DECIDED 2026-09-30). Every Gold floor is the
+Volcano Temple, and a player may live in Gold for hours. From depth 44 it moves to its next hall every
+4 depths and wraps round, for ever (`Config.Env.Halls`, `VaultEnv.hall`):
+
+| hall | depths | light (over the volcano's) | weather | props |
+|---|---|---|---|---|
+| Magma Hall | 44-47, 56-59, 68-71, ... | the Volcano Temple's own | embers 12/s | ember cages |
+| Obsidian Hall | 48-51, 60-63, ... | violet Ambient, violet haze, cool tint | obsidian glints (glitter) 8/s | hanging braziers |
+| Ash Hall | 52-55, 64-67, ... | grey Ambient, grey haze, a little desaturated | ash 12/s (a new grey weather) | brass lamps |
+
+The palette (walls, floor, pads, gems, the drop's ring) is the volcano's in every hall, so every
+readability number below holds in every hall. The chip reads `🌋 Volcano Temple · Obsidian Hall`; a
+card names each new hall, with the fanfare only for a hall deeper than any floor the player has
+cleared. Measured (`Pacing.spec`, two 8-hour careers): a normal player sees 38 hall changes, one hall
+lasting 6.7-21.1 minutes.
+
 **Transitions never cut.** A band blends in over `fade` depths before its `from` (smoothstep), so a
 blend floor is half one stratum and half the next: its walls, accents, props (each ceiling site rolls
 which band's prop it hangs), weather (both kinds, capped together) and lighting. The floor colour is
@@ -79,11 +127,11 @@ biggest single frame moves Ambient 12.5 % of the change, with no overshoot. Volc
 
 | # | stratum | depth (fade) | which floors | first reached, minutes: normal · fast · slow (seeds 7 / 8) | walls · floor · **pad** | weather | ceiling props | over the top storey | drop |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | 🏦 Bank Vault | 0 | Bronze 1-2 (3-4 blend into the tomb) | 0 · 0 · 0 | steel grey (a little reflective) · dark green · **gold** | gold glitter 6/s | brass lamps, 30 % of cells | a brass dome ring and a 118-stud skylight | marble slab |
-| 2 | 🏺 Pyramid Tomb | 5 (2) | Bronze 5-10 (11-13 blend) | 4.9 / 5.3 · 4.3 / 4.6 · 9.2 / 15.4 | sandstone · brown · **cream** | drifting sand 10/s | hanging braziers with flames, 30 % | a winged sun, 80 studs across | sandstone block |
-| 3 | ⚛️ Reactor Core | 14 (3) | Bronze 14-19 (20-23 blend) | 25.7 / 23.8 · 20.3 / 21.2 · 36.9 / 44.0 | gunmetal · dark · **cyan** | sparks 8/s | neon light panels with a beacon, 35 % | a turning neon reactor ring (radius 60) round a glowing core | coolant pipe |
-| 4 | ❄️ Frozen Vault | 24 (4) | Bronze 24-33, Silver 1-8 (Bronze 34-39, Silver 9-14 blend) | 61.8 / 61.2 · 51.0 / 55.0 · 87.9 / 94.7 | ice blue (shiny) · snow white · **navy** | snow 14/s | icicle clusters, 35 % | a pale moon and three aurora ribbons | icicle |
-| 5 | 🌋 Volcano Temple | 40 (6) | Bronze 40+, Silver 15+, **every Gold floor** | 135.3 / 144.8 · 100.9 / 119.1 · 213.8 / 218.6 | basalt · near black · **bone** | embers 12/s (rising) | ember cages, 30 % | a basalt crater rim round a lake of lava light | lava bomb |
+| 1 | 🏦 Bank Vault | 0 | Bronze 1-2 (3-4 blend into the tomb) | 0 · 0 · 0 | steel grey (a little reflective) · dark green · **marble** | gold glitter 6/s | brass lamps, 30 % of cells | a brass dome ring and a 118-stud skylight | marble slab |
+| 2 | 🏺 Pyramid Tomb | 5 (2) | Bronze 5-10 (11-13 blend) | 4.9 / 5.3 · 4.3 / 4.6 · 9.2 / 15.4 | sandstone · brown · **gilded gold** | drifting sand 10/s | hanging braziers with flames, 30 % | a winged sun, 80 studs across | sandstone block |
+| 3 | ⚛️ Reactor Core | 14 (3) | Bronze 14-15 (16-17 blend) | 25.7 / 23.8 · 20.3 / 21.1 · 36.9 / 44.0 | gunmetal · dark · **cyan** | sparks 8/s | neon light panels with a beacon, 35 % | a turning neon reactor ring (radius 60) round a glowing core | coolant pipe |
+| 4 | ❄️ Frozen Vault | **18** (2) | Bronze 18-33, Silver 1-8 (Bronze 34-39, Silver 9-14 blend) | **40.8 / 37.9** · 32.6 / 32.6 · 54.2 / 62.5 | ice blue (shiny) · snow white · **navy** | snow 14/s | icicle clusters, 35 % | a pale moon and three aurora ribbons | icicle |
+| 5 | 🌋 Volcano Temple | 40 (6) | Bronze 40+, Silver 15+, **every Gold floor**; from depth 44 in three HALLS (below) | 135.3 / 134.9 · 106.9 / 119.1 · 210.8 / 218.6 | basalt · near black · **jade** | embers 12/s (rising) | ember cages, 30 % | a basalt crater rim round a lake of lava light | lava bomb |
 
 Lighting per stratum: its own Ambient / OutdoorAmbient tint, Atmosphere colour and haze, bloom and
 colour grade (`Config.Env.Bands[*]`). ClockTime stays 0 (night) everywhere, as the server's Cozy
@@ -99,11 +147,43 @@ real drops), with the human part written down as a profile in `Config.Pacing`:
   knows. **fast** and **slow** bracket it. Silver unlocks at 90 / 65 / 155 min (normal / fast / slow).
   Gold unlocks after the Volcano Temple for all three.
 * Asserted: the tomb within 10 min; the reactor at 15-40; **the Frozen Vault, the one to brag about,
-  at 45-90 min**; the Volcano Temple at least twice as far and inside 5 h; no band lasts under 4
-  minutes; a slow player reaches the ice within 2 h. There is no telemetry yet: **when there is,
-  retune `Profiles.normal` first, then the `from` numbers.** The spec prints where each band lands.
-* The brief's 30-45 minutes was +1 Jump's number for reaching space. This game had no target of its
-  own, so the earlier attempt chose the one above. It is an owner decision (§10).
+  inside 30-45 min** (was 45-90, at 61); the Volcano Temple at least twice as far and inside 5 h; no
+  band lasts under 4 minutes; a slow player reaches the ice within 2 h; in the halls, no hall lasts a
+  normal player over 30 minutes or under 4. There is no telemetry yet: **when there is, retune
+  `Profiles.normal` first, then the `from` numbers.** The spec prints where each band lands.
+* The brag target is 30-45 minutes (docs/complete-game-standard.md §2; DECIDED 2026-09-30, §10).
+
+### 2.5 Critters (pass 2, 2026-10-01)
+
+docs/complete-game-standard.md §2 asks every band for its own light, colour, scenery, **critters** and
+weather. Each stratum now has a kind of its own (`Config.Env.Bands[*].critters`, drawn by `VaultArt`,
+three parts each, never Neon):
+
+| stratum | critter | where | speed |
+|---|---|---|---|
+| 🏦 Bank Vault | rats, grey-brown | on the floor | 4 studs/s |
+| 🏺 Pyramid Tomb | scarabs, dark teal | on the floor | 1.2 |
+| ⚛️ Reactor Core | maintenance drones, gunmetal | 8.5 studs up, bobbing | 2.5 |
+| ❄️ Frozen Vault | frost bats, charcoal | 10 studs up, bobbing | 5 |
+| 🌋 Volcano Temple (every hall) | salamanders, dark red | on the floor | 2 |
+
+* **Placed like a prop, from (storey, cell, floor seed) only** (`VaultEnv.critterSites`, salted apart
+  from the props). A critter lives in ONE maze cell and walks a loop inside it (`VaultEnv.critterOffset`:
+  an ellipse of at most `CritterRoam` 3.5 studs, never faster than its speed). A cell centre is always
+  open in a perfect maze, so a critter never needs the walls and cannot mark the route or a dead end.
+  Never in the shaft cell or over the hole.
+* **The runner meets the ones within `CritterReach` (2) cells** of the cell they stand in, nearest
+  first, at most `Budget.MaxCritters` (4). On a blend floor each critter belongs to whichever stratum
+  its roll falls in, like a prop. None in the hub.
+* **Never treasure, never a pad:** `EnvConfig.spec` keeps every critter's body colour at least
+  `MinGemPadDistance` (80 RGB) from every gem colour and the pad painted on its floor at every depth
+  0-100; the worst is the frost bat against the navy pad on the reactor › frozen blend, 98.3.
+* **They yield first:** a critter is hung only under `MaxLocalParts` less the headroom a drop, a
+  cracking shaft and debris may need, and `enforceBudget` takes critters down before props.
+* Measured through the real client (`check_vaultrunners_env` §4b): in every stratum, standing in the
+  storey-0 critter cell nearest the entry, the client shows exactly the critters `VaultEnv` says (4 in
+  each), of that stratum's kind, inert, not Neon, in an open cell of the maze, moving; forced to
+  `MaxCritters = 1` in memory it shows one.
 
 ### 2.1 Inside a run: the collapse as the runner feels it
 
@@ -136,10 +216,11 @@ the collapse closes in on storey 0, and none in the stairwell.
   pad can land on the lerped floor. The reactor's cyan over the frozen white meets at 1.2:1, which
   nobody can read. So the pad is the candidate that stands out most against that floor, or black or
   white if neither reaches 3:1.
-* **Contrast, measured at every depth from 0 to 100 in 1/8 steps** (`EnvConfig.spec`):
-  * pad against floor: worst 5.68:1 (the assertion is ≥ 3);
-  * pad against wall: worst 1.80:1 (≥ 1.5);
-  * a pad about to crumble, against the floor: worst 3.15:1 (≥ 2);
+* **Contrast, measured at every depth from 0 to 100 in 1/8 steps** (`EnvConfig.spec`; the numbers
+  after §13's palette changes):
+  * pad against floor: worst 5.64:1 (the assertion is ≥ 3);
+  * pad against wall: worst 1.62:1 (≥ 1.5);
+  * a pad about to crumble, against the floor: worst 3.06:1 (≥ 2);
   * a cracked pad against a whole one: ≥ 1.5.
 * **In the shaft, the weather and the ceiling dust thin to 30 %; the rumble never fires there, and
   since the resume session neither does a drop's landing shake.** `check_vaultrunners_shaft`:
@@ -149,12 +230,13 @@ the collapse closes in on storey 0, and none in the stairwell.
     the shaft.
 * **What a runner has to find stays findable too** (review round, §12):
   * the gems and the exit pad keep their tier's colour where it reads (≥ 3:1 against the floor,
-    ≥ 1.8:1 against the walls). Where it would vanish, they wear the stratum's own gem colour: gold
-    coin, pearl, isotope green, sapphire, molten gold. So Silver's gems are sapphire in the Frozen
-    Vault (5.79:1 floor, 4.45:1 wall, was 1.19 / 1.10), and Bronze's are pearl in the tomb (7.22 /
-    2.02, was 4.16 / 1.16);
-  * worst over every tier and depths 0-100: 4.16:1 against the floor and 1.81:1 against the wall. The
-    black-or-white fallback is never needed (`EnvConfig.spec`);
+    ≥ 1.8:1 against the walls, and since §13 ≥ 80 apart in RGB from the pads). Where it would not,
+    they wear the stratum's own gem colour: gold coin, pearl, isotope green, amethyst (sapphire until
+    §13), molten gold. So Silver's gems are amethyst in the Frozen Vault (6.25:1 floor, 4.81:1 wall,
+    100 from the navy pads), and Bronze's are pearl in the tomb (7.22 / 2.02, 176.6 from the gilded
+    pads);
+  * worst over every tier and depths 0-100: 4.70:1 against the floor, 1.82:1 against the wall, and
+    90.9 apart from the pads. The black-or-white fallback is never needed (`EnvConfig.spec`);
   * the drop's ring is drawn in the first colour that reads ≥ 3:1 against the floor under it: yellow on
     the dark floors, dark gold on the snow; locked: hot coral red on the dark floors, crimson on the
     snow. Worst 3.20:1 (tomb), and the lock always looks different from the follow (≥ 79 apart in RGB).
@@ -255,7 +337,7 @@ minutes of run time, measured. But a runner who keeps moving is 19-30 studs past
 a drop that lands within a stride of you happens only to a player who stopped (about once every 145
 run-minutes for the normal model; about once every 31 for one who stops 3 s at every junction). That
 fits the game (the collapse punishes standing still, and so do the drops), but it is not the same
-feel as +1 Jump's near-misses. It is an owner decision (§10).
+feel as +1 Jump's near-misses. **DECIDED 2026-09-30 (owner: take recommended): leave it** (§10).
 
 ---
 
@@ -339,12 +421,16 @@ budget sits on top of that. Mobile is the target.
 | where | parts | emitters (particles/s) | beams | lights |
 |---|---|---|---|---|
 | hub | 17 (vault door 14, portal-sign anchors 3) | 0 | 0 | 0 |
-| bank (Bronze 1) | 56 | 3 (13.8) | 0 | 0 |
-| bank › tomb blend (Bronze 4) | 56 | **4** (16.4) | 0 | 0 |
-| tomb (Bronze 5) | 47 | 3 (17.3) | 0 | 0 |
-| reactor (Bronze 14) | **100** | 3 (14.1) | 0 | 0 |
-| frozen (Silver 1) | 68 | 3 (20.1) | 3 | 0 |
-| volcano (Gold 1) | 89 | 3 (17.4) | 0 | 0 |
+| bank (Bronze 1) | 62 | 3 (13.8) | 0 | 0 |
+| bank › tomb blend (Bronze 4) | 65 | **4** (16.4) | 0 | 0 |
+| tomb (Bronze 5) | 50 | 3 (17.3) | 0 | 0 |
+| reactor (Bronze 14) | **106** | 3 (14.1) | 0 | 0 |
+| frozen (Silver 1) | 77 | 3 (20.1) | 3 | 0 |
+| volcano (Gold 1) | 98 | 3 (17.4) | 0 | 0 |
+
+(Pass 2 added the critters: the counts above include the ones a runner standing in the entry cell meets,
+3-9 parts; they were 56 / 56 / 47 / 100 / 68 / 89 before. The peak over every measured frame is now 112,
+in the reactor; with drops in the air 108.)
 
 The highest particle rate with drops off was 35.5/s, standing on storey 0 of the bank while the
 collapse closed in (weather + thick ceiling dust + sparks).
@@ -355,13 +441,14 @@ frames per run, 3 450-3 650 of them with a drop in flight. Five runs on the fina
 
 | metric | measured peak | budget (`Config.Budget`) |
 |---|---|---|
-| local parts | **100** (reactor, Bronze 14) | 180 |
+| local parts | **112** (reactor, Bronze 14, with its drones; 100 before the critters) | 180 |
 | enabled particle emitters | 4 | 6 |
 | particles per second | **65.5** (a drop's trickle + weather + collapse dust and sparks) | 90 |
 | weather emitters | 2 (a blend floor) | 2 (enforced in code by `EnvBands.capRates`) |
 | point lights | 1 (the drop's blink) | 3 |
 | beams | 3 (aurora) | 6 |
-| drops at once | 1 | 1 |
+| drops at once | 1 | 1 (structural: `Hazards` has one `state.active` slot; no code reads `MaxHazards`, and `EnvConfig.spec` pins it to 1) |
+| critters at once | 4 | 4 (`MaxCritters`, a cap in `VaultArt.updateCritters`; forced to 1 in memory, `check_vaultrunners_env` §4b shows one) |
 
 **How it stays cheap:**
 
@@ -377,9 +464,33 @@ frames per run, 3 450-3 650 of them with a drop in flight. Five runs on the fina
 
 These are part and emitter counts, not frame time; phone frame time is on the Studio list.
 
+**Since §13 every budget is a CAP in code, not only a number these checks compare against.** Before,
+the running game enforced only the weather's (`EnvBands.capRates`); a retune that hung props in every
+cell put 235 parts on a phone against 180 and nothing stopped it. Now (`VaultArt`):
+
+* every part the client parents is counted, the hub's sign anchors included;
+* props are hung, the runner's own storey first, only while they fit under `MaxLocalParts` less a
+  31-part headroom for a drop in the air, a whole shaft of cracking pads and a full set of debris;
+* `enforceBudget`, the last thing in every client frame, takes props and then debris down if
+  anything still passes the cap, grants the emitters by priority within `MaxEmitters` and
+  `MaxEmitterRate` (the drop's trickle first, then the collapse's sparks and dust, then the weather;
+  `VaultEnv.grantRates`), and caps lights and beams.
+
+`check_vaultrunners_budget` forces the demand and the budgets in memory. With props in every cell the
+peak is 173 parts against 180, and the props on the runner's storey do not change while a drop hangs
+over it (132 before, 132 during). With the budgets forced to 2 emitters, 20 particles/s, 0 lights and
+1 beam, every frame stays inside them and the drop's trickle is on for every frame a chunk hangs. With
+the shipped numbers nothing is capped: every prop is hung and all three aurora ribbons are drawn.
+The reviewer's side note reproduced: over 360 floors the most prop parts on one storey pair is 75
+(Bronze 31, storey 0); the table above samples six floors.
+
 ---
 
 ## 7. Gates
+
+**The current counts are in §15** (pass 2, 2026-10-01: specs 1 963 / 0, headless 955 / 0 + PASS, store
+text 10 / 0; every gate green). §14 has pass 1's, §13.4 REVIEW-5's.
+The table below is the history up to the first review round.
 
 Every gate for this game, before the eye candy (HEAD, run from a `git archive` copy), at the start of
 the resume session (the earlier attempt's tree), and at the end:
@@ -508,17 +619,28 @@ Mutations killed only by the new suites (round 1):
 5. **Ceiling props** at 12.8+ studs in 12-stud corridors with the default third-person camera: do they
    show, do they read as the stratum, and is 30-35 % of cells the right density?
 6. **Pad readability under real light.** Contrast is measured on sRGB colours; Ambient tint, bloom and
-   haze change what the eye gets, especially navy pads on white ice, cream on brown, and bone on
-   basalt. Also: do the three crack lines on a 3 × 3 pad read, and does the crumble tint read as
+   haze change what the eye gets, especially navy pads on white ice, gilded gold on brown, marble on
+   the bank's dark green, and jade on basalt (the last three new in §13). Also: do the three crack lines on a 3 × 3 pad read, and does the crumble tint read as
    "going"? And with real ping: the crack is held until the server's drop arrives; watch that a pad
    you stepped off and the server never counted lets its crack go within 1.5 s rather than looking
    doomed for ever.
    * **Gems and the exit pad under real light** (review round). They are Neon, so they glow brighter
      than their albedo, which the contrast numbers ignore. Do the stratum gems (pearl in the tomb,
-     sapphire on the ice, isotope green in the reactor) read as TREASURE in each place? Does a dark
-     sapphire Neon ball glow or look dull? The server's sparkles and the exit's glow keep the tier's
+     amethyst on the ice, isotope green in the reactor) read as TREASURE in each place? Does a dark
+     amethyst Neon ball glow or look dull? The server's sparkles and the exit's glow keep the tier's
      colour; do they clash with a recoloured gem? And is the tier identity missed (Silver's gems are
-     sapphire, not pale blue, in the Frozen Vault)?
+     amethyst, not pale blue, in the Frozen Vault)? §13 measures gem-to-pad distance in RGB (≥ 80);
+     under real light, do gems and pads read as different things?
+   * **A crumbling pad under a Bronze runner** (§14). The 80 bar is for the resting pad. Every
+     stratum shares the crack colour (255, 90, 50), an orange red 95.7 from Bronze's orange gem, and a
+     crumbling pad is pulled 70 % of the way to it. Measured over Bronze floors 1-400: in the Bank
+     Vault the marble pad passes 44.6 RGB from the gem (at 81 % of the crumble); at a full crack it
+     ends 60.9 away in the reactor and 70.5 in the Frozen Vault and the volcano; the tomb stays 176.6
+     away. Silver stays 81.5 or more away and Gold 110.2. It is only ever the pad under the runner's own
+     feet (gems are never in a stairwell), and only while it goes. Does it read as "going", or as
+     treasure? If treasure, the fix is a crack colour chosen by eye: a dark one that keeps the bank's
+     whole path 80 away, for example (200, 20, 60) at 80.9, reads 1.96:1 against the bank's dark green
+     floor, under the 2:1 bar for a pad about to go, so the numbers alone cannot pick it.
 7. **The drop's telegraph on a phone**:
    * the ceiling crack decal and the trickle;
    * the wobble;
@@ -554,8 +676,35 @@ Mutations killed only by the new suites (round 1):
 15. **The collapse at danger 1**: rumble strength, dust thickness, and sparks off a plate the size of
     the vault's footprint.
 16. **A drop crashing about 20 studs behind a runner who kept moving** (the camera faces forward): is it
-    noticed at all? The landing shake is 0.16-0.27 at that distance, plus debris. This ties to the owner
-    decision in §10.
+    noticed at all? The landing shake is 0.16-0.27 at that distance, plus debris. The owner decided
+    (§10) to leave it; this is where a playtest would say whether "keep moving" is still read.
+17. **The Volcano Temple's halls** (§2, §13): do the Obsidian Hall's violet light and the Ash Hall's
+    grey read as new places, or as a colour filter over the same room? The ash is a new weather kind
+    (grey flakes, slow): does it read as ash or as dust? Braziers and brass lamps take the volcano's
+    orange accent and glow: do they look like they belong? A hall card on every new hall: welcome or
+    noise?
+18. **The budgets as caps** (§6, §13): the shipped scene never reaches a cap, so nothing a player sees
+    is trimmed today. If a later retune hits one, props go first (from the storey above), then debris;
+    look at whether a trimmed ceiling reads as sparse or as broken.
+19. **The DEEPEST ESCAPES board** (§15), a 16 x 11 stud sign at (-18, 5.5, 4), turned to face the
+    spawn, gold trim behind it. From the spawn pad (18.4 studs away): are ten rows at 22 px on a 640 x
+    440 px face readable, on a phone too? Does a stratum emoji (❄️, 🌋) render in a SurfaceGui? Does the
+    sign block the walk to the Bronze portal or crowd the round vault door? With API access off it must
+    say it is offline (`Config.Board.Text.Offline`); the rows, the names and the Friends toggle can only
+    be seen on a published place. **Never film or screenshot the Friends view with a real account.**
+20. **The board's prompt.** It sits low on the sign's face, 11.6 studs from the spawn pad's nearest
+    edge and reaching 10, so it must NOT show while standing on the pad, and must show (E, or a tap on a
+    phone) a step or two in front of the sign. Does one tap switch the view at once, and does the
+    "Checking your friends: n of m" note move for a player with many friends?
+21. **Streaming.** If the published place streams (StreamingEnabled), the hub can stream out while a
+    runner is 200 studs up in a vault. `Board.client` remounts its drawing when the sign comes back
+    (asserted headless, `check_vaultrunners_board` §11), and `Vault.client` was written streaming-safe;
+    neither has been watched in a real streaming session.
+22. **The critters** (§2.5). Three-part rats, scarabs, drones, frost bats and salamanders: do they read
+    as animals and machines, or as clutter? A crawler walks an ellipse inside one cell: does it look
+    alive or like it is on a rail? Do the bats and drones at 8.5-10 studs ever sit in the camera's way
+    in a 12-stud corridor (they cannot collide and cannot catch a camera ray, but they can be in
+    front of it)? And do they ever draw the eye from a gem or the next pad?
 
 ---
 
@@ -624,17 +773,22 @@ Positions are for `WorldSeed 20260909`, recomputed from `VaultFloor.build` in th
    * **Action:** climb pads 1 → 3. Mid-hop from pad 3 to pad 4, anchor the root from the Server command
      bar: `c.HumanoidRootPart.Anchored = true`. Un-anchor it afterwards.
    * **In frame:** the avatar in the air between two pads; the pad behind showing dark crack
-     lines and a red-orange crumble tint (it falls away 1.1 s after you land on it, with debris); bone-coloured
-     pads against basalt; orange grade; embers drifting (thinned to 30 % in the shaft).
+     lines and a red-orange crumble tint (it falls away 1.1 s after you land on it, with debris); jade
+     pads against basalt (bone until §13); orange grade; embers drifting (thinned to 30 % in the shaft).
+     Gold floor 1 is the Magma Hall, which is the Volcano Temple as it always was.
    * **Variant:** the same in the Bank Vault (Bronze floor 1, stairwell (36, 200, 36), pads
-     (40, 203, 40) … (32, 218, 40)), for gold pads on a dark green floor.
+     (40, 203, 40) … (32, 218, 40)), for marble pads on a dark green floor (gold until §13).
+   * **Variant, the halls** (§13): in session A also set `Env.TierDepth = { 0, 25, 47 }` for the
+     Obsidian Hall on Gold floor 1 (depth 48: violet light, braziers, glints) or `{ 0, 25, 51 }` for
+     the Ash Hall (depth 52: grey light, brass lamps, falling ash). Same shaft, same jade pads.
 3. **"The tomb"** (session B, Bronze floor 1 = Pyramid Tomb).
    * **Avatar:** teleport to (-24, 240, -36) on the top storey (storey 2, floor y = 236). That is
      the corridor just east of the entry corner. Do NOT stand on the corner cell (-36, -36) itself:
      above storey 0 the entry cell is the hole you climbed out of, and you would drop a storey.
    * **Camera:** low behind the avatar, looking up at about 60° toward (0, 362, 0).
    * **In frame:**
-     * sandstone walls with teal accents framing the sky;
+     * sandstone walls with teal accents framing the sky (and, if the shaft is in frame, gilded gold
+       pads since §13);
      * hanging braziers with flames (on storey 2, sites sit in 30 % of cells; one at the corner is
        luck, so frame along the +X corridor);
      * drifting sand;
@@ -651,8 +805,8 @@ Positions are for `WorldSeed 20260909`, recomputed from `VaultFloor.build` in th
    * **Camera:** looking up toward the moon at about (90, 440, -40).
    * **In frame:** ice-blue shiny walls, snow-white floor, navy pads if the shaft is in frame, icicle
      clusters hanging, snow falling, and three aurora ribbons across the sky with the pale moon. Take
-     several: Beams are the least predictable thing in this list. Variant at eye level: a sapphire gem
-     glowing in an ice corridor (Silver's gems are sapphire here since the review round).
+     several: Beams are the least predictable thing in this list. Variant at eye level: an amethyst gem
+     glowing in an ice corridor (Silver's gems are amethyst here since §13; sapphire before).
 6. **"Ceiling drop": the marble slab over a runner** (session C, Bronze floor 1 = Bank Vault).
    * **Avatar:** teleport to the open maze cell at (-12, 204, -12) on storey 0. A drop may start
      there, and a brass lamp hangs there.
@@ -671,6 +825,14 @@ Positions are for `WorldSeed 20260909`, recomputed from `VaultFloor.build` in th
      * from about 26 s into the run, the red kill plane sweeps up through storey 0's shaft, with
        sparks shooting off it, ceiling dust pouring and the grade warming;
      * it reaches storey 1 at about 52 s and ends the run, so shoot between 35 and 50 s.
+7. **"Deepest Escapes": the board** (§15). **HELD until the game is published:** in Studio with API
+   access off the sign correctly says it is offline, and turning API access on would write to the live
+   DataStore, which step 2 forbids.
+   * **On the live server:** the avatar on the spawn pad, turned west.
+   * **Camera:** about (-4, 7, 10), looking at the sign's centre, (-18, 5.5, 4).
+   * **In frame:** the dark sign with its gold trim, the title, PUBLIC, rows of names with their depths
+     and strata (a ❄️ row is the brag), the prompt's E, and the spawn pad's neon edge in the corner.
+   * **Only the PUBLIC view**, or a test account with no friends: never a real account's friends.
 
 ---
 
@@ -685,20 +847,43 @@ Positions are for `WorldSeed 20260909`, recomputed from `VaultFloor.build` in th
 
   The adversarial review (§12) confirmed the numbers and added the cost of leaving it: the banner says
   "keep moving!" every ~2.5 run-minutes and the chunk then lands 20+ studs BEHIND a camera that faces
-  forward, so the landing is rarely seen, and players may learn to ignore the banner. Not changed
-  without him.
+  forward, so the landing is rarely seen, and players may learn to ignore the banner.
+
+  **DECIDED 2026-09-30 (owner: take recommended): leave it.** It is the option the list argued for
+  (it rewards moving, which is the game), and it is the one that is fair and never punishing: a
+  shorter lock gives a player who stopped less time to step out and moves the landing only a sixth
+  closer, and aiming ahead would hit the players who do what the banner says. Measured after the
+  other changes of §13: one drop per 2.60 run-minutes, reacting players hit by 0 of 170. No code
+  changed. Whether the landing behind a forward camera is noticed stays on the Studio list (§8.16).
 * **Owner decision: the endgame is one stratum.** Gold floor 1 is depth 56, so **every Gold floor is
   the Volcano Temple**, and Silver is too from floor 15. The whole slack curve the game is tuned
   around lives in Gold. +1 Jump's galaxy is also "the last band forever", but a Vault Runners player
   may live in Gold for hours. The options, if he wants more: a sixth stratum, deeper `TierDepth`
-  spacing, or a per-floor variant inside the volcano. Not done.
+  spacing, or a per-floor variant inside the volcano.
+
+  **DECIDED 2026-09-30 (owner: take recommended): a per-floor variant inside the volcano — the
+  HALLS (§2).** No option was marked, so the one that serves "never monotonous" where the problem
+  is: a sixth stratum or a deeper spacing only moves the last room further down, and the player who
+  lives in Gold for hours still ends in one room. The halls turn every 4 depths for ever, change the
+  light, the weather and the props, and never the palette, so nothing a runner reads changes (fair),
+  and they change nothing a run is judged by (never exploitable). A normal player meets a new hall
+  every 6.7-21.1 minutes.
 * **Owner decision: the pacing target.** The brief's 30-45 min was +1 Jump's. Here: tomb about 5 min,
   reactor about 25, Frozen Vault about 61 (the brag), volcano 135-145, for a MODELLED normal player.
-* **The review round's own fixes (§12) have not been re-reviewed** by a separate reviewer. They were
-  test-first, swept with mutations and controls, and every gate is green, but no second pair of eyes
-  has read them.
+
+  **DECIDED 2026-09-30 (owner: take recommended): the brag inside 30-45 minutes**, which is what
+  docs/complete-game-standard.md §2 now asks of every game. The Frozen Vault moved from depth 24
+  (fade 4) to 18 (fade 2): a normal player first runs it at 40.8 / 37.9 minutes (fast 32.6, slow 54.2
+  / 62.5); the tomb, the reactor and the volcano did not move (5, 25, 135 minutes). `Pacing.spec`
+  asserts 30-45.
+* **The review round's own fixes (§12) were re-read by the second review** (§13), which found the
+  budget and gem/pad issues below; those fixes (§13) have not had a third reviewer. §14 re-measured
+  them and re-ran their mutation sweep, by the same kind of writer pass, which is not a review.
 * **`luau-analyze` has never been run** on the new files (not installed here). `check_vaultrunners_static`
-  only proves they compile.
+  only proves they compile. That includes pass 2's `Board.client.luau` and the board, token and shutdown
+  code in `Main.server.luau` (§15).
+* **Pass 2 (§15) has had no reviewer.** It was written and mutation-tested by one writer pass, and
+  that includes the critters (§2.5).
 * **The model cannot price what reading the maze buys** (§11 item 4). A drop that hurries a reading
   player makes them faster in the model; whether real hurrying costs wrong turns is a playtest
   question.
@@ -780,6 +965,7 @@ Files written by the resume session:
 
 Nothing else was written. `robloxemu/emu`, `tools`, `docs`, every `marketing` folder and the other
 games were untouched. Nothing was committed, pushed or published, and Studio was not opened.
+(All of it was committed later, as 511793d on 2026-09-24.)
 
 ---
 
@@ -1009,3 +1195,182 @@ Files written in the review round:
   `451e55788de2f29da1a0eabad4424310`, verified to equal a fresh rebuild of the final sources).
 
 Nothing else was written. Nothing was committed, pushed or published, and Studio was not opened.
+(The review round was committed later with the rest of the eye candy, as 511793d on 2026-09-24.)
+
+---
+
+## 13. Second review round and the owner's decisions (2026-09-30, REVIEW-5)
+
+The full account, with the obby review that shared the pass, is `REVIEW-5.md`. For this page:
+
+### 13.1 The budgets are caps (second review, finding 1): FIXED
+
+Reproduced by the new `check_vaultrunners_budget`: with props forced into every cell the client hung
+235 parts against 180, and with the budgets forced below the scene 3 emitters, 57 particles/s, 1 light
+and 3 beams went through. Now every budget is enforced in `VaultArt` (§6): after the fix, 173 parts at
+most, the forced budgets held on every frame, the drop's trickle on for every frame a chunk hung, no
+prop taken down while a drop hangs over its storey, and the shipped numbers cap nothing.
+
+### 13.2 Gems and the exit are not the pads' colour (second review, finding 2): FIXED
+
+Reproduced in `EnvConfig.spec` at every tier and depth: the tomb's pearl gems 41.5 apart (RGB) from
+its cream pads, the Frozen Vault's sapphire 41.8 from its navy pads, and two the review did not name,
+Bronze's orange 39.9 from the bank's gold pads and Gold's own gems 70.8 from the volcano's bone pads.
+Now `Env.MinGemPadDistance = 80` is part of the gem rule, and four palette entries changed: bank pads
+marble, tomb pads gilded gold, Frozen Vault gems amethyst, volcano pads jade. Worst after: 100.0
+(Bronze), 100.0 (Silver), 90.9 (Gold); as painted through the real client 176.6 (tomb), 100.0 (Frozen
+Vault), 188.6 (volcano). Every earlier readability bar still holds (§2.3).
+
+### 13.3 The state text (second review, finding 3), and the owner's decisions: DONE
+
+"Uncommitted" is gone from CLAUDE.md and from this file's header; the historical "nothing was
+committed" lines of §11 and §12 now say they were committed later as 511793d. The three decisions are
+recorded in §10 as DECIDED 2026-09-30 (owner: take recommended): the brag inside 30-45 minutes (the
+Frozen Vault at depth 18), near-hits left as they are, and the halls of the Volcano Temple (§2).
+
+### 13.4 Gates at the end of REVIEW-5
+
+| gate | before (§12) | REVIEW-5 |
+|---|---|---|
+| `tests/Ascent.spec` | 68 / 0 | 77 / 0 |
+| `tests/Collapse.spec` | 281 / 0 | 282 / 0 |
+| `tests/Curve.spec` | 23 / 0 | 29 / 0 |
+| `tests/EnvBands.spec` | 124 / 0 | 124 / 0 |
+| `tests/EnvConfig.spec` | 366 / 0 | 401 / 0 |
+| `tests/Hazards.spec` | 91 / 0 | 91 / 0 |
+| `tests/Pacing.spec` | 47 / 0 | 51 / 0 |
+| `tests/Pets.spec` | 75 / 0 | 75 / 0 |
+| `tests/Progression.spec` | 66 / 0 | 66 / 0 |
+| `tests/Rest.spec` | 55 / 0 | 55 / 0 |
+| `tests/Rng.spec` | 37 / 0 | 37 / 0 |
+| `tests/RunState.spec` | 75 / 0 | 75 / 0 |
+| `tests/Trace.spec` | 28 / 0 | 28 / 0 |
+| `tests/VaultEnv.spec` | 112 / 0 | 138 / 0 |
+| `tests/VaultFloor.spec` | 215 / 0 | 231 / 0 |
+| `tests/responsive.spec` | 70 / 0 | 70 / 0 |
+| **spec total** | **1 733 / 0** | **1 830 / 0** |
+| `check_vaultrunners.luau` | 138 / 0 | 138 / 0 |
+| `check_vaulthud.luau` | PASS | PASS |
+| `robloxemu/check_vaultrunners_env` | 255 / 0 | 255 / 0 |
+| `robloxemu/check_vaultrunners_hazards` | 50 / 0 | 50 / 0 |
+| `robloxemu/check_vaultrunners_shaft` | 53 / 0 | 63 / 0 |
+| `robloxemu/check_vaultrunners_cards` | 20 / 0 | 20 / 0 |
+| `robloxemu/check_vaultrunners_static` | 86 / 0 | 91 / 0 |
+| `robloxemu/check_vaultrunners_readable` | 47 / 0 | 50 / 0 |
+| `robloxemu/check_vaultrunners_budget` | — | 15 / 0 (new) |
+| `robloxemu/check_vaultrunners_halls` | — | 68 / 0 (new) |
+| **headless total** | **649 / 0 + PASS** | **750 / 0 + PASS** |
+
+The mutation sweep is in REVIEW-5.md §4.
+
+Files written in REVIEW-5, all in the working tree and none committed: in `vault-runners/`,
+`src/shared/{Config,VaultPath,Ascent,VaultEnv,VaultArt}.luau`, `src/server/Main.server.luau`,
+`src/client/Vault.client.luau`, `tests/{Ascent,Collapse,Curve,EnvConfig,Pacing,VaultEnv,VaultFloor}.spec.luau`,
+`tests/VaultModel.luau`, `check_vaultrunners.luau`, `mutate_obby.sh`, `REVIEW-5.md`, this file,
+`CLAUDE.md`, `README.md`; in `robloxemu/`, `check_vaultrunners_{env,shaft,static,readable}.luau`, the
+new `check_vaultrunners_{budget,halls}.luau`, and `build/vault-runners.luau` (rebuilt). Studio was not
+opened.
+
+---
+
+## 14. Pass-1 re-run (2026-10-01)
+
+The full account is REVIEW-5.md §6. For this page:
+
+* **All three second-review findings reproduced on HEAD 511793d and are fixed in the tree.** With
+  the reviewer's own mutant (reactor props in every cell), HEAD hung 235 client parts on Bronze 14 and
+  the tree hangs 160. Gem to pad on HEAD: tomb 41.5 RGB, Frozen Vault 41.8; in the tree the worst is
+  90.9. The "uncommitted" text is gone. The tests that hold each fix fail on HEAD's source (budget
+  13 / 2, readable 47 / 3).
+* **The owner's three decisions** are recorded in §10 as "DECIDED 2026-09-30 (owner: take
+  recommended)". Measured again: the Frozen Vault at 40.8 / 37.9 minutes for a normal player, 38 hall
+  changes in two 8-hour careers, one drop per 2.60 run-minutes with reacting players hit by 0 of 170.
+* **Changed:** `Config.Budget`'s comment (it said the budgets were only measured; they are caps, and
+  `MaxHazards` is the scheduler's single slot, pinned by `EnvConfig.spec`), §6's table row for drops,
+  and §8.6.
+* **Found, not changed, and on the Studio list (§8.6):** the gem rule's 80 RGB is for the resting pad.
+  A pad crumbling under a Bronze runner passes 44.6 from the orange gem in the Bank Vault. Every crack
+  colour that keeps that path 80 away measured under the 2:1 floor bar.
+* **Mutation sweep, again:** 40 mutations, 39 killed, 1 disclosed survivor (B1g); 6 of 6 controls
+  survived; 46 of 46 bundles proved; scratch sources sha256-identical.
+
+| gate | §13.4 | §14 |
+|---|---|---|
+| 16 specs | 1 830 / 0 | 1 830 / 0 |
+| `tests/Board.spec` (board WIP, CLAUDE.md) | — | 69 / 0 |
+| `check_vaultrunners.luau` | 138 / 0 | 138 / 0 |
+| `check_vaulthud.luau` | PASS | PASS |
+| `robloxemu/check_vaultrunners_{env,hazards,shaft,cards}` | 255, 50, 63, 20 / 0 | 255, 50, 63, 20 / 0 |
+| `robloxemu/check_vaultrunners_static` | 91 / 0 | 93 / 0 (Board.luau is one more module) |
+| `robloxemu/check_vaultrunners_{readable,budget,halls}` | 50, 15, 68 / 0 | 50, 15, 68 / 0 |
+| `robloxemu/check_vaultrunners_board` (board WIP) | — | RED: 30 FAIL, then it stops at line 381 |
+
+Nothing was committed, pushed or published, and Studio was not opened.
+
+---
+
+## 15. Pass 2 (2026-10-01): the rest of docs/complete-game-standard.md
+
+Every item of the standard was checked against the tree, not only the reviewer's list. What was missing
+was built test first (an assertion written, run, watched fail, then the code); what was there was left
+alone. Nothing was committed, pushed or published, and Studio was not opened.
+
+| standard | before pass 2 | now |
+|---|---|---|
+| §1 core loop from join, incl. rejoin | spawn, runs, bank, buy were walked; a rejoin was not | `check_vaultrunners` "REJOIN": wallet, banked total, every vault's floor and the pets come back on a new session |
+| §1 spawn: `RespawnLocation` | never set (one enabled spawn only) | the hub spawn, set in `onPlayerAdded` before the load yields (CLAUDE.md invariant 16) |
+| §1 nothing secret; a salted seed | `WorldSeed` in ReplicatedStorage, unsalted | unchanged ON PURPOSE: the maze is replicated geometry, and a retried floor is the same floor (invariant 17) |
+| §1 DataStore owner token | `game.JobId` (per server); `flush` wrote when the record's jobId was nil or its lock had lapsed | a GUID per session; a lost record stops writing, warns once, tells the player (invariant 9d) |
+| §1 DataStore at shutdown | no `BindToClose` | every profile written and its lock released (invariant 18) |
+| §1 integer keys | `numKeys` existed, but no check reached it: removing it survived every gate (round 2 below) | a sparse, string-keyed `floors` is staged and loads as 7 / 1 / 2 |
+| §2 bands: critters | none | five kinds (§2.5, invariant 19) |
+| §2 brag in 30-45 min, budgets as caps, hazards, rest | done (§10, §13, §14) | unchanged |
+| §2 HUD overlap rule 4b | `overlap = true` in `check_vaulthud` | unchanged |
+| §3 board, public + friends | half-built, its check red, the tie bug | the DEEPEST ESCAPES sign (invariant 15) |
+| §4 store text | 708 characters, stale, the README said "No leaderboard" | rewritten (897 characters) and gated: `check_store_text.py` |
+| §4 clip list | none | `MARKETING.md`: 9 clips, 2 held until published |
+| §4 needs-Studio list, thumbnails | §8: 18 items, §9: 6 shots | §8: 22 items, §9: 7 shots |
+
+**The board**, built against the check the interrupted pass left red (30 FAIL, then a stop at its line
+381), which pass 2 did not weaken: it added to it (names cached, a shallower escape never re-stamps the
+reach time, the sign streaming back). The WIP's tie bug is fixed: `bestAt` is stamped in `finishRun`
+when the server banks an escape deeper than any before, so a new player's first board write no longer
+carries reach time 0. The sign is at (-18, 5.5, 4), not the WIP config's -16: at -16 the prompt was 9.6
+studs from the spawn pad, inside its 10-stud reach, and showed on every spawn (measured by the check);
+at -18 it is 11.6. Measured: one `GetSortedAsync` per minute (3 in 180 s); 450 friends cost 41 reads in
+the first second, 100 in the first minute, exactly 200 in all, over 3 pages.
+
+**Mutation sweeps** (scratchpad `vr7`, on frozen snapshots, never the real tree; every mutated bundle was
+checked against the expected build; every scratch source sha256-identical afterwards):
+
+* Round 1 (board, owner token, spawn, shutdown): **31 mutations, 31 killed; 3 of 3 controls survived.**
+* Round 2 (rejoin, critters): 18 mutations: 13 killed, 4 survived, and 1 was written invalid (its
+  "kill" was a compile error: `break` not last in its block); 3 of 3 controls survived. The survivors,
+  and what was done: `numKeys` removed (no check reached it; the sparse-key check above was written for
+  it); the critter cap removed from `VaultArt` alone (the glue asks for at most `MaxCritters` too); the
+  critters' parts allowance removed alone (`enforceBudget` takes them down in the same frame); the
+  run's end no longer clearing them (the frame loop already passes nil every frame without a run, so
+  that line was REMOVED as redundant).
+* Round 3: 4 mutations, 2 killed, 2 survived; 1 of 1 control survived. Killed: `numKeys` removed, by
+  the new sparse-key check; BOTH critter caps removed, by `check_vaultrunners_env` (10 failures). Survived:
+  "critters not taken down first" alone (the allowance keeps them out first), and the allowance AND the
+  take-down both removed, which no check could see: critters then pushed props out. `check_vaultrunners_budget`
+  §1 now asserts that wherever the props alone fill the budget no critter is up (7 storeys measured).
+* Round 4: that pair, killed by the new assertion; 1 of 1 control survived.
+* **Disclosed survivors, by design (each masked by its twin, both together killed):** the critter cap in
+  `VaultArt` alone (the glue's), the critters' parts allowance alone (`enforceBudget`), and "critters
+  not taken down first" alone (the allowance). The same shape as REVIEW-5's B1g.
+
+| gate | §14 (pass 1) | §15 (pass 2) |
+|---|---|---|
+| 17 specs | 1 899 / 0 | **1 963 / 0** (EnvConfig 401 → 432, VaultEnv 138 → 171; the rest unchanged) |
+| `check_vaultrunners.luau` | 138 / 0 | **157 / 0** (owner token, RespawnLocation, rejoin, sparse keys, shutdown) |
+| `check_vaulthud.luau` | PASS | PASS |
+| `robloxemu/check_vaultrunners_env` | 255 / 0 | **340 / 0** (§2 no critters in the hub; §4b each stratum's critters) |
+| `robloxemu/check_vaultrunners_{hazards,shaft,cards}` | 50, 63, 20 / 0 | 50, 63, 20 / 0 |
+| `robloxemu/check_vaultrunners_static` | 93 / 0 | **100 / 0** (Board.client compiles, fires and writes nothing) |
+| `robloxemu/check_vaultrunners_{readable,budget,halls}` | 50, 15, 68 / 0 | 50, **17**, 68 / 0 (budget §1: critters yield first) |
+| `robloxemu/check_vaultrunners_board` | RED: 30 FAIL, stop at line 381 | **90 / 0** |
+| `check_store_text.py` (new) | — | 10 / 0 (and 5 of 5 bad store texts caught, a reworded control passes) |
+
+Bundle `robloxemu/build/vault-runners.luau` sha256 5c761d72... at the final run.

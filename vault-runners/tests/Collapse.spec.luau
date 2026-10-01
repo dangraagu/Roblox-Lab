@@ -202,8 +202,9 @@ end
 -- the caps. Every floor, not a sample: the maze is random, so a floor nobody thought to check is
 -- exactly where the outlier lives.
 -- ...and while every one of those floors is being built anyway, check the DEADLINES on all of
--- them. The ten floors sampled above get a full tick-by-tick simulation; these 360 get the same
--- inequality without the ticking, which is what actually decides it:
+-- them. The ten floors sampled above get a full tick-by-tick simulation; these 2400 (3 tiers x 800
+-- floors — the range the obby review swept, REVIEW-5 §9) get the same inequality without the
+-- ticking, which is what actually decides it:
 --
 --     leaveAt(s) + MIN_STOREY_SLACK  <=  frac(s) * countdown
 --
@@ -213,12 +214,15 @@ end
 -- sampled floors green, because on a maze with even storeys the total-route constraint dominates
 -- and hides it. The mazes are random; the floor where the ground storey is the long one is not a
 -- floor anybody would have thought to sample.
+-- 800, not 200: the tightest storey margin keeps falling past floor 200 (REVIEW-5 §9), so a
+-- 200-floor number quoted as the game's floor was a sample, not a minimum.
+local SWEEP_FLOORS = 800
 do
 	local worst, worstAt, shortest, shortAt = 0, "", math.huge, ""
 	local tightest, tightestAt = math.huge, ""
 	local tightestExit, tightestExitAt = math.huge, ""
 	for tier = 1, #C.Tiers do
-		for floor = 1, 200 do
+		for floor = 1, SWEEP_FLOORS do
 			local model, spec = buildFloor(tier, floor)
 			local t = spec.collapseSeconds
 			if t > worst then worst, worstAt = t, C.Tiers[tier].name .. " floor " .. floor end
@@ -254,8 +258,8 @@ do
 	ok(tightestExit >= MIN_ESCAPE_SLACK, string.format(
 		"the tightest escape in the whole game leaves %.1fs, under %ds — %s",
 		tightestExit, MIN_ESCAPE_SLACK, tightestExitAt))
-	print(string.format("  3 tiers x 200 floors: countdown %ds..%ds  tightest storey +%.1fs  tightest escape +%.1fs",
-		shortest, worst, tightest, tightestExit))
+	print(string.format("  3 tiers x %d floors: countdown %ds..%ds  tightest storey +%.2fs (%s)  tightest escape +%.1fs",
+		SWEEP_FLOORS, shortest, worst, tightest, tightestAt, tightestExit))
 end
 
 --============================================================================ the model itself
@@ -335,10 +339,17 @@ do
 	-- ...and the retries are charged storey by storey, because every one of them is seconds spent
 	-- back on a floor the plane is rising toward. Clearing storey s means the (s+1)-th climb is
 	-- behind you, so s+1 transitions' worth of falls are behind you with it.
-	for s = 0, model.storeys - 1 do
+	for s = 0, model.storeys - 2 do
 		near(m.obbyBy[s + 1], (s + 1) * m.climbRetrySeconds, 1e-9,
 			string.format("storey %d's deadline covers the falls back onto it and every storey below", s))
 	end
+	-- ...and the TOP storey has no climb out of it. There are storeys - 1 transitions in a vault, so
+	-- the falls behind a runner standing on the top storey are storeys - 1 lots, the same as the
+	-- escape's. This spec used to assert `storeys * retry` for the top entry too — pinning the
+	-- off-by-one it should have been guarding against (obby review finding 4, REVIEW-5 §4).
+	near(m.obbyBy[model.storeys], (model.storeys - 1) * m.climbRetrySeconds, 1e-9,
+		"the top storey is charged one lot of falls per climb BELOW it — it has no climb of its own")
+	near(m.obbyBy[model.storeys], m.obbyTotal, 1e-9, "...which is exactly what the escape is charged")
 	near(m.obbyTotal, (model.storeys - 1) * m.climbRetrySeconds, 1e-9,
 		"the escape is charged one lot of falls per climb in the vault")
 

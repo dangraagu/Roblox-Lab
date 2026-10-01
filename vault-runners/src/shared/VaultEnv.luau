@@ -165,6 +165,65 @@ function VaultEnv.propSites(model: any, storey: number, seed: number, density: n
 	return out
 end
 
+--================================================================ critters
+
+-- Maze cells of `storey` that hold a critter, each with a roll (its loop, and which of two blending
+-- strata it belongs to). Like propSites, a function of (cells, storey, seed, density) ONLY, salted
+-- apart from the props so a critter is not always under a lamp; the shaft and hole cells are skipped.
+-- A critter lives inside its one cell, and a maze cell's centre is always open, so a critter never
+-- needs the walls: it cannot mark the route or a dead end.
+function VaultEnv.critterSites(model: any, storey: number, seed: number, density: number): { any }
+	local out = {}
+	if density <= 0 then return out end
+	local en, ex = model.entryCells[storey + 1], model.exitCells[storey + 1]
+	local s = (seed + 104729) % 1000000007
+	for cy = 0, model.cells - 1 do
+		for cx = 0, model.cells - 1 do
+			local skip = (en and cx == en.cx and cy == en.cy) or (ex and cx == ex.cx and cy == ex.cy)
+			if not skip then
+				if hash01(cx, cy, storey + 211, s) < density then
+					out[#out + 1] = { cx = cx, cy = cy, roll = hash01(cy, cx, storey + 307, s) }
+				end
+			end
+		end
+	end
+	return out
+end
+
+-- The critters a runner in maze cell (cx, cy) meets: the sites within `reach` cells (Chebyshev),
+-- nearest first (ties in a fixed cell order), at most `max`. The same cell always meets the same ones.
+function VaultEnv.critterNear(sites: { any }, cx: number, cy: number, reach: number, max: number): { any }
+	local found = {}
+	for _, s in sites do
+		local d = cheb(s.cx, s.cy, cx, cy)
+		if d <= reach then found[#found + 1] = { site = s, d = d } end
+	end
+	table.sort(found, function(a, b)
+		if a.d ~= b.d then return a.d < b.d end
+		if a.site.cy ~= b.site.cy then return a.site.cy < b.site.cy end
+		return a.site.cx < b.site.cx
+	end)
+	local out = {}
+	for i = 1, math.min(max, #found) do out[i] = found[i].site end
+	return out
+end
+
+-- Where a critter is in its cell at time `t` (seconds), as an offset from the cell centre, and the way
+-- it is walking: (dx, dz, vx, vz). An ellipse around the centre whose larger radius is `roam` scaled by
+-- the roll (0.55..1), turning one way or the other, never faster than `speed` studs/s along it, so it
+-- never leaves `roam` of its centre.
+function VaultEnv.critterOffset(roll: number, t: number, roam: number, speed: number): (number, number, number, number)
+	local r = roam * (0.55 + 0.45 * roll)
+	local squash = 0.6 + 0.4 * ((roll * 7) % 1)
+	local rx, rz = r, r * squash
+	local dir = if roll < 0.5 then 1 else -1
+	local w = speed / math.max(r, 0.1)   -- the larger radius sets the pace: the speed along it is <= speed
+	local a = roll * 2 * math.pi + dir * w * t
+	local dx, dz = math.cos(a) * rx, math.sin(a) * rz
+	local vx, vz = -math.sin(a) * rx * w * dir, math.cos(a) * rz * w * dir
+	return dx, dz, vx, vz
+end
+
 --================================================================ readability
 
 -- WCAG contrast ratio between two {r, g, b} (0..255) colours; 1 (same) .. 21 (black on white).
@@ -286,9 +345,22 @@ end
 
 --================================================================ gems stay findable
 
--- How well colour `c` reads over `floor` AND in front of `wall`, as a share of the bars: >= 1 reads.
-local function gemScore(c: any, floor: any, wall: any, minFloor: number, minWall: number): number
-	return math.min(VaultEnv.contrast(c, floor) / minFloor, VaultEnv.contrast(c, wall) / minWall)
+-- Euclidean distance between two {r, g, b} (0..255) colours: how different two colours of the same
+-- brightness look, which the WCAG ratio cannot say (pearl and cream are 1.12:1 AND the same cue).
+function VaultEnv.rgbDistance(a: any, b: any): number
+	local ar, ag, ab = a[1] or a.r or 0, a[2] or a.g or 0, a[3] or a.b or 0
+	local br, bg, bb = b[1] or b.r or 0, b[2] or b.g or 0, b[3] or b.b or 0
+	return math.sqrt((ar - br) ^ 2 + (ag - bg) ^ 2 + (ab - bb) ^ 2)
+end
+
+-- How well colour `c` reads over `floor` AND in front of `wall` — and, when a `pad` is given, how far
+-- it sits from the pads' colour — as a share of the bars: >= 1 reads.
+local function gemScore(c: any, floor: any, wall: any, minFloor: number, minWall: number, pad: any?, minPad: number?): number
+	local s = math.min(VaultEnv.contrast(c, floor) / minFloor, VaultEnv.contrast(c, wall) / minWall)
+	if pad ~= nil and minPad ~= nil and minPad > 0 then
+		s = math.min(s, VaultEnv.rgbDistance(c, pad) / minPad)
+	end
+	return s
 end
 
 -- A GEM KEEPS ITS TIER'S COLOUR WHERE THAT STILL READS. The client repaints walls and floors per
@@ -296,22 +368,27 @@ end
 -- So: the tier's colour if it stands out `minFloor`:1 against the floor and `minWall`:1 against the
 -- wall; else the candidate (the stratum's own gem colours) that reads best; else black or white,
 -- whichever reads better. Returns one of the given tables, or a fresh fallback.
-function VaultEnv.readableGem(tierGem: any, floor: any, wall: any, candidates: { any }, minFloor: number, minWall: number): any
-	if gemScore(tierGem, floor, wall, minFloor, minWall) >= 1 then return tierGem end
+--
+-- AND IT IS NOT THE PADS' COLOUR. With `pad` and `minPad` given, a colour closer than `minPad` (in RGB)
+-- to the pads does not read either: what a runner must find must not share the obby's colour cue.
+-- The first gem fix put pearl gems beside the tomb's cream pads and sapphire beside the Frozen Vault's
+-- navy, 42 apart each (second review, REVIEW-5 §B2).
+function VaultEnv.readableGem(tierGem: any, floor: any, wall: any, candidates: { any }, minFloor: number, minWall: number, pad: any?, minPad: number?): any
+	if gemScore(tierGem, floor, wall, minFloor, minWall, pad, minPad) >= 1 then return tierGem end
 	local best, bestS = nil, -1
 	for _, c in candidates do
-		local s = gemScore(c, floor, wall, minFloor, minWall)
+		local s = gemScore(c, floor, wall, minFloor, minWall, pad, minPad)
 		if s > bestS then best, bestS = c, s end
 	end
 	if best ~= nil and bestS >= 1 then return best end
 	local white, black = { 245, 245, 245 }, { 16, 16, 16 }
-	if gemScore(white, floor, wall, minFloor, minWall) >= gemScore(black, floor, wall, minFloor, minWall) then return white end
+	if gemScore(white, floor, wall, minFloor, minWall, pad, minPad) >= gemScore(black, floor, wall, minFloor, minWall, pad, minPad) then return white end
 	return black
 end
 
 -- The colour the client paints on the gems (and the exit pad) of tier `tierIndex` under palette
--- `pal` (VaultEnv.palette): the two blending bands' own `palette.gem` are the candidates. A fresh
--- {r, g, b} array.
+-- `pal` (VaultEnv.palette): the two blending bands' own `palette.gem` are the candidates, and the
+-- palette's own pad is the colour it must stay clear of. A fresh {r, g, b} array.
 function VaultEnv.gem(cfg: any, pal: any, tierIndex: number): { number }
 	local g = cfg.Tiers[tierIndex].gemColor
 	local own = { g.r, g.g, g.b }
@@ -321,7 +398,8 @@ function VaultEnv.gem(cfg: any, pal: any, tierIndex: number): { number }
 		local c = bands[id] and bands[id].palette and bands[id].palette.gem
 		if c then table.insert(candidates, c) end
 	end
-	local chosen = VaultEnv.readableGem(own, pal.floor, pal.wall, candidates, cfg.Env.MinGemContrast, cfg.Env.MinGemWallContrast)
+	local chosen = VaultEnv.readableGem(own, pal.floor, pal.wall, candidates, cfg.Env.MinGemContrast,
+		cfg.Env.MinGemWallContrast, pal.pad, cfg.Env.MinGemPadDistance)
 	return { chosen[1], chosen[2], chosen[3] }
 end
 
@@ -355,6 +433,58 @@ end
 function VaultEnv.ring(cfg: any, floor: any, locked: boolean): any
 	local E = cfg.Env
 	return VaultEnv.readableRing(floor, if locked then E.RingLock else E.RingFollow, E.MinRingContrast)
+end
+
+--================================================================ the endgame turns: halls
+
+-- WHICH HALL OF THE DEEPEST STRATUM `depth` IS IN, or nil (owner decision 2026-09-30). Every Gold
+-- floor is the Volcano Temple, so past Env.Halls.from it moves to its next hall every Env.Halls.every
+-- depths and wraps round, for ever. Returns the hall's table from Config (read it, never write it).
+function VaultEnv.hall(cfg: any, depth: number): any
+	local H = cfg.Env and cfg.Env.Halls
+	if H == nil or type(depth) ~= "number" or depth ~= depth or depth < H.from or #H.list == 0 then return nil end
+	local k = math.floor((depth - H.from) / H.every)
+	return H.list[(k % #H.list) + 1]
+end
+
+-- The first depth of the hall `depth` is in (the fanfare is for a hall deeper than any floor this
+-- player has cleared), or nil before the halls.
+function VaultEnv.hallStart(cfg: any, depth: number): number?
+	local H = cfg.Env and cfg.Env.Halls
+	if H == nil or type(depth) ~= "number" or depth < H.from then return nil end
+	return H.from + math.floor((depth - H.from) / H.every) * H.every
+end
+
+--================================================================ the emitter budget is a cap
+
+-- WHAT EACH EMITTER IS ALLOWED THIS FRAME. `wants` = { { rate, prio } } (lower prio = more important;
+-- equal prio: first asked, first served). At most `maxN` emitters are granted anything and the grants
+-- sum to at most `maxRate` particles/s; an emitter that wants nothing takes no slot. Returns the
+-- granted rates in the order of `wants`. Config.Budget's emitter and particle budgets used to be read
+-- only by the checks (second review, REVIEW-5 §B1); VaultArt.enforceBudget applies this every frame.
+function VaultEnv.grantRates(wants: { any }, maxN: number, maxRate: number): { number }
+	local order = {}
+	for i in wants do order[#order + 1] = i end
+	table.sort(order, function(a, b)
+		local pa, pb = wants[a].prio or math.huge, wants[b].prio or math.huge
+		if pa ~= pb then return pa < pb end
+		return a < b
+	end)
+	local out = {}
+	for i in wants do out[i] = 0 end
+	local n, left = 0, maxRate
+	for _, i in order do
+		local want = wants[i].rate or 0
+		if want > 0 and n < maxN and left > 0 then
+			local g = math.min(want, left)
+			if g >= 0.1 then
+				out[i] = g
+				n += 1
+				left -= g
+			end
+		end
+	end
+	return out
 end
 
 return VaultEnv

@@ -436,7 +436,8 @@ local function crackRun(tier, hop)
 	ground()
 	local sawFlash, backAt = false, nil
 	local t = 0
-	for _ = 1, 60 * (Config.Ascent.RespawnSeconds + 1) do
+	-- (capped: a mutant with a crumble or respawn of 1e9 must fail this check, not hang the gate)
+	for _ = 1, 60 * math.min(Config.Ascent.RespawnSeconds + 1, 10) do
 		frame(1 / 60)
 		t += 1 / 60
 		if part.Transparency < 0.5 then
@@ -480,6 +481,96 @@ do
 		respawn()
 		run(0.3, 1 / 30)
 	end
+end
+
+--============================================================================ §6 the server sees every pad a chained hopper lands on
+--
+-- Obby review 2026-09-10, finding 3 (REVIEW-5 §3). The server decides a runner stood on a pad by
+-- looking at its TRUSTED position, and it used to look once per Run.TickSeconds (0.2 s). A runner
+-- who chains the hops — jumps again on the frame they land, which Roblox allows — has a pad's feet
+-- band under them for about 0.13 s per pad: the last 0.07 s of the fall onto it, one frame of
+-- contact, the first 0.04 s of the next jump. A 0.2 s look misses that about a third of the time,
+-- depending only on the phase of the server's tick, and a missed pad never crumbles: the mechanic
+-- went soft for exactly the players it was aimed at.
+--
+-- This climbs storey 0's shaft the way physics would carry a runner (Roblox's own JumpPower and
+-- Gravity, from Config.Movement, and the hop timed to land exactly on the next pad's top), one frame
+-- of contact per pad, at four phases of the server's tick. Every pad landed on must crumble. The
+-- CONTROL half dwells 0.25 s on every pad — longer than any tick — and must crumble every pad too,
+-- so this section can see a crumble at all.
+local function hopperRun(tier, delay, dwell)
+	local e = enter(tier)
+	local shaft = shaftAndApproach(0)
+	local centre = worldAt(0, shaft.fx, shaft.fy)
+	walkTo(centre)
+	ground()
+	run(3.2 + delay, 1 / 60) -- the trusted position arrives and its burst allowance refills
+	local pads = e.model.shafts[1].pads
+	local parts, goneAt, landedAt = {}, {}, {}
+	for k = 1, #pads do parts[k] = myVault():FindFirstChild("Step_0_" .. k) end
+	local g, v0 = Config.Movement.Gravity, Config.Movement.JumpPower
+	local R = Config.Run.RunnerRootHeight
+	local t = 0
+	local function watch()
+		for k, part in parts do
+			if goneAt[k] == nil and part and part.Transparency > 0.5 then goneAt[k] = t end
+		end
+	end
+	local function step()
+		frame(1 / 60)
+		t += 1 / 60
+		watch()
+	end
+	-- feet start on the storey floor at the stairwell's centre
+	local from = Vector3.new(centre.X, centre.Y - R, centre.Z)
+	for k, pad in pads do
+		local to = e.origin + Vector3.new(pad.x, pad.y, pad.z)
+		local rise = to.Y - from.Y
+		local T = (v0 + math.sqrt(math.max(0, v0 * v0 - 2 * g * rise))) / g -- lands on the way down
+		local n = math.max(1, math.ceil(T * 60))
+		for i = 1, n do
+			local u = math.min(1, i / n)
+			local tt = u * T
+			local y = from.Y + v0 * tt - 0.5 * g * tt * tt
+			if i == n then y = to.Y end
+			hrp.CFrame = CFrame.new(from.X + (to.X - from.X) * u, y + R, from.Z + (to.Z - from.Z) * u)
+			step()
+		end
+		landedAt[k] = t
+		-- contact: one frame (chained), or the control's dwell
+		for _ = 1, math.max(1, math.floor(dwell * 60 + 0.5)) - 1 do step() end
+		from = to
+	end
+	-- (capped: a mutant with a crumble or respawn of 1e9 must fail this check, not hang the gate)
+	for _ = 1, math.floor(math.min(Config.Ascent.CrumbleSeconds + 1, 5) * 60) do step() end
+	local missed, late = {}, 0
+	for k = 1, #pads do
+		if goneAt[k] == nil then table.insert(missed, k)
+		else late = math.max(late, goneAt[k] - landedAt[k]) end
+	end
+	respawn()
+	run(0.3, 1 / 30)
+	return missed, late, #pads
+end
+
+do
+	local allMissed, worstLate, landings = 0, 0, 0
+	for _, tier in { 1, 3 } do
+		for _, delay in { 0, 0.05, 0.1, 0.15 } do
+			local missed, late, n = hopperRun(tier, delay, 0)
+			landings += n
+			allMissed += #missed
+			worstLate = math.max(worstLate, late)
+			eq(#missed, 0, string.format("§6 %s floor 1, a chained hopper (phase +%.2f s): every pad landed on crumbles (missed: %s)",
+				Config.Tiers[tier].name, delay, table.concat(missed, ",")))
+		end
+	end
+	truthy(worstLate <= Config.Ascent.CrumbleSeconds + 0.1 + 1e-6, string.format(
+		"§6 and it crumbles on time: worst %.3f s from landing to the drop, against CrumbleSeconds %.2f", worstLate, Config.Ascent.CrumbleSeconds))
+	print(string.format("  §6 chained hopper: %d pad landings, %d never counted by the server; worst landing-to-drop %.3f s", landings, allMissed, worstLate))
+	-- CONTROL: a 0.25 s stand on every pad is seen at any tick rate
+	local cMissed = hopperRun(1, 0.1, 0.25)
+	eq(#cMissed, 0, "§6 CONTROL: a runner who stands 0.25 s on every pad crumbles every pad (missed: " .. table.concat(cMissed, ",") .. ")")
 end
 
 for _, e in h:errors() do

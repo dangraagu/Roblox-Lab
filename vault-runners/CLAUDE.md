@@ -3,15 +3,35 @@
 ## State
 
 v1 is **built and green, and has never been run by a person or published.** No Roblox experience
-exists for it, no `publish_*.bat` exists, and the tree was deliberately left dirty and
-uncommitted.
+exists for it and no `publish_*.bat` exists. The eye candy was committed as 511793d (2026-09-24);
+everything REVIEW-5 changed (2026-09-30) is in the working tree, NOT committed.
 
-**The eye candy (owner's brief 2026-09-17) is built and green, uncommitted, through one adversarial
-review (its findings closed or handed to the owner, EYECANDY.md §12), and NOT yet seen in Studio: read
-`EYECANDY.md` first.** Five strata by depth, rare ceiling drops, rest in the
-hub, all client-side; `Main.server.luau` is unchanged by it.
+**Complete against docs/complete-game-standard.md as far as code can take it (pass 2, 2026-10-01,
+EYECANDY.md §15), in the working tree, NOT committed.** Pass 2 finished the highscore board (the
+DEEPEST ESCAPES sign west of the hub spawn: public top 10 or friends, invariant 15) against the check
+an interrupted pass had left red, fixed that WIP's tie bug (`bestAt` is now stamped when the server
+banks a new deepest escape), and closed four more gaps of the standard, each test first: the owner
+token is per SESSION, not the server's JobId (invariant 9d); every player's `RespawnLocation` is the hub
+spawn (invariant 16); a shutdown saves and releases every profile (`BindToClose`, invariant 18); the
+store text is rewritten and gated (`check_store_text.py`). It also found a gap the reviewer had not
+listed: the standard asks every band for its own CRITTERS, and the strata had none; now each has its
+own (invariant 19). `MARKETING.md` has the clip list. The seed is deliberately NOT salted, and
+invariant 17 says why. What is left is Studio and people: nobody has
+played it, seen it, or seen the board (EYECANDY.md §8).
 
-Four review passes so far, and they supersede each other — read them newest first.
+**The eye candy (owner's brief 2026-09-17) is built and green, through two adversarial reviews
+(EYECANDY.md §12 and §13, all findings closed), and NOT yet seen in Studio: read `EYECANDY.md`
+first.** Five strata by depth, and past depth 44 the Volcano Temple turns through three halls (owner
+decision 2026-09-30); rare ceiling drops; rest in the hub; all client-side. The client's budgets are
+CAPS in code (`VaultArt.enforceBudget`), not just numbers the checks compare against.
+
+Five review passes so far, and they supersede each other — read them newest first.
+`REVIEW-5.md` closes the obby review (`docs/reviews/2026-09-10-vault-runners-obby.md`: hop 1 is no
+longer priced as missable, the shaft is watched at 20 Hz with a derived stand box) and the second
+eye-candy review, and records the owner's three decisions. Its §6 is the pass-1 re-run of
+2026-10-01: every finding reproduced on HEAD 511793d and measured fixed, the sweep re-run (39 of 40
+killed, 6 of 6 controls survive), and one thing the gem rule does not cover (a crumbling pad under a
+Bronze runner, invariant 12).
 `REVIEW-4.md` is the obby: the crumbling climb shaft, how its cost was priced into the countdown,
 the re-derived monotonicity table, and the mutation gate. `REVIEW-3.md` is the difficulty curve:
 the slack schedule, where its numbers came from, the monotonicity and jitter measurements.
@@ -25,29 +45,34 @@ tests/Rng.spec.luau             37 passed, 0 failed
 tests/Progression.spec.luau     66 passed, 0 failed
 tests/Pets.spec.luau            75 passed, 0 failed
 tests/RunState.spec.luau        75 passed, 0 failed
-tests/VaultFloor.spec.luau     215 passed, 0 failed   (+ climbIsFailable: THE JUMP CAN BE MISSED)
+tests/VaultFloor.spec.luau     231 passed, 0 failed   (+ climbIsFailable, firstHopIsAStep: WHICH HOPS CAN BE MISSED)
 tests/responsive.spec.luau      70 passed, 0 failed
-tests/Collapse.spec.luau       281 passed, 0 failed   IS THE VAULT WINNABLE AT ALL
-tests/Curve.spec.luau           23 passed, 0 failed   IS "DEEPER" ACTUALLY HARDER
-tests/Ascent.spec.luau          68 passed, 0 failed   THE PADS CRUMBLE, AND EVERY ONE COMES BACK
+tests/Collapse.spec.luau       282 passed, 0 failed   IS THE VAULT WINNABLE AT ALL (3 tiers x 800 floors)
+tests/Curve.spec.luau           29 passed, 0 failed   IS "DEEPER" ACTUALLY HARDER; the rolled climb and a rolled miss
+tests/Ascent.spec.luau          77 passed, 0 failed   THE PADS CRUMBLE, EVERY ONE COMES BACK, the stand box is derived
 tests/Trace.spec.luau           28 passed, 0 failed   the anti-teleport throttle + its BOUNDS
 tests/EnvBands.spec.luau       124 passed, 0 failed   (the eye candy, EYECANDY.md, from here...)
 tests/Rest.spec.luau            55 passed, 0 failed
 tests/Hazards.spec.luau         91 passed, 0 failed
-tests/VaultEnv.spec.luau       112 passed, 0 failed
-tests/EnvConfig.spec.luau      366 passed, 0 failed   THE PADS, GEMS AND RING STAY READABLE at every depth
-tests/Pacing.spec.luau          47 passed, 0 failed   (...to here)
-check_vaultrunners.luau        138 passed, 0 failed   (headless boot: builds vaults, plays runs)
+tests/VaultEnv.spec.luau       171 passed, 0 failed   (+ critters: placed from (storey, cell, seed) only, never in a wall)
+tests/EnvConfig.spec.luau      432 passed, 0 failed   THE PADS, GEMS AND RING STAY READABLE; gems never the pads' colour; critters neither
+tests/Pacing.spec.luau          51 passed, 0 failed   (...to here) the brag at 30-45 min; the halls turn
+tests/Board.spec.luau           69 passed, 0 failed   the board's pure rules: stored value, ties, views, cache, limiter
+check_vaultrunners.luau        157 passed, 0 failed   (headless boot: builds vaults, plays runs; owner token, RespawnLocation, rejoin, sparse keys, shutdown)
 check_vaulthud.luau            PASS                   (11 viewports x {hub, mid-run}, HUD + Vault.client)
-../robloxemu/check_vaultrunners_env.luau      255 passed, 0 failed   the strata, real client + server
+../robloxemu/check_vaultrunners_env.luau      340 passed, 0 failed   the strata, real client + server; §4b each stratum's critters
 ../robloxemu/check_vaultrunners_hazards.luau   50 passed, 0 failed   the drops (emulator Random unseeded)
-../robloxemu/check_vaultrunners_shaft.luau     53 passed, 0 failed   the shaft stays readable; crack held till the drop
+../robloxemu/check_vaultrunners_shaft.luau     63 passed, 0 failed   the shaft stays readable; the server sees a chained hopper
 ../robloxemu/check_vaultrunners_cards.luau     20 passed, 0 failed   returning player's cards; forced guards
-../robloxemu/check_vaultrunners_static.luau    86 passed, 0 failed   compiles; no remote, no attribute
-../robloxemu/check_vaultrunners_readable.luau  47 passed, 0 failed   gems, exit, drop ring readable; signs clear
+../robloxemu/check_vaultrunners_static.luau   100 passed, 0 failed   compiles; no remote, no attribute (Vault.client AND Board.client); Config's obby comment
+../robloxemu/check_vaultrunners_readable.luau  50 passed, 0 failed   gems, exit, drop ring readable; not the pads' colour
+../robloxemu/check_vaultrunners_budget.luau    17 passed, 0 failed   every Config.Budget is a CAP (forced demand + budgets); critters yield first
+../robloxemu/check_vaultrunners_halls.luau     68 passed, 0 failed   the Volcano Temple's halls, through the real client
+../robloxemu/check_vaultrunners_board.luau     90 passed, 0 failed   the board, public + friends, through the real server and Board.client
+py -3 check_store_text.py      10 passed, 0 failed    the store description: <= 1000 chars, no coloured squares, no false brief claims
 walk_vaultrunners.luau         5 floors x 3 runners   (walks the real server, prints outcomes)
 measure_curve.luau             the tuning instrument  (where Config.Collapse's numbers came from)
-mutate_obby.sh                 the obby's mutation gate (13 mutations + 2 controls)
+mutate_obby.sh                 the obby's mutation gate (21 mutations: 20 killed, 1 disclosed; 2 controls survive; RUN IT ON A SCRATCH COPY)
 ```
 
 Regenerate the emulator bundle after ANY edit under `src/`, or the headless checks measure the
@@ -124,8 +149,20 @@ cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runne
    way `WasteWeight` pays for the maze's. It is an assumption in the same class as
    `measure_curve.luau`'s blind explorer, and REVIEW-4 sweeps it 0..0.12 rather than defending
    one value. `E[misses] = p * E[attempts]`, NOT `E[attempts] - n` — the first cut was the second
-   one and over-priced the shaft by 10%; `tests/Curve.spec.luau` rolls 20000 climbs and never
-   reads the closed form, which is how that was caught.
+   one and over-priced the shaft by 10%; `tests/Curve.spec.luau` rolls 80000 climbs and never
+   reads the closed form, which is how that was caught. `ModelMissChance` outside [0, 1) is refused
+   by name (at 1 the closed form divided by zero).
+8g. **HOP 1 IS A STEP, NOT A HOP** (REVIEW-5 §1.1). It leaves from the storey floor and the floor
+   under pad 1 is solid, so it cannot be missed: `VaultPath.failableHops` is pads - 1, and
+   `VaultFloor.spec`'s `firstHopIsAStep` holds the geometry that makes it so. Pricing all six hops
+   as missable cost 0.087 s per transition, and the 2% tolerance of the old rolled climb could not
+   see it; the roll is now 80000 climbs at 0.5%, plus a rolled MISS at 1%.
+8h. **THE SERVER WATCHES THE SHAFT AT 20 Hz** (`Config.Ascent.SampleSeconds`, REVIEW-5 §1.3).
+   `watchRunner` steps `Trace`, touches the pad under the trusted position and draws the flips every
+   0.05 s; `tickRun` judges gems, exit, collapse and seal every `Run.TickSeconds` (0.2) against the
+   position `watchRunner` left in `a.trusted`. At 0.2 s the server never counted 18 of 48 chained
+   landings (`check_vaultrunners_shaft` §6). `StandRadius` is DERIVED (pad half-width + runner
+   half-width = 2.5), never typed.
 9b. **Every rule in the run loop reads `Trace`, never `hrp.Position`.** The client owns its own
    character's physics, so the position the server reads is a claim. `Trace` moves the server's
    own position toward that claim at walking pace and the gem, exit and kill tests all read the
@@ -134,6 +171,14 @@ cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runne
    exactly the fields it saves and returns early when nothing moved; remote handlers call
    `requestSave`, which only marks the profile pending for the flush loop. Do not call `flush`
    from a remote handler.
+9d. **THE OWNER TOKEN IS PER SESSION** (docs/complete-game-standard.md §1, fork-tower's
+   `old.session`). The load that takes the record writes a fresh `HttpService:GenerateGUID` as
+   `session`, and `flush` writes only while the record still carries it; a lost record sets
+   `canSave = false`, warns once and tells the player. `jobId` + `lockUntil` still decide whether a
+   LOAD may take the record. The token used to be `game.JobId`, which every session on one server
+   shares, and `flush` wrote whenever the record's jobId was nil or its lock had run out: the lock is
+   renewed only by a write, so an idle player in the hub had an expired lock after two minutes, and a
+   newer session's data could be written over (`check_vaultrunners`, "the OWNER TOKEN is per session").
 9. **One CONFIG table.** Every tunable is in `src/shared/Config.luau`. Per-feature RNG salts live
    in `VaultFloor.luau` (same convention as grow-a-crystal's `Cavern.luau`) because they are
    structure, not tuning.
@@ -155,7 +200,65 @@ cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runne
     the server's drop arrives. Never end it on the client's own clock; that painted a pad WHOLE a beat
     (plus ping) before it fell. **What a runner must find must read in every stratum**: gems and the
     exit pad wear `VaultEnv.gem`, and the drop's ring `VaultEnv.ring`. Any new stratum palette is
-    checked by `EnvConfig.spec` against those bars (review round, EYECANDY.md §12).
+    checked by `EnvConfig.spec` against those bars (review round, EYECANDY.md §12). **...and a gem is
+    never the pads' colour**: `Env.MinGemPadDistance` (80, RGB) is part of the gem rule (§13). That
+    rule is about the RESTING pad. A crumbling pad is pulled 70 % of the way to the shared `crack`
+    colour (255, 90, 50), an orange red, so under a BRONZE runner (orange gems) it comes within 44.6
+    RGB of the gem in the Bank Vault and ends 60.9-70.5 away in the reactor, Frozen Vault and volcano
+    (Silver and Gold stay 81.5+ away; REVIEW-5 §6). Only the pad under the runner's own feet, only
+    while it goes. It is on the Studio list (EYECANDY.md §8.6), not "fixed": a crack colour dark
+    enough to keep the bank's path 80 away reads under the 2:1 bar on the bank's dark green floor.
+13. **Every `Config.Budget` is a CAP in code** (EYECANDY.md §13). Parts go through
+    `VaultArt._parent` (counted), props are hung only inside `MaxLocalParts` less the headroom, and
+    `VaultArt.enforceBudget` runs LAST in every client frame: decoration yields first, emitters are
+    granted by priority (the drop's trickle first), lights and beams are capped. An emitter never
+    writes its own Rate or Enabled: it calls `_want`. `check_vaultrunners_budget` forces the demand
+    and the budgets in memory and measures every frame. `MaxHazards` (1) is the one budget no code
+    reads: the cap is structural (`Hazards` has a single `state.active` slot, `Hazards.spec` holds
+    "never more than one drop at a time"), and `EnvConfig.spec` pins the number to it.
+14. **The endgame turns** (owner decision 2026-09-30). Past `Env.Halls.from` (depth 44) the deepest
+    stratum moves through `Env.Halls.list` every `every` (4) depths, for ever. A hall may change the
+    light, the weather and the props, NEVER the palette: every readability bar holds in every hall
+    because the pads, gems and floor are the stratum's own.
+15. **The board ranks the DEEPEST VAULT ESCAPED, and only the server moves it** (Config.Board,
+   `src/shared/Board.luau`, docs/complete-game-standard.md §3). The metric is
+   `VaultEnv.deepestCleared(p.floors)`; `floors` moves only in `finishRun` when `RunState.tryEscape`
+   banks a run judged on `Trace`, and no remote carries a depth, a floor or a time. Stored in the
+   OrderedDataStore `Config.Save.Board`, key `u_<userId>`, value `depth * 2e9 + (2e9 - bestAt)`;
+   `bestAt` is stamped in `finishRun` only when the escape is DEEPER than any before (never on a
+   shallower one, never at the board write), saved with the floors, and offered to the board after the
+   profile write lands and again at every join, through `UpdateAsync` + `Board.keepHigher` (a tie keeps
+   the first reach time, the board is never lowered). Public: one `GetSortedAsync(false, 10)` per
+   `PublicCacheSeconds` while anyone is here; a failed read keeps the last list. Friends: only when the
+   prompt asks, `GetFriendsAsync` to `FriendsCap` (200), cached per player, reads cached and throttled
+   (`Board.newLimiter` and Roblox's budget), players in this server from memory. Names from the server,
+   the friends list or `GetNameFromUserIdAsync`, cached in memory, never stored. The sign is drawn by
+   `Board.client` on the part (never in PlayerGui: the HUD fit check would measure it as screen), per
+   player, and remounted if the part streams back in. Do not put a RUN TIME on this board: nothing
+   records one, and a run time would need its own anti-cheat thinking.
+16. **Every player's `RespawnLocation` is the hub spawn**, set in `onPlayerAdded` before the profile
+   load yields (SPAWN-ORDER.md §3's preferred pattern). The world still holds exactly one enabled
+   SpawnLocation; both are asserted in `check_vaultrunners`' "WHERE THE ENGINE PUTS YOU".
+17. **`Config.WorldSeed` is NOT salted, on purpose** (docs/complete-game-standard.md §1 asks for a
+   server-only salt on a seed a player could memorise; this is the written reason why not). A salt
+   would hide nothing: every wall, gem and pad of a vault is a replicated Part the moment the run
+   starts, so a script reads the maze off the workspace whatever the seed (the standard's own note:
+   a salt on a seed that drives visible geometry is not enough). And remembering a floor is the design:
+   a wiped floor is the SAME floor next attempt, like an obby course, and a depth on the board means the
+   same thing for everyone only because every runner faced the same vaults. What a script cannot do is
+   go faster than a runner: `Trace` and the countdown are the wall, and the board's metric needs no
+   secret.
+18. **A shutdown saves every profile** (`game:BindToClose`, `flush(plr, true)` for each): a purchase
+   pending on the flush tick and the lock release would otherwise be lost when Roblox closes the server.
+   Still through the owner token, so a late shutdown write never lands over a newer session.
+19. **Every stratum has its own CRITTERS, and they are decoration** (docs/complete-game-standard.md
+   §2; `Config.Env.Bands[*].critters`, `VaultEnv.critterSites/critterNear/critterOffset`,
+   `VaultArt.updateCritters`). Client-only, inert, never Neon. Placed like props, from (storey, cell,
+   floor seed) ONLY: a critter lives inside ONE maze cell (a cell centre is always open) and never reads
+   the walls, so it cannot point at the route. Never in the shaft cell or over the hole. At most
+   `Budget.MaxCritters`, within `CritterReach` cells of the runner; they yield FIRST (before props)
+   when the parts budget is tight. A critter's body colour stays `MinGemPadDistance` from every gem
+   and pad on its floor (`EnvConfig.spec`). A new stratum needs a critter kind VaultArt can draw.
 
 ## How the vault is put together
 
@@ -215,7 +318,7 @@ in `doBuy`'s "poor" branch. It is a narrowing artefact, not a bug.
    perfect memory, no hesitation, no missed jump, no gem detour). It is optimistic by construction,
    so every completion percentage in this repo is a CEILING. Re-run `measure_curve.luau` after a
    playtest and move Slack / MinSlack to what real humans do; do not go back to typing seconds onto
-   a tier. Watch for two things in particular: Gold floor 1 is a 264-second run, and
+   a tier. Watch for two things in particular: Gold floor 1 is a 269-second run, and
    `Config.Movement.WalkSpeed` is now 24 rather than Roblox's 16 and the server writes it onto the
    Humanoid, so the game feels faster than the brief imagined.
 2. **Play the obby.** The decision was to BUILD it rather than retitle the game, and it is built:
@@ -228,8 +331,14 @@ in `doBuy`'s "poor" branch. It is a narrowing artefact, not a bug.
    actually notice are **pets are bought rather than hatched** and **pets do not level**.
 4. Sound. There is not one Sound instance in the game, and a rising collapse with no audio is half
    a collapse.
-5. A leaderboard. Runs are already deterministic per (tier, floor), so a time is comparable; only
-   the recording is missing.
+5. **See the board and the critters in Studio** (EYECANDY.md §8.19-22): with API access off the board says it is offline,
+   which is correct; its rows, the prompt and the Friends toggle can only be seen on a published place
+   (never film the Friends view with a real account). And whether the place streams: Board.client and
+   Vault.client are written to survive it, but nobody has watched.
+6. **Publishing** (night shift only): create the universe, a git-ignored `publish_*.bat`, the
+   content-maturity questionnaire, then `MARKETING.md`'s clips and EYECANDY.md §9's thumbnails.
+7. **An independent review of pass 2.** The board, the owner token, the shutdown and the critters were
+   written and mutation-tested by one writer pass (EYECANDY.md §15); no reviewer has read them.
 
 ## What this game deliberately does NOT have
 

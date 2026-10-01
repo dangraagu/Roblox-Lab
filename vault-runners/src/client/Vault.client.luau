@@ -364,6 +364,7 @@ local rumbleIn = 6
 local frameError = false
 local floorsKnown: { number }? = nil -- next floor per tier, from the server's state pushes
 local tiersKnown: { any }? = nil
+local lastCardHall: string? = nil
 local lastCardBand: number? = nil
 local runSerial = 0
 local lastBand = 1
@@ -459,6 +460,7 @@ local function endRun()
 	art:updateProps(nil, nil)
 	art:updateWeather({}, nil)
 	art:updateCollapse(nil, nil, nil, 0, 0)
+	art:enforceBudget()
 	applyLayout()
 end
 
@@ -490,6 +492,8 @@ local function startRun(data: any)
 		ringFollow = VaultEnv.ring(Config, pal.floor, false),
 		ringLock = VaultEnv.ring(Config, pal.floor, true),
 		band = EnvBands.indexAt(bands, depth),
+		-- the hall of the deepest stratum this depth is in, or nil (Config.Env.Halls: the endgame turns)
+		hall = VaultEnv.hall(Config, depth),
 		t = 0, timeLeft = tonumber(data.collapseSeconds) or 0, timeAt = 0,
 		folder = nil, origin = nil, added = nil,
 		pads = {},
@@ -502,14 +506,26 @@ local function startRun(data: any)
 	-- last vault's piece (which the player can no longer see) does not linger over this one
 	for id in pieceW do pieceW[id] = 0 end
 
-	-- a title card when the stratum changes; a fanfare the first time this player goes this deep
+	-- a title card when the stratum changes, or the hall of the deepest one; a fanfare the first time
+	-- this player goes this deep (a new stratum, or a hall that starts deeper than any floor cleared)
 	local b = bands[run.band]
-	if lastCardBand ~= run.band then
+	local hallId = if run.hall then run.hall.id else nil
+	if lastCardBand ~= run.band or lastCardHall ~= hallId then
+		local newBand = lastCardBand ~= run.band
 		lastCardBand = run.band
-		local best = if floorsKnown then EnvBands.indexAt(bands, VaultEnv.deepestCleared(Config, floorsKnown)) else run.band
-		local celebrate = floorsKnown ~= nil and run.band > best
+		lastCardHall = hallId
+		local cleared = if floorsKnown then VaultEnv.deepestCleared(Config, floorsKnown) else 0
+		local best = if floorsKnown then EnvBands.indexAt(bands, cleared) else run.band
+		local hallStart = VaultEnv.hallStart(Config, depth)
+		local celebrate = floorsKnown ~= nil and (run.band > best or (hallStart ~= nil and hallStart > cleared))
 		local tierName = Config.Tiers[tier].name
-		showCard(b.emoji .. " " .. string.upper(b.name), string.format("%s · floor %d · %s", tierName, floor, b.blurb), celebrate)
+		if newBand or run.hall == nil then
+			local sub = if run.hall then string.format("%s · %s · floor %d", run.hall.name, tierName, floor)
+				else string.format("%s · floor %d · %s", tierName, floor, b.blurb)
+			showCard(b.emoji .. " " .. string.upper(b.name), sub, celebrate)
+		else
+			showCard(b.emoji .. " " .. string.upper(run.hall.name), string.format("%s · %s · floor %d", b.name, tierName, floor), celebrate)
+		end
 	end
 end
 
@@ -603,7 +619,7 @@ local function buildHub()
 			anchor.Transparency = 1
 			anchor.Size = Vector3.new(1, 1, 1)
 			anchor.CFrame = CFrame.new((p :: BasePart).Position + labelOffset)
-			anchor.Parent = folder
+			art:adopt(anchor) -- parented through VaultArt, so the parts budget counts it
 			-- centred on the label's point, tall enough that its bottom SIGN_H px sit SIGN_GAP px under
 			-- the label's bottom edge; the rest of it is empty and see-through
 			local half = labelH / 2 + SIGN_GAP + SIGN_H
@@ -696,6 +712,9 @@ local function frame(dt: number)
 		local target = {}
 		for _, g in GROUPS do
 			local s = if r then EnvBands.sample(bands, r.depth, g) else table.clone(Env.Hub[g])
+			-- a hall of the deepest stratum lays its own light over the stratum's
+			local hallOver = r and r.hall and r.hall.overlay and r.hall.overlay[g]
+			if hallOver then s = EnvBands.overlay(s, hallOver, 1) end
 			local over = Env.Danger[g]
 			if over and danger > 0 then
 				s = EnvBands.overlay(s, over, danger * Env.MaxDangerBlend)
@@ -722,10 +741,12 @@ local function frame(dt: number)
 			local pal = r.pal
 			local a, b = bands[pal.band], bands[pal.next]
 			local density = a.props.density + (b.props.density - a.props.density) * pal.t
+			local hallProps = r.hall and r.hall.props -- a hall of the deepest stratum hangs its own
+			if hallProps then density = hallProps.density end
 			local sites = {}
 			for s = loc.storey, math.min(loc.storey + Env.PropStoreysAbove, model.storeys - 2) do
 				for _, site in VaultEnv.propSites(model, s, r.spec.seed, density) do
-					local kind = if site.roll < pal.t then b.props.kind else a.props.kind
+					local kind = if hallProps then hallProps.kind elseif site.roll < pal.t then b.props.kind else a.props.kind
 					local x = (2 * site.cx + 1 - (model.gCols - 1) / 2) * S
 					local z = (2 * site.cy + 1 - (model.gRows - 1) / 2) * S
 					table.insert(sites, {
@@ -737,6 +758,46 @@ local function frame(dt: number)
 			end
 			art:updateProps(key, sites)
 		end
+	end
+
+	-- critters: the stratum's own life in the maze cells around the runner (docs/complete-game-standard.md
+	-- §2). Sites per storey from (cells, storey, seed) only (VaultEnv.critterSites); the runner meets the
+	-- ones within CritterReach cells of the cell they stand in, nearest first, at most Budget.MaxCritters;
+	-- on a blend floor a critter belongs to whichever stratum its roll falls in, like a prop. Every frame
+	-- without a run (the hub, a run's end) passes nil, which takes them all down: no separate clear.
+	do
+		local list = nil
+		if r and origin and model and loc and loc.inside then
+			local pal = r.pal
+			local a, b = bands[pal.band], bands[pal.next]
+			r.critterSites = r.critterSites or {}
+			local sites = r.critterSites[loc.storey]
+			if sites == nil then
+				local density = a.critters.density + (b.critters.density - a.critters.density) * pal.t
+				sites = VaultEnv.critterSites(model, loc.storey, r.spec.seed, density)
+				r.critterSites[loc.storey] = sites
+			end
+			local cx = math.clamp(math.floor((loc.fx - 1) / 2 + 0.5), 0, model.cells - 1)
+			local cy = math.clamp(math.floor((loc.fy - 1) / 2 + 0.5), 0, model.cells - 1)
+			local S, H = model.cellSize, model.storeyHeight
+			list = {}
+			for _, site in VaultEnv.critterNear(sites, cx, cy, Env.CritterReach, Budget.MaxCritters) do
+				local c = if site.roll < pal.t then b.critters else a.critters
+				if VaultArt.hasCritter(c.kind) then
+					local dx, dz, vx, vz = VaultEnv.critterOffset(site.roll, r.t, Env.CritterRoam, c.speed)
+					local y = loc.storey * H + c.height
+					if c.height > 2 then y += math.sin(r.t * 2.3 + site.roll * 9) * Env.CritterBob end -- a flyer bobs
+					table.insert(list, {
+						kind = c.kind,
+						pos = (origin :: Vector3) + Vector3.new((2 * site.cx + 1 - (model.gCols - 1) / 2) * S + dx, y,
+							(2 * site.cy + 1 - (model.gRows - 1) / 2) * S + dz),
+						face = Vector3.new(vx, 0, vz),
+						color = rgb(c.color),
+					})
+				end
+			end
+		end
+		art:updateCritters(list)
 	end
 	do
 		local want: { [string]: number } = {}
@@ -764,9 +825,14 @@ local function frame(dt: number)
 		if r and origin then
 			local pal = r.pal
 			local a, b = bands[pal.band], bands[pal.next]
-			if VaultArt.hasWeather(a.weather.kind) then rates[a.weather.kind] = (rates[a.weather.kind] or 0) + a.weather.rate * (1 - pal.t) * shaftScale end
-			if pal.t > 0 and VaultArt.hasWeather(b.weather.kind) then
-				rates[b.weather.kind] = (rates[b.weather.kind] or 0) + b.weather.rate * pal.t * shaftScale
+			local hw = r.hall and r.hall.weather -- a hall of the deepest stratum has its own weather
+			if hw then
+				if VaultArt.hasWeather(hw.kind) then rates[hw.kind] = hw.rate * shaftScale end
+			else
+				if VaultArt.hasWeather(a.weather.kind) then rates[a.weather.kind] = (rates[a.weather.kind] or 0) + a.weather.rate * (1 - pal.t) * shaftScale end
+				if pal.t > 0 and VaultArt.hasWeather(b.weather.kind) then
+					rates[b.weather.kind] = (rates[b.weather.kind] or 0) + b.weather.rate * pal.t * shaftScale
+				end
 			end
 		end
 		art:updateWeather(EnvBands.capRates(rates, Budget.MaxWeatherEmitters, Budget.MaxWeatherRate, 0.1), camPos)
@@ -961,6 +1027,7 @@ local function frame(dt: number)
 	if r then
 		local b = bands[r.band]
 		chipText = b.emoji .. " " .. b.name
+		if r.hall then chipText ..= "  ·  " .. r.hall.name end
 		local nextIdx, remaining = EnvBands.nextBand(bands, r.depth)
 		if nextIdx then
 			local n = math.max(1, math.ceil(remaining :: number))
@@ -978,6 +1045,10 @@ local function frame(dt: number)
 	if chip.Text ~= chipText then chip.Text = chipText end
 	local btnText = if resting then "▶ Play" elseif rest.pending then "☕ …" else "☕ Rest"
 	if restBtn.Text ~= btnText then restBtn.Text = btnText end
+
+	-- LAST: every budget in Config.Budget is a cap, applied here to whatever this frame asked for
+	-- (VaultArt.enforceBudget; robloxemu/check_vaultrunners_budget.luau)
+	art:enforceBudget()
 end
 
 RunService.RenderStepped:Connect(function(dt)

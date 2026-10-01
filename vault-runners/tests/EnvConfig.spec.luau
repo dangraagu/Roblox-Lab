@@ -118,6 +118,50 @@ do
 		"a pad that comes back flashes, briefly (" .. tostring(Env.PadFlashSeconds) .. " s)")
 end
 
+--============================================================================ the endgame turns (halls)
+
+-- Owner decision 2026-09-30: the deepest stratum is where a player lives for hours (every Gold floor),
+-- so past Env.Halls.from it moves through halls — its own light, weather and props — every
+-- Env.Halls.every depths, and wraps round. The palette is the stratum's own in every hall, so every
+-- readability bar above holds in every hall by construction.
+do
+	local H = Env.Halls
+	ok(type(H) == "table" and type(H.list) == "table", "Config.Env.Halls exists")
+	H = H or { list = {} }
+	local last = bands[#bands]
+	ok(H.from ~= nil and H.from >= last.from, string.format("the halls start inside the deepest stratum (from %s, %s from %d)",
+		tostring(H.from), last.id, last.from))
+	ok(H.every ~= nil and H.every >= 3, "a hall lasts at least three depths (" .. tostring(H.every) .. ")")
+	ok(#H.list >= 3, "at least three halls (" .. #H.list .. ")")
+	local WEATHER = { glitter = true, sand = true, sparks = true, snow = true, embers = true, ash = true }
+	local PROPS = { lamp = true, brazier = true, panel = true, icicles = true, embers = true }
+	local seenWeather, seenProps = {}, {}
+	for i, hall in H.list do
+		ok(type(hall.id) == "string" and type(hall.name) == "string" and #hall.name <= 16,
+			"hall " .. i .. " has an id and a short name (" .. tostring(hall.name) .. ")")
+		local w = hall.weather or last.weather
+		local p = hall.props or last.props
+		ok(WEATHER[w.kind] == true and w.rate > 0 and w.rate <= Config.Budget.MaxWeatherRate,
+			string.format("hall %s's weather (%s, %s/s) is a kind the client draws, inside the weather budget", hall.id, tostring(w.kind), tostring(w.rate)))
+		ok(PROPS[p.kind] == true and p.density > 0 and p.density <= 0.5,
+			string.format("hall %s hangs a prop the client builds (%s) in at most half its cells", hall.id, tostring(p.kind)))
+		seenWeather[w.kind] = true
+		seenProps[p.kind] = true
+		for g, over in hall.overlay or {} do
+			for k in over do
+				ok(Env.Hub[g] ~= nil and Env.Hub[g][k] ~= nil, string.format("hall %s overlays %s.%s, which the lighting has", hall.id, g, k))
+			end
+		end
+		ok(hall.palette == nil, "hall " .. hall.id .. " keeps the stratum's palette (the pads and gems stay as measured)")
+	end
+	ok(H.list[1] and H.list[1].overlay == nil and H.list[1].weather == nil and H.list[1].props == nil,
+		"the first hall is the stratum as it was, so arriving there changes nothing but the name")
+	local nw, np = 0, 0
+	for _ in seenWeather do nw += 1 end
+	for _ in seenProps do np += 1 end
+	ok(nw == #H.list and np == #H.list, string.format("every hall has its own weather and its own props (%d weathers, %d props over %d halls)", nw, np, #H.list))
+end
+
 --============================================================================ gems stay findable
 
 do
@@ -130,9 +174,18 @@ do
 	for _, b in bands do
 		ok(type(b.palette.gem) == "table" and #b.palette.gem == 3, "band " .. b.id .. " has a gem colour of its own")
 	end
+	-- WHAT A RUNNER MUST FIND IS NOT DRESSED AS THE OBBY (second review, REVIEW-5 §B2). The pads are
+	-- read by colour too, and the first gem fix painted the tomb's gems and exit pearl next to its
+	-- cream pads (42 apart in RGB) and the Frozen Vault's sapphire next to its navy pads (42 apart);
+	-- Bronze's orange sat 40 from the bank's gold pads from the start. Every gem colour must now sit
+	-- MinGemPadDistance apart (Euclidean, sRGB 0-255) from the pad painted on the same floor.
+	ok(type(Env.MinGemPadDistance) == "number" and Env.MinGemPadDistance >= 80,
+		"a gem must sit at least 80 apart in RGB from the pads (" .. tostring(Env.MinGemPadDistance) .. ")")
+	local function dist(a, b) return math.sqrt((a[1] - b[1]) ^ 2 + (a[2] - b[2]) ^ 2 + (a[3] - b[3]) ^ 2) end
 	for t, tier in Config.Tiers do
 		local own = { tier.gemColor.r, tier.gemColor.g, tier.gemColor.b }
 		local worstF, worstFAt, worstW, worstWAt, recoloured, fallback = math.huge, 0, math.huge, 0, 0, 0
+		local worstP, worstPAt = math.huge, 0
 		for i = 0, 100 * 8 do
 			local depth = i / 8
 			local pal = VaultEnv.palette(Config, EnvBands, depth)
@@ -140,6 +193,8 @@ do
 			local cf, cw = VaultEnv.contrast(g, pal.floor), VaultEnv.contrast(g, pal.wall)
 			if cf < worstF then worstF, worstFAt = cf, depth end
 			if cw < worstW then worstW, worstWAt = cw, depth end
+			local dp = dist(g, pal.pad)
+			if dp < worstP then worstP, worstPAt = dp, depth end
 			local isOwn = g[1] == own[1] and g[2] == own[2] and g[3] == own[3]
 			local isBand = false
 			for _, id in { pal.band, pal.next } do
@@ -153,6 +208,9 @@ do
 			tier.name, worstF, worstFAt, worstW, worstWAt, recoloured))
 		ok(worstF >= Env.MinGemContrast, string.format("%s: a gem always stands out against the floor (worst %.2f:1 at depth %.2f)", tier.name, worstF, worstFAt))
 		ok(worstW >= Env.MinGemWallContrast, string.format("%s: and against the wall (worst %.2f:1 at depth %.2f)", tier.name, worstW, worstWAt))
+		ok(worstP >= (Env.MinGemPadDistance or math.huge), string.format(
+			"%s: a gem never wears the pads' colour (worst %.1f apart in RGB at depth %.2f)", tier.name, worstP, worstPAt))
+		print(string.format("  %s gems vs the pads: worst %.1f apart in RGB (depth %.2f)", tier.name, worstP, worstPAt))
 		ok(fallback == 0, string.format("%s: the shipped strata never need the black-or-white fallback (%d depths did)", tier.name, fallback))
 		ok(recoloured < 801, tier.name .. ": and somewhere its gems keep the tier's own colour")
 	end
@@ -219,6 +277,65 @@ do
 	ok(valid, "Config.Rest validates (" .. tostring(err) .. ")")
 	ok(Config.Rest.IdleSeconds == 0, "no idle rest: nothing in the hub to rest from, and nothing in a run may pause")
 	ok(Config.Rest.PendingSeconds > 0, "a queued rest expires")
+end
+
+--============================================================================ critters: every stratum is alive
+
+do
+	-- docs/complete-game-standard.md §2: every band has its own light, colour, scenery, CRITTERS and
+	-- weather. Each stratum has a kind of its own, which lives in one maze cell (VaultEnv.critterOffset)
+	-- and is drawn by VaultArt (check_vaultrunners_critters builds every kind through the real client).
+	local kinds, distinct = {}, 0
+	for _, b in bands do
+		local c = b.critters
+		ok(type(c) == "table" and type(c.kind) == "string" and #c.kind > 0, "band " .. b.id .. " has critters of its own")
+		if type(c) == "table" then
+			if kinds[c.kind] == nil then distinct += 1 end
+			kinds[c.kind] = true
+			ok(type(c.density) == "number" and c.density > 0 and c.density <= 1,
+				b.id .. ": critter density in (0, 1] (" .. tostring(c.density) .. ")")
+			ok(type(c.speed) == "number" and c.speed > 0 and c.speed < Config.Movement.WalkSpeed,
+				b.id .. ": a critter is slower than a runner (" .. tostring(c.speed) .. ")")
+			ok(type(c.height) == "number" and c.height >= 0
+				and c.height + (Env.CritterBob or 0) + (Env.CritterHalfLength or math.huge) < Env.PropBottomAboveFloor,
+				b.id .. ": it walks or flies below the hanging props (" .. tostring(c.height) .. ")")
+			ok(type(c.color) == "table" and #c.color == 3, b.id .. ": it has a body colour")
+		end
+	end
+	ok(distinct == #bands, "every stratum's critter is a kind of its own (" .. distinct .. " kinds, " .. #bands .. " strata)")
+	-- it lives in ONE maze cell and never reaches that cell's walls
+	ok(type(Env.CritterRoam) == "number" and type(Env.CritterHalfLength) == "number" and Env.CritterRoam > 0
+		and Env.CritterRoam + Env.CritterHalfLength <= Config.Vault.CellSize / 2 - 0.5,
+		"a critter's loop stays inside its cell, half a stud clear of the wall")
+	ok(type(Env.CritterReach) == "number" and Env.CritterReach >= 1 and Env.CritterReach % 1 == 0,
+		"critters are met within whole cells of the runner")
+	ok(type(Config.Budget.MaxCritters) == "number" and Config.Budget.MaxCritters >= 1 and Config.Budget.MaxCritters <= 6,
+		"a handful at a time (Budget.MaxCritters " .. tostring(Config.Budget.MaxCritters) .. ")")
+
+	-- A CRITTER IS NEVER TREASURE AND NEVER A PAD. A runner reads gems and pads by colour, so a critter's
+	-- body sits MinGemPadDistance away, in RGB, from every gem colour worn on its floor and from the pad
+	-- painted there, at every depth its stratum covers (a blend floor shows both strata's critters).
+	local function dist(x, y) return math.sqrt((x[1] - y[1]) ^ 2 + (x[2] - y[2]) ^ 2 + (x[3] - y[3]) ^ 2) end
+	local worst, worstAt = math.huge, ""
+	for i = 0, 100 * 8 do
+		local depth = i / 8
+		local pal = VaultEnv.palette(Config, EnvBands, depth)
+		for _, id in { pal.band, pal.next } do
+			local c = bands[id].critters
+			if type(c) == "table" and type(c.color) == "table" then
+				for tIdx in Config.Tiers do
+					local d = dist(c.color, VaultEnv.gem(Config, pal, tIdx))
+					if d < worst then worst, worstAt = d, string.format("%s vs tier %d's gem at depth %.2f", c.kind, tIdx, depth) end
+				end
+				local d = dist(c.color, pal.pad)
+				if d < worst then worst, worstAt = d, string.format("%s vs the pad at depth %.2f", c.kind, depth) end
+			end
+		end
+	end
+	print(string.format("  critters vs gems and pads: worst %.1f apart in RGB (%s)", worst, worstAt))
+	ok(worst < math.huge, "(the colour rule measured some critter)")
+	ok(worst >= (Env.MinGemPadDistance or math.huge),
+		string.format("a critter never wears a gem's or a pad's colour (worst %.1f apart: %s)", worst, worstAt))
 end
 
 --============================================================================ budgets

@@ -150,7 +150,15 @@ end
 -- So the explorer rolls each hop, and `climbSeconds` is never consulted here.
 --
 -- A miss costs the fall from the pad below the one that was missed, plus getting back under
--- pad 1. Missing hop 1 is a step off a kerb; missing hop 6 is fifteen studs.
+-- pad 1. Missing hop 2 is a three-stud drop; missing hop 6 is fifteen studs.
+--
+-- HOP 1 CANNOT BE MISSED, and the roll knows it (REVIEW-5 §1). It leaves from the storey floor,
+-- and the floor under pad 1 is solid (tests/VaultFloor.spec.luau, `firstHopIsAStep`): a runner
+-- who fluffs it lands on the floor they jumped from, which is where a miss would have put them
+-- anyway. So a round is hop 1 for free, then the five hops that CAN be missed. The first cut
+-- rolled all six as missable, shared that assumption with VaultPath, and the two agreed to 0.1%
+-- while both priced a hop nobody can fail.
+local rolledFalls = { n = 0, seconds = 0 } -- every fall the rolled climbs take, for the per-miss check
 local function climbSeconds(model, rand)
 	local n = math.floor(model.storeyHeight / model.stepRise)
 	local hop = C.Movement.ClimbSecondsPerStep
@@ -161,8 +169,11 @@ local function climbSeconds(model, rand)
 		guard += 1
 		if guard > 100000 then break end
 		t += hop
-		if rand(1000000) <= pMillionths then
-			t += VaultPath.fallSeconds(C, (k - 1) * model.stepRise) + C.Ascent.ModelReapproachSeconds
+		if k > 1 and rand(1000000) <= pMillionths then
+			local fall = VaultPath.fallSeconds(C, (k - 1) * model.stepRise)
+			rolledFalls.n += 1
+			rolledFalls.seconds += fall
+			t += fall + C.Ascent.ModelReapproachSeconds
 			k = 1
 		else
 			k += 1
@@ -213,24 +224,62 @@ do
 	spec.seed = Progression.seedFor(C, 3, 1)
 	local model = VaultFloor.build(C, spec, MazeGen, Rng)
 	local rand = lcg(20260910)
-	local N = 20000
-	local sum, worstFalls = 0, 0
+	local N = 80000 -- the standard error of the mean has to sit well inside the 0.5% tolerance below
+	local sum, sumSq, worstFalls = 0, 0, 0
 	local base = math.floor(model.storeyHeight / model.stepRise) * C.Movement.ClimbSecondsPerStep
 	for _ = 1, N do
 		local t = climbSeconds(model, rand)
 		sum += t
+		sumSq += t * t
 		if t > worstFalls then worstFalls = t end
 	end
 	local mean = sum / N
+	local se = math.sqrt(math.max(0, sumSq / N - mean * mean) / N)
 	local priced = VaultPath.climbSeconds(C, model)
-	ok(math.abs(mean - priced) / priced <= 0.02, string.format(
+	-- 0.5%, not 2%. The standard error of the 80000-roll mean is printed below (0.14%), so 0.5% is
+	-- over three standard errors of room — and 2% was loose enough to wave through a closed form that
+	-- priced a hop nobody can miss, 1.2% too dear (REVIEW-5 §1).
+	ok(se / mean < 0.005 / 3, string.format(
+		"the rolled mean's standard error is %.3f%% — too noisy for a 0.5%% tolerance to mean anything",
+		100 * se / mean))
+	ok(math.abs(mean - priced) / priced <= 0.005, string.format(
 		"%d rolled climbs average %.3fs and VaultPath prices them at %.3fs — the budget is paying "
 			.. "for a different obby than the one being climbed", N, mean, priced))
 	ok(mean > base, string.format(
 		"a rolled climb averages %.3fs against a clean %.3fs — nothing is ever being missed",
 		mean, base))
-	print(string.format("  climb: clean %.2fs, priced %.2fs, %d rolled %.2fs (worst %.2fs)",
-		base, priced, N, mean, worstFalls))
+	-- ...and what ONE miss costs, measured on its own. The whole-climb mean is dominated by the clean
+	-- hops, so a miss priced 8% too cheap moves it by a quarter of a percent — inside the tolerance
+	-- above (REVIEW-5 §4, mutation E2: a fall off pad j priced from pad j-1). The average fall over
+	-- the rolled misses has no clean hops in it.
+	local perMiss = rolledFalls.seconds / math.max(1, rolledFalls.n) + C.Ascent.ModelReapproachSeconds
+	local pricedMiss = VaultPath.missSeconds(C, model)
+	ok(rolledFalls.n >= 1000 and math.abs(perMiss - pricedMiss) / pricedMiss <= 0.01, string.format(
+		"%d rolled misses cost %.4fs each and VaultPath.missSeconds prices one at %.4fs", rolledFalls.n, perMiss, pricedMiss))
+	print(string.format("  a miss: %d rolled cost %.4fs each, priced %.4fs", rolledFalls.n, perMiss, pricedMiss))
+	print(string.format("  climb: clean %.2fs, priced %.3fs, %d rolled %.3fs +- %.3f (%.2f%% apart; worst %.2fs)",
+		base, priced, N, mean, se, 100 * math.abs(mean - priced) / priced, worstFalls))
+end
+
+-- ModelMissChance IS AN INVITATION TO RETUNE (Config.Ascent says so, and measure_curve.luau §6
+-- sweeps it), so an out-of-range value is an edit somebody will make, not an impossible one. At
+-- p = 1 the closed form divides by q^n = 0 and hands every vault an infinite countdown; it must
+-- refuse loudly instead (REVIEW-5 §6). Just under 1 is still a number.
+do
+	local spec = Progression.difficulty(C, 3, 1)
+	spec.seed = Progression.seedFor(C, 3, 1)
+	local model = VaultFloor.build(C, spec, MazeGen, Rng)
+	local bad = table.clone(C)
+	bad.Ascent = table.clone(C.Ascent)
+	for _, p in ipairs({ 1, 1.5, -0.1 }) do
+		bad.Ascent.ModelMissChance = p
+		local fine, err = pcall(VaultPath.climbSeconds, bad, model)
+		ok(not fine and string.find(tostring(err), "ModelMissChance", 1, true) ~= nil, string.format(
+			"ModelMissChance = %s must be refused by name, and the climb priced %s", tostring(p), tostring(err)))
+	end
+	bad.Ascent.ModelMissChance = 0.9
+	local fine, t = pcall(VaultPath.climbSeconds, bad, model)
+	ok(fine and type(t) == "number" and t == t and t < math.huge, "ModelMissChance = 0.9 still prices a finite climb (" .. tostring(t) .. ")")
 end
 
 local MAZES, TRIALS = 120, 12

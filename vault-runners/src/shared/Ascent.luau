@@ -113,7 +113,9 @@ end
 -- landing is not standing on it and neither is walking under the shaft.
 --
 -- Passing `state` and `now` makes a pad that has already fallen away un-standable, which is what
--- stops the server registering a touch on thin air.
+-- stops the server registering a touch on thin air. A gone pad is SKIPPED, not an answer: the scan
+-- carries on, so a gone pad can never hide a solid one under the same runner (REVIEW-5 §11 — the
+-- first cut returned "nothing" at the first box that matched).
 function Ascent.padUnder(cfg: any, model: any, pos: any, state: any?, now: number?): (number?, number?)
 	local A = cfg.Ascent
 	for s = 0, model.storeys - 2 do
@@ -127,7 +129,6 @@ function Ascent.padUnder(cfg: any, model: any, pos: any, state: any?, now: numbe
 						if state == nil or now == nil or Ascent.solid(cfg, state, s, pad.index, now) then
 							return s, pad.index
 						end
-						return nil, nil
 					end
 				end
 			end

@@ -207,6 +207,29 @@ function VaultPath.climbBaseSeconds(cfg: any, model: any): number
 	return steps * cfg.Movement.ClimbSecondsPerStep
 end
 
+-- HOW MANY HOPS OF THE CLIMB CAN BE MISSED. Not all of them: hop 1 leaves from the storey FLOOR,
+-- and the floor under pad 1 is solid (the hole is at the storey's entry cell, the shaft at its
+-- exit), so a runner who fluffs hop 1 lands on the floor they jumped from — which is where a miss
+-- would have put them anyway. Every later hop leaves from a pad with five studs of open air around
+-- it (tests/VaultFloor.spec.luau: `climbIsFailable`, `firstHopIsAStep`).
+--
+-- The first cut priced all floor(storeyHeight / stepRise) = 6 hops as missable, and the rolled
+-- climb in tests/Curve.spec.luau shared the assumption, so the two agreed while both charged a
+-- fall that cannot happen (REVIEW-5 §1).
+function VaultPath.failableHops(_cfg: any, model: any): number
+	return math.max(0, math.floor(model.storeyHeight / model.stepRise) - 1)
+end
+
+-- The obby's one assumption, checked where it is used. It is an invitation to retune (Config.Ascent
+-- says so, measure_curve.luau §6 sweeps it), and at p = 1 the closed form below divides by zero and
+-- hands every vault an infinite countdown (REVIEW-5 §6). Refuse it by name instead.
+local function missChance(cfg: any): number
+	local p = cfg.Ascent.ModelMissChance
+	assert(type(p) == "number" and p >= 0 and p < 1, string.format(
+		"Config.Ascent.ModelMissChance must be in [0, 1), got %s", tostring(p)))
+	return p
+end
+
 -- WHAT A MISSED HOP COSTS, in seconds, averaged over which hop was missed.
 --
 -- There is no checkpoint in the shaft and nothing to catch you: a miss drops the runner to the
@@ -215,9 +238,10 @@ end
 -- the retry count, not through this number.
 --
 -- MISSES ARE NOT SPREAD EVENLY UP THE SHAFT, and the first cut of this function averaged the
--- drop over the six hops as if they were. They are not: a miss restarts at pad 1, so hop 1 is
--- attempted every round and hop 6 only in a round that got that far. Hop k is reached with
--- probability q^(k-1), so that is the weight a miss there carries.
+-- drop over the hops as if they were. They are not: a miss restarts at pad 1, so the first
+-- missable hop (hop 2, off pad 1) is attempted every round and hop 6 only in a round that got that
+-- far. Missable hop j (j = 1..failableHops) is reached with probability q^(j-1), and a miss there
+-- is a fall from pad j, j * stepRise above the floor.
 --
 -- The fall is weighted too, not evaluated at the average drop — sqrt is concave, so
 -- E[sqrt(drop)] and sqrt(E[drop]) are different numbers and the second one is the flattering one.
@@ -225,29 +249,32 @@ end
 -- tests/Curve.spec.luau's rolled climb is what caught the uniform version: 20000 simulated
 -- climbs came out 10% cheaper than this file was pricing them.
 function VaultPath.missSeconds(cfg: any, model: any): number
-	local n = math.floor(model.storeyHeight / model.stepRise)
-	local q = 1 - cfg.Ascent.ModelMissChance
+	local m = VaultPath.failableHops(cfg, model)
+	local q = 1 - missChance(cfg)
 	local wsum, fsum = 0, 0
-	for k = 1, n do
-		local w = q ^ (k - 1)
+	for j = 1, m do
+		local w = q ^ (j - 1)
 		wsum += w
-		fsum += w * VaultPath.fallSeconds(cfg, (k - 1) * model.stepRise)
+		fsum += w * VaultPath.fallSeconds(cfg, j * model.stepRise)
 	end
+	if wsum <= 0 then return cfg.Ascent.ModelReapproachSeconds end
 	return fsum / wsum + cfg.Ascent.ModelReapproachSeconds
 end
 
 -- EXPECTED seconds for one storey transition, misses included.
 --
--- n hops, each missed independently with probability p, and a miss sends the runner back to the
--- bottom of the shaft. That is the textbook "n consecutive successes with restart":
+-- A round is hop 1 (off the floor: it cannot be missed) and then the m = failableHops hops that
+-- can, each missed independently with probability p; a miss sends the runner back to the floor
+-- and a new round. The m missable hops are the textbook "m consecutive successes with restart":
 --
---     E[hop attempts] = (1 - q^n) / (p q^n)        q = 1 - p
---     E[misses]       = p * E[attempts]
+--     E[missable attempts] = (1 - q^m) / (p q^m)        q = 1 - p
+--     E[misses]            = p * E[missable attempts]
+--     E[hops]              = E[missable attempts] + (E[misses] + 1)   one hop 1 per round
 --
--- so the expected cost is E[attempts] hops plus E[misses] falls. At p = 0 the first expression
--- is 0/0; the limit is n, and the branch below is that limit rather than a nan — which matters,
--- because p = 0 is exactly the mutation a spec uses to ask whether the budget pays for the obby
--- at all.
+-- so the expected cost is E[hops] hops plus E[misses] falls. At p = 0 the first expression is 0/0;
+-- the limit is m, E[hops] is n, and the branch below is that limit rather than a nan — which
+-- matters, because p = 0 is exactly the mutation a spec uses to ask whether the budget pays for the
+-- obby at all.
 --
 -- E[misses] IS NOT attempts - n. That was the first cut and it is wrong by a factor of three at
 -- p = 0.04: attempts - n counts the successful hops of the rounds that ended in a fall as if they
@@ -257,16 +284,18 @@ end
 -- p IS A MODEL, NOT A MEASUREMENT. Nobody has played this game, so Config.Ascent.ModelMissChance
 -- is a stated assumption about a competent player in the same way measure_curve.luau's blind
 -- explorer is — and REVIEW-4 sweeps it rather than defending one value. What the geometry
--- guarantees (tests/VaultFloor.spec.luau, `climbIsFailable`) is that p is not ZERO: every hop in
--- the shaft crosses a gap wider than the runner, inside a reach the jump actually has.
+-- guarantees (tests/VaultFloor.spec.luau, `climbIsFailable`) is that p is not ZERO for the hops
+-- priced here: every one crosses a gap wider than the runner, inside a reach the jump actually has.
 function VaultPath.climbAttempts(cfg: any, model: any): (number, number)
 	local n = math.floor(model.storeyHeight / model.stepRise)
-	local p = cfg.Ascent.ModelMissChance
-	if p <= 0 then return n, 0 end
+	local m = VaultPath.failableHops(cfg, model)
+	local p = missChance(cfg)
+	if p <= 0 or m <= 0 then return n, 0 end
 	local q = 1 - p
-	local qn = q ^ n
-	local attempts = (1 - qn) / (p * qn)
-	return attempts, p * attempts
+	local qm = q ^ m
+	local missable = (1 - qm) / (p * qm)
+	local misses = p * missable
+	return missable + misses + (n - m), misses
 end
 
 function VaultPath.climbSeconds(cfg: any, model: any): number
@@ -331,7 +360,9 @@ function VaultPath.measure(cfg: any, model: any): any
 		-- transitions 0..s is behind them — and every one of those retries was seconds spent
 		-- standing on a floor the plane was rising toward. Only the retries: the clean climb is a
 		-- monotone rise out of the danger and is already in the walk demand above.
-		obbyBy[s + 1] = (s + 1) * climbRetry
+		-- The TOP storey has no climb out of it (it has the exit), so it carries the storeys - 1
+		-- lots below it and no more — the same as obbyTotal (REVIEW-5 §4).
+		obbyBy[s + 1] = math.min(s + 1, model.storeys - 1) * climbRetry
 		if s < model.storeys - 1 then dt += climbBase end
 
 		arriveAt[s + 1] = t

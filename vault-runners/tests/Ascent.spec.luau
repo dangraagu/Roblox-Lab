@@ -89,6 +89,20 @@ do
 	local _, k2 = Ascent.padUnder(C, model, { x = pad.x + 1.4, y = pad.y + 3, z = pad.z })
 	eq(k2, 3, "standing on the lip of the pad still counts as standing on it")
 
+	-- THE STAND BOX IS THE PAD PLUS HALF A RUNNER, AND NOT A STUD MORE (REVIEW-5 §3). A runner whose
+	-- root is within StepSize/2 + RunnerWidth/2 of the pad's centre has part of their 2-stud body over
+	-- the pad; past that, all of them is over the gap. StandRadius = 3 was a full pad-width of
+	-- tolerance: a runner who landed short, 1.5 studs out into the air and about to fall, was counted
+	-- as standing on the pad and started its crumble.
+	local edge = C.Vault.StepSize / 2 + C.Movement.RunnerWidth / 2
+	eq(A.StandRadius, edge, "StandRadius is the pad's half-width plus the runner's half-width")
+	local _, kEdge = Ascent.padUnder(C, model, { x = pad.x + edge, y = pad.y + 3, z = pad.z })
+	eq(kEdge, 3, "a runner whose body just overlaps the pad's edge is standing on it")
+	local _, kPast = Ascent.padUnder(C, model, { x = pad.x + edge + 0.1, y = pad.y + 3, z = pad.z })
+	eq(kPast, nil, "a runner whose whole body is over the gap is not standing on the pad")
+	local _, kShort = Ascent.padUnder(C, model, { x = pad.x - 3, y = pad.y + 3, z = pad.z })
+	eq(kShort, nil, "the reviewer's point: 1.5 studs out into the gap is not on the pad")
+
 	-- ...but the open air between two pads is not any pad. This is the assertion that says the
 	-- gap is real: if StandRadius ever grew past half the reach, the whole shaft would read as
 	-- one continuous platform and nothing could ever be missed.
@@ -114,10 +128,24 @@ do
 	local p1 = sh0.pads[1]
 	local _, kFloor = Ascent.padUnder(C, model, { x = p1.x - 1, y = floorRoot, z = p1.z - 1 })
 	eq(kFloor, nil, "walking across the stairwell floor does not crumble the pad above it")
-	-- (The TOP pad is flush with the floor above by construction, so a runner arriving on the next
-	-- storey does register as standing on it for a moment. That is correct rather than a false
-	-- positive — they genuinely did just stand on it — and it costs nothing, because the pad is
-	-- behind them.)
+	-- THE TOP PAD IS FLUSH WITH THE FLOOR ABOVE, 0.5 studs in from the hole's edge, so a runner
+	-- arriving on the next storey registers on it while any part of their body is over it — and not
+	-- once all of it is on the solid floor (obby review finding 7, REVIEW-5 §7). With StandRadius = 3
+	-- a runner a full stud onto the floor above still counted, "correct" only by fiat.
+	do
+		local top = sh0.pads[#sh0.pads]
+		local sx = if top.x > sh0.x then 1 else -1 -- the hole edge nearest the pad, away from the cell centre
+		local holeEdge = sh0.x + sx * model.cellSize / 2
+		local rootY = top.y + C.Run.RunnerRootHeight
+		-- standing on the floor's lip, 0.8 studs past the hole's edge, body clear of the pad by 0.3
+		local clear = top.x + sx * (C.Vault.StepSize / 2 + C.Movement.RunnerWidth / 2 + 0.3)
+		ok(sx * (clear - holeEdge) > 0, "(the lip point is on the floor above, past the hole's edge)")
+		local _, kFloorAbove = Ascent.padUnder(C, model, { x = clear, y = rootY, z = top.z })
+		eq(kFloorAbove, nil, "a runner on the floor above whose body is clear of the top pad is not on it")
+		local overlap = top.x + sx * (A.StandRadius - 0.05) -- half a runner over the pad's far edge
+		local _, kLip = Ascent.padUnder(C, model, { x = overlap, y = rootY, z = top.z })
+		eq(kLip, #sh0.pads, "...and one whose body still overlaps the top pad from the floor's lip is on it")
+	end
 	-- Standing on the pad still counts, feet on its top surface.
 	local _, kOn = Ascent.padUnder(C, model,
 		{ x = p1.x, y = p1.y + C.Run.RunnerRootHeight, z = p1.z })
@@ -128,6 +156,43 @@ do
 	local _, kGone = Ascent.padUnder(C, model, { x = pad.x, y = pad.y + 3, z = pad.z }, st,
 		A.CrumbleSeconds + 0.01)
 	eq(kGone, nil, "a pad that has already fallen away cannot be stood on")
+end
+
+-- A GONE PAD DOES NOT HIDE A SOLID ONE (obby review finding 11, REVIEW-5 §11). padUnder used to stop
+-- at the first pad whose box matched and answer "nothing" if that pad was gone, instead of looking
+-- at the rest. The shipped shaft never has two pads within a stand box of one point (asserted just
+-- below), so this is the rule held on a made-up shaft where it does.
+do
+	local fake = {
+		storeys = 2, stepRise = model.stepRise,
+		shafts = { { pads = {
+			{ index = 1, x = 0, y = 3, z = 0 },
+			{ index = 2, x = 1, y = 3, z = 0 },
+		} } },
+	}
+	local st = Ascent.new(C, fake)
+	Ascent.touch(C, st, 0, 1, 0)
+	local _, k = Ascent.padUnder(C, fake, { x = 0.5, y = 3 + C.Run.RunnerRootHeight, z = 0 }, st, A.CrumbleSeconds + 0.01)
+	eq(k, 2, "a runner over a gone pad AND a solid one is standing on the solid one")
+	-- ...and in the vaults we ship, no point is inside two pads' stand boxes at once
+	local worst = math.huge
+	for _, tier in ipairs({ 1, 2, 3 }) do
+		local sp = Progression.difficulty(C, tier, 1)
+		sp.seed = Progression.seedFor(C, tier, 1)
+		local mm = VaultFloor.build(C, sp, MazeGen, Rng)
+		local all = {}
+		for s = 0, mm.storeys - 2 do for _, p in ipairs(mm.shafts[s + 1].pads) do table.insert(all, p) end end
+		for i = 1, #all do
+			for j = i + 1, #all do
+				local a, b = all[i], all[j]
+				-- two boxes overlap only when BOTH axes are within 2 * StandRadius and the feet bands meet
+				local apart = math.max(math.abs(a.x - b.x), math.abs(a.z - b.z))
+				if math.abs(a.y - b.y) < model.stepRise / 2 + A.StandHeight then worst = math.min(worst, apart) end
+			end
+		end
+	end
+	ok(worst > 2 * A.StandRadius, string.format(
+		"two pads at feet-band height are %.1f studs apart, inside two stand boxes (%.1f)", worst, 2 * A.StandRadius))
 end
 
 --============================================================================ the crumble cycle

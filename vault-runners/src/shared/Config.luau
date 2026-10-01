@@ -39,6 +39,52 @@ Config.Save = {
 	-- this file already has one boundary it refuses to sit on (RunState's `now >= sealAt`).
 	FlushTickSeconds = 7,
 	LockSeconds = 120,          -- soft session lock TTL, renewed by every write
+	-- The highscore board's OrderedDataStore (Config.Board). Its own store: an ordered store holds
+	-- one integer per key, never a profile.
+	Board = "VaultRunners_Deepest_v1",
+}
+
+--============================================================================ the highscore board
+
+-- docs/complete-game-standard.md §3 (owner, 2026-09-16). One board, PUBLIC or FRIENDS, on a physical
+-- sign by the hub spawn with a ProximityPrompt that toggles the view per player.
+--
+-- THE METRIC IS THE DEEPEST VAULT ESCAPED, as a depth: VaultEnv.deepestCleared(floors), the tier's
+-- buried depth (Env.TierDepth) plus the last floor cleared in it. It is the number the strata are
+-- drawn from, so the brag (the Frozen Vault, depth 18+) is a row on the board. A script cannot
+-- inflate it: `floors` moves only in finishRun, when RunState.tryEscape banks a run the server judged
+-- on its own trusted position (Trace), and no remote carries a depth, a floor or a time.
+-- Stored as `depth * 2e9 + (2e9 - reachedAtUnix)` (src/shared/Board.luau) so a tie goes to whoever
+-- escaped that deep FIRST, and written only when the depth improves.
+Config.Board = {
+	PublicRows = 10,            -- GetSortedAsync(false, 10)
+	PublicCacheSeconds = 60,    -- the server asks for the top 10 at most once a minute
+	FriendsRows = 10,
+	FriendsCap = 200,           -- Players:GetFriendsAsync is never read past this many friends
+	FriendsCacheSeconds = 300,  -- one player's friends list
+	ScoreCacheSeconds = 120,    -- one friend's stored value (including "never escaped"), per server
+	ReadsBurst = 40,            -- GetAsync on the board for friends: 40 at once...
+	ReadsPerSecond = 1,         -- ...then 1 a second (Roblox allows 60 + 10 per player a minute)
+	BudgetReserve = 10,         -- always leave this many GetAsync in Roblox's own budget
+	MaxMetric = 4000000,        -- every stored value is exact in a double up to here (4e6 * 2e9 < 2^53)
+	PromptDistance = 10,        -- studs; the spawn pad's edge is farther, so standing on it shows no prompt
+	-- where the sign stands: west of the spawn, across from the pet stall, its face turned to the spawn,
+	-- its foot on the hub floor (y = Size.y / 2). x = -18, not -16: at -16 the prompt low on its face was
+	-- 9.6 studs from the spawn pad's edge, inside PromptDistance, so it would pop up on every spawn
+	-- (check_vaultrunners_board measured it). At -18 it is 11.6 and the sign is 18.4 from the spawn.
+	Position = { x = -18, y = 5.5, z = 4 },
+	Size = { x = 16, y = 11, z = 1 },
+	Text = {
+		Title = "DEEPEST ESCAPES",
+		EmptyPublic = "Nobody has escaped a vault yet. Escape one and your name goes here first!",
+		FriendsFailed = "Couldn't load your Roblox friends right now. Try again in a minute.",
+		NoFriends = "No Roblox friends yet. Friends you add show up here, ranked against you.",
+		FriendsNoScores = "None of your %d friends has escaped a vault yet. Invite one and race them to the Frozen Vault!",
+		FriendsChecking = "Checking your friends: %d of %d so far...",
+		Loading = "Loading...",
+		Prompt = "Public / Friends",
+		Offline = "The board is offline this session (saving is off), so nothing is ranked.",
+	},
 }
 
 --============================================================================ vault geometry
@@ -259,16 +305,25 @@ Config.Ascent = {
 	RespawnSeconds = 3,
 	-- How the SERVER decides a runner is standing on a pad, in studs, against the TRUSTED
 	-- position (src/shared/Trace.luau) — never against the client's claim. Horizontal is measured
-	-- to the pad's centre and is generous by half a pad, because a runner standing on the lip of
-	-- a 3-stud pad is standing on it.
+	-- from the runner's root to the pad's centre, and it is the pad's half-width plus the RUNNER's
+	-- half-width: up to there, part of a 2-stud body is over the pad; past it, all of it is over the
+	-- gap. DERIVED, not typed. It was 3 — a full pad-width of tolerance — and a runner who landed short,
+	-- 1.5 studs out into the air and about to fall, was counted as standing on the pad (REVIEW-5 §3).
 	--
 	-- StandHeight is how far the runner's FEET may be above the pad's top surface, NOT how far
 	-- their root may be. Measured from the root it is impossible to tell standing on pad 1 from
 	-- walking across the floor underneath it — the pad's top is exactly StepRise up and a standing
 	-- root is Run.RunnerRootHeight up, and those are the same number of studs above the floor.
 	-- That made pad 1 crumble while the runner was still walking towards it.
-	StandRadius = 3,
+	StandRadius = Config.Vault.StepSize / 2 + Config.Movement.RunnerWidth / 2,
 	StandHeight = 2,
+	-- HOW OFTEN THE SERVER LOOKS AT THE SHAFT, in seconds. Faster than the run's rules tick
+	-- (Run.TickSeconds, 0.2) on purpose: a runner who chains the hops has a pad under their feet for
+	-- about 0.13 s, and a 0.2 s look missed a third of those landings, so the pads they chained over
+	-- never crumbled (robloxemu/check_vaultrunners_shaft.luau §6: 18 of 48 before, 0 after). The
+	-- trusted position (Trace) is stepped at this rate too; the gems, the exit and the collapse are
+	-- still judged at Run.TickSeconds.
+	SampleSeconds = 0.05,
 
 	--------------------------------------------------------------------- the MODEL, not the game
 	-- Neither of the next two numbers is read by the running game. They exist so the COUNTDOWN
@@ -278,12 +333,18 @@ Config.Ascent = {
 	-- ModelMissChance is an ASSUMPTION, in the same way measure_curve.luau's blind explorer is an
 	-- assumption. Nobody has played this game, so there is no measured miss rate to put here;
 	-- REVIEW-4 sweeps it from 0 to 0.12 and reports what the curve does at each, instead of
-	-- defending one number. Six hops at 0.04 is a 22% chance of falling at least once per storey
-	-- and 0.94 expected falls per storey transition — about 3.7 falls in a five-storey Gold run.
+	-- defending one number. Five missable hops at 0.04 (hop 1 leaves from the floor and cannot be
+	-- missed, VaultPath.failableHops) is an 18% chance of falling at least once per storey and 0.23
+	-- expected falls per storey transition — about 0.91 falls in a five-storey Gold run.
+	-- robloxemu/check_vaultrunners_static.luau recomputes every number in those two sentences; an
+	-- earlier version said 0.94 and 3.7, which is `attempts - n`, the closed form's own first bug.
 	ModelMissChance = 0.04,
-	-- Seconds from landing on the storey floor after a miss to being back under pad 1, including
-	-- the wait when the pad you fell off has not respawned yet. The fall itself is NOT in here —
-	-- VaultPath.fallSeconds solves that from Gravity.
+	-- Seconds from landing on the storey floor after a miss to being back under pad 1. The fall
+	-- itself is NOT in here — VaultPath.fallSeconds solves that from Gravity — and neither is the
+	-- wait for a crumbled pad to come back: a miss on hop 2 can find pad 1 still gone for about two
+	-- seconds. That wait is NOT modelled. Measured on the real server (walk_vaultrunners.luau) it
+	-- is 0.46 s per fall — 22.2 s over 48 falls — so about 0.4 s at the 0.91 falls a Gold run is
+	-- priced for, against a 269 s countdown (REVIEW-5 §5).
 	ModelReapproachSeconds = 0.8,
 }
 
@@ -363,6 +424,15 @@ Config.Env = {
 	-- One storey above the one you stand on is dressed too, so props never pop in as you climb.
 	PropStoreysAbove = 1,
 	PropBottomAboveFloor = 12.8, -- a hanging prop never reaches below this (a jumping head tops out near 12)
+	-- CRITTERS (docs/complete-game-standard.md §2: every band has its own). Each stratum's kind is in its
+	-- band (`critters`). A critter lives in ONE maze cell and walks a loop inside it (VaultEnv.critterOffset),
+	-- placed from (storey, cell, floor seed) only, like a prop: it never reads the walls, the route or the
+	-- gems. The runner meets the ones within CritterReach cells of the cell they stand in, nearest first,
+	-- at most Budget.MaxCritters; never in the shaft cell or over the hole. Client-only and inert.
+	CritterReach = 2,      -- maze cells (Chebyshev) around the runner's cell
+	CritterRoam = 3.5,     -- studs: the loop's largest radius from the cell centre
+	CritterHalfLength = 1, -- studs: the most any critter VaultArt draws reaches from its centre
+	CritterBob = 0.4,      -- studs: how far a flyer bobs above and below its height
 
 	-- The hub is not a band: it is where every run starts and ends. These are Fx.Presets.Cozy's
 	-- numbers exactly (the server applies Cozy at load), so the client's first write changes nothing.
@@ -402,6 +472,12 @@ Config.Env = {
 	-- tomb's sandstone.
 	MinGemContrast = 3,
 	MinGemWallContrast = 1.8,
+	-- ...AND IS NOT THE PADS' COLOUR. The pads are read by colour too, so a gem (and the exit pad) must
+	-- sit this far from the pad painted on the same floor, as a Euclidean distance in sRGB 0-255
+	-- (VaultEnv.rgbDistance). The first gem fix put pearl gems 42 from the tomb's cream pads and
+	-- sapphire 42 from the Frozen Vault's navy; Bronze's orange sat 40 from the bank's gold pads from
+	-- the start. 80 is twice those, and the drop ring's follow/lock pair already has to be 60 apart.
+	MinGemPadDistance = 80,
 	-- THE DROP'S RING STAYS VISIBLE. The ring is the danger zone itself, a Neon disc on the floor: the
 	-- first candidate that stands out MinRingContrast:1 against the floor under it (seen through its own
 	-- transparency, VaultEnv.readableRing) is drawn. Yellow read 1.16:1 on the Frozen Vault's snow, and
@@ -438,12 +514,13 @@ Config.Env = {
 			colorCorrection = { Brightness = 0.03, Contrast = 0.12, Saturation = 0.1, TintColor = { 255, 240, 215 } },
 			sky = { StarCount = 800 },
 			palette = {
-				wall = { 104, 108, 116 }, floor = { 58, 82, 68 }, pad = { 242, 208, 112 },
+				wall = { 104, 108, 116 }, floor = { 58, 82, 68 }, pad = { 215, 210, 200 }, -- marble pads: gold is the treasure's colour here
 				accent = { 214, 172, 82 }, glow = { 255, 226, 160 }, crack = { 255, 90, 50 }, wallReflect = 0.06,
 				gem = { 255, 214, 90 }, -- gold coin
 			},
 			weather = { kind = "glitter", rate = 6 },
 			props = { kind = "lamp", density = 0.3 },
+			critters = { kind = "rat", density = 0.35, speed = 4, height = 0.35, color = { 140, 124, 110 } },   -- rats along the marble
 			piece = "dome",
 			hazards = { "marble" },
 		},
@@ -459,12 +536,13 @@ Config.Env = {
 			colorCorrection = { Brightness = 0.02, Contrast = 0.14, Saturation = 0.2, TintColor = { 255, 226, 186 } },
 			sky = { StarCount = 2600 },
 			palette = {
-				wall = { 214, 172, 110 }, floor = { 110, 78, 44 }, pad = { 252, 236, 196 },
+				wall = { 214, 172, 110 }, floor = { 110, 78, 44 }, pad = { 255, 226, 60 }, -- gilded pads, clear of the pearl gems
 				accent = { 46, 150, 160 }, glow = { 255, 166, 84 }, crack = { 255, 90, 50 }, wallReflect = 0,
 				gem = { 255, 250, 235 }, -- pearl
 			},
 			weather = { kind = "sand", rate = 10 },
 			props = { kind = "brazier", density = 0.3 },
+			critters = { kind = "scarab", density = 0.35, speed = 1.2, height = 0.25, color = { 24, 60, 56 } },   -- scarabs in the sand
 			piece = "sunDisc",
 			hazards = { "sandstone" },
 		},
@@ -486,11 +564,14 @@ Config.Env = {
 			},
 			weather = { kind = "sparks", rate = 8 },
 			props = { kind = "panel", density = 0.35 },
+			critters = { kind = "drone", density = 0.35, speed = 2.5, height = 8.5, color = { 150, 150, 160 } },  -- maintenance drones
 			piece = "reactorRing",
 			hazards = { "pipe" },
 		},
 		{
-			id = "frozen", name = "Frozen Vault", emoji = "❄️", from = 24, fade = 4,
+			-- the brag: a normal player first runs it inside 30-45 min (owner decision 2026-09-30,
+			-- tests/Pacing.spec.luau). It was from = 24, fade = 4 and arrived at 61 min.
+			id = "frozen", name = "Frozen Vault", emoji = "❄️", from = 18, fade = 2,
 			blurb = "The reactor's cold side. Everything here is ice",
 			lighting = {
 				Ambient = { 98, 122, 152 }, OutdoorAmbient = { 110, 140, 170 }, Brightness = 2.3, ExposureCompensation = 0.1,
@@ -503,10 +584,11 @@ Config.Env = {
 			palette = {
 				wall = { 176, 214, 236 }, floor = { 226, 238, 246 }, pad = { 40, 92, 160 },
 				accent = { 190, 240, 255 }, glow = { 170, 225, 255 }, crack = { 255, 90, 50 }, wallReflect = 0.15,
-				gem = { 40, 80, 200 }, -- sapphire
+				gem = { 120, 40, 190 }, -- amethyst (sapphire sat 42 from the navy pads, REVIEW-5 §B2)
 			},
 			weather = { kind = "snow", rate = 14 },
 			props = { kind = "icicles", density = 0.35 },
+			critters = { kind = "bat", density = 0.35, speed = 5, height = 10, color = { 70, 60, 72 } },          -- frost bats under the ice
 			piece = "aurora",
 			hazards = { "icicle" },
 		},
@@ -522,14 +604,50 @@ Config.Env = {
 			colorCorrection = { Brightness = 0, Contrast = 0.2, Saturation = 0.25, TintColor = { 255, 216, 196 } },
 			sky = { StarCount = 200 },
 			palette = {
-				wall = { 58, 44, 42 }, floor = { 34, 26, 26 }, pad = { 216, 198, 172 },
+				wall = { 58, 44, 42 }, floor = { 34, 26, 26 }, pad = { 80, 220, 190 }, -- jade: bone sat 71 from the Gold tier's gems
 				accent = { 255, 110, 30 }, glow = { 255, 124, 56 }, crack = { 255, 90, 50 }, wallReflect = 0,
 				gem = { 255, 226, 120 }, -- molten gold
 			},
 			weather = { kind = "embers", rate = 12 },
 			props = { kind = "embers", density = 0.3 },
+			critters = { kind = "salamander", density = 0.35, speed = 2, height = 0.3, color = { 150, 44, 30 } }, -- fire salamanders
 			piece = "eruption",
 			hazards = { "lavaBomb" },
+		},
+	},
+
+	-- THE ENDGAME IS NOT ONE ROOM (owner decision 2026-09-30). Every Gold floor is the Volcano Temple,
+	-- and a player may live in Gold for hours, so past `from` the deepest stratum moves to its next
+	-- HALL every `every` depths and wraps round: its own light (an overlay on the stratum's), its own
+	-- weather and its own props. The palette — walls, floors, pads, gems, the drop's ring — is the
+	-- stratum's own in every hall, so every readability bar in tests/EnvConfig.spec.luau holds in every
+	-- hall by construction. The first hall IS the stratum as it was. VaultEnv.hall picks the hall;
+	-- tests/Pacing.spec.luau measures how long one lasts a normal player.
+	Halls = {
+		from = 44,
+		every = 4,
+		list = {
+			{ id = "magma", name = "Magma Hall" },
+			{
+				id = "obsidian", name = "Obsidian Hall",
+				overlay = {
+					lighting = { Ambient = { 74, 46, 96 }, OutdoorAmbient = { 62, 40, 86 }, FogColor = { 22, 10, 34 } },
+					atmosphere = { Color = { 150, 96, 196 }, Decay = { 56, 22, 84 } },
+					colorCorrection = { TintColor = { 228, 212, 255 } },
+				},
+				weather = { kind = "glitter", rate = 8 }, -- obsidian glints
+				props = { kind = "brazier", density = 0.3 },
+			},
+			{
+				id = "ash", name = "Ash Hall",
+				overlay = {
+					lighting = { Ambient = { 98, 88, 84 }, OutdoorAmbient = { 86, 78, 76 }, FogColor = { 42, 38, 36 } },
+					atmosphere = { Color = { 172, 162, 152 }, Decay = { 82, 72, 66 } },
+					colorCorrection = { Saturation = -0.08, TintColor = { 236, 230, 224 } },
+				},
+				weather = { kind = "ash", rate = 12 },
+				props = { kind = "lamp", density = 0.3 },
+			},
 		},
 	},
 }
@@ -595,8 +713,13 @@ Config.Rest = {
 
 --============================================================================ budgets (client, measured)
 
--- What the client may build on top of the server's vault, per player. Measured every frame by
--- robloxemu/check_vaultrunners_env.luau; EYECANDY.md has the table. Mobile is the target.
+-- What the client may build on top of the server's vault, per player. Mobile is the target. These
+-- are CAPS IN CODE, not only numbers a check compares against (EYECANDY.md §6, §13): VaultArt hangs
+-- props only inside MaxLocalParts less its headroom, and VaultArt.enforceBudget, every frame, trims
+-- parts, grants emitters by priority within MaxEmitters / MaxEmitterRate and caps lights and beams;
+-- the weather also goes through EnvBands.capRates. MaxHazards is the drop scheduler's single slot
+-- (Hazards holds one drop at a time) and tests/EnvConfig.spec.luau pins the number to it. Measured
+-- by robloxemu/check_vaultrunners_env.luau §9 (shipped) and check_vaultrunners_budget.luau (forced).
 Config.Budget = {
 	MaxLocalParts = 180,      -- every Part the client creates, pooled or not, parented at once
 	MaxEmitters = 6,          -- enabled ParticleEmitters the client owns
@@ -606,6 +729,7 @@ Config.Budget = {
 	MaxLights = 3,
 	MaxBeams = 6,
 	MaxHazards = 1,
+	MaxCritters = 4,          -- critters on show at once (VaultArt.updateCritters; they yield first)
 }
 
 --============================================================================ pacing (a MODEL, not the game)

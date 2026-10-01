@@ -18,6 +18,9 @@
 --   §7  the collapse: dust and sparks rise as the plane closes in; the run's end clears it all;
 --   §8  title cards: a card per new stratum, the fanfare only the first time this player goes deeper;
 --   §9  the budgets (Config.Budget) on EVERY measured frame, and the pools do not grow;
+--   §4b the critters (docs/complete-game-standard.md §2: every band has its own critters): each
+--       stratum's own kind, in the maze cells around the runner, never in a wall, the shaft or over
+--       the hole, never Neon, inert, moving, capped by Budget.MaxCritters; none in the hub;
 --   §10 the leak rules: no remote fired, no attribute written, every client part inert, nothing in
 --       another player's vault touched.
 --
@@ -64,6 +67,10 @@ local EnvBands = mod("EnvBands")
 local VaultEnv = mod("VaultEnv")
 local VaultArt = mod("VaultArt")
 local Trace = mod("Trace")
+local Progression = mod("Progression")
+local VaultFloor = mod("VaultFloor")
+local MazeGen = mod("MazeGen")
+local Rng = mod("Rng")
 local bands = Config.Env.Bands
 local Budget = Config.Budget
 
@@ -265,6 +272,9 @@ do
 	end)
 	eq(hazardSeen, false, "§2 ten minutes in the hub: not one ceiling drop")
 	eq(weatherOn, false, "§2 and no particles (the hub is calm)")
+	local critters = 0
+	for _, d in fx:GetChildren() do if string.sub(d.Name, 1, 8) == "Critter_" then critters += 1 end end
+	eq(critters, 0, "§2 and no critters: the hub is not a stratum")
 end
 
 --============================================================================ §3 rest, in the hub only
@@ -470,6 +480,98 @@ local function checkBand(label, tier, expectBandId)
 		truthy(string.find(chip.Text, bands[nextIdx].emoji, 1, true) ~= nil, label .. ": and the next stratum")
 	end
 	bandLooks[label] = { props = props, pieceParts = pieceParts, weather = weather, kinds = kinds, m = measure(label) }
+
+	-- §4b the critters. Measured LAST, after every look above, because it moves the runner: to the
+	-- critter cell of storey 0 nearest the entry, which is where the client must show this stratum's own
+	-- kind, exactly the critters VaultEnv says a runner in that cell meets, and nothing in a wall.
+	do
+		local spec = Progression.difficulty(Config, tier, start.floor)
+		spec.seed = Progression.seedFor(Config, tier, start.floor)
+		local model = VaultFloor.build(Config, spec, MazeGen, Rng)
+		local vOrigin = v:FindFirstChild("ExitPad").Position
+			- Vector3.new(model.exit.position.x, model.exit.position.y, model.exit.position.z)
+		local Env = Config.Env
+		local a, bb = bands[pal.band], bands[pal.next]
+		local density = a.critters.density + (bb.critters.density - a.critters.density) * pal.t
+		local sites = VaultEnv.critterSites(model, 0, spec.seed, density)
+		truthy(#sites > 0, label .. ": §4b storey 0 has critter cells (" .. #sites .. ")")
+		local en = model.entryCells[1]
+		local target = VaultEnv.critterNear(sites, en.cx, en.cy, model.cells, 1)[1]
+		if target then
+			local S = model.cellSize
+			local function cellCentre(cx, cy)
+				return vOrigin + Vector3.new((2 * cx + 1 - (model.gCols - 1) / 2) * S, 0, (2 * cy + 1 - (model.gRows - 1) / 2) * S)
+			end
+			hrp.CFrame = CFrame.new(cellCentre(target.cx, target.cy) + Vector3.new(0, Config.Run.RunnerRootHeight, 0))
+			run(1, 1 / 30)
+			local expect = VaultEnv.critterNear(sites, target.cx, target.cy, Env.CritterReach, Budget.MaxCritters)
+			local function critterParts()
+				local out = {}
+				for _, d in fx:GetChildren() do
+					if d:IsA("BasePart") and string.sub(d.Name, 1, 8) == "Critter_" then table.insert(out, d) end
+				end
+				return out
+			end
+			local parts = critterParts()
+			local seenKinds, wrongKind, neon, live, inWall, inCorner, lost = {}, nil, nil, nil, nil, nil, nil
+			local allowed = { [a.critters.kind] = true, [bb.critters.kind] = true }
+			local ex = model.exitCells[1]
+			for _, d in parts do
+				local kind = string.match(d.Name, "^Critter_(%a+)")
+				seenKinds[kind or "?"] = true
+				if not allowed[kind] then wrongKind = wrongKind or d.Name end
+				if d.Material == Enum.Material.Neon then neon = neon or d.Name end
+				if d.CanCollide or d.CanTouch or d.CanQuery or d.CastShadow then live = live or d.Name end
+				local lx, lz = d.Position.X - vOrigin.X, d.Position.Z - vOrigin.Z
+				local fx2 = math.floor(lx / S + (model.gCols - 1) / 2 + 0.5)
+				local fy2 = math.floor(lz / S + (model.gRows - 1) / 2 + 0.5)
+				local row = model.grids[1][fy2]
+				if row == nil or row[fx2] ~= false then inWall = inWall or (d.Name .. string.format(" at %d,%d", fx2, fy2)) end
+				if (fx2 == 2 * ex.cx + 1 and fy2 == 2 * ex.cy + 1) or (fx2 == 2 * en.cx + 1 and fy2 == 2 * en.cy + 1) then
+					inCorner = inCorner or d.Name
+				end
+				-- within its cell's roam (+ the critter's own size) of one of the sites the runner meets
+				local home = false
+				for _, st in expect do
+					local c = cellCentre(st.cx, st.cy)
+					local dx, dz = d.Position.X - c.X, d.Position.Z - c.Z
+					if math.sqrt(dx * dx + dz * dz) <= Env.CritterRoam + Env.CritterHalfLength + 1e-6 then home = true end
+				end
+				if not home then lost = lost or d.Name end
+			end
+			local n = #parts / VaultArt.CritterParts
+			local kindList = {}
+			for k in seenKinds do table.insert(kindList, k) end
+			table.sort(kindList)
+			print(string.format("  §4b %-22s %d critters (%s) around cell %d,%d of storey 0", label, n, table.concat(kindList, ", "), target.cx, target.cy))
+			eq(n, #expect, string.format("%s: §4b the client shows exactly the critters a runner in cell %d,%d meets (%d)", label, target.cx, target.cy, #expect))
+			truthy(n >= 1 and n <= Budget.MaxCritters, string.format("%s: §4b at least one, at most Budget.MaxCritters (%d)", label, n))
+			truthy(seenKinds[a.critters.kind] or (pal.t > 0 and seenKinds[bb.critters.kind]),
+				label .. ": §4b the stratum's own kind (" .. a.critters.kind .. ")")
+			eq(wrongKind, nil, label .. ": §4b and no other stratum's")
+			eq(neon, nil, label .. ": §4b a critter is never Neon (Neon is what glows: gems, the exit, lamps)")
+			eq(live, nil, label .. ": §4b and never collides, touches, catches a ray or casts a shadow")
+			eq(inWall, nil, label .. ": §4b no critter part is in a wall")
+			eq(inCorner, nil, label .. ": §4b nor in the shaft cell or over the hole")
+			eq(lost, nil, label .. ": §4b every critter is in one of the cells the runner meets")
+			local before = {}
+			for _, d in parts do before[d] = d.Position end
+			run(1, 1 / 30)
+			local moved = 0
+			for _, d in critterParts() do
+				if before[d] and (d.Position - before[d]).Magnitude > 0.3 then moved += 1 end
+			end
+			truthy(moved >= VaultArt.CritterParts, label .. ": §4b they move (" .. moved .. " parts moved in a second)")
+			-- the cap is read in code: forced to one in memory, one is all the client shows
+			local cap = Budget.MaxCritters
+			Budget.MaxCritters = 1
+			run(0.2, 1 / 30)
+			local capped = #critterParts() / VaultArt.CritterParts
+			Budget.MaxCritters = cap
+			run(0.2, 1 / 30)
+			truthy(capped <= 1, label .. ": §4b Budget.MaxCritters is a cap in code (forced to 1: " .. capped .. ")")
+		end
+	end
 	return v, start, pal, origin
 end
 
@@ -518,7 +620,8 @@ do
 	local padColour = c3(bankPal.pad)
 	local goneBefore = false -- the server's state when this frame's client code ran
 	where = "bank, on the pads"
-	run(Config.Ascent.CrumbleSeconds + Config.Ascent.RespawnSeconds + 1.5, 1 / 30, function()
+	-- (capped: a mutant with a crumble or respawn of 1e9 must fail this check, not hang the gate)
+	run(math.min(Config.Ascent.CrumbleSeconds + Config.Ascent.RespawnSeconds + 1.5, 20), 1 / 30, function()
 		if fx:FindFirstChild("PadCrack") then sawCrack = true end
 		if pad1.Transparency < 0.5 and not sameColor(pad1.Color, padColour, 0.03) and not sawGone then sawCrackColour = true end
 		-- a pad the server had ALREADY dropped when the client last ran must carry no crack

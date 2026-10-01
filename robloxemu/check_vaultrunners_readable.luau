@@ -243,6 +243,14 @@ do
 		truthy(worstF >= MIN_GEM_FLOOR, string.format("%s: every gem and the exit pad stand out against the floor (worst %.2f:1)", label, worstF))
 		truthy(worstW >= MIN_GEM_WALL, string.format("%s: and against the walls (worst %.2f:1)", label, worstW))
 		truthy(same, label .. ": the exit pad glows in the gems' colour, as it always has")
+		-- ...and none of it wears the obby's colour (second review, REVIEW-5 §B2): the tomb's pearl gems
+		-- and exit sat 42 apart in RGB from its cream pads, the Frozen Vault's sapphire 42 from its navy
+		local pad = painted("Step_")
+		local d = if pad then math.sqrt((first[1] - pad[1]) ^ 2 + (first[2] - pad[2]) ^ 2 + (first[3] - pad[3]) ^ 2) else 0
+		truthy(pad ~= nil and d >= (Config.Env.MinGemPadDistance or math.huge), string.format(
+			"%s: the gems and the exit pad are not the pads' colour (%.1f apart in RGB, as painted)", label, d))
+		print(string.format("  %s: gems {%d, %d, %d} vs pads {%d, %d, %d}: %.1f apart", label, math.round(first[1]), math.round(first[2]),
+			math.round(first[3]), math.round(pad and pad[1] or -1), math.round(pad and pad[2] or -1), math.round(pad and pad[3] or -1), d))
 		if wantBand == "volcano" then
 			truthy(keptOwn, label .. ": where the tier's own gem colour reads, it is kept")
 		end

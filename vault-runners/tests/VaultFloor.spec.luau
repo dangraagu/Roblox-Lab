@@ -377,6 +377,49 @@ CHECK.climbIsFailable = function(m)
 	return true
 end
 
+-- HOP 1 IS A STEP, NOT A HOP, AND THE BUDGET MUST NOT PRICE IT AS ONE (REVIEW-5 §1).
+--
+-- climbIsFailable looks at the five pad-to-pad hops. The sixth transition — storey floor up onto
+-- pad 1 — leaves from the FLOOR, and the floor under pad 1 is solid: storey s's hole is at its
+-- ENTRY cell and the shaft at its EXIT cell, so there is nothing under the stairwell to fall into.
+-- A runner who fluffs hop 1 lands on the floor they jumped from, which is exactly where a miss
+-- would have put them. So hop 1 cannot be missed, and a countdown that charges it as missable
+-- pays for a fall that cannot happen. This check holds the geometry; the assertion after the
+-- vaults below holds VaultPath to it.
+CHECK.firstHopIsAStep = function(m)
+	for s = 0, m.storeys - 2 do
+		local pads = partsOf(m, "step", s)
+		if #pads == 0 then return false, "storey " .. s .. " has no shaft" end
+		table.sort(pads, function(a, b) return a.position.y < b.position.y end)
+		local p1 = aabb(pads[1])
+		local floorTop = s * m.storeyHeight
+		if math.abs((p1.maxY - floorTop) - m.stepRise) > EPS then
+			return false, string.format("storey %d: pad 1's top is %.2f studs above the floor, not one StepRise",
+				s, p1.maxY - floorTop)
+		end
+		-- solid floor under every corner of pad 1 AND under the runner beside it: the takeoff and any
+		-- fluffed landing are both on this storey's floor
+		local margin = C.Movement.RunnerWidth
+		for _, c in ipairs({ { p1.minX - margin, p1.minZ - margin }, { p1.maxX + margin, p1.minZ - margin },
+			{ p1.minX - margin, p1.maxZ + margin }, { p1.maxX + margin, p1.maxZ + margin } }) do
+			local x = math.max(p1.minX, math.min(p1.maxX, c[1]))
+			local z = math.max(p1.minZ, math.min(p1.maxZ, c[2]))
+			local under = false
+			for _, f in ipairs(partsOf(m, "floor", s)) do
+				local b = aabb(f)
+				if f.collide and x >= b.minX - EPS and x <= b.maxX + EPS and z >= b.minZ - EPS and z <= b.maxZ + EPS
+					and math.abs(b.maxY - floorTop) <= EPS then
+					under = true
+				end
+			end
+			if not under then
+				return false, string.format("storey %d: open air under pad 1 at (%.1f, %.1f) — hop 1 can be missed after all", s, x, z)
+			end
+		end
+	end
+	return true
+end
+
 -- The spawn point has to be somewhere a player can actually stand.
 CHECK.spawnClear = function(m)
 	local sp = m.spawn.position
@@ -500,7 +543,7 @@ end
 
 local ORDER = {
 	"everyStoreyHasFloor", "floorTiling", "climbHoleOpen", "wallsMatchMaze", "perimeterSealed",
-	"wallsMeetCeiling", "storeysConnected", "stairsLineUp", "climbIsFailable", "spawnClear", "gemsPlaced",
+	"wallsMeetCeiling", "storeysConnected", "stairsLineUp", "climbIsFailable", "firstHopIsAStep", "spawnClear", "gemsPlaced",
 	"gemsPerStorey", "exitOnTop", "collapseSweepsVault", "partsSane",
 }
 
@@ -520,6 +563,20 @@ for tier = 1, 3 do
 	for _, floor in ipairs({ 1, 7, 13, 31 }) do
 		local m, spec = build(tier, floor)
 		runChecks(m, spec, string.format("tier %d floor %d", tier, floor))
+	end
+end
+
+-- ...and the budget prices exactly the hops the geometry lets a runner miss: every pad-to-pad hop
+-- (climbIsFailable: open air wider than the runner) and not the step up from the floor
+-- (firstHopIsAStep). The first cut priced floor(StoreyHeight / StepRise) = 6 missable hops.
+do
+	for tier = 1, 3 do
+		local m = build(tier, 1)
+		local pads = partsOf(m, "step", 0)
+		local missable = #pads - 1 -- hop 1 leaves from the floor
+		eq(type(VaultPath.failableHops) == "function" and VaultPath.failableHops(C, m) or nil, missable,
+			string.format("tier %d: VaultPath prices %s missable hops per climb; the shaft has %d (hop 1 is a step)",
+				tier, tostring(type(VaultPath.failableHops) == "function" and VaultPath.failableHops(C, m) or "?"), missable))
 	end
 end
 
@@ -752,6 +809,18 @@ killed("climbIsFailable", "the pads were flung to opposite corners of a jump nob
 			p.position.x = sh.x + sign * 5.5
 			p.position.z = sh.z + sign * 5.5
 		end
+	end
+end)
+
+-- ...and hop 1: cut a pit under storey 0's pad 1. Only the new check may notice (the other checks
+-- see floor area and the hole, which a pit in a DIFFERENT place changes too, so the pit is made by
+-- dropping the floor slab that holds pad 1 below the storey instead of deleting it).
+killed("firstHopIsAStep", "the floor under pad 1 was dropped into a pit", function(m)
+	local pads = partsOf(m, "step", 0)
+	table.sort(pads, function(a, b) return a.position.y < b.position.y end)
+	local p1 = pads[1]
+	for _, f in ipairs(partsOf(m, "floor", 0)) do
+		if contains(f, p1.position.x, nil, p1.position.z) then f.position.y -= 6 end
 	end
 end)
 

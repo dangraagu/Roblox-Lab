@@ -323,8 +323,10 @@ function VaultModel.career(self: any, opts: any): any
 	local capMinutes = opts.capMinutes or 600
 	local tierAt = { [1] = 0 }
 	local unlocks = {}
+	local log = {} -- { minutes, depth } of every run, in order (for the halls of the deepest stratum)
 	while minutes < capMinutes do
 		local depth = self.VaultEnv.depth(C, tier, floors[tier])
+		table.insert(log, { minutes = minutes, depth = depth })
 		for i, b in bands do
 			if reachedAt[i] == nil and depth >= b.from then reachedAt[i] = minutes end
 		end
@@ -360,7 +362,7 @@ function VaultModel.career(self: any, opts: any): any
 	hz.runSeconds = runMinutes * 60
 	return {
 		reachedAt = reachedAt, runs = runs, runMinutes = runMinutes, totalMinutes = minutes,
-		hz = hz, tierAt = tierAt, floors = floors, banked = banked, unlocks = unlocks,
+		hz = hz, tierAt = tierAt, floors = floors, banked = banked, unlocks = unlocks, log = log,
 	}
 end
 

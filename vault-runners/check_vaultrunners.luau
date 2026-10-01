@@ -45,8 +45,9 @@ local ME = 4242
 -- defaultProfile() and says so about nothing.
 -- 1500 banked opens Bronze and Silver and leaves GOLD LOCKED, which is what makes the refusal
 -- below a real test. 2000 gems in the wallet pays for a pet.
--- `floors` is written with INTEGER keys on purpose: it goes through the emulator's JSON
--- round-trip, so loadProfile's numKeys normalisation is exercised rather than assumed.
+-- `floors` is written with INTEGER keys: a dense array, which the JSON round trip returns with
+-- integer keys, so this does NOT exercise loadProfile's numKeys (the mutation sweep of 2026-10-01
+-- showed it). The sparse, string-keyed case is staged on its own below ("STRING floor keys").
 local store = h.services.DataStoreService:GetDataStore("VaultRunners_v1")
 store:SetAsync("u_" .. ME, {
 	data = {
@@ -322,11 +323,19 @@ do
 	walkTo(Vector3.new(pad.Position.X, pad.Position.Y + 0.5 + Config.Run.RunnerRootHeight,
 		pad.Position.Z))
 	truthy(pad.CanCollide, "landing on a pad does not pull it out from under the foot that lands")
-	h:advance(Config.Ascent.CrumbleSeconds + 2 * STEP)
+	-- (capped: a mutant with a crumble or respawn of 1e9 must fail this check, not hang the gate)
+	h:advance(math.min(Config.Ascent.CrumbleSeconds, 30) + 2 * STEP)
 	falsy(pad.CanCollide, "...and a beat later the pad is gone")
 	falsy(pad.CanQuery, "a pad that is gone cannot be raycast at either")
 	truthy(pad.Transparency > wasTransparency, "and it is drawn as gone, not just made walk-through")
-	h:advance(Config.Ascent.RespawnSeconds + 2 * STEP)
+	-- ...and the runner FALLS, as gravity would: nobody can stand where a pad has gone. Left hovering
+	-- there (no physics here), the runner stands on the pad again the moment it comes back and starts a
+	-- second crumble, and whether the next assertion lands inside that second cycle depended on the
+	-- phase of the server's shaft sampling (REVIEW-5 §4: a control that looked at the shaft every
+	-- 0.04 s instead of 0.05 s failed here). check_vaultrunners_env §6 made the same change in §12.
+	hrp.CFrame = CFrame.new(pad.Position.X, pad.Position.Y + 0.5 - 3 * Config.Vault.StepRise + Config.Run.RunnerRootHeight,
+		pad.Position.Z)
+	h:advance(math.min(Config.Ascent.RespawnSeconds, 30) + 2 * STEP)
 	truthy(pad.CanCollide, "the pad comes BACK — a shaft that eats its own route is unwinnable")
 	eq(pad.Transparency, wasTransparency, "...and is drawn solid again")
 
@@ -710,6 +719,73 @@ do
 	local _ = callsBefore
 end
 
+--============================================================================ the OWNER TOKEN is per session
+
+-- docs/complete-game-standard.md §1: "an owner token on every write (fork-tower old.session)". The
+-- token used to be game.JobId, which is per SERVER, not per session: every session of every player on
+-- one server carries the same one, so it cannot tell this session's record from a record somebody
+-- else loaded since. And flush() wrote whenever the record's jobId was nil or its lock had run out,
+-- so a session that was no longer the owner could still land a write — over the newer session's data.
+-- The lock is renewed only by a write, and an idle player in the hub writes nothing, so "the lock ran
+-- out" is not a rare state: it is every player who stood still for two minutes.
+do
+	local STALE = 8585
+	store:SetAsync("u_" .. STALE, { data = { gems = 500, totalBanked = 500, pets = {}, equipped = nil,
+		floors = { 1, 1, 1 }, escapes = 0, wipes = 0 } })
+	local first = h:join("TokenTester", STALE)
+	h:advance(1)
+	h.Players:simulateSpawn(first, h.workspace)
+	h:advance(1)
+	local rec1 = store:GetAsync("u_" .. STALE)
+	local token1 = rec1 and rec1.session
+	truthy(type(token1) == "string" and #token1 >= 8,
+		"the load that takes the lock writes an owner token for THIS session (" .. tostring(token1) .. ")")
+	h:leave(first)
+	h:advance(1)
+	local second = h:join("TokenTester", STALE)
+	h:advance(1)
+	h.Players:simulateSpawn(second, h.workspace)
+	h:advance(1)
+	local rec2 = store:GetAsync("u_" .. STALE)
+	local token2 = rec2 and rec2.session
+	truthy(type(token2) == "string" and token2 ~= token1,
+		"a second session of the same player on the SAME server gets a new token (" .. tostring(token2) .. ")")
+
+	-- Another session takes the record (its lock had run out, it loaded, it played, it released). This
+	-- session is no longer the owner, and the record is not "locked" by anybody: jobId nil, lockUntil 0.
+	store:SetAsync("u_" .. STALE, {
+		jobId = nil, session = "a-newer-session", lockUntil = 0,
+		data = { gems = 777, totalBanked = 900, pets = {}, floors = { 4, 1, 1 }, escapes = 3, wipes = 0 },
+	})
+	local warnsBefore = #h.warnings
+	local toastsBefore = #Toast:getSent()
+	-- A REAL change, so the flush loop has something to write: Coppertail costs 150 of the 500 gems.
+	remotes:FindFirstChild("Buy"):simulateFireServer(second, "coppertail")
+	h:advance(Config.Save.FlushTickSeconds * 2 + 1)
+	local now = store:GetAsync("u_" .. STALE)
+	eq(now and now.session, "a-newer-session", "a session that lost the record does not take it back")
+	eq(now and tonumber(now.data.gems), 777, "nor write over the newer session's data (jobId nil, lock expired)")
+	truthy(#h.warnings > warnsBefore, "and the server says so")
+	local told = nil
+	for i = toastsBefore + 1, #Toast:getSent() do
+		local t = Toast:getSent()[i]
+		if t.player == second then told = tostring(t.args[1]) end
+	end
+	truthy(told ~= nil and string.find(told, "saved", 1, true) ~= nil,
+		"and tells the PLAYER their progress is no longer being saved (" .. tostring(told) .. ")")
+	h:leave(second)
+	h:advance(Config.Save.FlushTickSeconds + 1)
+	local final = store:GetAsync("u_" .. STALE)
+	eq(final and tonumber(final.data.gems), 777, "leaving does not write over it either")
+	eq(final and final.session, "a-newer-session", "nor release a lock that is not ours")
+	-- ...and it stopped trying: ONE warning for the lost record, not one per later write attempt
+	local said = 0
+	for i = warnsBefore + 1, #h.warnings do
+		if string.find(tostring(h.warnings[i]), "TokenTester", 1, true) then said += 1 end
+	end
+	eq(said, 1, "the lost session stops writing: one warning, not one per attempt (leaving included)")
+end
+
 --============================================================================ WHERE THE ENGINE PUTS YOU
 
 -- MEASURED IN ROBLOX STUDIO, 2026-09-10 (fork-tower/STUDIO.md, robloxemu/SPAWN-ORDER.md):
@@ -758,6 +834,12 @@ do
 			.. " vs pad top " .. tostring(padTop) .. ") — not sunk into it, not hanging over it")
 	local spawnTop = hubSpawn and (hubSpawn.Position.Y + hubSpawn.Size.Y / 2) or 0
 
+	-- docs/complete-game-standard.md §1 and SPAWN-ORDER.md §3, the PREFERRED pattern: the player's
+	-- RespawnLocation points at that real, enabled spawn, set before the character loads, so the
+	-- engine's own placement is the answer and the "only one spawn in the world" rule above is a
+	-- second guard rather than the only one.
+	eq(me.RespawnLocation, hubSpawn, "plr.RespawnLocation points at the hub spawn (a player who joined at the start)")
+
 	-- Standing on the hub spawn: inside its footprint in XZ, and above its top face without
 	-- being thrown clear of it. Deliberately a BAND and not a number. The engine's own placement
 	-- and the game's teleportToHub disagree by 2.49 studs (3.51 vs 6.00), both are on the pad,
@@ -795,6 +877,7 @@ do
 	h:advance(1)
 	truthy(onTheHubSpawn(rootOf(runner)),
 		"a player who just joined is standing on the hub spawn (" .. say(rootOf(runner)) .. ")")
+	eq(runner.RespawnLocation, hubSpawn, "...and a player who joins later has RespawnLocation on it too")
 
 	Enter:simulateFireServer(runner, 1)   -- Bronze floor 1, unlockGems = 0, no prerequisite
 	h:advance(1)
@@ -918,18 +1001,111 @@ do
 	h:advance(1)
 end
 
+--============================================================================ REJOIN: what you earned comes back
+
+-- docs/complete-game-standard.md §1: "spawn, first objective, one full loop, earn, spend, rejoin". The
+-- runner above banked runs, bought pets and cleared floors; they leave and come back on a new session,
+-- and every one of those has to be there: the wallet, the lifetime total, the floor reached in each
+-- vault, and the pets owned and equipped.
+do
+	local State = remotes:FindFirstChild("State")
+	local function lastState(plr)
+		local sent = State:sentTo(plr)
+		return sent[#sent] and sent[#sent].args[1]
+	end
+	local function summary(st)
+		if not st then return "<no state>" end
+		local floors, owned = {}, {}
+		for _, tier in ipairs(st.tiers or {}) do floors[#floors + 1] = tostring(tier.floor) end
+		for _, pet in ipairs(st.pets or {}) do
+			if pet.owned then owned[#owned + 1] = pet.id .. (if pet.equipped then "*" else "") end
+		end
+		return string.format("gems %s, banked %s, floors %s, pets %s", tostring(st.gems), tostring(st.totalBanked),
+			table.concat(floors, "/"), table.concat(owned, ","))
+	end
+	local before = summary(lastState(me))
+	local bronzeNext = tonumber(string.match(before, "floors (%d+)/"))
+	truthy(bronzeNext ~= nil and bronzeNext >= 2 and string.match(before, "pets (%a+)") ~= nil,
+		"set-up: the runner cleared a Bronze floor and owns a pet before leaving (" .. before .. ")")
+	h:leave(me)
+	h:advance(2)
+	local back = h:join("Runner", ME)
+	h:advance(1)
+	h.Players:simulateSpawn(back, h.workspace)
+	h:advance(1)
+	eq(summary(lastState(back)), before, "a rejoin brings back the wallet, the banked total, every vault's floor and the pets")
+	local ls2 = back:FindFirstChild("leaderstats")
+	eq(ls2 and ls2:FindFirstChild("Banked") and ls2:FindFirstChild("Banked").Value,
+		tonumber(string.match(before, "banked (%d+)")), "and the leaderstats show it")
+	h:leave(back)
+	h:advance(1)
+end
+
+--============================================================================ STRING floor keys come back as numbers
+
+-- docs/new-game-checklist.md §3, "DataStore integer keys": JSON round-trips SPARSE integer keys to
+-- STRINGS. This game always writes `floors` for every tier (a dense array, which comes back with integer
+-- keys), so the round trip above never produces the trap; the mutation sweep showed it (removing
+-- loadProfile's numKeys survived every check). So the trap is staged here directly: a profile whose
+-- floors came back with string keys and a gap, as a sparse table does.
+do
+	local SPARSE = 8787
+	store:SetAsync("u_" .. SPARSE, { data = { gems = 0, totalBanked = 100000, pets = {}, equipped = nil,
+		floors = { ["1"] = 7, ["3"] = 2 }, escapes = 6, wipes = 0 } })
+	local sp = h:join("SparseTester", SPARSE)
+	h:advance(1)
+	local sent = remotes:FindFirstChild("State"):sentTo(sp)
+	local st = sent[#sent] and sent[#sent].args[1]
+	local f = {}
+	for _, tier in ipairs(st and st.tiers or {}) do f[#f + 1] = tostring(tier.floor) end
+	eq(table.concat(f, "/"), "7/1/2", "floors saved under STRING keys with a gap load as Bronze 7, Silver 1, Gold 2")
+	h:leave(sp)
+	h:advance(1)
+end
+
+--============================================================================ the server SHUTS DOWN
+
+-- A shutdown (an update, "shut down all servers") gives scripts up to 30 s of game:BindToClose, and does
+-- not wait for anything else. A pet bought a few seconds earlier is only PENDING (requestSave coalesces
+-- onto the flush tick), and the leave that releases the lock may never get to run. So the shutdown
+-- itself must write every profile this server holds and release its lock.
+do
+	local SHUT = 8686
+	store:SetAsync("u_" .. SHUT, { data = { gems = 500, totalBanked = 500, pets = {}, equipped = nil,
+		floors = { 1, 1, 1 }, escapes = 0, wipes = 0 } })
+	local closer = h:join("ShutdownTester", SHUT)
+	h:advance(1)
+	h.Players:simulateSpawn(closer, h.workspace)
+	h:advance(1)
+	remotes:FindFirstChild("Buy"):simulateFireServer(closer, "coppertail")   -- pending, not yet written
+	local pending = store:GetAsync("u_" .. SHUT)
+	eq(pending and tonumber(pending.data.gems), 500, "set-up: the purchase is still only pending")
+	h.game:runBindToClose()
+	local closed = store:GetAsync("u_" .. SHUT)
+	eq(closed and tonumber(closed.data.gems), 350, "the shutdown writes the pending purchase (500 - 150)")
+	eq(closed and closed.jobId, nil, "and releases this server's lock")
+	eq(closed and tonumber(closed.lockUntil), 0, "both halves of it")
+	h:leave(closer)
+	h:advance(1)
+end
+
 --============================================================================ done
 
 print("")
--- ONE warning is expected and is asserted for above: the session-lock block deliberately hands
+-- TWO kinds of warning are expected and are asserted for above: the session-lock block deliberately hands
 -- the server a profile another server holds, and a server that did NOT warn there would be a
 -- server quietly playing without saving. Everything else is a defect. The pattern is narrow on
 -- purpose — "no warnings except the ones we caused" is only a gate if the exception is exact.
-local EXPECTED_WARNING = "is locked by another server"
+-- The owner-token block hands it a second one on purpose: a session that lost its record.
+local EXPECTED_WARNINGS = { "is locked by another server", "another session has taken over" }
 local unexpected = 0
 for _, w in ipairs(h.warnings) do
 	print("warn: " .. tostring(w))
-	if string.find(tostring(w), EXPECTED_WARNING, 1, true) == nil then unexpected += 1 end
+	local owed = false
+	for _, pattern in ipairs(EXPECTED_WARNINGS) do
+		if string.find(tostring(w), pattern, 1, true) ~= nil then owed = true end
+	end
+	if not owed then unexpected += 1 end
 end
 eq(unexpected, 0, "the server ran the whole session with no warning it did not owe the player")
 for _, e in h:errors() do

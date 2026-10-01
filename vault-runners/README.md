@@ -16,13 +16,22 @@ Concept brief: `../docs/game-radar/2026-09-09-roblox-game-radar.md`, "1. Vault R
 **The look, and the drops (EYECANDY.md).** The deeper the vault, the older and stranger it gets:
 five strata, driven by depth (tier + floor), never by time. They are 🏦 Bank Vault → 🏺 Pyramid Tomb →
 ⚛️ Reactor Core → ❄️ Frozen Vault → 🌋 Volcano Temple, each with its own light, wall / floor / pad
-colours, hanging props, weather and a set piece in the sky over the top storey. Blend floors are half
-one stratum and half the next. As the collapse closes in, ceiling dust, sparks and a hotter grade show
-it. Crumbling pads crack (held until the server drops them), drop debris and flash back. Gems, the exit
-pad and the drop's ring keep a colour that reads in every stratum. Once every 2-3 minutes of run time a chunk of
-ceiling cracks over you, follows you, locks and drops: keep moving and it lands behind you. **Rest is
-the hub, between runs**; a run never pauses. All of it is client-side, and `Main.server.luau` is
-unchanged. Not yet seen in Studio.
+colours, hanging props, critters (rats, scarabs, drones, frost bats, salamanders), weather and a set
+piece in the sky over the top storey. A normal player (the
+model in `tests/Pacing.spec.luau`) first runs the Frozen Vault, the one to brag about, at about 40
+minutes. The Volcano Temple is every Gold floor, so from depth 44 it turns through three halls
+(Magma, Obsidian, Ash) every four depths, for ever. Blend floors are half one stratum and half the
+next. As the collapse closes in, ceiling dust, sparks and a hotter grade show it. Crumbling pads crack
+(held until the server drops them), drop debris and flash back. Gems, the exit pad and the drop's ring
+keep a colour that reads in every stratum, and a gem is never the pads' colour. Once every 2-3 minutes
+of run time a chunk of ceiling cracks over you, follows you, locks and drops: keep moving and it lands
+behind you. **Rest is the hub, between runs**; a run never pauses. All of it is client-side, and its
+part, particle, light and beam budgets are enforced in code. Not yet seen in Studio.
+
+**The board.** West of the hub spawn stands the DEEPEST ESCAPES sign: the deepest vault each runner
+escaped, measured by the server (a script cannot raise it: `floors` only moves when the server banks
+an escape judged on its own trusted position), public top 10 or your friends, toggled with its
+ProximityPrompt. Ties go to whoever got there first. See CLAUDE.md invariant 15.
 
 ---
 
@@ -64,11 +73,12 @@ unchanged. Not yet seen in Studio.
    floor 26 (Gold starts at both size caps), so what changes with depth is how much room over the
    demand you are owed: `slack(f)` decays from 1.85 toward 1.21 as a power law and never arrives,
    so there is no floor at which the next one is not measurably tighter. Modelled completion falls
-   98% -> 88% -> 68% -> 50% at floors 1 / 30 / 100 / 400, WITH the crumbling shaft in the run. See
-   REVIEW-3.md for how the schedule was derived and REVIEW-4.md for how the obby composes with it.
+   98% -> 88% -> 69% -> 51% at floors 1 / 30 / 100 / 400, WITH the crumbling shaft in the run. See
+   REVIEW-3.md for how the schedule was derived, REVIEW-4.md for how the obby composes with it, and
+   REVIEW-5.md for why only five of the six hops are priced as missable.
 
-Floor 1 countdowns as generated today: **Bronze 79s, Silver 165s, Gold 270s.** Across three tiers
-and two hundred floors the range is 68s to 273s, and `Config.Collapse.MaxSeconds` (300) is what
+Floor 1 countdowns as generated today: **Bronze 79s, Silver 164s, Gold 269s.** Across three tiers
+and eight hundred floors the range is 68s to 272s, and `Config.Collapse.MaxSeconds` (300) is what
 holds `Config.Curve`'s size caps down — a bigger cap means a longer run, all of it lost on one
 death.
 
@@ -79,10 +89,12 @@ each hop against `Config.Ascent.ModelMissChance`:
 | tier / floor | countdown | took | banked / on the floor | falls |
 |---|---|---|---|---|
 | bronze 1 | 79s | 59.6s | 36 / 48 | 0 |
-| gold 1 | 270s | 219.1s | 506 / 660 | 2 |
+| gold 1 | 269s | 219.1s | 506 / 660 | 2 |
 | gold 30 | 227s | 200.0s | 726 / 990 | 1 |
 | gold 100 | 184s | 159.2s | 594 / 990 | 0 |
-| gold 400 | 189s | 181.9s | 638 / 990 | 4 |
+| gold 400 | 188s | 180.7s | 594 / 990 | 4 |
+
+(The GRABBER runner, re-walked in REVIEW-5 with the server watching the shaft at 20 Hz.)
 
 Nothing but the first Bronze floor can be emptied, so from there the game is a **choice about what
 to leave behind**, which is the intended shape. The same file also walks a FUMBLER — the same
@@ -117,6 +129,8 @@ vault-runners/
   src/server/Main.server.luau   authoritative: the world, the run loop, the DataStore
   src/client/Hud.client.luau    display only, phone-first
   src/client/Vault.client.luau  the strata, the drops, rest in the hub: CLIENT-ONLY (EYECANDY.md)
+  src/client/Board.client.luau  draws this player's view of the DEEPEST ESCAPES sign, display only
+  src/shared/Board.luau         the board's rules: the stored value, ties, views, cache, limiter, PURE
   src/shared/EnvBands.luau      depth -> stratum + blend (+1 Jump's template, verbatim), PURE
   src/shared/Hazards.luau       rare telegraphed ceiling drops (template, adapted), PURE
   src/shared/Rest.luau          what rest means (template, verbatim), PURE
@@ -130,6 +144,8 @@ vault-runners/
   walk_vaultrunners.luau        plays the real server: SOLVER / GRABBER / FUMBLER, pad by pad
   measure_curve.luau            the tuning instrument (where Config.Collapse's numbers came from)
   mutate_obby.sh                the obby's mutation gate — 13 mutations + 2 controls
+  check_store_text.py           the store description's gate (the one gate in Python: luau cannot read files)
+  MARKETING.md                  the clip list for tools/film_game.py
 ```
 
 **Pure logic lives in `src/shared` and takes its dependencies as ARGUMENTS.** Nothing in
@@ -147,18 +163,19 @@ luau tests/Rng.spec.luau            #  37 passed, 0 failed
 luau tests/Progression.spec.luau    #  66 passed, 0 failed
 luau tests/Pets.spec.luau           #  75 passed, 0 failed
 luau tests/RunState.spec.luau       #  75 passed, 0 failed
-luau tests/VaultFloor.spec.luau     # 215 passed, 0 failed
+luau tests/VaultFloor.spec.luau     # 231 passed, 0 failed
 luau tests/responsive.spec.luau     #  70 passed, 0 failed
-luau tests/Collapse.spec.luau       # 281 passed, 0 failed   IS THE VAULT WINNABLE AT ALL
-luau tests/Curve.spec.luau          #  23 passed, 0 failed   IS "DEEPER" ACTUALLY HARDER
-luau tests/Ascent.spec.luau         #  68 passed, 0 failed   THE PADS CRUMBLE, AND COME BACK
+luau tests/Collapse.spec.luau       # 282 passed, 0 failed   IS THE VAULT WINNABLE AT ALL
+luau tests/Curve.spec.luau          #  29 passed, 0 failed   IS "DEEPER" ACTUALLY HARDER
+luau tests/Ascent.spec.luau         #  77 passed, 0 failed   THE PADS CRUMBLE, AND COME BACK
 luau tests/Trace.spec.luau          #  28 passed, 0 failed   the anti-teleport throttle
 luau tests/EnvBands.spec.luau       # 124 passed, 0 failed   (EYECANDY.md from here down)
 luau tests/Rest.spec.luau           #  55 passed, 0 failed
 luau tests/Hazards.spec.luau        #  91 passed, 0 failed
-luau tests/VaultEnv.spec.luau       # 112 passed, 0 failed
-luau tests/EnvConfig.spec.luau      # 366 passed, 0 failed   THE PADS, GEMS AND RING STAY READABLE
-luau tests/Pacing.spec.luau         #  47 passed, 0 failed   when each stratum arrives, how rare a drop is
+luau tests/VaultEnv.spec.luau       # 171 passed, 0 failed
+luau tests/EnvConfig.spec.luau      # 432 passed, 0 failed   THE PADS, GEMS AND RING STAY READABLE
+luau tests/Pacing.spec.luau         #  51 passed, 0 failed   when each stratum and hall arrives, how rare a drop is
+luau tests/Board.spec.luau          #  69 passed, 0 failed   the board's stored value, ties, views, cache, limiter
 ```
 
 Then the headless boot, which runs the REAL server script inside `robloxemu`:
@@ -166,21 +183,27 @@ Then the headless boot, which runs the REAL server script inside `robloxemu`:
 ```
 cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runners.luau
 cd ../vault-runners
-luau check_vaultrunners.luau        # 138 passed, 0 failed
+luau check_vaultrunners.luau        # 157 passed, 0 failed
 luau check_vaulthud.luau            # PASS - fits every viewport checked (HUD + the strata's chip)
 cd ../robloxemu
-luau check_vaultrunners_env.luau     # 255 passed, 0 failed   the five strata through the real client
+luau check_vaultrunners_env.luau     # 340 passed, 0 failed   the five strata (and their critters) through the real client
 luau check_vaultrunners_hazards.luau #  50 passed, 0 failed   the drops through the real client
-luau check_vaultrunners_shaft.luau   #  53 passed, 0 failed   the shaft stays readable; the crack holds till the pad goes
+luau check_vaultrunners_shaft.luau   #  63 passed, 0 failed   the shaft stays readable; the server sees a chained hopper
 luau check_vaultrunners_cards.luau   #  20 passed, 0 failed   a returning player's cards; forced guards
-luau check_vaultrunners_static.luau  #  86 passed, 0 failed   compiles; the client cannot talk to the server
-luau check_vaultrunners_readable.luau #  47 passed, 0 failed  gems, exit, drop ring readable; hub signs never overlap
+luau check_vaultrunners_static.luau  # 100 passed, 0 failed   compiles; the clients cannot talk to the server
+luau check_vaultrunners_readable.luau #  50 passed, 0 failed  gems, exit, drop ring readable; hub signs never overlap
+luau check_vaultrunners_budget.luau  #  17 passed, 0 failed   every client budget is a cap in code
+luau check_vaultrunners_halls.luau   #  68 passed, 0 failed   the Volcano Temple's three halls
+luau check_vaultrunners_board.luau   #  90 passed, 0 failed   the board, public + friends, real server + Board.client
+cd ../vault-runners
+py -3 check_store_text.py            #  10 passed, 0 failed   the store description
 ```
 
 `check_vaultrunners.luau` asks the workspace how many parts arrived (112 for Bronze floor 1),
 **walks** onto gems, escapes in time, gets sealed in, gets caught by the collapse, buys a pet from
 a pedestal, proves a rejected remote costs the DataStore nothing, proves leaving releases the
-session lock, and leaves mid-run. An unparented Instance raises nothing and is invisible to unit
+session lock, that a session which lost its record to a newer one never writes over it (the owner
+token), that a shutdown saves and releases every profile, and leaves mid-run. An unparented Instance raises nothing and is invisible to unit
 tests; this is the file that would notice.
 
 It **walks** rather than teleporting, and that is not a detail. Every earlier version proved an
@@ -223,8 +246,10 @@ Honest list. The concept brief and the paste-ready store description promise som
   a countdown you can see; the rule that ends the run is the timer in `RunState`.
 - **Dying is a teleport, not a death.** Getting caught by the collapse moves you back to the hub
   with a toast and a screen shake. There is no ragdoll, no death animation, and no respawn wait.
-- **No leaderboard.** Runs are deterministic per (tier, floor) and times would be comparable, but
-  nothing records or displays them.
+- **The board ranks DEPTH, not run times.** The DEEPEST ESCAPES sign in the hub (public top 10 or
+  your friends, ProximityPrompt) ranks the deepest vault each runner escaped, ties to whoever got
+  there first. Run times are comparable (every runner gets the same vaults) but nothing records them.
+  The board has never been seen in Studio; with API access off it says it is offline.
 - **No sound.** Not one Sound instance in the game.
 - **No "give up" button.** Once you are in a vault the only ways out are the exit and the
   collapse.
@@ -241,7 +266,7 @@ Honest list. The concept brief and the paste-ready store description promise som
   did not). The obby's difficulty has never rested on `Trace`: it rests on five studs of open air
   and on physics the server does not own. `tests/Trace.spec.luau` prints the number every run.
 - **Gold is a long run.** Gold floor 1 is a 6x6 maze over five storeys and its derived countdown is
-  270 seconds. That number is measured rather than guessed, and it is deliberately under
+  269 seconds. That number is measured rather than guessed, and it is deliberately under
   `Config.Collapse.MaxSeconds` — but four minutes with total loss on a single death is a pacing
   call nobody has playtested.
 - **Never played by a person.** Everything below has been verified headless and by unit test. The
@@ -261,46 +286,50 @@ Honest list. The concept brief and the paste-ready store description promise som
 
 `docs/marketing/store-text.json` is the live text for the four PUBLISHED games and Vault Runners
 is not one of them, so this is the PROPOSAL, kept here until there is a place to paste it.
+`py -3 check_store_text.py` is its gate: at most 1000 characters (code points and UTF-16 units), no
+coloured-square emoji, and none of the brief's claims the table below found false. Rewritten
+2026-10-01 for the strata, the ceiling drops and the board, which the game now has.
 
 ```
-🏆 VAULT RUNNERS 🏆 CRUMBLING OBBY meets PET COLLECTOR! 💎
+💎 VAULT RUNNERS 💎 Escape the vault before it seals!
 
-Race up a COLLAPSING VAULT before it seals forever! Every floor is a new procedural maze
-tower — grab GEMS, then LEAP the crumbling pads out of every storey while the collapse
-rises underneath you. Miss a jump and it is still rising.
+Drop into a maze vault, grab the GEMS, then LEAP the six crumbling pads out of every storey while the collapse rises underneath you. Gems bank ONLY if you get out before the seal.
 
 ⭐ FEATURES ⭐
-💎 Bank gems to BUY rare Vault-Keeper PETS
-🧱 Endless PROCEDURALLY-GENERATED vault towers
-🧗 SIX CRUMBLING PADS out of every storey — one miss and you fall
-🔥 Gems bank ONLY if you get out before the seal
+🧱 Maze vaults floor after floor: Bronze, Silver and Gold
+🧗 SIX CRUMBLING PADS out of every storey: miss a jump and the collapse keeps rising
+🏺 Dig deeper: Bank Vault, Pyramid Tomb, Reactor Core, the Frozen Vault and the Volcano Temple, each with its own critters
+⚠️ Watch the ceiling: a red ring marks where a rare drop lands, so keep moving
+🐾 Spend banked gems on Vault-Keeper pets that multiply your haul
+🏆 DEEPEST ESCAPES board in the hub: the public top 10, or just your friends
 📈 Every floor deeper is measurably tighter
-💾 Progress auto-SAVES — come back stronger
+💾 Progress auto-saves
 
-Love obby towers AND pet-collecting games? This is your new obsession.
-
-👍 LIKE + ⭐ FAVORITE to help the Vault grow!
+Every runner gets the same vaults, so a depth means the same thing for everyone. How deep can you go?
 ```
 
 **What changed from the brief's paste-ready copy, and why.** Every line below was checked against
 what the build now does, not against what it was meant to do.
 
-| the brief's line | verdict | what it says now |
+| the brief's line | verdict | what it says now (2026-10-01) |
 |---|---|---|
-| "ROBLOX RAGE OBBY meets PET COLLECTOR" | **overstated** — the obby is real now, but on Gold floor 1 it is ~26s of a ~150s run; the rest is maze | "CRUMBLING OBBY meets PET COLLECTOR" |
-| "Every run is a brand-new PROCEDURAL OBBY tower" | **false** — vaults are deterministic per (tier, floor), so a floor you die on is the same vault next attempt. That is deliberate: it is what makes a time comparable | "Every floor is a new procedural maze tower" |
+| "ROBLOX RAGE OBBY meets PET COLLECTOR" | **overstated** — the obby is real now, but on Gold floor 1 it is ~26s of a ~150s run; the rest is maze | no genre line; the headline is "Escape the vault before it seals!" |
+| "Every run is a brand-new PROCEDURAL OBBY tower" | **false** — vaults are deterministic per (tier, floor), so a floor you die on is the same vault next attempt. That is deliberate: it is what makes a depth comparable | "Maze vaults floor after floor", and "Every runner gets the same vaults" |
 | "dodge the closing walls" | **false** — nothing closes in. The seal over the exit does not even collide; the hazard is a rising kill plane | "while the collapse rises underneath you" |
-| "Bank gems to HATCH rare Vault-Keeper PETS" | **false** — you click a pedestal and pay. No egg, no hatch, no randomness | "Bank gems to BUY rare Vault-Keeper PETS" |
+| "Bank gems to HATCH rare Vault-Keeper PETS" | **false** — you click a pedestal and pay. No egg, no hatch, no randomness | "Spend banked gems on Vault-Keeper pets that multiply your haul" (`Pets.multiplier`, 1.05x-1.65x) |
 | "Vault SEALS FAST — pure rage-obby tension" | **overstated** — countdowns run 68s to 273s; Gold floor 1 is four and a half minutes | "Gems bank ONLY if you get out before the seal" |
-| "Collect & level up your pet squad" | **false** — eight pets, you own what you buy, you equip exactly ONE, and it never levels | dropped; the BUY line covers it |
-| "Endless PROCEDURALLY-GENERATED climbing towers" | true, kept | "Endless PROCEDURALLY-GENERATED vault towers" |
+| "Collect & level up your pet squad" | **false** — eight pets, you own what you buy, you equip exactly ONE, and it never levels | dropped; the pets line covers it |
+| "Endless PROCEDURALLY-GENERATED climbing towers" | true, but "endless towers" reads as one tower; it is three vaults of floors | "Maze vaults floor after floor: Bronze, Silver and Gold" |
 | "Harder floor tiers unlock as you climb" | true, and now measurable | "Every floor deeper is measurably tighter" |
-| "Progress auto-SAVES" | true, kept | unchanged |
-| "Love jump-tower obbies AND egg/pet-collecting games?" | **false** — there are no eggs | "Love obby towers AND pet-collecting games?" |
+| "Progress auto-SAVES" | true, kept | "Progress auto-saves" |
+| "Love jump-tower obbies AND egg/pet-collecting games?" | **false** — there are no eggs | dropped |
 | "new floors & pets added weekly" | **an unkeepable promise** on an unpublished game with nobody rostered to it | dropped |
+| (new) the strata | true: five by depth, each with its own critters, EYECANDY.md §2 and §2.5 | "Dig deeper: Bank Vault, Pyramid Tomb, Reactor Core, the Frozen Vault and the Volcano Temple, each with its own critters" |
+| (new) the ceiling drops | true: rare, telegraphed, a red ring marks where it lands (EYECANDY.md §3) | "a red ring marks where a rare drop lands, so keep moving" |
+| (new) the board | true: public top 10 or friends, on a sign in the hub (CLAUDE.md invariant 15) | "DEEPEST ESCAPES board in the hub: the public top 10, or just your friends" |
 
-The one line that got *stronger* is the obby: "SIX CRUMBLING PADS out of every storey — one miss
-and you fall" is now a literal description of `Config.Vault.StepReach` and `Config.Ascent`, held
-by `tests/VaultFloor.spec.luau`'s `climbIsFailable` and `tests/Ascent.spec.luau`. The brief's
-thumbnail concept — a player mid-air between two crumbling stone platforms — is what the game
-actually looks like now.
+The one line that got *stronger* is the obby: "SIX CRUMBLING PADS out of every storey: miss a jump
+and the collapse keeps rising" is a literal description of `Config.Vault.StepReach` and
+`Config.Ascent`, held by `tests/VaultFloor.spec.luau`'s `climbIsFailable` and
+`tests/Ascent.spec.luau`. The brief's thumbnail concept — a player mid-air between two crumbling
+stone platforms — is what the game actually looks like now.

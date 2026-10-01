@@ -276,6 +276,116 @@ do
 	truthy(moved, "a different floor seed hangs them differently (floors do not all look the same)")
 end
 
+--================================================================ critters: alive, and never in a wall
+
+-- docs/complete-game-standard.md §2: every band has its own CRITTERS. A critter lives in one maze cell
+-- (a cell centre is always open in a perfect maze) and walks a loop inside it, so, like a prop, it is
+-- placed from (storey, cell, seed) ONLY: it never reads the walls, the route or the gems, and cannot
+-- point at the exit. It is never in the shaft cell or over the hole. The runner meets the ones within
+-- CritterReach cells of the cell they stand in, nearest first, at most Budget.MaxCritters.
+do
+	truthy(type(VaultEnv.critterSites) == "function", "VaultEnv.critterSites exists")
+	truthy(type(VaultEnv.critterNear) == "function", "VaultEnv.critterNear exists")
+	truthy(type(VaultEnv.critterOffset) == "function", "VaultEnv.critterOffset exists")
+	if type(VaultEnv.critterSites) == "function" and type(VaultEnv.critterNear) == "function"
+		and type(VaultEnv.critterOffset) == "function" then
+		local a = build(3, 1, 111)
+		local b = build(3, 1, 222)
+		local same = true
+		for s = 0, a.storeys - 1 do
+			local sa = VaultEnv.critterSites(a, s, 777, 0.35)
+			local sb = VaultEnv.critterSites(b, s, 777, 0.35)
+			if #sa ~= #sb then same = false end
+			for i = 1, math.min(#sa, #sb) do
+				if sa[i].cx ~= sb[i].cx or sa[i].cy ~= sb[i].cy or sa[i].roll ~= sb[i].roll then same = false end
+			end
+		end
+		eq(same, true, "critter sites depend on (storey, cell, seed) only: two different mazes get identical sites")
+		local inCorner, total = nil, 0
+		for s = 0, a.storeys - 1 do
+			local en, ex = a.entryCells[s + 1], a.exitCells[s + 1]
+			for _, st in VaultEnv.critterSites(a, s, 777, 0.35) do
+				total += 1
+				if (st.cx == en.cx and st.cy == en.cy) or (st.cx == ex.cx and st.cy == ex.cy) then inCorner = st end
+			end
+		end
+		eq(inCorner, nil, "no critter lives in the shaft cell or over the hole")
+		local possible = a.storeys * (a.cells * a.cells - 2)
+		truthy(total > possible * 0.2 and total < possible * 0.5,
+			string.format("density 0.35 puts a critter in about a third of the cells (%d of %d)", total, possible))
+		eq(#VaultEnv.critterSites(a, 0, 777, 0), 0, "density 0: no critters")
+		-- not the props' cells: a critter is not always under a lamp
+		local differs = false
+		local ps, cs = VaultEnv.propSites(a, 0, 777, 0.35), VaultEnv.critterSites(a, 0, 777, 0.35)
+		if #ps ~= #cs then differs = true end
+		for i = 1, math.min(#ps, #cs) do
+			if ps[i].cx ~= cs[i].cx or ps[i].cy ~= cs[i].cy then differs = true end
+		end
+		truthy(differs, "critters are not simply the prop cells again")
+
+		-- who the runner meets: within reach, nearest first, at most max
+		local sites = VaultEnv.critterSites(a, 0, 777, 1)   -- every open cell but the two corners
+		local near = VaultEnv.critterNear(sites, 2, 2, 1, 4)
+		eq(#near, 4, "at most max critters, even with more cells in reach")
+		local far = nil
+		for _, st in near do
+			if math.max(math.abs(st.cx - 2), math.abs(st.cy - 2)) > 1 then far = st end
+		end
+		eq(far, nil, "only cells within reach (Chebyshev) of the runner's cell")
+		eq(near[1].cx == 2 and near[1].cy == 2, true, "the runner's own cell first")
+		local all = VaultEnv.critterNear(sites, 2, 2, 1, 100)
+		eq(#all, 9, "a reach of 1 is the 3 x 3 cells around the runner")
+		local again = VaultEnv.critterNear(sites, 2, 2, 1, 4)
+		local stable = true
+		for i = 1, 4 do if again[i].cx ~= near[i].cx or again[i].cy ~= near[i].cy then stable = false end end
+		eq(stable, true, "the same cell meets the same critters, frame after frame")
+
+		-- the loop: inside the roam, moving, never faster than its speed
+		local roam, speed, dt = Config.Env.CritterRoam or 3.5, 4, 1 / 30
+		local worstR, worstStep, moved = 0, 0, 0
+		for _, roll in { 0, 0.13, 0.5, 0.77, 0.999 } do
+			local px, pz = VaultEnv.critterOffset(roll, 0, roam, speed)
+			for i = 1, 1800 do
+				local x, z, vx, vz = VaultEnv.critterOffset(roll, i * dt, roam, speed)
+				worstR = math.max(worstR, math.sqrt(x * x + z * z))
+				local step = math.sqrt((x - px) ^ 2 + (z - pz) ^ 2)
+				worstStep = math.max(worstStep, step)
+				moved += step
+				if i % 600 == 0 then
+					-- the velocity is the way it walks: along the step it just took
+					local sx, sz = x - px, z - pz
+					truthy(type(vx) == "number" and type(vz) == "number" and vx * sx + vz * sz > 0,
+						"it faces the way it walks (velocity along its step, roll " .. roll .. ", t " .. i * dt .. ")")
+				end
+				px, pz = x, z
+			end
+		end
+		truthy(worstR <= roam + 1e-9, string.format("a critter never leaves its roam (%.3f of %.3f studs from its cell centre)", worstR, roam))
+		truthy(worstStep <= speed * dt * 1.01, string.format("and never moves faster than its speed (%.4f per frame, %.4f allowed)", worstStep, speed * dt))
+		truthy(moved > 5 * 60 * speed * 0.3, string.format("it moves (%.0f studs in five 60 s walks)", moved))
+
+		-- and so it is never in a wall: every critter of every storey, all minute long, stands in an open
+		-- fine cell, and in its own maze cell (the walls are where the roam would have to cross a wall)
+		local inWall, outOfCell = nil, nil
+		local S = a.cellSize
+		for s = 0, a.storeys - 1 do
+			for _, st in VaultEnv.critterSites(a, s, 777, 1) do
+				for i = 0, 600 do
+					local x, z = VaultEnv.critterOffset(st.roll, i * 0.1, roam, speed)
+					local wx = (2 * st.cx + 1 - (a.gCols - 1) / 2) * S + x
+					local wz = (2 * st.cy + 1 - (a.gRows - 1) / 2) * S + z
+					local fx = math.floor(wx / S + (a.gCols - 1) / 2 + 0.5)
+					local fy = math.floor(wz / S + (a.gRows - 1) / 2 + 0.5)
+					if a.grids[s + 1][fy][fx] then inWall = inWall or string.format("storey %d cell %d,%d", s, st.cx, st.cy) end
+					if fx ~= 2 * st.cx + 1 or fy ~= 2 * st.cy + 1 then outOfCell = outOfCell or string.format("storey %d cell %d,%d", s, st.cx, st.cy) end
+				end
+			end
+		end
+		eq(inWall, nil, "no critter ever stands in a wall")
+		eq(outOfCell, nil, "every critter stays in its own maze cell")
+	end
+end
+
 --================================================================ readability arithmetic
 
 do
@@ -429,6 +539,26 @@ do
 	eq(k[1] == 168 and k[2] == 226 and k[3] == 255, true, "and keeps the tier's colour where it reads")
 	g[1] = 0
 	eq(sapphire[1], 40, "it hands out a fresh array, never the band's own table")
+
+	-- NOT THE PADS' COLOUR (second review, REVIEW-5 §B2). A gem that reads against the floor and the
+	-- wall can still wear the obby's colour: the tomb's pearl gems sat 42 apart in RGB from its cream
+	-- pads. With the pad passed in, a colour closer than `minPad` to it does not count as reading.
+	local cream, pearl, gold2 = { 252, 236, 196 }, { 255, 250, 235 }, { 255, 214, 90 }
+	local sandFloor, sandWall = { 110, 78, 44 }, { 214, 172, 110 }
+	eq(VaultEnv.readableGem(pearl, sandFloor, sandWall, { gold2 }, 3, 1.5), pearl,
+		"(without a pad, pearl reads in the tomb and is kept)")
+	eq(VaultEnv.readableGem(pearl, sandFloor, sandWall, { gold2 }, 3, 1.5, cream, 80), gold2,
+		"a tier colour that reads but sits on the pads' colour is replaced by a stratum gem that does not")
+	eq(VaultEnv.readableGem(tierGem, iceFloor, iceWall, { navy, sapphire }, 3, 1.8, { 30, 30, 125 }, 80), sapphire,
+		"of two stratum gems that read, one on the pads' colour loses to the one that is not, however well it reads")
+	local cfgP = {
+		Tiers = { { gemColor = { r = 255, g = 250, b = 235 } } },
+		Env = { MinGemContrast = 3, MinGemWallContrast = 1.5, MinGemPadDistance = 80, Bands = {
+			{ palette = { gem = gold2 } },
+		} },
+	}
+	local gp = VaultEnv.gem(cfgP, { floor = sandFloor, wall = sandWall, pad = cream, band = 1, next = 1, t = 0 }, 1)
+	eq(gp[1] == gold2[1] and gp[2] == gold2[2] and gp[3] == gold2[3], true, "VaultEnv.gem holds the gem off the palette's own pad")
 end
 
 --================================================================ the drop's ring stays visible
@@ -461,6 +591,60 @@ do
 	local pad = m.shafts[s + 1].pads[4]
 	eq(VaultEnv.inShaft(Config, m, { x = pad.x, y = pad.y + 3, z = pad.z }), true, "and so is standing on a pad")
 	eq(VaultEnv.inShaft(Config, m, standAt(m, s, 3, 3)), 3 == 2 * ex.cx + 1 and 3 == 2 * ex.cy + 1, "an ordinary corridor is not")
+end
+
+--================================================================ the endgame turns: halls of the deepest stratum
+-- (owner decision 2026-09-30: every Gold floor was the Volcano Temple, and a player may live in Gold for
+-- hours. Past Env.Halls.from the deepest stratum moves to its next hall every Env.Halls.every depths,
+-- and wraps round, so the endgame never settles into one room.)
+
+do
+	local cfg = { Env = { Halls = { from = 44, every = 4, list = {
+		{ id = "a", name = "A" }, { id = "b", name = "B" }, { id = "c", name = "C" },
+	} } } }
+	eq(VaultEnv.hall ~= nil and VaultEnv.hall(cfg, 43.99), nil, "no hall before Env.Halls.from")
+	local h44 = VaultEnv.hall and VaultEnv.hall(cfg, 44)
+	eq(h44 and h44.id, "a", "the first hall starts at `from`")
+	eq(VaultEnv.hall and (VaultEnv.hall(cfg, 47.9) or {}).id, "a", "...and lasts `every` depths")
+	eq(VaultEnv.hall and (VaultEnv.hall(cfg, 48) or {}).id, "b", "then the next hall")
+	eq(VaultEnv.hall and (VaultEnv.hall(cfg, 52) or {}).id, "c", "and the next")
+	eq(VaultEnv.hall and (VaultEnv.hall(cfg, 56) or {}).id, "a", "and round again: the endgame never runs out of halls")
+	eq(VaultEnv.hall and (VaultEnv.hall(cfg, 56 + 12 * 1000) or {}).id, "a", "however deep")
+	eq(VaultEnv.hallStart and VaultEnv.hallStart(cfg, 50) or -1, 48, "a hall's first depth (for the fanfare: deeper than ever cleared)")
+	eq(VaultEnv.hall ~= nil and VaultEnv.hall({ Env = {} }, 99), nil, "no Env.Halls: no halls, as before")
+end
+
+--================================================================ the emitter budget is a cap
+-- (second review, REVIEW-5 §B1: Config.Budget's emitter and particle budgets were read only by the
+-- checks.) VaultEnv.grantRates is the rule the client applies every frame: wants in, grants out, the
+-- most important first, never more than `maxN` emitters or `maxRate` particles/s in all.
+
+do
+	local wants = {
+		{ rate = 14, prio = 4 }, -- weather
+		{ rate = 40, prio = 1 }, -- the drop's trickle (the telegraph)
+		{ rate = 18, prio = 2 }, -- sparks off the collapse
+		{ rate = 11.5, prio = 3 }, -- ceiling dust
+	}
+	local g = VaultEnv.grantRates and VaultEnv.grantRates(wants, 6, 90) or {}
+	eq(g[1], 14, "under budget, every emitter gets what it asked for (weather)")
+	eq(g[2], 40, "(trickle)")
+	eq(g[3], 18, "(sparks)")
+	eq(g[4], 11.5, "(dust)")
+	local c = VaultEnv.grantRates and VaultEnv.grantRates(wants, 2, 50) or {}
+	eq(c[2], 40, "over budget, the telegraph is granted first")
+	eq(c[3], 10, "then the collapse's sparks, with what is left of the rate")
+	eq(c[4], 0, "the third emitter is refused: at most maxN")
+	eq(c[1], 0, "and the ambient weather goes first")
+	local total, n = 0, 0
+	for _, r in c do total += r; if r > 0 then n += 1 end end
+	truthy(total <= 50 and n <= 2, string.format("the grants fit the budget (%.1f/s over %d emitters)", total, n))
+	local z = VaultEnv.grantRates and VaultEnv.grantRates({ { rate = 0, prio = 1 }, { rate = 5, prio = 2 } }, 1, 90) or {}
+	eq(z[1], 0, "an emitter that wants nothing takes no slot")
+	eq(z[2], 5, "...so the next one gets it")
+	local tie = VaultEnv.grantRates and VaultEnv.grantRates({ { rate = 5, prio = 4 }, { rate = 5, prio = 4 } }, 1, 90) or {}
+	eq(tie[1], 5, "equal priority: the first asked is the first served")
+	eq(tie[2], 0, "(and the second waits)")
 end
 
 print(string.format("VaultEnv: %d passed, %d failed", passed, failed))

@@ -17,6 +17,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")   -- GenerateGUID only (the session's owner token); no HTTP
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Rng = require(ReplicatedStorage:WaitForChild("Rng"))
@@ -29,6 +30,8 @@ local Pets = require(ReplicatedStorage:WaitForChild("Pets"))
 local Trace = require(ReplicatedStorage:WaitForChild("Trace"))
 local Ascent = require(ReplicatedStorage:WaitForChild("Ascent"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
+local VaultEnv = require(ReplicatedStorage:WaitForChild("VaultEnv"))   -- deepestCleared: the board's metric
+local Board = require(ReplicatedStorage:WaitForChild("Board"))
 
 -- Visuals are part of the first build, not a later pass (docs/new-game-checklist.md §2).
 -- Cozy: no sun, warm glow, dark fog — an underground vault lit by what is inside it.
@@ -59,6 +62,7 @@ local EnterEvent = mk("RemoteEvent", "Enter")   -- client -> server: enter vault
 local BuyEvent = mk("RemoteEvent", "Buy")       -- client -> server: buy pet <id>
 local EquipEvent = mk("RemoteEvent", "Equip")   -- client -> server: equip pet <id or nil>
 local ToastEvent = mk("RemoteEvent", "Toast")   -- server -> client: one short line
+local BoardEvent = mk("RemoteEvent", "Board")   -- server -> client: THIS player's view of the board
 
 --============================================================================ data
 
@@ -78,9 +82,29 @@ local store = tryStore(function()
 	return DataStoreService:GetDataStore(Config.Save.Store)
 end, "profiles")
 
+-- The highscore board (Config.Board). Nil when the place has no DataStore access, and then the sign
+-- says it is offline rather than showing an empty board as if nobody had ever escaped.
+local boardStore = tryStore(function()
+	return DataStoreService:GetOrderedDataStore(Config.Save.Board)
+end, "board")
+
+-- ONE clock for the board's caches and read limiter. os.clock() is CPU time in Roblox (a quiet
+-- server barely counts) and os.time() has whole seconds; GetServerTimeNow is the wall clock, and
+-- tick() is the fallback for an engine (and the headless harness) that does not have it.
+local clock: () -> number
+do
+	local ok, t = pcall(function()
+		return (workspace :: any):GetServerTimeNow()
+	end)
+	clock = if ok and type(t) == "number" then function()
+		return (workspace :: any):GetServerTimeNow()
+	end else tick
+end
+
 local profiles = {}   -- [player] = profile
 local pendingSave = {}   -- [player] = true, "this profile wants a write on the next flush tick"
 local requestSave     -- forward declaration; defined under flush()
+local toast           -- forward declaration; defined with the runs (flush tells a player it lost the save)
 
 local function defaultProfile()
 	local floors = {}
@@ -93,6 +117,10 @@ local function defaultProfile()
 		floors = floors,     -- [tierIndex] = next floor number in that vault
 		escapes = 0,
 		wipes = 0,
+		-- When the deepest escape (the board's metric) was reached, in unix seconds. Saved, so a board
+		-- write that failed is retried with the time the player GOT there, not the time of the retry:
+		-- a tie on the board goes to whoever escaped that deep first.
+		bestAt = 0,
 		canSave = false,
 	}
 end
@@ -109,11 +137,20 @@ local function numKeys(src)
 	return out
 end
 
--- Soft session lock. The owner token is game.JobId — a STABLE per-session value. A timestamp
--- rewritten on every save fires the guard against yourself and silently stops saving.
+-- Soft session lock (docs/complete-game-standard.md §1, fork-tower's `old.session`).
+-- TWO fields, two jobs. `jobId` + `lockUntil` say whether a LOAD may take the record: a live lock held
+-- by another server is respected (the player plays without saving). `session` is the OWNER TOKEN: a
+-- fresh GUID written by the load that takes the record, and every later write of this session lands
+-- only while the record still carries it (flush). game.JobId alone was the token before, and it is per
+-- SERVER, not per session: every session on one server shares it, so it could not tell this session's
+-- record from one a newer session had loaded since, and flush wrote whenever the record's jobId was
+-- nil or its lock had run out, which is every player who stood still in the hub for two minutes (the
+-- lock is renewed only by a write). A timestamp would be worse: rewritten on every save, it fires the
+-- guard against yourself and silently stops saving.
 local function loadProfile(plr)
 	local p = defaultProfile()
 	if not store then return p end
+	local token = HttpService:GenerateGUID(false)
 	local acquired = false
 	local ok, err = pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
@@ -128,6 +165,7 @@ local function loadProfile(plr)
 				p.equipped = (type(d.equipped) == "string") and d.equipped or nil
 				p.escapes = tonumber(d.escapes) or 0
 				p.wipes = tonumber(d.wipes) or 0
+				p.bestAt = tonumber(d.bestAt) or 0
 				local f = numKeys(d.floors)
 				for i = 1, #Config.Tiers do p.floors[i] = math.max(1, tonumber(f[i]) or 1) end
 			end
@@ -137,6 +175,7 @@ local function loadProfile(plr)
 			end
 			acquired = true
 			old.jobId = game.JobId
+			old.session = token
 			old.lockUntil = now + Config.Save.LockSeconds
 			old.data = old.data or {}
 			return old
@@ -147,8 +186,14 @@ local function loadProfile(plr)
 		return p
 	end
 	p.canSave = acquired
+	p.session = if acquired then token else nil
 	if not acquired then
 		warn("[Vault] " .. plr.Name .. " is locked by another server; playing without saving.")
+	end
+	-- A profile saved before bestAt existed still has a deepest escape; it is stamped with the session
+	-- it came back in (the true time is unknown, and a later stamp can only lose a tie, never steal one).
+	if p.bestAt <= 0 and VaultEnv.deepestCleared(Config, p.floors) > 0 then
+		p.bestAt = os.time()
 	end
 	return p
 end
@@ -173,8 +218,32 @@ local function saveFingerprint(p)
 	for i = 1, #Config.Tiers do floors[i] = tostring(p.floors[i] or 1) end
 	return table.concat({
 		tostring(p.gems), tostring(p.totalBanked), tostring(p.escapes), tostring(p.wipes),
-		tostring(p.equipped), table.concat(owned, ","), table.concat(floors, ","),
+		tostring(p.equipped), table.concat(owned, ","), table.concat(floors, ","), tostring(p.bestAt),
 	}, "|")
+end
+
+--============================================================================ the board's writes
+
+-- The depth this session has confirmed on the board, per player. Memory only: at worst a join
+-- re-offers a depth the board already holds, and Board.keepHigher aborts that write.
+local boardSent = {}   -- [player] = depth
+
+-- Offer this player's deepest escape to the board. Only while this session can save (so the board
+-- never holds a depth the profile would roll back), only when it is deeper than what this session
+-- already confirmed, and through UpdateAsync + Board.keepHigher, so the stored value only ever moves
+-- when the DEPTH improves and a tie keeps its first reach time.
+local function writeBoard(plr, p)
+	if not boardStore or not p or not p.canSave then return end
+	local depth = VaultEnv.deepestCleared(Config, p.floors)
+	if depth <= 0 or depth <= (boardSent[plr] or 0) then return end
+	local value = Board.encode(depth, p.bestAt, Config.Board)
+	local ok = pcall(function()
+		boardStore:UpdateAsync(Board.key(plr.UserId), function(old)
+			return Board.keepHigher(old, value)
+		end)
+	end)
+	-- Also when keepHigher aborted: what the board holds is at least this deep.
+	if ok then boardSent[plr] = depth end
 end
 
 local function flush(plr, releaseLock)
@@ -191,13 +260,20 @@ local function flush(plr, releaseLock)
 	end
 
 	local wrote = false
+	-- Set on EVERY invocation: UpdateAsync may run the transform more than once.
+	local lost = false
 	local ok, err = pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
 			old = old or {}
-			if old.jobId ~= nil and old.jobId ~= game.JobId
-				and (tonumber(old.lockUntil) or 0) > os.time() then
+			-- OWNERSHIP. Only while the record still carries the token this session's load wrote. A
+			-- newer session that took the record (its own load, after this lock ran out) has written its
+			-- own token; this write is then cancelled whatever it is, a flush tick, a run's end or the
+			-- release on leaving, and whether or not that newer session still holds a live lock.
+			if old.session ~= p.session then
+				lost = true
 				return nil   -- somebody else owns the slot; ABORT the write
 			end
+			lost = false
 			-- if-then-else, NOT `releaseLock and nil or game.JobId`. That and-or reads as a
 			-- ternary and is not one: nil is falsy, so it ALWAYS evaluates to game.JobId and the
 			-- lock is never released. luau-analyze flags it as MisleadingAndOr, which is how it
@@ -209,18 +285,31 @@ local function flush(plr, releaseLock)
 				gems = p.gems, totalBanked = p.totalBanked,
 				pets = p.pets, equipped = p.equipped,
 				floors = p.floors, escapes = p.escapes, wipes = p.wipes,
+				bestAt = p.bestAt,
 			}
 			wrote = true
 			return old
 		end)
 	end)
 	if not ok then warn("[Vault] save failed for " .. plr.Name .. ": " .. tostring(err)) end
+	if ok and lost then
+		-- Nothing this session does is kept from here on, so it stops trying, and says so once.
+		p.canSave = false
+		pendingSave[plr] = nil
+		warn("[Vault] " .. plr.Name .. ": another session has taken over this profile; progress is no longer saved this session.")
+		if plr.Parent == Players and toast then
+			toast(plr, "⚠️ You are playing in another server too: progress here is no longer saved.")
+		end
+		return false
+	end
 	-- Only a transform that actually RETURNED a value wrote anything. The abort branch above
 	-- returns nil, which is a successful pcall and a save that did not happen; treating that as
 	-- written would clear the fingerprint and lose the change for good.
 	if ok and wrote then
 		p.savedFingerprint = fingerprint
 		pendingSave[plr] = nil
+		-- The profile holding this depth is saved; now the board may hear about it.
+		if not releaseLock then writeBoard(plr, p) end
 	end
 	return ok and wrote
 end
@@ -289,6 +378,7 @@ end
 
 local portalParts = {}   -- [tierIndex] = Part
 local stallParts = {}    -- [petId] = Part
+local hubSpawn           -- the one SpawnLocation; every player's RespawnLocation (onPlayerAdded)
 
 local function buildHub()
 	local pad = Instance.new("Part")
@@ -325,6 +415,7 @@ local function buildHub()
 	spawnPad.Transparency = 0.4
 	spawnPad.CanCollide = true
 	spawnPad.Parent = hubFolder
+	hubSpawn = spawnPad
 
 	-- Three portals, one per vault. Clicking one is the whole "start a run" interaction: the
 	-- first-run action is one click, with no purchase and no prerequisite in front of it.
@@ -489,7 +580,7 @@ end
 
 local active = {}   -- [player] = { run, model, folder, origin, gemParts, plane, seal, elapsed }
 
-local function toast(plr, text)
+function toast(plr, text)
 	ToastEvent:FireClient(plr, text)
 end
 
@@ -594,6 +685,16 @@ local function buildVault(plr, tierIndex, floor)
 			label(part, "🚪 ESCAPE", 240, 6)
 		end
 	end
+	-- EVERY PAD ASCENT WILL MOVE HAS A PART TO MOVE. Ascent.update records a flip as drawn when it
+	-- reports it, and the flip loop skips a pad with no part — so a pad missing here would be a pad
+	-- stuck gone (or stuck solid) for the rest of the run, silently. Refuse to build that vault
+	-- instead (obby review finding 12, REVIEW-5 §12).
+	for s = 0, model.storeys - 2 do
+		for _, pad in ipairs(model.shafts[s + 1].pads) do
+			assert(padParts[s][pad.index] ~= nil, string.format(
+				"[Vault] %s: shaft %d pad %d has no part to crumble", folder.Name, s, pad.index))
+		end
+	end
 	if plane then Fx.attachGlow(plane, col(Config.Hud.DangerColor), 3, 60) end
 	if seal then Fx.attachGlow(seal, col(Config.Hud.DangerColor), 2, 24) end
 
@@ -657,7 +758,53 @@ end
 
 local finishRun
 
-local function tickRun(plr, a, dt)
+-- WHERE THE RUNNER IS, AND THE SHAFT UNDER THEM, looked at every Config.Ascent.SampleSeconds —
+-- four times per rules tick. A runner who chains the hops has a pad under their feet for about
+-- 0.13 s, and the 0.2 s rules tick missed a third of those landings: the pads they chained over
+-- never crumbled (REVIEW-5 §3, robloxemu/check_vaultrunners_shaft.luau §6). So the trusted position
+-- is stepped here, the pad under it is touched here, and the shaft's flips are drawn here; the
+-- rules (gems, exit, collapse, seal) still run at Run.TickSeconds in tickRun, against the position
+-- this left in `a.trusted`.
+local function watchRunner(plr, a, dt)
+	local char = plr.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		-- WHERE THE CLIENT SAYS IT IS...
+		local claimed = hrp.Position - a.origin
+		-- ...and where a runner could actually have got to by now. Every rule reads the second
+		-- one. In Roblox the client owns its character's physics, so the first is a claim; writing
+		-- the root part onto the exit pad used to bank a whole vault instantly.
+		local t = Trace.step(a.trace, { x = claimed.X, y = claimed.Y, z = claimed.Z }, dt)
+		a.trusted = Vector3.new(t.x, t.y, t.z)
+
+		-- THE CLIMB SHAFT. Standing on a pad starts its crumble; the pad is gone a beat later and
+		-- back a few seconds after that. This reads the TRUSTED position like every rule in the run
+		-- loop: a crumble driven by the client's claim would let a teleporting client pre-crumble a
+		-- whole vault on the way past.
+		local onStorey, onPad = Ascent.padUnder(Config, a.model, t, a.ascent, a.elapsed)
+		if onPad ~= nil then Ascent.touch(Config, a.ascent, onStorey, onPad, a.elapsed) end
+	else
+		a.trusted = nil
+	end
+
+	-- ...and draw whatever the shaft did. Only the FLIPS: writing CanCollide on every pad of a
+	-- five-storey vault every sample is 24 replicated property writes at 20Hz for nothing.
+	-- This runs outside the `if hrp` above on purpose: a pad that has crumbled must come back on
+	-- time even while the server cannot see the runner's root for a moment. (A respawn is not that
+	-- case: onCharacter ends the run on every CharacterAdded, and the vault, its pads and this state
+	-- go with it.)
+	for _, ch in ipairs(Ascent.update(Config, a.ascent, a.elapsed)) do
+		local part = a.padParts[ch.storey] and a.padParts[ch.storey][ch.index]
+		if part then
+			part.CanCollide = ch.solid
+			part.CanQuery = ch.solid
+			part.Transparency = ch.solid and 0 or 1
+			part.CastShadow = ch.solid
+		end
+	end
+end
+
+local function tickRun(plr, a)
 	local p = profiles[plr]
 	if not p then return end
 	local model, run = a.model, a.run
@@ -675,17 +822,9 @@ local function tickRun(plr, a, dt)
 		a.seal.CFrame = CFrame.new(a.origin + Vector3.new(model.seal.x, sy, model.seal.z))
 	end
 
-	local char = plr.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	if hrp then
-		-- WHERE THE CLIENT SAYS IT IS...
-		local claimed = hrp.Position - a.origin
-		-- ...and where a runner could actually have got to by now. Every rule below reads the
-		-- second one. In Roblox the client owns its character's physics, so the first is a claim;
-		-- writing the root part onto the exit pad used to bank a whole vault instantly.
-		local t = Trace.step(a.trace, { x = claimed.X, y = claimed.Y, z = claimed.Z }, dt)
-		local local_ = Vector3.new(t.x, t.y, t.z)
-
+	-- The TRUSTED position watchRunner left this sample (nil while there is no root part).
+	local local_ = a.trusted
+	if local_ then
 		for id, part in pairs(a.gemParts) do
 			local g = a.gemById[id]
 			if (local_ - vec(g.position)).Magnitude <= RUN.CollectRadius then
@@ -702,15 +841,6 @@ local function tickRun(plr, a, dt)
 			end
 		end
 
-		-- THE CLIMB SHAFT. Standing on a pad starts its crumble; the pad is gone a beat later and
-		-- back a few seconds after that. This reads `local_` — the TRUSTED position — like every
-		-- other rule in this loop: a crumble driven by the client's claim would let one player
-		-- dissolve the shaft by lying about where they are, and would let a teleporting client
-		-- pre-crumble a whole vault on the way past.
-		local onStorey, onPad = Ascent.padUnder(Config, model,
-			{ x = local_.X, y = local_.Y, z = local_.Z }, a.ascent, now)
-		if onPad ~= nil then Ascent.touch(Config, a.ascent, onStorey, onPad, now) end
-
 		if (local_ - vec(model.exit.position)).Magnitude <= RUN.ExitRadius then
 			finishRun(plr, "exit")
 			return
@@ -722,21 +852,6 @@ local function tickRun(plr, a, dt)
 		if RunState.caught(run, model, local_.Y, now) then
 			finishRun(plr, "collapse")
 			return
-		end
-	end
-
-	-- ...and draw whatever the shaft did this tick. Only the FLIPS: writing CanCollide on every
-	-- pad of a five-storey vault every tick is 24 replicated property writes at 5Hz for nothing.
-	-- This runs outside the `if hrp` above on purpose — a pad that has crumbled must come back
-	-- even while the player has no character, or a respawn mid-climb finds a shaft with holes in
-	-- it that never fill.
-	for _, ch in ipairs(Ascent.update(Config, a.ascent, now)) do
-		local part = a.padParts[ch.storey] and a.padParts[ch.storey][ch.index]
-		if part then
-			part.CanCollide = ch.solid
-			part.CanQuery = ch.solid
-			part.Transparency = ch.solid and 0 or 1
-			part.CastShadow = ch.solid
 		end
 	end
 
@@ -772,10 +887,19 @@ function finishRun(plr, cause)
 		-- sealed. Reaching the exit is not the win condition; reaching it in time is.
 		local res = RunState.tryEscape(run, Pets.multiplier(Config, p), now)
 		if res.ok then
+			local deepestBefore = VaultEnv.deepestCleared(Config, p.floors)
 			p.gems += res.banked
 			p.totalBanked += res.banked
 			p.escapes += 1
 			p.floors[a.tierIndex] = (p.floors[a.tierIndex] or 1) + 1
+			-- THE BOARD'S REACH TIME. Stamped here, when the server banks an escape DEEPER than any
+			-- before it, and saved with the floors in the flush below: a tie on the board goes to
+			-- whoever got there first, so the time must be the escape's, never the board write's
+			-- (a write can fail and be retried a session later). An escape that is not the deepest
+			-- (Silver floor 1 after Bronze floor 29) leaves it alone.
+			if VaultEnv.deepestCleared(Config, p.floors) > deepestBefore then
+				p.bestAt = os.time()
+			end
 			outcome = { ok = true, reason = "escaped", banked = res.banked, carried = res.carried,
 				time = now, floor = a.floor, tier = a.tierIndex }
 			toast(plr, string.format("💎 Banked %d gems — %s floor %d cleared!",
@@ -880,13 +1004,23 @@ local function beginRun(plr, tierIndex)
 	})
 	pushState(plr)
 
+	-- Two rates in one loop: the runner and the shaft are watched every Ascent.SampleSeconds
+	-- (watchRunner), the run's rules are judged every Run.TickSeconds (tickRun). One clock,
+	-- `a.elapsed`, for both, so a pad's crumble and the collapse can never disagree about the time.
 	task.spawn(function()
+		local sample = Config.Ascent.SampleSeconds
+		local sinceRules = 0
 		while active[plr] == a do
-			local dt = task.wait(RUN.TickSeconds)
-			if type(dt) ~= "number" then dt = RUN.TickSeconds end
+			local dt = task.wait(sample)
+			if type(dt) ~= "number" then dt = sample end
 			if active[plr] ~= a then break end
 			a.elapsed += dt
-			tickRun(plr, a, dt)
+			watchRunner(plr, a, dt)
+			sinceRules += dt
+			if sinceRules >= RUN.TickSeconds - 1e-6 then
+				sinceRules = math.min(sinceRules - RUN.TickSeconds, RUN.TickSeconds)
+				tickRun(plr, a)
+			end
 		end
 	end)
 end
@@ -958,6 +1092,268 @@ for petId, part in pairs(stallParts) do
 	end
 end
 
+--============================================================================ the highscore board
+
+-- docs/complete-game-standard.md §3, Config.Board. The metric is the deepest vault escaped, measured
+-- by this server (finishRun, behind RunState and Trace), stored encoded so a tie goes to whoever got
+-- there FIRST (Board.encode), and written only when it deepens (writeBoard, above). The sign stands in
+-- the hub, west of the spawn with its face turned to it; its ProximityPrompt toggles PUBLIC / FRIENDS
+-- per player, and each player's view goes to their own client (Board.client draws it on the sign).
+-- Public: one GetSortedAsync per PublicCacheSeconds. Friends: only when asked, capped at FriendsCap,
+-- cached per player and throttled (Board.newLimiter plus Roblox's own budget). Names are looked up and
+-- kept in memory, never stored.
+local BC = Config.Board
+
+local boardPart = Instance.new("Part")
+boardPart.Name = "DeepestBoard"
+boardPart.Anchored = true
+boardPart.Size = vec(BC.Size)
+do
+	local centre = vec(BC.Position)
+	local spawnAt = vec(HUB.SpawnPosition)
+	-- the front face (local -Z, where Board.client draws) looks at the spawn, level
+	boardPart.CFrame = CFrame.lookAt(centre, Vector3.new(spawnAt.X, centre.Y, spawnAt.Z))
+end
+boardPart.Material = Enum.Material.SmoothPlastic
+boardPart.Color = Color3.fromRGB(24, 22, 34)
+boardPart.TopSurface = Enum.SurfaceType.Smooth
+boardPart.Parent = hubFolder
+do
+	-- A gold frame behind the sign: something interactive should look interactive
+	-- (docs/new-game-checklist.md §2). Parented to the sign, so it is part of it, not in the way.
+	local trim = Instance.new("Part")
+	trim.Name = "Trim"
+	trim.Anchored = true
+	trim.CanCollide = false
+	trim.CanQuery = false
+	trim.CastShadow = false
+	trim.Size = Vector3.new(BC.Size.x + 0.8, BC.Size.y + 0.8, 0.6)
+	trim.CFrame = boardPart.CFrame * CFrame.new(0, 0, 0.35)   -- local +Z is behind the sign
+	trim.Material = Enum.Material.Neon
+	trim.Color = col(Config.Hud.AccentColor)
+	trim.Parent = boardPart
+end
+local boardPrompt = Instance.new("ProximityPrompt")
+do
+	-- Low on the front face. It pops up when a runner walks over to the sign, never while they stand on
+	-- the spawn pad (check_vaultrunners_board measures the nearest point of the pad against the reach).
+	local at = Instance.new("Attachment")
+	at.Name = "PromptAt"
+	at.Position = Vector3.new(0, -BC.Size.y / 2 + 2, -(BC.Size.z / 2 + 0.1))
+	at.Parent = boardPart
+	boardPrompt.Name = "BoardPrompt"
+	boardPrompt.ActionText = BC.Text.Prompt
+	boardPrompt.ObjectText = BC.Text.Title
+	boardPrompt.HoldDuration = 0
+	boardPrompt.MaxActivationDistance = BC.PromptDistance
+	boardPrompt.RequiresLineOfSight = false
+	boardPrompt.KeyboardKeyCode = Enum.KeyCode.E
+	boardPrompt.Parent = at
+end
+
+-- Names: a player in this server, the friends list, or GetNameFromUserIdAsync; kept in memory, never
+-- stored. A failed lookup is not remembered, so the next view tries again.
+local nameCache = {}   -- [userId] = name
+local function nameOf(userId)
+	local cached = nameCache[userId]
+	if cached then return cached end
+	local here = Players:GetPlayerByUserId(userId)
+	if here then
+		nameCache[userId] = here.Name
+		return here.Name
+	end
+	local ok, res = pcall(function()
+		return Players:GetNameFromUserIdAsync(userId)
+	end)
+	if ok and type(res) == "string" then
+		nameCache[userId] = res
+		return res
+	end
+	return "#" .. tostring(userId)
+end
+local function withNames(rows)
+	local out = {}
+	for i, r in ipairs(rows) do
+		out[i] = { rank = r.rank, userId = r.userId, depth = r.depth, you = r.you, name = nameOf(r.userId) }
+	end
+	return out
+end
+
+-- A player in this server: their value from memory, fresher than the store (which hears about a new
+-- depth after the profile holding it is saved).
+local function liveValue(p)
+	if not p then return 0 end
+	local depth = VaultEnv.deepestCleared(Config, p.floors)
+	if depth <= 0 then return 0 end
+	return Board.encode(depth, p.bestAt, BC)
+end
+
+local boardMode = {}   -- [player] = "public" | "friends"
+local publicView = { rows = {}, note = if boardStore then BC.Text.Loading else BC.Text.Offline }
+
+local function sendBoard(plr, mode, view)
+	-- `viewer`: FireClient reaches only this player in Roblox; the field lets the client ignore the rest.
+	BoardEvent:FireClient(plr, { viewer = plr.UserId, mode = mode, rows = view.rows, note = view.note })
+end
+
+local function refreshPublic()
+	if not boardStore then return end
+	local ok, page = pcall(function()
+		return boardStore:GetSortedAsync(false, BC.PublicRows)
+	end)
+	if not ok or not page then return end   -- keep the last list rather than blank the sign
+	local okPage, items = pcall(function()
+		return page:GetCurrentPage()
+	end)
+	if not okPage or type(items) ~= "table" then return end
+	local entries = {}
+	for _, e in ipairs(items) do
+		local uid = Board.userIdOf(tostring(e.key))
+		if uid and type(e.value) == "number" then
+			table.insert(entries, { userId = uid, value = e.value })
+		end
+	end
+	local view = Board.publicView(entries, BC)
+	publicView = { rows = withNames(view.rows), note = view.note }
+end
+
+-- Friends: on demand, capped, cached per player. A failed fetch is retried after a minute, not per tap.
+local friendsCache = Board.newCache(BC.FriendsCacheSeconds)
+local friendsFailed = Board.newCache(60)
+local scoreCache = Board.newCache(BC.ScoreCacheSeconds)
+local readLimiter = Board.newLimiter(BC.ReadsBurst, BC.ReadsPerSecond, clock())
+local fetching = {}   -- [player] = true while their friends list is being read
+
+local function friendIdsOf(plr)
+	local now = clock()
+	local hit = Board.cacheGet(friendsCache, plr.UserId, now)
+	if hit then return hit, false end
+	if Board.cacheHas(friendsFailed, plr.UserId, now) then return {}, true end
+	local ok, pages = pcall(function()
+		return (Players :: any):GetFriendsAsync(plr.UserId)
+	end)
+	local ids = {}
+	local broken = not ok or pages == nil
+	while not broken and #ids < BC.FriendsCap do
+		local okPage, items = pcall(function()
+			return pages:GetCurrentPage()
+		end)
+		if not okPage or type(items) ~= "table" then
+			broken = #ids == 0
+			break
+		end
+		for _, item in ipairs(items) do
+			local id = tonumber(item.Id)
+			if id and #ids < BC.FriendsCap then
+				table.insert(ids, id)
+				if type(item.Username) == "string" then nameCache[id] = item.Username end
+			end
+		end
+		if pages.IsFinished or #ids >= BC.FriendsCap then break end
+		if not pcall(function() pages:AdvanceToNextPageAsync() end) then break end
+	end
+	if broken then
+		Board.cachePut(friendsFailed, plr.UserId, true, now)
+		return {}, true
+	end
+	Board.cachePut(friendsCache, plr.UserId, ids, now)
+	return ids, false
+end
+
+-- Always leave BudgetReserve GetAsync calls in Roblox's own budget (if it cannot be read, only the
+-- limiter applies).
+local function budgetLeft()
+	local ok, budget = pcall(function()
+		return DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetAsync)
+	end)
+	return not (ok and type(budget) == "number" and budget < BC.BudgetReserve)
+end
+
+-- A friend's stored value (0 = never escaped), or nil when throttled (try again shortly). A read that
+-- fails counts as 0 without being cached, so one bad key never stalls the list.
+local function friendValue(userId)
+	local here = Players:GetPlayerByUserId(userId)
+	if here and profiles[here] then return liveValue(profiles[here]) end
+	local now = clock()
+	if Board.cacheHas(scoreCache, userId, now) then return Board.cacheGet(scoreCache, userId, now) end
+	if not boardStore then return 0 end
+	if not budgetLeft() or not Board.take(readLimiter, now) then return nil end
+	local ok, v = pcall(function()
+		return boardStore:GetAsync(Board.key(userId))
+	end)
+	if not ok then return 0 end
+	local value = if type(v) == "number" then v else 0
+	Board.cachePut(scoreCache, userId, value, now)
+	return value
+end
+
+local function showFriends(plr)
+	if not boardStore then
+		sendBoard(plr, "friends", { rows = {}, note = BC.Text.Offline })
+		return
+	end
+	if fetching[plr] then
+		sendBoard(plr, "friends", { rows = {}, note = BC.Text.Loading })   -- the fetch running sends soon
+		return
+	end
+	fetching[plr] = true
+	task.spawn(function()
+		sendBoard(plr, "friends", { rows = {}, note = BC.Text.Loading })
+		local ids, failedList = friendIdsOf(plr)
+		local values = {}
+		local status = { friendCount = #ids, checked = 0, failed = failedList }
+		local function push()
+			values[plr.UserId] = liveValue(profiles[plr])
+			local view = Board.friendsView(plr.UserId, values, status, BC)
+			sendBoard(plr, "friends", { rows = withNames(view.rows), note = view.note })
+		end
+		local i, lastPush = 1, -math.huge
+		while i <= #ids and plr.Parent == Players and boardMode[plr] == "friends" do
+			local v = friendValue(ids[i])
+			if v == nil then
+				status.checked = i - 1
+				if clock() - lastPush >= 0.5 then
+					push()
+					lastPush = clock()
+				end
+				task.wait(1)   -- throttled: wait for the limiter
+			else
+				values[ids[i]] = v
+				i += 1
+			end
+		end
+		status.checked = i - 1
+		if plr.Parent == Players and boardMode[plr] == "friends" then push() end
+		fetching[plr] = nil
+	end)
+end
+
+-- The prompt is the player's own action, and it always answers: the other view, at once.
+boardPrompt.Triggered:Connect(function(plr)
+	-- (a player still loading gets the view too: liveValue(nil) is "not escaped yet". Only one who has
+	-- already left is ignored, so the per-player tables never keep an entry for them.)
+	if plr.Parent ~= Players then return end
+	boardMode[plr] = if boardMode[plr] == "friends" then "public" else "friends"
+	if boardMode[plr] == "friends" then
+		showFriends(plr)
+	else
+		sendBoard(plr, "public", publicView)
+	end
+end)
+
+-- The public list, refreshed at most once per PublicCacheSeconds and only while someone is here.
+task.spawn(function()
+	while true do
+		if #Players:GetPlayers() > 0 then
+			refreshPublic()
+			for plr, mode in pairs(boardMode) do
+				if mode == "public" and plr.Parent == Players then sendBoard(plr, "public", publicView) end
+			end
+		end
+		task.wait(BC.PublicCacheSeconds)
+	end
+end)
+
 --============================================================================ players
 
 local function onCharacter(plr, char)
@@ -981,6 +1377,9 @@ local function onCharacter(plr, char)
 end
 
 local function onPlayerAdded(plr)
+	-- docs/complete-game-standard.md §1, SPAWN-ORDER.md §3: point the engine at the one real, enabled
+	-- spawn BEFORE the character loads (loadProfile below yields), so its own placement is the answer.
+	plr.RespawnLocation = hubSpawn
 	local p = loadProfile(plr)
 	profiles[plr] = p
 	-- What is already on disk. Without this a player who joins and changes nothing still writes
@@ -1007,6 +1406,13 @@ local function onPlayerAdded(plr)
 	if not p.canSave then
 		toast(plr, "⚠️ Progress cannot be saved this session.")
 	end
+
+	-- The board: this player sees the public view first, and their saved deepest escape is offered to
+	-- the board (Board.keepHigher keeps a deeper or earlier value that is already there). That is also
+	-- the retry for a board write that failed last session: bestAt was saved with the floors.
+	boardMode[plr] = "public"
+	sendBoard(plr, "public", publicView)
+	writeBoard(plr, p)
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
@@ -1024,6 +1430,9 @@ Players.PlayerRemoving:Connect(function(plr)
 	flush(plr, true)   -- forced: the lock has to come off even if nothing changed
 	pendingSave[plr] = nil
 	profiles[plr] = nil
+	boardMode[plr] = nil
+	boardSent[plr] = nil
+	fetching[plr] = nil
 end)
 
 -- THE ONLY PLACE A REMOTE-DRIVEN SAVE ACTUALLY WRITES. Handlers mark the profile pending and
@@ -1038,6 +1447,16 @@ task.spawn(function()
 		for plr in pairs(pendingSave) do
 			if profiles[plr] ~= nil then flush(plr, false) end
 		end
+	end
+end)
+
+-- THE SHUTDOWN. Roblox gives game:BindToClose up to 30 s and waits for nothing else: a purchase still
+-- pending on the flush tick, and the leave that releases the lock, may never run. So every profile this
+-- server holds is written here, with its lock released (flush still writes only while the record carries
+-- this session's token). One after another: a handful of UpdateAsyncs is well inside the 30 s.
+game:BindToClose(function()
+	for plr in pairs(profiles) do
+		flush(plr, true)
 	end
 end)
 

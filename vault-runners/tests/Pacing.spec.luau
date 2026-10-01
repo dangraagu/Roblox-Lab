@@ -8,9 +8,10 @@
 --
 -- What the owner's brief asks, and what is asserted:
 --   * the world changes as you progress and never feels monotonous: a new band early (the tomb within
---     10 minutes), the Frozen Vault as the thing a normal player reaches and brags about (45-90 min),
---     the Volcano Temple as the long-term goal (at least twice as far, inside 5 hours); no band flashes
---     past in under 4 minutes; unlocking a tier never sends a player back to an earlier band;
+--     10 minutes), the Frozen Vault as the thing a normal player reaches and brags about INSIDE 30-45
+--     MINUTES (docs/complete-game-standard.md §2; owner decision 2026-09-30 — it was 45-90 and sat at
+--     61), the Volcano Temple as the long-term goal (at least twice as far, inside 5 hours); no band
+--     flashes past in under 4 minutes; unlocking a tier never sends a player back to an earlier band;
 --   * hazards are RARE — one per 120-180 s of run time — and easy to avoid: a player who reacts to the
 --     ring is never hit, a player who stands still in it always is (the ring is the rule);
 --   * THE TIME BUDGET DOES NOT CHANGE. The countdown is VaultPath's, byte for byte (Collapse.spec and
@@ -81,8 +82,8 @@ for _, seed in { 7, 8 } do
 	ok(r[TOMB] ~= nil and r[TOMB] <= 10, string.format("seed %d: a normal player reaches the tomb within 10 min (%.1f)", seed, r[TOMB] or -1))
 	ok(r[REACTOR] ~= nil and r[REACTOR] >= 15 and r[REACTOR] <= 40,
 		string.format("seed %d: the reactor arrives at 15-40 min (%.1f)", seed, r[REACTOR] or -1))
-	ok(r[FROZEN] ~= nil and r[FROZEN] >= 45 and r[FROZEN] <= 90,
-		string.format("seed %d: the Frozen Vault — the one to brag about — at 45-90 min (%.1f)", seed, r[FROZEN] or -1))
+	ok(r[FROZEN] ~= nil and r[FROZEN] >= 30 and r[FROZEN] <= 45,
+		string.format("seed %d: the Frozen Vault — the one to brag about — inside 30-45 min (%.1f)", seed, r[FROZEN] or -1))
 	ok(r[VOLCANO] ~= nil and r[VOLCANO] >= 2 * r[FROZEN] and r[VOLCANO] <= 300,
 		string.format("seed %d: the Volcano Temple is the long-term goal: at least twice the Frozen Vault and inside 5 h (%.1f)",
 			seed, r[VOLCANO] or -1))
@@ -116,6 +117,41 @@ do
 		end
 	end
 	ok(worst == nil, "unlocking a tier never sends a player back to an earlier band: " .. tostring(worst))
+end
+
+--============================================================================ the endgame keeps turning (halls)
+
+-- Owner decision 2026-09-30: every Gold floor was the Volcano Temple, and a player may live in Gold
+-- for hours. Past Env.Halls.from the deepest stratum moves through its halls. Measured on whole careers
+-- (8 h, hazards off): once a normal player is in the halls, the longest stretch they spend in ONE hall
+-- before the next — and the shortest, so a hall is a place and not a flicker.
+do
+	local H = C.Env.Halls
+	ok(H ~= nil, "(Env.Halls exists)")
+	local longest, shortest, changes = 0, math.huge, 0
+	for _, seed in { 7, 8 } do
+		local r = M:career({ profile = C.Pacing.Profiles.normal, hazards = "off", capMinutes = 480, seed = seed })
+		local curId, since = nil, nil
+		for _, run in r.log do
+			local hall = H and deps.VaultEnv.hall and deps.VaultEnv.hall(C, run.depth)
+			local id = hall and hall.id
+			if id ~= curId then
+				if curId ~= nil and since ~= nil then
+					local len = run.minutes - since
+					longest = math.max(longest, len)
+					shortest = math.min(shortest, len)
+				end
+				if id ~= nil and curId ~= nil then changes += 1 end
+				curId, since = id, run.minutes
+			end
+		end
+		if curId ~= nil and since ~= nil then longest = math.max(longest, r.totalMinutes - since) end
+	end
+	print(string.format("  halls (normal, 2 careers x 8 h): %d hall changes; one hall lasts %.1f-%.1f min", changes, shortest, longest))
+	ok(changes >= 6, string.format("a normal player sees the halls turn (%d changes in two 8-hour careers)", changes))
+	-- half an hour: a normal player meets a new hall at least as often as the brag window is wide
+	ok(longest <= 30, string.format("no hall lasts a normal player over half an hour (%.1f min)", longest))
+	ok(shortest >= 4, string.format("and none flashes past in under 4 minutes (%.1f min)", shortest))
 end
 
 --============================================================================ how often a drop comes
