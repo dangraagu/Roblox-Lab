@@ -1,0 +1,9 @@
+M8 farming vs splicing, 1500 plans per row, salvage per minute (p50 of per-attempt rates)
+k=5  fast   | splicing 60.5/min | farming the first salvage 10.7/min | ratio 5.66
+k=5  medium | splicing 50.1/min | farming the first salvage 9.5/min | ratio 5.29
+k=10 fast   | splicing 67.2/min | farming the first salvage 12.5/min | ratio 5.39
+k=10 medium | splicing 55.3/min | farming the first salvage 10.8/min | ratio 5.10
+k=23 fast   | splicing 99.3/min | farming the first salvage 20.6/min | ratio 4.81
+k=23 medium | splicing 78.1/min | farming the first salvage 17.7/min | ratio 4.41
+k=40 fast   | splicing 141.5/min | farming the first salvage 33.1/min | ratio 4.27
+k=40 medium | splicing 108.8/min | farming the first salvage 28.4/min | ratio 3.83

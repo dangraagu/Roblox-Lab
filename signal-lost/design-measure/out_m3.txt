@@ -1,0 +1,22 @@
+== M3 campaign, greedy buyer (cheapest affordable rank after each splice) (400 runs, cap 61 sectors / 240 min)
+fast   sector:minutes p50  5:2.0  10:5.1  16:10.9  23:17.6  30:27.2  31:28.5  40:40.7  50:54.4  60:69.6
+       BRAG (relay 30 spliced) at minute p10/p50/p90 25.6 / 28.4 / 31.3 (100% of runs) | THE ECHO (sector 60 entered) p50 69.6 min (100%)
+       income p50 139.2 salvage/min | all 8 ranks by p50 39.9 min (100% of runs)
+       deaths p50 0 | vacuum share of sector time 0.71 | first purchase p50 2.9 min | ranks bought by 35 min p50 7 | sector at 35 min p10/p50/p90 33/35/38
+       attempts per sector (mean): 1:1.00  3:1.00  6:1.00  10:1.00  12:1.00  15:1.00  20:1.00  25:1.00  30:1.00
+       purchase n at minute p50: #1 2.9  #2 4.9  #3 9.4  #4 13.1  #5 18.9  #6 24.8  #7 32.9  #8 39.9
+       by band: docking: O2<25% 0.02, blackout/attempt 0.000 | hydro: O2<25% 0.02, blackout/attempt 0.000 | cargo: O2<25% 0.10, blackout/attempt 0.000 | reactor: O2<25% 0.07, blackout/attempt 0.000 | array: O2<25% 0.12, blackout/attempt 0.000 | deep: O2<25% 0.26, blackout/attempt 0.006 | echo: O2<25% 0.42, blackout/attempt 0.021
+medium sector:minutes p50  5:2.5  10:6.5  16:14.3  23:22.8  30:35.1  31:36.9  40:53.2  50:72.7  60:95.3
+       BRAG (relay 30 spliced) at minute p10/p50/p90 33.0 / 36.9 / 41.3 (100% of runs) | THE ECHO (sector 60 entered) p50 95.3 min (100%)
+       income p50 105.2 salvage/min | all 8 ranks by p50 51.4 min (100% of runs)
+       deaths p50 1 | vacuum share of sector time 0.72 | first purchase p50 3.7 min | ranks bought by 35 min p50 6 | sector at 35 min p10/p50/p90 27/29/32
+       attempts per sector (mean): 1:1.00  3:1.00  6:1.00  10:1.01  12:1.00  15:1.00  20:1.00  25:1.00  30:1.00
+       purchase n at minute p50: #1 3.7  #2 6.2  #3 12.3  #4 16.8  #5 24.3  #6 31.5  #7 42.2  #8 51.4
+       by band: docking: O2<25% 0.02, blackout/attempt 0.000 | hydro: O2<25% 0.06, blackout/attempt 0.000 | cargo: O2<25% 0.15, blackout/attempt 0.002 | reactor: O2<25% 0.14, blackout/attempt 0.001 | array: O2<25% 0.26, blackout/attempt 0.003 | deep: O2<25% 0.43, blackout/attempt 0.027 | echo: O2<25% 0.60, blackout/attempt 0.049
+slow   sector:minutes p50  5:3.0  10:8.4  16:18.8  23:30.2  30:47.1  31:49.3  40:71.7  50:99.0  60:131.8
+       BRAG (relay 30 spliced) at minute p10/p50/p90 43.5 / 49.2 / 55.7 (100% of runs) | THE ECHO (sector 60 entered) p50 131.8 min (100%)
+       income p50 78.6 salvage/min | all 8 ranks by p50 68.3 min (100% of runs)
+       deaths p50 3 | vacuum share of sector time 0.73 | first purchase p50 4.5 min | ranks bought by 35 min p50 5 | sector at 35 min p10/p50/p90 22/24/27
+       attempts per sector (mean): 1:1.00  3:1.01  6:1.00  10:1.03  12:1.03  15:1.01  20:1.01  25:1.02  30:1.02
+       purchase n at minute p50: #1 4.5  #2 7.7  #3 15.6  #4 21.9  #5 31.6  #6 41.3  #7 55.4  #8 68.3
+       by band: docking: O2<25% 0.05, blackout/attempt 0.003 | hydro: O2<25% 0.11, blackout/attempt 0.001 | cargo: O2<25% 0.26, blackout/attempt 0.021 | reactor: O2<25% 0.18, blackout/attempt 0.007 | array: O2<25% 0.35, blackout/attempt 0.025 | deep: O2<25% 0.59, blackout/attempt 0.087 | echo: O2<25% 0.74, blackout/attempt 0.179

@@ -1,0 +1,7 @@
+M7b first hazard, 300 campaigns per row (interval 80-120 s of exposure after the first)
+first interval 80-120 s  fast   | first hazard at minute p10/p50/p90 5.1 / 6.0 / 7.0, in sector p50 10 (hydroponics starts at sector 5)
+first interval 80-120 s  medium | first hazard at minute p10/p50/p90 5.3 / 6.4 / 7.7, in sector p50 10 (hydroponics starts at sector 5)
+first interval 80-120 s  slow   | first hazard at minute p10/p50/p90 5.7 / 6.8 / 8.1, in sector p50 8 (hydroponics starts at sector 5)
+first interval 30 s      fast   | first hazard at minute p10/p50/p90 2.7 / 3.3 / 4.0, in sector p50 7 (hydroponics starts at sector 5)
+first interval 30 s      medium | first hazard at minute p10/p50/p90 2.9 / 3.7 / 4.7, in sector p50 6 (hydroponics starts at sector 5)
+first interval 30 s      slow   | first hazard at minute p10/p50/p90 3.4 / 4.2 / 5.4, in sector p50 6 (hydroponics starts at sector 5)

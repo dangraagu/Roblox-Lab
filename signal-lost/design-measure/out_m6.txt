@@ -1,0 +1,5 @@
+M6 first sector, 3000 plans. Seconds after the dock doors open (p10 / p50 / p90)
+relay reachable through air only: 0.000 of plans | entry has a breached neighbour: 1.000
+fast   | first vacuum entry  1.0 /  1.0 /  1.0 (100% of runs) | first salvage  4.0 /  4.0 / 10.1 (91%) | splice done 11.4 / 19.9 / 30.6 | O2 below half: 1%
+medium | first vacuum entry  1.2 /  1.2 /  1.2 (100% of runs) | first salvage  4.6 /  4.6 / 11.8 (92%) | splice done 13.0 / 24.4 / 37.1 | O2 below half: 6%
+slow   | first vacuum entry  1.5 /  1.5 /  1.5 (100% of runs) | first salvage  5.3 /  5.3 / 13.9 (93%) | splice done 15.7 / 29.8 / 44.5 | O2 below half: 17%

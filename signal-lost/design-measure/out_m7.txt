@@ -1,0 +1,10 @@
+M7 hazard rate over 200 campaigns per profile, capped at 61 sectors / 240 min
+interval 60-90 s  fast   | one hazard per 2.05 min of play in hazard bands | exposed share of that play 0.62 | per band (min of play per hazard): hydro 6.6  cargo 2.4  reactor 2.3  array 2.1  deep 1.9  echo 1.7
+interval 60-90 s  medium | one hazard per 1.98 min of play in hazard bands | exposed share of that play 0.64 | per band (min of play per hazard): hydro 4.3  cargo 2.4  reactor 2.2  array 2.1  deep 1.8  echo 1.8
+interval 60-90 s  slow   | one hazard per 1.93 min of play in hazard bands | exposed share of that play 0.65 | per band (min of play per hazard): hydro 3.7  cargo 2.4  reactor 2.2  array 2.0  deep 1.8  echo 1.7
+interval 80-120 s  fast   | one hazard per 2.75 min of play in hazard bands | exposed share of that play 0.62 | per band (min of play per hazard): hydro 19.5  cargo 3.1  reactor 3.1  array 2.8  deep 2.5  echo 2.4
+interval 80-120 s  medium | one hazard per 2.64 min of play in hazard bands | exposed share of that play 0.64 | per band (min of play per hazard): hydro 7.3  cargo 3.2  reactor 3.0  array 2.8  deep 2.4  echo 2.3
+interval 80-120 s  slow   | one hazard per 2.58 min of play in hazard bands | exposed share of that play 0.65 | per band (min of play per hazard): hydro 5.3  cargo 3.2  reactor 2.9  array 2.7  deep 2.4  echo 2.3
+interval 100-150 s  fast   | one hazard per 3.45 min of play in hazard bands | exposed share of that play 0.62 | per band (min of play per hazard): hydro 201.1  cargo 3.9  reactor 3.8  array 3.5  deep 3.1  echo 3.1
+interval 100-150 s  medium | one hazard per 3.31 min of play in hazard bands | exposed share of that play 0.64 | per band (min of play per hazard): hydro 13.2  cargo 3.9  reactor 3.7  array 3.5  deep 3.0  echo 2.9
+interval 100-150 s  slow   | one hazard per 3.22 min of play in hazard bands | exposed share of that play 0.65 | per band (min of play per hazard): hydro 7.6  cargo 4.0  reactor 3.6  array 3.4  deep 3.0  echo 2.8
