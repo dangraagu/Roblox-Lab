@@ -7,9 +7,42 @@ For FACILITY specifically: the dark and the flashlight are the gameplay and ther
 visuals must never make a room brighter or easier to see than designed, must never hide a fuse, and rest
 belongs in the break room, not mid-run.
 
-**State: built, unit-tested, headless-tested, mutation-tested, and reviewed by an independent adversarial reviewer
-whose five findings are closed (§11). NOT seen in Studio, NOT played by a person.** Nothing was committed, pushed
-or published.
+**State: built, unit-tested, headless-tested, mutation-tested, and reviewed twice by independent adversarial reviewers;
+all ten findings are closed (§11, §12). The owner's two open decisions are taken (§10). NOT seen in Studio, NOT played by
+a person.** Nothing was committed, pushed or published.
+
+**Pass 2 resumed (2026-10-01), §15.** Every item of the standard checked again. Built test-first: a critter in every band
+(a cockroach, a lab mouse, a moth, a rat, a bat, a beetle, a pale drifter), held to every dressing rule over its whole path
+and moving only in near lit rooms; dust motes, the offices' weather; the walk's rejoin; and the desktop check's rare flake,
+which was a real defect (the wrong hint at the powered lift).
+
+**Pass 1 again (2026-10-01), §14.** Review 2's five findings were re-checked on the current tree with the reviewer's own
+probes: none reproduces, except the slow half of the brag finding, which was an open owner decision and is now **DECIDED
+2026-09-30 (owner: take recommended): left as designed**, one brag timed for normal play (§10, with the per-band minutes).
+Pass 2's cut-off mutation sweep is completed (§13: 27 of 28 KILLED, B11 equivalent, 3 controls SURVIVED) and review 2's
+re-run on this tree (§7: 27 of 27, 3 controls SURVIVED). Documentation only; no source changed.
+
+**Pass 2 of the complete-game standard (2026-10-01), §13.** Every item of docs/complete-game-standard.md checked; built
+test-first where missing: the TOP DIVERS board (public + friends, on the break room's north wall), a REST button to press
+pause in the break room, the local-parts budget capped in code, a `[hub]` mode in the HUD check, MARKETING.md's eight
+clips, the store text, and §8 item 18 / §9's 1920x1080.
+
+**Review round 2 and the owner's decisions (2026-09-30 / 10-01).** A second reviewer found five things; §12 has each
+one reproduced, fixed test-first and mutation-tested. The owner decided "take the recommended option for all" (§10).
+1. **Text lay on the EXTRACT / DESCEND modal on a phone, and on the perk panel everywhere** (medium). The reviewer found
+   the hazard banner on the choice modal; the same gate gap hid the toast and the hint on both modals (31 text-row
+   overlaps across 20 viewport-modes before the fix, 0 after). No hazard starts at the powered lift now, a live one is
+   called off there, and while a modal is up the HUD's text rows sit below it.
+2. **The brag came too late** (medium). THE VOID was both the brag and the long-term goal: a medium player first powered
+   it after a median of 52.9 minutes in this round's reproduction (the reviewer measured 71.0). The brag is now the OVERGROWN BIO-LAB, with a fanfare the first time the saved record
+   reaches it: a medium player gets there after a median of 29.6 minutes (§2). The void stays the long-term goal.
+3. **Doors between two bands broke the door-contrast promise** (low). A leaf now wears the band of the room on the
+   player's side of it.
+4. **Five environment promises no gate held** (low). Each is asserted now, and each of the reviewer's five mutants is
+   killed.
+5. **A stale 17 %** (low). The void is reached on 10 of 120 perk-less medium runs (8 %), measured again below.
+- **Owner's decisions:** hazards come every 90-140 s of exposed time (option 2), about one per 2.6-3.1 minutes of play in
+  the bands that have them (§3); and the slow player's brag is left as designed (§10, taken in §14's pass).
 
 **Review round (2026-09-24, after the resume session).** An independent reviewer found five things; §11 has each
 one reproduced, fixed test-first and mutation-tested:
@@ -66,7 +99,7 @@ on the unfixed build.
 | file | what |
 |---|---|
 | `src/shared/EnvBands.luau` | **template, verbatim** from plus1-jump (md5 `c6fc63a1…`): progress → band + eased blend, frame-rate-independent glide. Its spec is copied verbatim too. |
-| `src/shared/Hazards.luau` | **adapted** from plus1-jump. Kept: a clock that freezes and never resets, 120-180 s between hazards, one at a time, and "the ring is what hits". FACILITY-specific: hazards come down from the ceiling (nothing flies), start only on a legal spot in a lit room, and are called off by a flicker. `arrivalOk` (this session): none in the first 6 s on a sublevel. |
+| `src/shared/Hazards.luau` | **adapted** from plus1-jump. Kept: a clock that freezes and never resets, 120-180 s between hazards (90-140 since the owner's decision, §10), one at a time, and "the ring is what hits". FACILITY-specific: hazards come down from the ceiling (nothing flies), start only on a legal spot in a lit room, and are called off by a flicker. `arrivalOk` (this session): none in the first 6 s on a sublevel. |
 | `src/shared/Rest.luau` | **adapted** from plus1-jump: rest is a state, allowed only in the break room. `validate` refuses any run phase. |
 | `src/shared/Dressing.luau` | pure: each band's kit of room dressing, and the rules that keep it fair. It never sees an item. Review round: `linear`, `returned` and a `paletteOk` that works in linear light (§11, finding 1). |
 | `src/shared/EnvBus.luau` | a client-local message bus, Env.client → HUD. No Instance, nothing replicates. |
@@ -77,6 +110,21 @@ on the unfixed build.
 | `src/shared/Config.luau` | + `Env` (base values, break-room grade, 7 bands), `Hazards` (6 kinds, `ArrivalGraceSeconds`), `Rest`, `Budget`. No survival number changed. Review round: `Env.ReflectanceMin`, `LightOutputMin`, `DoorContrastMin` / `Max`, and five retuned palettes. |
 | `tests/` | specs `EnvBands` `EnvBus` `EnvConfig` `Hazards` `Rest` `Dressing`; the measurement `hazards.measure.luau`. |
 | `robloxemu/check_facilitynightmare_env.luau`, `_hazards.luau`, `_firstframe.luau` | headless glue checks through the real server, HUD and Env.client. `_firstframe` (review round) audits every frame at 60 Hz. |
+
+**Review 2 (§12) and the owner's decision (§10) changed:**
+- `Hazards.luau`: `validate` holds every kind to the config's promised shove (`KnockMin` / `KnockMax` / `LiftMax`).
+  `step` takes `ctx.callOff`: at the powered lift a live hazard is called off and none starts.
+- `Dressing.luau`: `leafSide`, which of a door leaf's rooms is on the viewer's side.
+- `Env.client.luau`: the lift's call-off, and every door leaf painted in the band on the player's side, every frame.
+- `Hud.client.luau`: while a modal is up the text rows sit below it, and a modal keeps room for them. The brag's and
+  the goal's fanfare.
+- `Main.server.luau`: the `choice` notice's `record` flag.
+- `Config.luau`: hazards every 90-140 s (the owner's decision), `KnockMin` 16 / `KnockMax` 24 / `LiftMax` 3, and the
+  bio-lab's `brag = true`.
+- `tests/`: `pacing.measure.luau` (the brag's and the goal's minutes), new cases in `Hazards`, `EnvConfig` and
+  `Dressing`.
+- The checks: the HUD's text-on-a-modal audit, hazards D and E at the lift, env B (board, benches, fanfare), env D3
+  (doors between two bands), env F (the fanfare in play), the firstframe door rule, and the main check's `record`.
 
 ---
 
@@ -143,30 +191,66 @@ observations of dark or flickering dressed rooms per run (24 runs), 0 self-lit t
 
 Reach and arrival come from `tests/hazards.measure.luau`: perk-less runs through the real server, played by
 `tests/Bot.luau` at DESIGN.md's speed proxies (medium = 12.8 studs/s, slow = 10.4, perfect = 16), 120 / 80 /
-40 runs. "Arrival" is minutes into the run, among the runs that got there. The numbers are the review round's
-run on the final tree. The resume session's run gave medium 98 / 85 / 63 / 48 / 34 / 17 % for labs to void; the
-palettes cannot move them (the bot reads the workspace, not colours), so the spread between the runs is sampling.
+40 runs. "Arrival" is minutes into the run, among the runs that got there. The numbers are review 2's run on the
+final tree (2026-10-01). Earlier runs gave medium 98 / 91 / 72 / 55 / 30 / 12 % (review 1) and 98 / 85 / 63 / 48 / 34
+/ 17 % (the resume session) for labs to void; hazards cost nothing and the palettes cannot move reach (the bot reads
+the workspace, not colours), so the spread between the runs is sampling.
 
-| # | band (banner) | sublevels | look (grade, room palette) | dressing (per room: 3-5 wall pieces, overhead runs, hanging pieces, desk items) | particles | hazard | reached (medium / slow / perfect) | arrival p50 (medium) |
+| # | band (banner) | sublevels | look (grade, room palette) | dressing (per room: 3-5 wall pieces, overhead runs, hanging pieces, desk items) | weather (particles); critter (pass 2) | hazard | reached (medium / slow / perfect) | arrival p50 (medium) |
 |---|---|---|---|---|---|---|---|---|
-| 1 | ADMIN OFFICES | 1-2 | pale fluorescent green-grey; beige-grey walls, blue-grey carpet | filing cabinets, cubicle dividers with an office chair, water cooler, notice board (SAFETY FIRST), potted plant, wall clock stopped at 3:17, monitors and keyboards on desks, scattered papers | none | none: a first run meets the dark before anything else | 100 % / 100 % / 100 % | 0 min |
-| 2 | LABORATORIES | 3-4 (26 % of sublevel 2's rooms) | cold cyan; pale teal walls | lab benches with glowing violet and cyan flasks, a fume hood with slow fumes, shelves of glowing jars, whiteboard (DO NOT OPEN TANK 3), biohazard bins, microscopes with a glowing slide, ceiling ducts | fumes | CHEMICAL LEAK | 98 % / 95 % / 100 % | 1.9 min |
-| 3 | SERVER VAULT | 5-6 | cold blue, higher contrast; steel-blue metal walls, diamond-plate floor | rack pairs with blinking blue/red/white LED faces, a rack with a cable bundle, a cooling unit, a breaker box with a loose sparking cable, laptops, cable trays, drooping cables | sparks | ARCING CABLE | 91 % / 70 % / 100 % | 4.3 min |
-| 4 | FLOODED MAINTENANCE | 7-8 | teal-green murk; stained green-grey concrete, brown doors | water over the whole floor, rusted pipe runs with red valve wheels, valve banks, pumps, rust streaks, an overhead pipe dripping into the water | drips | BURST PIPE | 72 % / 28 % / 98 % | 7.6 min |
-| 5 | REACTOR CORE | 9-10 | warm orange, high contrast; warm grey metal, hazard-brown doors | coolant risers with hazard-yellow bands, yellow/black HIGH TEMPERATURE panels, pulsing red beacons, consoles reading CORE 712 C / PRESSURE HIGH, steam vents, coolant ducts | steam | STEAM VALVE | 55 % / 8 % / 95 % | 10.5 min |
-| 6 | OVERGROWN BIO-LAB | 11-12 | green; moss-green concrete, earth floor | vines up the walls, specimen tanks of glowing teal liquid, glowing blue fungi, cracked panels with roots, ceiling vines, hanging vines with seed pods, moss | drifting glowing spores | SPORE POD | 30 % / 1 % / 90 % | 13.3 min |
-| 7 | THE VOID | 13+ | desaturated violet, darkest grade; dusky violet slate | glitching wall panels, violet tears that flicker, black monoliths, ink pools, cracks with rising motes, stone debris floating and bobbing overhead | motes | RIFT | 12 % / 0 % / 80 % | 16.2 min |
+| 1 | ADMIN OFFICES | 1-2 | pale fluorescent green-grey; beige-grey walls, blue-grey carpet | filing cabinets, cubicle dividers with an office chair, water cooler, notice board (SAFETY FIRST), potted plant, wall clock stopped at 3:17, monitors and keyboards on desks, scattered papers | dust motes drifting high in the light (pass 2); a cockroach along the foot of a wall | none: a first run meets the dark before anything else | 100 % / 100 % / 100 % | 0 min |
+| 2 | LABORATORIES | 3-4 (26 % of sublevel 2's rooms) | cold cyan; pale teal walls | lab benches with glowing violet and cyan flasks, a fume hood with slow fumes, shelves of glowing jars, whiteboard (DO NOT OPEN TANK 3), biohazard bins, microscopes with a glowing slide, ceiling ducts | fumes; an escaped white lab mouse | CHEMICAL LEAK | 100 % / 93 % / 100 % | 1.9 min |
+| 3 | SERVER VAULT | 5-6 | cold blue, higher contrast; steel-blue metal walls, diamond-plate floor | rack pairs with blinking blue/red/white LED faces, a rack with a cable bundle, a cooling unit, a breaker box with a loose sparking cable, laptops, cable trays, drooping cables | sparks; a moth fluttering under the trays | ARCING CABLE | 93 % / 68 % / 100 % | 4.3 min |
+| 4 | FLOODED MAINTENANCE | 7-8 | teal-green murk; stained green-grey concrete, brown doors | water over the whole floor, rusted pipe runs with red valve wheels, valve banks, pumps, rust streaks, an overhead pipe dripping into the water | drips; a rat along the water's edge | BURST PIPE | 70 % / 28 % / 100 % | 7.3 min |
+| 5 | REACTOR CORE | 9-10 | warm orange, high contrast; warm grey metal, hazard-brown doors | coolant risers with hazard-yellow bands, yellow/black HIGH TEMPERATURE panels, pulsing red beacons, consoles reading CORE 712 C / PRESSURE HIGH, steam vents, coolant ducts | steam; a bat flitting under the ducts | STEAM VALVE | 48 % / 10 % / 98 % | 10.0 min |
+| 6 | OVERGROWN BIO-LAB, **the brag** | 11-12 | green; moss-green concrete, earth floor | vines up the walls, specimen tanks of glowing teal liquid, glowing blue fungi, cracked panels with roots, ceiling vines, hanging vines with seed pods, moss | drifting glowing spores; a beetle crawling high on the wall | SPORE POD | 28 % / 1 % / 90 % | 12.9 min |
+| 7 | THE VOID, **the long-term goal** | 13+ | desaturated violet, darkest grade; dusky violet slate | glitching wall panels, violet tears that flicker, black monoliths, ink pools, cracks with rising motes, stone debris floating and bobbing overhead | motes; a pale half-there drifter overhead | RIFT | 8 % / 0 % / 80 % | 16.3 min |
 
-Perks push these up: every row above is perk-less. The void is the long-term goal, the brag for players who
-have bought perks and learned the dark. At the medium proxy nearly every run sees the labs and about half
+Perks push these up: every row above is perk-less. At the medium proxy nearly every run sees the labs and about half
 reach the reactor; at the slow proxy most runs end in the labs or the server vault. The last band starts by sublevel 13
 (`EnvConfig.spec`), and every band lasts at least two sublevels.
+
+**The brag and the long-term goal** (review 2, finding 2; `docs/complete-game-standard.md` asks for a brag within about
+30-45 minutes of normal play and a goal beyond it). THE VOID used to be both, and a medium player first powered it after a
+median of 52.9 minutes in this round's reproduction (30 players; the reviewer measured 71.0). Now:
+- **The brag is the OVERGROWN BIO-LAB** (`brag = true` in `Config.Env.Bands`), the deepest band of the facility itself.
+- **The long-term goal is THE VOID**, the last band.
+- Each is reached when the SAVED record first reaches its first sublevel: its lift powers, the server's `choice` notice
+  says `record = true` (only the server knows the best before), and the HUD plays the fanfare, a
+  `NEW RECORD — OVERGROWN BIO-LAB` / `NEW RECORD — THE VOID` banner with an FOV punch. It shows below the
+  EXTRACT / DESCEND modal. It fires once: a powering that does not raise the record, or a sublevel that starts no
+  band, gets none. The DEPTH RECORD board names the band from then on, and `leaderstats.Deepest` shows the number to
+  everyone.
+- **Measured** by `tests/pacing.measure.luau` (review 2's pacing model): fresh players on the real server buy every
+  perk they can afford between runs and always DESCEND. The clock covers everything since join.
+
+| proxy | players | the brag (bio-lab): p10 / p50 / p90 min | within 30 / 45 min | the goal (void): p10 / p50 / p90 min | within 45 / 150 min |
+|---|---|---|---|---|---|
+| medium (normal play, 12.8) | 30 | 14.7 / **29.6** / 41.8 (the 3rd run, median) | 16 / 27 of 30 | 26.3 / 57.7 / 96.9 | 14 / 30 of 30 |
+| slow (10.4) | 20 | 146.5 / later than 150 / later | 0 / 0 of 20 | later than 150 | 0 / 0 of 20 |
+| perfect (16) | 10 | 10.5 / 13.5 / 23.2 | 10 / 10 of 10 | 13.1 / 15.5 / 28.8 | 10 / 10 of 10 |
+
+A second, separate sample of the same model (the review-2 reproduction probe, 30 medium players) gave the bio-lab a
+median of 34.6 minutes (17 of 30 within 45 min, 12 within 30) and the void 52.9. A third, pass 2's run on its final
+gameplay code (bundle md5 `33ee9007…`, 8 min 44 s): medium brag p10 13.9 / **p50 26.9** / p90 51.9 min, 16 of 30 within 30
+and 23 of 30 within 45; void p10 29.3 / p50 70.2 / p90 113.7 (10 of 30 within 45, 30 of 30 within 150); slow: brag p10
+126.3, the rest later than 150; perfect: brag 11.1 / 12.2 / 21.9, void 13.1 / 14.9 / 26.8. Two more on the current tree
+(2026-10-01, pass 1 again, §14; nothing retuned since pass 2): `tests/pacing.measure.luau` itself gave medium brag p10
+15.5 / **p50 31.8** / p90 62.7 (14 of 30 within 30, 21 of 30 within 45), void p50 49.2; slow brag p10 144.5, the rest later
+than 150; perfect brag 12.2 / 13.2 / 24.5. A per-band variant (30 medium players) gave the brag **p50 37.0** (24 of 30 within
+45) and the void 46.6. Over the five samples the brag's medium median is 26.9-37.0 minutes, and 17-27 of 30 players get
+there within 45: the brag sits in the standard's 30-45 minutes by its median, with a long tail from runs the dark ends
+early. **A slow player mostly does not reach the brag**: within 45 minutes 0, 0, 0 and 3 of 20 in four slow samples, and
+the median is later than 150 minutes in all four; they
+first power the flooded maintenance (sublevel 7) after a median of 27.6-32.7 minutes and the reactor (9) after 61.8-90.7.
+That is **left as designed: DECIDED 2026-09-30 (owner: take recommended)**, §10.
 
 **The break room** has its own warm grade, never brighter than the facility's.
 - Along the walls: a lit vending machine, a coffee corner with a steaming cup, a water cooler, three potted
   plants, a rug under two benches, and posters (`IF THE LIGHTS FLICKER — RUN`, `DAYS WITHOUT AN INCIDENT: 0`).
-- The **DEPTH RECORD** board faces a player who has just spawned. It shows `DEEPEST: SUBLEVEL n` and every band
-  you have reached by name. The ones below stay `???` (no spoilers), and your current band is highlighted.
+- The **DEPTH RECORD** board faces a player who has just spawned (asserted since review 2: its SurfaceGui's face points
+  at HubSpawn). It shows `DEEPEST: SUBLEVEL n` and every band you have reached by name. The ones below stay `???`
+  (no spoilers), and your current band is highlighted.
 - It is built once on the client and parented only while you are in the break room. All of it keeps off the
   spawn → car → arrival path, the benches, the perk terminal and the car (asserted).
 
@@ -183,18 +267,26 @@ reach the reactor; at the slow proxy most runs end in the labs or the server vau
 | SPORE POD | bio-lab | 3.2 s | 0.6 s | 7.4 | 16 | 0 | teal spores, then a teal splash |
 | RIFT | void | 3.0 s | 0.5 s | 7.0 | 24 | 3 | violet sparks, then a violet arc |
 
+Every kind is held to the promise below (a shove of 16-24 studs/s, at most 3 up): `Config.Hazards.KnockMin` /
+`KnockMax` / `LiftMax`, enforced by `Hazards.validate` since review 2 (it used to accept anything up to the module's own
+30 / 4), and pinned in `EnvConfig.spec`.
+
 **Rules** (`Hazards.luau`, validated at load; an invalid config switches hazards OFF with a warning and costs
 nothing else):
 
-- **Rarity.** One every 120-180 s of *exposed* time. Exposed means on a sublevel, in a lit room, in a band that
-  has hazards. The clock **freezes** everywhere else (dark rooms, the quiet offices, the ride, the break room)
+- **Rarity.** One every **90-140 s** of *exposed* time (DECIDED 2026-09-30 (owner: take recommended), §10; it was
+  120-180). Exposed means on a sublevel, in a lit room, in a band that has hazards. The clock **freezes** everywhere else (dark rooms, the quiet offices, the ride, the break room)
   and never resets, so walking in and out of a dark room cannot thin hazards out. Never two at once, never a
   backlog: a hazard that falls due waits for a legal spot, and exactly one comes.
 - **Where.** It comes down from the ceiling onto the spot you stand on, which must be a legal spot:
   - at least 6 studs off every wall (the room's interior, never in a doorway; whether a real humanoid's
     shove can still carry anyone through one is on the Studio list);
   - off the car's or lift's 10 × 10 pad;
-  - not under the light fixture.
+  - not under the light fixture;
+  - **not at the powered lift at all** (review 2, finding 1). The server says `atLift` for the whole powered exit room,
+    and the EXTRACT / DESCEND modal shows there. No hazard starts there, and a live one is called off the moment the
+    player reaches it (ring, source and banner). The clock runs on there, as on the car's pad, so a hazard that
+    falls due waits, and after DESCEND it waits out the arrival grace.
 - **Never in the dark.** Only in a lit room. If its room starts to flicker it is called off at once: ring,
   source and banner all go. The dark's 2-second warning outranks everything, and a hazard never adds to the
   dark.
@@ -223,22 +315,23 @@ FAILING — STAY IN THE LIGHT"). The ring pulses faster as the burst nears, and 
 
 | measurement | where | result |
 |---|---|---|
-| the scheduler on its own, 20 h exposed | `Hazards.spec` | 480 hazards = **one per 150 s exposed**, every gap 120.1-180.0 s |
+| the scheduler on its own, 20 h exposed (the spec's own config, 120-180 s) | `Hazards.spec` | 480 hazards = **one per 150 s exposed**, every gap 120.1-180.0 s |
 | exposure toggled every 6 s, or 40 s of every 150 s, for 6 h | `Hazards.spec` | 144 / 144 / 144, identical to continuous: freezing never thins hazards |
 | a stand-and-walk model in lit rooms, 10 h | `Hazards.spec` | a player who **reacts**: 0.393 hazards/min = **one near-hit per 2.5 exposed min, 0 hits**. One who **ignores** the warnings: hit once per 12.5 exposed min (hit share 0.20) |
 | walk out at 10.4 or 16 studs/s after 1 s, in 36 directions, both of the spec's own kinds | `Hazards.spec` | 0 of 144 hit; a player who stays put is hit |
-| through the real client on a held, lit floor, 18 hazards | `check_facilitynightmare_hazards` C | one per 146-157 s of lit time, gaps 120.5-178.9 s. Stand still: 9 of 9 hit. Step out a second after the warning: 9 of 9 dodged, and the banner said YOU ARE CLEAR before the burst every time. The ring was drawn where the player stood, as wide as the zone |
-| 10 min in a dark room, then lit again | same, D | no hazard in the dark; the next came 124-177 s of *lit* time after the last (frozen, not reset) |
+| through the real client on a held, lit floor, 18 hazards (at 120-180 s, before the decision) | `check_facilitynightmare_hazards` C | one per 146-157 s of lit time, gaps 120.5-178.9 s. Stand still: 9 of 9 hit. Step out a second after the warning: 9 of 9 dodged, and the banner said YOU ARE CLEAR before the burst every time. The ring was drawn where the player stood, as wide as the zone |
+| 10 min in a dark room, then lit again | same, D | no hazard in the dark; the next came 124-177 s of *lit* time after the last (frozen, not reset; at 120-180 s; review 2's final run at 90-140 s: 139.3 s) |
 | 200 s on the entry car's pad, then 200 s in the powered lift at the choice, each with a hazard long due | same, E | none on either pad. A step off the car's pad and the waiting hazard came at once. After DESCEND it came 5.9 s after arrival, not 0.6, and THE POWER IS FAILING kept its 3 s |
-| **real runs**, perk-less, the bot ignoring every warning and never stopping, medium proxy (12.8), 120 runs, 1 329 floor-minutes (review round, final tree) | `tests/hazards.measure.luau` | **one hazard per 4.3 minutes on a floor**, one per 2.8 exposed minutes; one per 3.3-4.0 floor-minutes in the bands that have hazards (labs 3.3, servers 3.9, flooded 4.0, reactor 3.8, bio-lab 3.5, void 3.3); one per 28 in the offices (only sublevel 2's foreshadowed lab rooms). 26 of 307 called off by a flicker. **Near-hit share: 2 of 281 bursts (0.7 %) landed within 8 studs of the bot.** 1 hit in 1 329 minutes. Hazards per run: 0: 4, 1: 22, 2: 33, 3: 31, 4: 25, 5: 4, 6: 1 |
-| same, slow proxy (10.4), 80 runs, 642 floor-min | same | one per 5.4 floor-min; near-hits 1 of 108 bursts (0.9 %); 1 hit |
-| same, perfect (16), 40 runs, 574 floor-min | same | one per 3.7 floor-min; near-hits 3 of 145 bursts (2.1 %); 3 hits |
-| the resume session's run of the same file (before the review round) | same | medium one per 4.4 floor-min (3 near-hits in 266 bursts), slow 5.4, perfect 3.7: the same rates within sampling |
+| **real runs, after the owner's decision (90-140 s)**, perk-less, the bot ignoring every warning and never stopping, medium proxy (12.8), 120 runs, 1 273 floor-minutes (review 2, final tree) | `tests/hazards.measure.luau` | **one hazard per 3.3 minutes on a floor**, one per 2.1 exposed minutes; **one per 2.6-3.1 floor-minutes in the bands that have hazards** (labs 2.6, servers 2.9, flooded 3.1, reactor 2.8, bio-lab 2.9; the void 4.0 on only 24 floor-minutes); one per 13.9 in the offices (only sublevel 2's foreshadowed lab rooms). 37 of 386 called off by a flicker. Near-hit share: 5 of 349 bursts (1.4 %) landed within 8 studs of the bot. 1 hit in 1 273 minutes. Hazards per run: 0: 3, 1: 10, 2: 31, 3: 20, 4: 34, 5: 15, 6: 6, 7: 1 |
+| same, slow proxy (10.4), 80 runs, 632 floor-min | same | one per 4.1 floor-min, 2.1 exposed min; 2.9-3.6 in the bands with hazards; near-hits 3 of 142 bursts (2.1 %); 3 hits |
+| same, perfect (16), 40 runs, 567 floor-min | same | one per 2.9 floor-min, 2.2 exposed min; 2.5-2.8 in the bands with hazards; near-hits 2 of 183 bursts (1.1 %); 3 hits |
+| review 1's run of the same file, at 120-180 s (before the decision) | same | medium one per 4.3 floor-min (3.3-4.0 in the bands with hazards), one per 2.8 exposed min, 2 near-hits in 281 bursts; slow 5.4; perfect 3.7 |
+| through the real client, 18 hazards on a held lit floor (review 2) | `check_facilitynightmare_hazards` C | at 90-140 s: one per 116.3 s of lit time, gaps 91.0-138.1 s; 9 of 9 standing still hit, 9 of 9 stepping out dodged |
+| 200 s at the powered lift 6.5 studs from its centre (off the pad, a legal spot anywhere else), with a hazard long due (review 2) | same, E | none, on every run; and a State saying `atLift` during a live hazard calls it off at once (D). The old code, reproduced this round with the reviewer's probe: a warning 119.7 and 108.7 s in, on 2 of 2 runs |
 
-**What that means against the brief** (reframed in the review round, finding 3). A hazard comes about once every
-3.3-4 minutes of play in a band that has hazards, and once per 2.5-2.8 minutes of *lit* time, the brief's number.
-It is rarer per minute of play because dark rooms freeze the clock. That is deliberate: the dark is FACILITY's
-threat, and a hazard must never add to it.
+**What that means against the brief.** With the owner's decision (90-140 s) a hazard comes about once every 2.6-3.1
+minutes of play in a band that has hazards (it was 3.3-4 at 120-180), and once per 2.1-2.2 minutes of *lit* time.
+Dark rooms still freeze the clock, deliberately: the dark is FACILITY's threat, and a hazard must never add to it.
 
 Whether each hazard is a **near-hit** depends on the player, and the brief asked for near-hits:
 - The ring is drawn where you stood **when the warning started**. A player who **stops** when the banner goes up
@@ -254,10 +347,10 @@ Whether each hazard is a **near-hit** depends on the player, and the brief asked
 A human who looks around in a lit room and ignores the banner is hit about once per 12.5 lit minutes (the spec's
 model). The bot's 5 hits in 2 545 minutes are not a human's number.
 
-This is **Gustav's call** (§10); nothing was changed.
+**DECIDED 2026-09-30 (owner: take recommended)**: option 2 of §10, 90-140 s. Why that one is in §10.
 
-`IntervalMin` / `IntervalMax` in `Config.Hazards` is the knob. `EnvConfig.spec` pins 120 / 180 so a retune is
-deliberate.
+`IntervalMin` / `IntervalMax` in `Config.Hazards` is the knob. `EnvConfig.spec` pins 90 / 140 and
+`check_facilitynightmare_hazards` writes out the same bounds, so a retune is deliberate.
 
 ---
 
@@ -271,6 +364,10 @@ nothing to lose:
 - **Sit on a bench.** Two real `Seat`s on the break room's south wall. Walk into one to sit, and jump to stand,
   the Roblox way. Everyone in the break room sees you sitting. Resting starts at once.
 - **Or stand still for 20 s** in the break room (AFK-safe).
+- **Or press REST** (pass 2, 2026-10-01: "man skal kunne trykke på pause"). A HUD button beside PERKS, only in the
+  break room. It rests at once (`Rest.press`, source `button`); moving or pressing it again (it reads GET UP) ends it.
+  Pressed anywhere else (a tap that lands as the ride starts) it is refused with a toast that says why. Like every
+  rest it is client presentation only: it fires no remote and pauses nothing, because nothing runs in the break room.
 - While resting, the view softens (a mild far depth of field) and the hint reads `Resting — nothing reaches
   the break room, and nothing is lost. Get up when ready.` Standing up, moving, stepping into the elevator car
   or a run starting ends it.
@@ -295,8 +392,9 @@ nothing to lose:
    this work did not change it.
    - Standing there, the rest of the floor still dies around you. The sublevel's pay was already credited when
      the lift powered, and the next sublevel starts only when you choose.
-   - No hazard ever targets the lift's pad (hazards check E: 200 s with one long due). A hazard that falls due
-     there waits out the 6 s arrival grace on the next sublevel.
+   - No hazard ever starts at the powered lift, pad or not, and a live one is called off there (hazards check D and E,
+     since review 2: 200 s on the pad and 200 s 6.5 studs out, with one long due). A hazard that falls due there waits
+     out the 6 s arrival grace on the next sublevel.
    - Idling there is not free. Roblox's idle disconnect would end the run as `left`, which pays the keep
      percentage (25 % base), not the full run. EXTRACT banks it all. The break room is the place to rest.
 
@@ -347,7 +445,8 @@ backs, 2 bases, 6 parts). `Config.Budget`, enforced in code where it matters:
 
 | metric | measured peak | where | budget |
 |---|---|---|---|
-| local parts | **207** | the densest floor, bio-lab kit | 240 (arithmetic worst case: 16 rooms within 60 studs × 14 parts + 8 hazard parts = 232) |
+| local parts | **229** (pass 2 resumed, with critters; 207 before) | the densest floor, bio-lab kit, 16 rooms built | 264 since pass 2 resumed (240 before), **capped in code** since pass 2 (Env.client parents rooms' dressing nearest first while it fits in the budget less the 8 kept for a hazard); the arithmetic worst case (16 rooms within 60 studs × (14 parts + 2 critter parts) + 8 hazard parts = 264) shows it never binds on a real floor |
+| critters moving | at most 4 (the cap) | near lit rooms | `Budget.MaxCritters` = 4, nearest first; every other critter keeps still (pass 2 resumed) |
 | particle emitters on | **4** (the cap) | densest floors, most kits | 4, nearest lit rooms first, and a live hazard takes one |
 | particles per second | **27** | densest floors | 40 |
 | screens (SurfaceGuis) on | **16** (the cap) | densest server vault | 16, nearest rooms first |
@@ -380,17 +479,20 @@ the spread is the random floors, since the review round changed no part.
   first, up to the caps. Since the review round an emitter runs only in a lit room, so a dark room near you
   takes none of the emitter budget.
 - **Animation.** Bobbing debris, pulsing beacons and flickering tears move only in near rooms. Screen blinks
-  step 4 times a second.
+  step 4 times a second. A critter (pass 2 resumed) moves only in a near, lit room, at most 4 at once: two parts moved
+  per critter per frame.
 - **Hazards.** One pooled model per hazard kind (3 parts), parented only while live.
 - **Lighting.** Written at most 10 times a second, only on change. Dressing passes run 4 times a second, and at
   once on a frame where a room that should be dressed is not (review round): a check of at most 25 rooms per
   frame, one table lookup for a room already dressed.
 - **Checked** (env check D1 and hazards check C, caps lowered in memory; since the review round also env check
-  E, a dark room's emitters stopping):
+  E, a dark room's emitters stopping; since pass 2 the local-parts cap):
   - a room out of range is put away and comes back in range;
   - with the emitter cap at 1, exactly one room's emitter runs;
   - with the screen cap at 1, at most one room's screens run;
-  - with the emitter cap at 1, a live hazard's warning takes the room's emitter, never both.
+  - with the emitter cap at 1, a live hazard's warning takes the room's emitter, never both;
+  - with the parts cap lowered to the hazard reserve + the player's own room, only that room keeps its dressing, and
+    with the real cap every room in range is dressed again (pass 2).
 
 These are part and emitter counts, not frame times. Frame time on a real phone, and what 16 SurfaceGuis cost
 there, are on the Studio list.
@@ -401,35 +503,45 @@ there, are on the Studio list.
 
 Git Bash from `D:\Claude\Roblox`; commands in CLAUDE.md. Bundle rebuilt before every headless run.
 
-| gate | before the environment (HEAD) | as the cut-off attempt left it | final (resume session) | after the review round (§11) |
-|---|---|---|---|---|
-| `tests/Config.spec` | 106 / 0 | 106 / 0 | 106 / 0 | 106 / 0 |
-| `tests/Economy.spec` | 93 / 0 | 93 / 0 | 93 / 0 | 93 / 0 |
-| `tests/Facility.spec` | 84 / 0 | 84 / 0 | 84 / 0 | 84 / 0 |
-| `tests/Survival.spec` | 74 / 0 | 74 / 0 | 74 / 0 | 74 / 0 |
-| `tests/Trust.spec` | 53 / 0 | 53 / 0 | 53 / 0 | 53 / 0 |
-| `tests/Responsive.spec` | 70 / 0 | 70 / 0 | 70 / 0 | 70 / 0 |
-| `tests/Rng.spec` | 37 / 0 | 37 / 0 | 37 / 0 | 37 / 0 |
-| `tests/MazeGen.spec` | 3 / 0 | 3 / 0 | 3 / 0 | 3 / 0 |
-| `tests/Fx.spec` | 26 / 0 | 26 / 0 | 26 / 0 | 26 / 0 |
-| `tests/EnvBands.spec` (verbatim template) | — | 124 / 0 | 124 / 0 | 124 / 0 |
-| `tests/EnvBus.spec` | — | 11 / 0 | 11 / 0 | 11 / 0 |
-| `tests/EnvConfig.spec` | — | 382 / 0 | **417 / 0** | **475 / 0** |
-| `tests/Hazards.spec` | — | 82 / 0 | **92 / 0** | 92 / 0 |
-| `tests/Rest.spec` | — | 43 / 0 | 43 / 0 | 43 / 0 |
-| `tests/Dressing.spec` | — | 75 / 0 | **79 / 0** | **87 / 0** |
-| **spec total** | **546 / 0** | **1 263 / 0** | **1 312 / 0** | **1 378 / 0** |
-| `check_facilitynightmare` | 203 / 0 | 203 / 0 | 203 / 0 | 203 / 0 |
-| `check_facilitynightmare_input` | 116 / 0 | 116 / 0 | 116 / 0 | 116 / 0 |
-| `check_facilitynightmare_desktop` | 47 / 0 | 47 / 0 | 47 / 0 | 47 / 0 |
-| `check_facilitynightmare_hud` (10 viewports × 3 modes) | PASS | PASS | PASS | PASS |
-| `check_facilitynightmare_env` | — | 191 / 0 (1 run in 8 crashed: the introduction's item 5) | **221 / 0** | **251 / 0** |
-| `check_facilitynightmare_hazards` | — | 28 / 0 | **42 / 0** | **44 / 0** |
-| `check_facilitynightmare_firstframe` (review round) | — | — | — | **18 / 0** |
-| `tests/walk.luau` (count varies with depth) | 70 / 0 | 55 / 0 | 55-63 / 0 (3 runs) | 55-71 / 0 (4 runs) |
-| **headless total**, the counted checks (the walk's count varies with depth) | 366 / 0 + PASS | 585 / 0 + PASS | **629 / 0 + PASS** | **679 / 0 + PASS** |
-| compile every file (see below) | 12 sources | — | **44 of 44 files clean**: 19 sources, 19 test files, 6 checks | **45 of 45**: 19 sources, 19 test files, 7 checks |
-| `rojo build` (Rojo 7.7.0) | builds | builds | builds; the place holds `Env` and `Hud` LocalScripts and every new module | builds; the place holds the review round's code |
+| gate | before the environment (HEAD) | as the cut-off attempt left it | final (resume session) | after the review round (§11) | after review 2 (§12, 2026-10-01) |
+|---|---|---|---|---|---|
+| `tests/Config.spec` | 106 / 0 | 106 / 0 | 106 / 0 | 106 / 0 | 106 / 0 |
+| `tests/Economy.spec` | 93 / 0 | 93 / 0 | 93 / 0 | 93 / 0 | 93 / 0 |
+| `tests/Facility.spec` | 84 / 0 | 84 / 0 | 84 / 0 | 84 / 0 | 84 / 0 |
+| `tests/Survival.spec` | 74 / 0 | 74 / 0 | 74 / 0 | 74 / 0 | 74 / 0 |
+| `tests/Trust.spec` | 53 / 0 | 53 / 0 | 53 / 0 | 53 / 0 | 53 / 0 |
+| `tests/Responsive.spec` | 70 / 0 | 70 / 0 | 70 / 0 | 70 / 0 | 70 / 0 |
+| `tests/Rng.spec` | 37 / 0 | 37 / 0 | 37 / 0 | 37 / 0 | 37 / 0 |
+| `tests/MazeGen.spec` | 3 / 0 | 3 / 0 | 3 / 0 | 3 / 0 | 3 / 0 |
+| `tests/Fx.spec` | 26 / 0 | 26 / 0 | 26 / 0 | 26 / 0 | 26 / 0 |
+| `tests/EnvBands.spec` (verbatim template) | — | 124 / 0 | 124 / 0 | 124 / 0 | 124 / 0 |
+| `tests/EnvBus.spec` | — | 11 / 0 | 11 / 0 | 11 / 0 | 11 / 0 |
+| `tests/EnvConfig.spec` | — | 382 / 0 | **417 / 0** | **475 / 0** | **511 / 0** |
+| `tests/Hazards.spec` | — | 82 / 0 | **92 / 0** | 92 / 0 | **108 / 0** |
+| `tests/Rest.spec` | — | 43 / 0 | 43 / 0 | 43 / 0 | 43 / 0 |
+| `tests/Dressing.spec` | — | 75 / 0 | **79 / 0** | **87 / 0** | **99 / 0** |
+| **spec total** | **546 / 0** | **1 263 / 0** | **1 312 / 0** | **1 378 / 0** | **1 442 / 0** |
+| `check_facilitynightmare` | 203 / 0 | 203 / 0 | 203 / 0 | 203 / 0 | **205 / 0** |
+| `check_facilitynightmare_input` | 116 / 0 | 116 / 0 | 116 / 0 | 116 / 0 | 116 / 0 |
+| `check_facilitynightmare_desktop` | 47 / 0 | 47 / 0 | 47 / 0 | 47 / 0 | 47 / 0 |
+| `check_facilitynightmare_hud` (10 viewports × 3 modes) | PASS | PASS | PASS | PASS | **PASS**, + no text row on a modal (20 viewport-modes) |
+| `check_facilitynightmare_env` | — | 191 / 0 (1 run in 8 crashed: the introduction's item 5) | **221 / 0** | **251 / 0** | **264 / 0** |
+| `check_facilitynightmare_hazards` | — | 28 / 0 | **42 / 0** | **44 / 0** | **53 / 0** |
+| `check_facilitynightmare_firstframe` (review round) | — | — | — | **18 / 0** | 18 / 0 (the door rule is the viewer's side now) |
+| `tests/walk.luau` (count varies with depth) | 70 / 0 | 55 / 0 | 55-63 / 0 (3 runs) | 55-71 / 0 (4 runs) | 55-71 / 0 (10 runs) |
+| **headless total**, the counted checks (the walk's count varies with depth) | 366 / 0 + PASS | 585 / 0 + PASS | **629 / 0 + PASS** | **679 / 0 + PASS** | **703 / 0 + PASS** |
+| compile every file (see below) | 12 sources | — | **44 of 44 files clean**: 19 sources, 19 test files, 6 checks | **45 of 45**: 19 sources, 19 test files, 7 checks | **46 of 46**: 19 sources, 20 test files (+ `pacing.measure`), 7 checks |
+| `rojo build` (Rojo 7.7.0) | builds | builds | builds; the place holds `Env` and `Hud` LocalScripts and every new module | builds; the place holds the review round's code | builds; the place holds review 2's code |
+
+**Stability after review 2** (bundle md5 `19c1e8d7…`). Floors are random every run. On the final tree:
+`check_facilitynightmare_env` 6 of 6 at 264 / 0, `_hazards` 12 of 12 at 53 / 0, `_firstframe` 6 of 6 at 18 / 0,
+`check_facilitynightmare`, `_input` and `_desktop` 3 of 3 each, `_hud` 4 of 4, the walk 4 of 4 (55-71), plus the final
+gate run. On the tree just before its last two edits (a redundant guard taken out of Env.client, and the hazards check's
+harness fix below): `_env` 10 of 10, `_firstframe` 10 of 10, `check_facilitynightmare`, `_input` and `_desktop` 6 of 6
+each, the walk 4 of 4, and `_hazards` 33 of 34. The one failure was a bot death in section E, and the assert's own
+message then crashed on a nil State. The check's player now has every perk, and the message is nil-safe; nothing the
+check asserts depends on the perks. The D3 control measured leaves joining two bands from both sides in all 16 env runs,
+and the firstframe audit saw door-frames of such a leaf in 13 of its 16 runs.
 
 **Stability after the review round** (bundle md5 `1bbf3b9a…`; the final bundle, `735c51b3…`, differs from it by one
 comment line in Env.client, diffed, and ran every gate once more, all green): `check_facilitynightmare_env` **24 of 24** at
@@ -449,6 +561,62 @@ checks were run many times on the final build.
 scratchpad (another session removed them). Every file was compiled with `luau.exe` + `loadstring` instead.
 That checks syntax only and runs nothing; a deliberately broken file fails it, as the control. **`luau-analyze`
 was not run at all this session.**
+
+### Mutation sweep (review 2, the final tree)
+
+Driver: review 2's own driver (`scratchpad/fnrev2/mut/driver.py`, pointed at a frozen copy of the final tree) with a
+parallel runner and this round's `mutations.py` (`scratchpad/fnp1_0930/sweep/`). Three workers on fresh copies, **all 23
+suites** per mutation, every mutation applied exactly once and **proved to be in the rebuilt bundle** (the mutated bundle
+equals the baseline bundle with the same replacement, path lines normalised), the frozen baseline proved unchanged
+after the sweep, and the real tree sha256-identical to its pre-sweep record. The baseline ran all 23 suites green first.
+
+**Result: 27 of 27 KILLED, all 3 controls SURVIVED.** One trap in the driver, found while reading this sweep: it counted a
+gate as passed when its last line contained "0 failed", so "10 failed" read as a pass. Every log was re-read with a
+digit-boundary match; the only change was one more killing suite for F3-c (Dressing.spec, 10 failures). No control
+depended on it.
+
+| id | mutation (review 2) | killed by |
+|---|---|---|
+| F1-a | Env.client never calls off at the lift | hazards |
+| F1-b | `Hazards.step`: callOff cancels nothing | Hazards.spec, hazards |
+| F1-c | `Hazards.step`: a hazard may start at the lift | Hazards.spec, hazards |
+| F1-d | HUD: the text rows stay above a modal | hud |
+| F1-e | HUD: the rows are not kept to the touch band's middle | hud |
+| F1-f | HUD: no room kept below a modal | hud |
+| F1-g | HUD: the hint shown below a modal where it does not fit | hud |
+| F2-a | the bio-lab is no brag | EnvConfig.spec |
+| F2-b | server: every powering is a record | check |
+| F2-c | HUD: the fanfare ignores the record flag | env |
+| F2-d | HUD: every band gets a fanfare | env |
+| F2-e | HUD: the long-term goal gets none | env |
+| F2-f | HUD: any sublevel of the band, not its first | env |
+| F2-g | HUD: no FOV punch on the fanfare | env |
+| F3-a | Env.client paints a leaf in its lower room's band again (the defect) | env, firstframe |
+| F3-b | `leafSide`: an unbuilt lower room on the wrong side | Dressing.spec |
+| F3-c | `leafSide`: the normal is the wide axis | Dressing.spec, env, firstframe |
+| F3-d | the doors are never painted | env, firstframe |
+| U1 | rift knock 30, lift 4 (the reviewer's) | EnvConfig.spec, env, firstframe, hazards (validate switches hazards off) |
+| U1-b | `KnockMax` 24 → 30 | EnvConfig.spec |
+| U1-c | validate ignores the config's knock bounds | Hazards.spec |
+| U2 | the warning rate uncapped (the reviewer's) | hazards |
+| U4 | the DEPTH RECORD board faces the wall (the reviewer's) | env |
+| U5 | a bench sitter faces the wall (the reviewer's) | env |
+| U6 | `FixtureKeepOut` 2.5 → 0 (the reviewer's) | EnvConfig.spec |
+| D-1 | `IntervalMin` back to 120 | EnvConfig.spec |
+| D-2 | `IntervalMax` back to 180 | EnvConfig.spec, hazards |
+| CONTROL-1 | the fanfare's FOV punch eases back in 0.45 s, not 0.4 | SURVIVED, as it must |
+| CONTROL-2 | the fanfare's banner stays 6 s, not 5 | SURVIVED, as it must |
+| CONTROL-3 | a leaf keeps its colour within 0.04 of its plane, not 0.05 | SURVIVED, as it must |
+
+D-1 is killed by the spec's pin alone: the hazards check's gaps (90-140) still hold at 120-140, and asserting the
+shortest of 18 gaps below 100 s would fail about 2 % of honest runs.
+
+**Re-run on the current tree (2026-10-01, pass 1 again, §14).** The same 27 mutations and 3 controls, on fresh copies of
+the tree pass 2 left (bundle md5 `61caa0b0…`), with `scratchpad/fnp1_1001/sweep/driver.py` and **all 26 suites** (the
+board's two checks are new since): **27 of 27 KILLED, 3 of 3 controls SURVIVED**, every mutation proved in the bundle.
+Two killer lists changed: F3-a fell to the env check alone this time (the firstframe audit only sees door frames the
+floor happens to give it), and U1 also to the board and input checks, which count the warning `Hazards.validate` prints
+when it switches hazards off.
 
 ### Mutation sweep (review round, the final tree)
 
@@ -642,9 +810,43 @@ reaches the exit room in the same tick the bot powers it. Not investigated furth
     top of the server's up to 394 zone parts.
 16. **The whole brief, with people**:
     - Does the world change often enough to never feel monotonous at the depths players actually reach?
-    - About half of perk-less medium runs reach the reactor, and 17 % reach the void.
-    - Are hazards rare and fair?
+    - About half of perk-less medium runs reach the reactor (57 of 120), and 8 % reach the void (10 of 120).
+    - Are hazards rare and fair at one per 90-140 s of lit time (the owner's decision)?
     - Does anyone miss a mid-run rest?
+17. **Review 2's changes** (headless proves the layout and the colours, never how they look):
+    - While the EXTRACT / DESCEND modal or the perk panel is up, the toast, hint and banner sit below it; on a phone
+      they are narrowed to the middle of the band the thumbstick and jump button own. Readable there, over the
+      touch controls' own graphics?
+    - The fanfare (`NEW RECORD — OVERGROWN BIO-LAB`, amber, with an FOV punch) under the choice modal: does it feel
+      like a brag? Do a medium player's first 30-45 minutes really get there (the pacing is a bot's)?
+    - A door leaf between rooms of two bands changes colour when the player crosses its plane (in a doorway, where
+      the leaf is edge-on or, when open, its lip is overhead). Watch the lip under a lintel for a visible snap.
+    - Hazards never start in the powered lift's room: is the room still interesting, and does a live hazard vanishing
+      as the player steps into the lift read as fair?
+18. **Pass 2's additions** (headless proves the numbers, the layout and the calls, never how they look or what Roblox's
+    services return):
+    - **The TOP DIVERS board** (north wall, 13 x 7 studs, 1300 x 700 canvas, rows at 34 px): legible from the spawn,
+      20.4 studs away? Its amber glow and the DEPTH RECORD board opposite: two boards, or one too many?
+    - Its ProximityPrompt (E, 10 studs, no hold) at the board's foot: does it show where a player stands to read it,
+      and does it never compete with the perk terminal's (31 studs apart)?
+    - The real services: `GetOrderedDataStore`, `GetSortedAsync`, `Players:GetFriendsAsync` pages and
+      `GetNameFromUserIdAsync` on a published place. The emulator has no friends service (the check supplies one) and
+      its store never throttles; watch the output for "request was added to queue" when a friends view is opened.
+    - A band a viewer has not reached shows as ??? on their board (no spoilers): does ??? next to a deep number tempt,
+      or confuse?
+    - **The REST button** beside PERKS on a phone: tappable, and does resting read (the soft focus, the hint)?
+    - The local-parts cap is headless-proven never to bind on a real floor; nothing to see unless a kit grows.
+19. **Pass 2 resumed (2026-10-01): critters, the offices' dust, the lift's hint** (headless proves where a critter can be,
+    that it moves only in a near, lit room and within the cap; never how it looks):
+    - The seven critters (a 0.55-stud cockroach, a white lab mouse, a moth, a rat, a bat, a beetle, a pale drifter): do
+      they read as what they are at that size, in first person and in the flashlight? Too small to notice, or a
+      distraction from finding fuses?
+    - A scurrier turns round by mirroring (its parts swap ends): does the turn read as an animal turning?
+    - A critter keeps still in a dark room and in the flicker's low step: in the flashlight, is a frozen roach creepy or
+      a visible bug?
+    - The offices' dust motes (3 a second, 0.14 studs, lit by the room, high in the room): visible at all, or noise?
+    - Back through a flickering room into the powered lift: the hint reads `EXTRACT (E) to bank it, or DESCEND (Q) for
+      more.` at once (it read "Your room is going dark" for up to 3 s before; desktop check F).
 
 ---
 
@@ -705,6 +907,10 @@ first and check them before relying on the rest.*
    - the light fixture is in the middle of the ceiling; in the entry room the car stands in the middle.
 6. **Clean frames**: `game.Players.LocalPlayer.PlayerGui.FacilityHud.Enabled = false` (Client), or Freecam.
 
+**Format: 1920x1080** (16:9 landscape, the Roblox thumbnail size). Set the Studio window or the capture region to
+1920x1080 before each shot, or capture larger and crop to exactly that, never stretch. The vertical 1080x1920 clips are
+MARKETING.md's, not these.
+
 **The shots** (in this order; shot 6 ends the held floor):
 
 1. **"The break room: DEPTH RECORD"** (no `SHOT_BAND` snippet).
@@ -718,6 +924,9 @@ first and check them before relying on the rest.*
    - In frame: the board (south wall, x ≈ -19), the benches and rug, the plant by the wall. Stretch it to
      catch the amber SERVICE ELEVATOR sign glowing in the car if you can.
    - The break room is lit, so this is the one bright, warm frame: the "before".
+   - Variant (pass 2): turn round to the north wall for the TOP DIVERS board, camera ≈ (-19, 5, 4) looking at
+     (-19, 5.5, 19.8), the board filling the middle third. In a place with no API access it says it cannot be reached:
+     take this variant only where the real public board shows, or leave it out.
 2. **"Server vault"** (`SHOT_BAND = 3`).
    - Open doors until a room shows a **rack pair** in a corner (two tall black racks with blinking LED faces).
    - Camera from the middle of the opposite wall, 6.5 up, looking at that corner (the snippet's framing).
@@ -756,32 +965,81 @@ first and check them before relying on the rest.*
 A HUD variant for any band: capture the ride down. `SUBLEVEL 1 — SERVER VAULT` is on the banner for the ride's
 first 3 s, and the hint gives the band's line.
 
+**Critters in frame (pass 2 resumed).** Every band has one (the cockroach, the lab mouse, the moth, the rat, the bat, the
+beetle, the drifter; §2's table), in about 70 % of rooms, at a wall slot near a corner. A critter moves only while its room
+is lit and within 32 studs of the player (at most 4 at once), so stand in or next to its room. Good extras: the moth under
+the server vault's cable tray (shot 2), the rat at the flooded room's waterline (shot 3), the beetle high on a bio-lab wall
+(shot 5), the drifter over the void's debris (shot 6). In the offices (shot 1's variant on a floor) the dust motes show
+best against the dark ceiling.
+
 ---
 
 ## 10. Not done / open
 
-- **The independent adversarial review is done** and its five findings are closed (§11). Nothing after it has
-  been reviewed by anyone else.
+- **Two independent adversarial reviews are done** and their ten findings are closed (§11, §12). Review 2's own changes
+  have been mutation-tested (§7) but not reviewed by a third pass.
 - **`luau-analyze` was not run** (the binary is gone from the shared scratchpad; still gone in the review round).
   The strict-mode type noise of the new modules is unknown.
-- **Gustav's call: hazards and near-hits** (review finding 3, §3). In real play a hazard comes once per 3.3-4
-  floor-minutes in the bands that have them (one per 4.3 overall at the medium proxy), because the dark freezes
-  the clock by design. And it is a near-hit only for a player who stops: 6 of 534 bursts (1.1 %) landed within 8
-  studs of a bot that never stops walking. Options, none taken:
-  1. **Keep it.** Hazards stay a rare telegraphed scare that never adds to the dark.
-  2. **More often:** `Config.Hazards.IntervalMin` / `IntervalMax` 90 / 140 (and update `EnvConfig.spec`). More
-     banners, still few near-hits for a walker.
-  3. **Aim ahead of a moving player:** draw the ring where they will be in about 1.5 s. A walker then meets it and
-     steps round it. This changes "the ring is where you stood", so the escape-time rule (every ring escapable at
-     10.4 studs/s after a 1 s reaction) must be re-derived and re-tested first.
-  4. **Start only when the player has stood still for a moment:** every hazard becomes a near-miss, but rarer still.
-- **The void is reached by 17 % of perk-less medium runs.** It is the long-term goal by design; perks raise it.
-  Real player depths (CLAUDE.md "Needs Studio" item 1) will show whether the band starts are right.
-- **The proposed store text in README.md** does not mention the bands. It is left to the publishing session.
-- **A rare flake in `check_facilitynightmare_desktop`**, which predates this work (§7). It was seen once in
-  about 190 runs: the lift's hint read "Your room is going dark" 0.3 s after powering. 0 of 40 on the final
-  build and 0 of 40 on HEAD; 0 of 20 more in the review round. Worth a look in the game's next review: if a powered lift can report a
-  flicker for a moment, the player sees a wrong hint at the choice.
+- **Gustav's call: hazards and near-hits** (review finding 3, §3). **DECIDED 2026-09-30 (owner: take recommended):
+  option 2, `IntervalMin` / `IntervalMax` 90 / 140.** None of the four was marked as recommended, so the one that best
+  serves the brief (fair, fun, never punishing, never exploitable) was taken:
+  1. **Keep it.** Not taken: at one hazard per 3.3-4 minutes of play in the bands that have them, it misses the brief's
+     "about one per 2-3 minutes".
+  2. **More often: 90 / 140. TAKEN.** It is the only option that moves the measured rate into the brief's number (now one
+     per 2.6-3.1 floor-minutes in those bands, §3). It is a config change: every fairness rule stays as it was (the
+     telegraph, the ring that is exactly what hits, one at a time, never in the dark, never on arrival, never at the
+     choice). The escape arithmetic is unchanged, a hit still costs nothing, and hazards are client-only, so there is
+     nothing to exploit. A player who stops at the banner gets a near-miss every time. A walker still mostly sees a
+     banner (5 of 349 bursts within 8 studs of the bot, 1.4 %).
+  3. **Aim ahead of a moving player.** Not taken: it cannot make a walker's near-miss inside one room. The burst comes
+     2.8-3.2 s after the warning, and a walker covers 29-51 studs in that time, while a legal spot lies within a
+     14 × 14 stud square of a 26-stud room. So the ring lands on their path and they walk through it before it bursts.
+     It would also break the rule "the ring is where you stood".
+  4. **Start only when the player has stood still.** Not taken: it makes hazards rarer still, away from the brief's
+     number, and never happens at all to a player who keeps moving.
+- **The void is reached by 8 % of perk-less medium runs** (10 of 120, review 2; the 17 % that stood here was an older
+  run, and this file's own table said 12 %). It is the long-term goal; the brag is now the bio-lab (§2). Real player
+  depths (CLAUDE.md "Needs Studio" item 1) will show whether the band starts are right.
+- **The slow player's brag** (review 2, finding 2's slow half; it stood here as open, and in CLAUDE.md "Next" 5).
+  **DECIDED 2026-09-30 (owner: take recommended): left as designed.** One brag, the OVERGROWN BIO-LAB, timed for normal
+  play (the medium proxy). No option was marked; the file's own position was this one ("a per-speed brag was not built:
+  the standard asks for normal play"), and it was checked against the brief (fair, fun, never punishing, never
+  exploitable) with a per-band run of the pacing model on the current tree (2026-10-01; `tests/pacing.measure.luau`'s
+  model with the first powering of every band's first sublevel recorded; minutes since join, p50):
+
+  | band (first sublevel) | slow (10.4), 20 players | medium (12.8, normal play), 30 players |
+  |---|---|---|
+  | LABORATORIES (3) | 4.0 | 3.1 |
+  | SERVER VAULT (5) | 15.0 | 6.2 |
+  | FLOODED MAINTENANCE (7) | 32.7 (15 of 20 within 45) | 9.6 |
+  | REACTOR CORE (9) | 90.7 (8 of 20 within 45) | 18.5 |
+  | OVERGROWN BIO-LAB (11), the brag | later than 150 (3 of 20 within 45, 6 of 20 within 150) | **37.0** (24 of 30 within 45) |
+  | THE VOID (13), the goal | later than 150 (1 of 20) | 46.6 |
+
+  1. **Keep it. TAKEN.** Fair: the brag means one thing for everyone, on TOP DIVERS and in `leaderstats`. Never
+     exploitable: it is the server's powered record. Never punishing: a slow player loses nothing by it and still meets a
+     new band at about 4, 15 and 33 minutes; their fanfare comes when their record gets there.
+  2. **An earlier brag band.** Not taken: no band fits both. The one a slow player reaches inside 45 minutes (the
+     flooded maintenance, 15 of 20) comes after 9.6 minutes for a medium player, too cheap for a brag, and the reactor
+     (8 of 20 slow players within 45) after 18.5.
+  3. **A fanfare on every new band.** Not taken: the ride already names each band (`SUBLEVEL 7 — FLOODED MAINTENANCE`),
+     and a brag that every band gives is not a brag (review 2's mutation F2-d, "every band gets a fanfare", is held
+     killed by the env check).
+  4. **A catch-up for slow players.** Not taken: the server cannot tell a slow player from a careful one, and it would
+     move the difficulty curve DESIGN.md measured.
+
+  The sibling games made the same call (anomaly-observatory D2, "left as designed"; same-door DESIGN §21.2). What can
+  reopen it is real players' depths (CLAUDE.md "Needs Studio" item 1). No code changed: `EnvConfig.spec` already pins
+  exactly one brag (the bio-lab, from 11) and the goal (the void, from 13), and the pacing model shows any retune.
+- **docs/complete-game-standard.md, pass 2 (2026-10-01):** the public and friends board, `MARKETING.md` (eight clips),
+  the REST button, the local-parts cap in code and the store text are built (§13). `luau-analyze` is still not in the
+  shared scratchpad, so it has not been run on any of this.
+- **The proposed store text in README.md** (pass 2) names the first five bands, the hazards, the rest and the board.
+- **A rare flake in `check_facilitynightmare_desktop`: CLOSED (pass 2 resumed, §15).** It was seen once in about 190
+  runs: the lift's hint read "Your room is going dark" 0.3 s after powering. It was a real defect, not the bot: the HUD
+  holds a `roomDying` hint for 3 s, so a player who came through a flickering room into the lift (or stepped out of the
+  powered lift into one and back) read it at the choice, over a lift that never goes dark. Made certain in desktop check F
+  (2 of 2 assertions failed before the fix), fixed in `Hud.client` (at the powered lift its own hint wins).
 - **Everything in §8.**
 
 ---
@@ -864,7 +1122,7 @@ lookup for a room already dressed.
 of a room in view in the server's colours or undressed. Mutations R2-F1..F4. Real replication order is on the
 Studio list (§8 item 10).
 
-### Finding 3 (low): hazards are rarer than the brief, and a walker almost never gets the near-hit. FRAMED for Gustav
+### Finding 3 (low): hazards are rarer than the brief, and a walker almost never gets the near-hit. FRAMED for Gustav; DECIDED 2026-09-30 (owner: take recommended), option 2 (§10)
 
 **Reproduced** with `tests/hazards.measure.luau` on the final tree: one hazard per 4.3 floor-minutes at the medium
 proxy (3.3-4.0 in the bands that have them), one per 2.8 exposed minutes, and **6 of 534 bursts (1.1 %) within 8
@@ -905,3 +1163,367 @@ Gates and counts, the server diff (the benches only), dressing never seeing an i
 in the dark or on a pad or in the arrival grace, nothing lost by a hit), rest (break room only, no server hook), the
 replication and authority rules, and the part budgets. Nothing in this round touched the server, the HUD, Hazards,
 Rest or the survival numbers.
+
+---
+
+## 12. Review 2 (2026-09-30) and how each finding was closed
+
+A second independent reviewer read the tree the §11 round left (unchanged since, git HEAD `b347f56`), ran all 23 gates
+and probed it. Five findings. Each was **reproduced first** on an untouched copy of that tree with the reviewer's own
+probes, each fix went **test-first** (every new assertion below was watched failing on the untouched tree, or, where the
+code already kept the promise, on the reviewer's mutant), and the sweep in §7 mutates every new rule.
+
+### Finding 1 (medium): text lay on the EXTRACT / DESCEND modal on a phone. CLOSED, wider than reported
+
+**Reproduced.** The reviewer's probe (the real server, HUD and Env.client; the offices given the labs' hazard in memory;
+the bot 6.5 studs from the powered exit room's centre): a hazard warning came 119.7 and 108.7 s later, on 2 of 2
+runs, and the banner lay on the choice modal on 5 of 10 viewports each time (phone landscape 264 × 46 px, small phone
+264 × 34, laptop-touch 440 × 13, phone-landscape-mouse 264 × 18, and the touch-again repeat). Control with no hazard
+kind: 0 of 10.
+
+**Wider.** The same gate gap (hudcheck's rule 4b counts Frames, and the toast, hint and banner are TextLabels) hid two more
+overlaps, found by a probe of every text row against both modals:
+- at every powering, the toast (`Fuses in: 3/3`) and the hint lay on the choice modal on 3 of 10 viewports;
+- with the perk panel open, a purchase's toast and the hub hint lay on its title and first row on **10 of 10**
+  viewports, the desktop too.
+
+The new audit counted **31 overlaps in 20 viewport-modes** on the untouched tree.
+
+**Fix, two halves.**
+- **The game:** no hazard starts at the powered lift, and a live one is called off when the player reaches it. The
+  server's `atLift` covers the whole powered exit room, and that is where the modal shows. `Hazards.step` takes
+  `ctx.callOff` and decides both (one place, trap 37). The clock runs on there, as on the car's pad, so a hazard that
+  falls due waits and, after DESCEND, waits out the arrival grace.
+- **The HUD:** while a modal is up, the banner, toast and hint sit BELOW it. A modal keeps room for the banner and the
+  toast under it. The hint is left out where it does not fit, because the modal says what to do. On a touch screen,
+  rows that reach the band Roblox's controls own keep to the middle, clear of the thumbstick's corner (0.35 of the
+  width) and the jump button's (0.25).
+
+**Tests** (all failing on the untouched tree):
+- `check_facilitynightmare_hud`: the text audit. On all 20 choice and perk viewport-modes it re-fires a real refused
+  request (a toast) and, at the choice, a hazard warning on the bus exactly as Env.client sends one. It asserts no
+  visible text row on a visible modal, every row fully on screen, and the touch band's middle. Before the fix: 31
+  failures. After: 0, with the banner audited 10 times, the toast 20 and the hint 16.
+- `check_facilitynightmare_hazards` E: 200 s at the powered lift, 6.5 studs out (off the pad, a legal spot anywhere
+  else), with a hazard long due: none.
+- `check_facilitynightmare_hazards` D: a State saying `atLift` during a live hazard calls it off at once, with its ring
+  and banner, and it never bursts.
+- `Hazards.spec`: callOff cancels a live hazard; 300 s at the lift with one due and a legal spot starts none while the
+  clock runs; the first legal moment after it brings exactly one.
+
+**After:** the reviewer's probe gave no warning in 200 s, and 0 of 10 overlaps, on 2 of 2 runs. Mutations F1-a..g.
+
+### Finding 2 (medium): the brag was not reachable in 30-45 minutes. CLOSED for the medium proxy
+
+**Reproduced** with a per-sublevel version of the reviewer's pacing probe: fresh players, perks bought between runs,
+always DESCEND, 30 players per proxy, run in parallel. At the medium proxy the first powering of sublevel 13 had a
+median of 52.9 min (p10 30.8, p90 110.8); 11 of 30 players got there within 45 min and 3 of 30 within 30. The slow
+proxy: 0 of 30 within 150 min. The perfect proxy: a median of 16.0.
+
+**Fix.** The brag is the OVERGROWN BIO-LAB (`brag = true`), the deepest band of the facility itself, and the void is the
+long-term goal beyond it.
+- **The server:** the `choice` notice says `record = true` when this powering raised the saved best. Only the server
+  knows the best before it.
+- **The HUD:** on a record that powers the first sublevel of the brag band or of the last band, it shows
+  `NEW RECORD — <BAND>` with an FOV punch, below the modal (finding 1's layout).
+
+**Tests** (failing on the untouched tree):
+- `EnvConfig.spec`: exactly one brag, the bio-lab, from 11; the goal is the void, from 13; every fanfare banner is at
+  most 40 characters.
+- `check_facilitynightmare` D and E: `record` is true on VET's first powering and false on the next.
+- `check_facilitynightmare_env` B: the notice as the server sends it, with the bands moved in memory. The brag's first
+  sublevel gets the fanfare; the same powering with no record gets none; a sublevel that starts no band gets none; the
+  offices as shipped get none; THE VOID gets its own.
+- `check_facilitynightmare_env` F, through the server: three new records on sublevels 1-3, with the offices marked as the
+  brag, give exactly one fanfare.
+
+**Measured** with `tests/pacing.measure.luau`: the medium brag's median is 29.6 min; 16 of 30 players got there
+within 30 min and 27 of 30 within 45 (§2). **Not closed for the slow proxy**: 0 of 20 in 45 min. That half is not a
+defect against the standard (it asks for normal play, and DESIGN.md §0 makes the medium proxy normal play); it was an
+open owner decision, **DECIDED 2026-09-30 (owner: take recommended): left as designed** (§10, with the per-band minutes).
+Mutations F2-a..g.
+
+### Finding 3 (low): a door between two bands broke the 90-110 % contrast promise. CLOSED
+
+**Reproduced.**
+- The reviewer's arithmetic: a servers room with a labs door gives 71 % (white light) and 72 % (room light); a labs
+  room with a servers door 138 %; every other adjacent pair 94-104 %.
+- The reviewer's end-to-end probe: 1 of 3 closed-door sides outside 90-110 % (138 %), on 3 of 3 runs. Control
+  (flooded to reactor): 0 of 3.
+- How common, on the shipped config: of 10 957 doors on 400 real sublevel-4 plans, 2 272 (21 %) join the labs and the
+  server vault, on 400 of 400 floors (the reviewer's `crossdoor_k4` probe, re-run).
+
+**Cause.** Env.client painted every leaf in the band of its lower room id.
+
+**Fix.** A leaf is a thin slab seen from one side at a time, set in that side's wall. `Dressing.leafSide` answers which
+of its rooms is on the viewer's side: its thin axis is the doorway's normal, and an unbuilt room is the built one's
+mirror image through the leaf. Env.client paints every leaf in that room's band, every frame after the dressing pass,
+and writes a colour only when it changes. On the plane itself, in a doorway's middle, where the leaf is edge-on or its
+lip is overhead, it keeps what it wore. No palette changed.
+
+**Tests** (failing on the untouched tree):
+- `Dressing.spec`: 12 cases, both orientations, both sides, unbuilt rooms, on the plane.
+- `check_facilitynightmare_env` D3: the labs on a floor with the server vault blended in, the blend chosen so that most
+  of the entry room's leaves join two bands. From inside the entry and from a stud past each leaf's plane, each leaf
+  must wear the door of the band on the player's side and stand out 90-110 % in white and in room light. 6 failures
+  before the fix; after, 16 of 16 runs measured such leaves from both sides.
+- `check_facilitynightmare_firstframe`: the audit's door rule is now the player's side, re-derived from the leaf's own
+  geometry. Before the fix it found 132 wrong frames on the real sublevel 2, where the labs creep into the offices.
+
+Mutations F3-a..d.
+
+### Finding 4 (low): five environment promises no gate held. CLOSED
+
+Each of the reviewer's five surviving mutants is killed now (§7: U1, U2, U4, U5, U6).
+- **U1:** `Hazards.validate` holds every kind to the config's promised shove (`KnockMin` 16, `KnockMax` 24, `LiftMax` 3)
+  instead of the module's 30 / 4. `EnvConfig.spec` pins the bounds and every kind's numbers, and `Hazards.spec` has
+  nine new cases.
+- **U2:** `check_facilitynightmare_hazards` C reads every warning emitter's rate on every frame: at most 10/s. It
+  reached 9.80/s, a control that the warning does thicken.
+- **U4:** env check B: the DEPTH RECORD board's SurfaceGui face points at HubSpawn, from the south wall.
+- **U5:** env check B: both benches seat a player facing into the room.
+- **U6:** `EnvConfig.spec` pins `FixtureKeepOut` 2.5, `PadKeepOut` 5.5 and `SpotMinWallDistance` 6. `spotOk` with the
+  shipped config refuses a spot 1 stud off a room's centre.
+
+The four promises other than U1 were already kept by the code; their tests were watched failing on the reviewer's
+mutants.
+
+### Finding 5 (low): a stale 17 %. CLOSED
+
+`tests/hazards.measure.luau` on the final tree: the void is reached on **10 of 120** perk-less medium runs (8 %), the
+reactor on 57 of 120 (48 %). §2's table, §8 item 16 and §10 now carry these numbers.
+
+### Also found and fixed this round
+- **The mutation driver's pass test** read "10 failed" as a pass (§7). Its logs were re-read; nothing it reported changed.
+- **`check_facilitynightmare_hazards` could crash in section E** on a bot death (1 of 34 runs): its assert message
+  indexed a nil State. The message is nil-safe now, and the check's player has every perk, as the env check's already
+  did.
+
+---
+
+## 13. Pass 2: the complete-game standard (2026-10-01)
+
+Every item of `docs/complete-game-standard.md` was checked against the code, not the earlier reports. What was missing
+was built test-first (each new assertion watched failing first), then mutation-tested with controls (below).
+
+| standard | before pass 2 | now |
+|---|---|---|
+| §3 highscore board, public + friends | only `leaderstats.Deepest` and the personal DEPTH RECORD | **TOP DIVERS** on the break room's north wall (13 x 7 studs, 20.4 studs from the spawn, facing it), ProximityPrompt E toggles Public / Friends. OrderedDataStore `FacilityNightmare_TopDivers_v1`, key `u_<userId>`, value `bestSublevel * 2e9 + (2e9 - bestAt)`; `shared/Board.luau` is plus1-jump's, verbatim |
+| §2 rest: "trykke på pause" | a bench or 20 s standing still | also a **REST** button beside PERKS (`Rest.press`); GET UP or moving ends it; refused with a toast outside the break room |
+| §2 budgets capped in code | local parts held by arithmetic only | Env.client parents dressing nearest-first within `MaxLocalParts` less the hazard's 8 (never binds on a real floor, §6) |
+| §2 phone first, rule 4b | `overlap = true`; the hub's own HUD never measured | a `[hub]` mode: PERKS and REST measured on 10 viewports |
+| §2 brag in 30-45 min | medium median 29.6 min (pass 1) | re-measured on this code: medium median 26.9 min, 23 of 30 within 45 (§2); not retuned |
+| §4 store text | did not mention bands, hazards or rest | 957 characters: bands to the reactor, hazards, rest, the board |
+| §4 thumbnail list | no resolution | 1920x1080, and a TOP DIVERS variant of shot 1 (§9) |
+| §4 clip list | none | MARKETING.md: eight vertical clips with staging and honesty rules |
+| §4 needs-Studio | items 1-17 | item 18 (the board, its prompt, the real services, REST on a phone) |
+
+**How the board keeps its promises** (check_facilitynightmare_board, 104 assertions, through the real server, Board.client,
+Env.client and a bot that powers real lifts):
+- The metric is the server's: only `power` raises `bestSublevel`, behind the trusted position. Forged CHOOSE / BUY from
+  the break room write nothing to the board.
+- Ties go to the first: Bo and Ava both at sublevel 4, Bo reached it earlier and ranks above her. A record saved before
+  the board existed is stamped once, with the session it came back in, and that stamp is saved.
+- Written only when it improves: two autosaves with no new record, 0 writes; NEW powers sublevel 1 (1 write, stamped
+  within 5 s of the powering), then 2 (1 more), then sublevel 1 again (0). A board value higher than the profile
+  (Ned: 8 on the board, 5 in his profile) is never lowered.
+- Public top 10: 3 GetSortedAsync calls in 180 s; a failing read keeps the last list.
+- Friends on demand: none fetched before the prompt; one fetch, then cached (no new reads on the next toggle); scores
+  read only for friends not on this server; 450 friends: 41 reads in the first second, 100 in the first minute, exactly
+  200 in all, 3 pages turned. Empty boards say something: no friends, friends who never powered a lift, the friends
+  call failing.
+- The drawn board: a SurfaceGui on the front face (canvas in the face's proportions), not in PlayerGui; a band the
+  viewer has not reached shows as ??? (no spoilers); names are never stored; no attribute on the board; no break-room
+  dressing within the board's 3 studs.
+- check_facilitynightmare_boardoff (16): with every call to the board's store raising, the server boots, the board says
+  "The board can't be reached on this server right now." (not "nobody has played"), the prompt still answers, the
+  player's file still loads; when the store comes back the record that failed to write is written at the next save.
+
+**Gates on the final tree** (bundle md5 `61caa0b0e1849935d9c352c330fb842a`): 16 specs 1 558 passed, 0 failed (Board 66
+new, Economy 93 -> 109, Rest 43 -> 77); check_facilitynightmare 205/0, _board 104/0 (new), _boardoff 16/0 (new),
+_input 116 -> 132/0, _desktop 47/0, _env 264 -> 269/0, _hazards 53/0, _firstframe 18/0, _hud PASS in 40 viewport-modes
+(30 before; the text audit still 20); walk 67/0. Repeat runs on the same bundle: _board 6 of 6, _boardoff 4 of 4, _input
+4 of 4, _env 3 of 3, _hud, _firstframe, _hazards, main and _desktop 2 of 2 each. luau.exe + loadstring: 51 of 51 files
+compile, a broken control does not. Rojo 7.7.0 builds. `luau-analyze` NOT run (still not in the shared scratchpad).
+
+**Pass 2's mutation sweep.** Pass 2's own sweep was cut off after B1-B12 of its 27 mutations and 3 controls (B11 survived,
+B13 was half-run), and this table was left as a placeholder. It was completed on the same tree by pass 1's re-run (2026-10-01,
+§14): pass 2's 27 mutations and 3 controls plus **B11b**, each applied exactly once to a fresh copy, **proved to be in the
+rebuilt bundle** (the mutated bundle equals the baseline bundle with the same replacement, path lines normalised), and run
+against **all 26 suites** (16 specs, the walk, 9 checks); every log read with a digit-boundary match (trap 43a). The
+baseline ran all 26 green in both workers first; afterwards both workers' `src` were byte-identical to the frozen copy,
+and the real tree's `src` to its sha256 at the start of the pass. Driver: `scratchpad/fnp1_1001/sweep/driver.py` +
+`muts.py` (which loads `fnp2/mutations.py`).
+
+**Result: 27 of 28 KILLED, B11 SURVIVED as an equivalent mutant, all 3 controls SURVIVED.**
+
+| id | mutation (pass 2) | killed by |
+|---|---|---|
+| B1 | `power` never stamps a new record's reach time | Economy.spec, board |
+| B2 | powering the same depth again restamps it (ties to the LAST) | Economy.spec |
+| B3 | sanitize drops `bestAt` and `boardBest` | Economy.spec, board, boardoff |
+| B4 | a legacy record is never stamped at load | board |
+| B5 | the board is written on every save, not only when the record rose | board |
+| B6 | the board write ignores what is stored (no `keepHigher`) | board |
+| B7 | `boardBest` is set even when the board write failed | boardoff |
+| B8 | `Board.encode`: ties go to the LAST (2e9 + t) | Board.spec, board |
+| B9 | the public top 10 is read every 5 s, not once a minute | board |
+| B10 | a player's friends list is never cached | board |
+| B11 | the friends loop's `while` condition drops the cap of 200 | **SURVIVED: equivalent.** The cap is held three times in that loop (the `while`, the insert, the `break`); any one of them alone keeps it |
+| B11b | all three cap checks gone | board |
+| B12 | friends' scores are read without the limiter | board |
+| B13 | the client draws views sent to other players | board |
+| B14 | the board names bands the viewer has not reached (spoilers) | board |
+| B15 | a board that was never read says "nobody has played" | boardoff |
+| B16 | the board faces the wall (turned 180°) | board |
+| B17 | the board's canvas is a fixed 400 x 200 | board |
+| B18 | the prompt toggles nothing (stays public) | board, boardoff |
+| B19 | a new record is not written at the powering's save (only on leave) | board, boardoff, walk |
+| R1 | `Rest.press` ignores the phase (rests on a floor) | Rest.spec, input |
+| R2 | pressing while resting does not get up | Rest.spec, input |
+| R3 | REST shows on a floor too | input |
+| R4 | a refused REST press is silent (no toast) | input |
+| R5 | REST drawn in the thumbstick's corner on a phone | hud |
+| R6 | REST under the minimum tap size on a phone | hud |
+| P1 | no local-parts cap: every room in range is parented | env |
+| P2 | the cap keeps the FARTHEST rooms first | env |
+| CONTROL-1 | the board's title a little smaller (60 -> 58 px) | SURVIVED, as it must |
+| CONTROL-2 | the board part a shade lighter | SURVIVED, as it must |
+| CONTROL-3 | the boarding refusal worded differently | SURVIVED, as it must |
+
+---
+
+## 14. Pass 1 again (2026-10-01): review 2 and the owner's decisions, re-checked on the current tree
+
+The workflow ran pass 1 a second time. The tree already held pass 1's fixes (§12) and pass 2's work (§13); pass 2 had
+been cut off during its mutation sweep, so §13's sweep table and CLAUDE.md's gate line were placeholders. At the start
+every one of the 26 suites was green (bundle md5 `61caa0b0e1849935d9c352c330fb842a`). Each of review 2's findings was
+re-checked on a copy of this tree with the reviewer's own probe (`scratchpad/fnrev2/robloxemu/`):
+
+| finding | the reviewer, on the old tree | this tree |
+|---|---|---|
+| 1. the hazard banner on the EXTRACT / DESCEND modal (medium) | a warning 76.8-135.3 s after standing 6.5 studs off the lift's centre, 4 of 4 runs; banner on the modal on 5 of 10 viewports | `probe_choicebanner`, 4 runs: no warning in 200 s, 0 of 10 viewports overlapped, each run; its control 0 of 10. Does not reproduce |
+| 2. the brag not reachable in 30-45 min (medium) | medium median 71.0 min (to the void); slow 0 of 30 within 45 | the brag is the bio-lab now: medium p50 31.8 (21 of 30 within 45) and 37.0 (24 of 30) in two samples. The slow half reproduces (0 and 3 of 20 within 45): an owner decision, **DECIDED 2026-09-30 (owner: take recommended): left as designed** (§10) |
+| 3. doors between two bands (low) | 24 of 85 closed-door sides outside 90-110 % over 30 runs | the reviewer's `probe_crossdoor`, 30 runs: 0 of 69. Adapted to stand in the room each side is seen from: 0 of 69, 31 of them on leaves joining the labs and the server vault; its control (flooded to reactor) 0 of 25 over 10 runs. Does not reproduce |
+| 4. five promises no gate held (low) | U1, U2, U4, U5, U6 survived all 23 gates | each killed (§7's re-run: 27 of 27 KILLED, 3 controls SURVIVED) |
+| 5. a stale 17 % (low) | EYECANDY said 17 %, its table 12 % | no 17 % is left for the void's reach; §2, §8 item 16 and §10 carry 8 % (10 of 120) |
+
+**Owner's decisions** ("take the recommended option for all", 2026-09-30). Two open decisions were found in this file,
+CLAUDE.md and the REVIEW files: the hazard interval (already DECIDED 2026-09-30 (owner: take recommended), option 2,
+90-140 s, §10) and the slow player's brag, which stood in §10 and CLAUDE.md "Next" 5 as open. The second is DECIDED
+2026-09-30 (owner: take recommended): left as designed, with the per-band minutes and the four options in §10. It
+changes no code, so it needed no new test: `EnvConfig.spec` already pins the one brag and the goal.
+
+**What changed in this pass:** documentation only. No game source, test or check changed; the real tree's `src` is
+sha256-identical to its state at the start of the pass, and the bundle is still `61caa0b0…`. §13's sweep (pass 2's,
+completed here: 27 of 28 KILLED, B11 equivalent, 3 controls SURVIVED) and §7's re-run replace the placeholders.
+
+**Gates on the final tree** (bundle md5 `61caa0b0e1849935d9c352c330fb842a`), five full runs (one at the start, four at the
+end), every count the same each time but the walk's: 16 specs **1 558 passed, 0 failed** (Board 66, Config 106, Dressing 99, Economy 109, EnvBands
+124, EnvBus 11, EnvConfig 511, Facility 84, Fx 26, Hazards 108, MazeGen 3, Responsive 70, Rest 77, Rng 37, Survival 74,
+Trust 53); check_facilitynightmare 205 / 0, _board 104 / 0, _boardoff 16 / 0, _desktop 47 / 0, _env 269 / 0, _firstframe
+18 / 0, _hazards 53 / 0, _input 132 / 0, _hud PASS; walk 55-71 / 0 (its count varies with depth). Every file compiles
+(`luau.exe` + `loadstring`, 51 of 51; a broken control fails); Rojo 7.7.0 builds the place. `luau-analyze` NOT run (still
+not in the shared scratchpad).
+
+---
+
+## 15. Pass 2 resumed (2026-10-01): critters and weather in every band, the rejoin, the lift's hint
+
+An earlier attempt at this pass was cut off by a usage limit. On resuming, the tree held passes 1 and 2's work (§13, §14)
+and all 26 suites were green on it (bundle md5 `61caa0b0…`). Every item of docs/complete-game-standard.md was checked again
+against the code, not the reports. Three gaps were left, none of them in the reviewer's list:
+
+| standard | found | now |
+|---|---|---|
+| §2 bands: each with "its own light, colour, scenery, critters and weather" | no band had a critter, and the offices had no weather (particles: none) | a critter per band, in 67-75 % of rooms (600 real rooms per kit, a probe beside the spec), and dust motes in the offices (50 % of rooms) |
+| §1 walk the player's path: "... spend, rejoin" | the walk ended after the second run; rejoins were checked only as stored values (check K) | the walk's REJOIN: leave, join again, land on HubSpawn (the RespawnLocation), the State shows the Essence, runs, deepest sublevel and the perk, `leaderstats.Deepest` is back, a third run has the perk's 55 s battery and is settled on leaving |
+| the desktop check's rare flake (§10) | "worth a look" | a real defect (CLAUDE.md trap 48): desktop check F, fixed in `Hud.client` |
+| §2 phone first, rule 4b | asserted; the reviewer's note that the HUD check never loads Env.client | the reason is written next to `clients` in the check: Env.client draws nothing in PlayerGui, and its screen text goes over EnvBus into the HUD, which section 4 fires exactly as Env.client does |
+| §2 brag in about 30-45 minutes | five samples, medians 26.9-37.0 | a sixth (`tests/pacing.measure.luau`, 11 min, on the starting bundle: this pass changed only client code and `Config.Env` / `Budget`, which the server never reads): medium brag p10 15.0 / **p50 30.5** / p90 54.1 min, 15 of 30 within 30 and 24 of 30 within 45; void p50 71.7; slow 0 of 20 within 45 (the owner's decision stands, §10); perfect 13.5. No retune |
+
+**The critters.** Each is two parts, never self-lit, matte, coloured clear of a fuse's amber and a cell's green by the
+same rule as all dressing, and placed at a wall slot near a corner, LAST in the room (every earlier draw is unchanged, so
+the rest of the room is dressed exactly as without it).
+
+| band | critter | how it moves (`Dressing.critterPose`) | where |
+|---|---|---|---|
+| offices | a cockroach | scurry: 3.4 studs along the foot of a wall, a stop, turns round, runs back, a stop | the floor, in the wall band |
+| labs | an escaped white lab mouse (pink tail) | scurry, 3.4 studs | the floor, in the wall band |
+| servers | a moth | flutter: loops over 2.6 along, 2.2 up, 2.2 out, from 8.2 studs up | overhead |
+| flooded | a rat at the water's edge | scurry, 3.3 studs | the floor, in the wall band |
+| reactor | a bat | flutter over 3.0 / 1.8 / 1.6, from 8.6 up | overhead |
+| bio-lab | a beetle | crawl: 3.0 along and 1.6 up the wall face, from 9.7 up | the wall band, above the doorways |
+| void | a pale drifter, 45-50 % see-through | drift over 2.4 / 1.6 / 1.6, from 7.8 up | overhead |
+
+The rules, and where each is held:
+- **Every dressing rule over the whole path.** A critter part's checked box is the envelope of everywhere it can be: the
+  part and, for a scurrier, its mirror image (it turns round by mirroring), swept over its travel along, up and out.
+  `Dressing.critterBox` is where the client draws it at a moment. Dressing.spec, on 60 real rooms per kit: every pose
+  (401 moments x 2 phases per part) inside its box, the size unchanged (it moves, it does not stretch), every critter
+  moving more than half a stud, and spanning at least 90 % of each travel; the pose functions stay within 0..1 and use the
+  whole travel, and a scurrier faces the way it runs and stops now and then. The envelope rule caught the bat and the
+  drifter, whose paths reached into the next wall's door column (CLAUDE.md trap 49).
+- **Never glows, never collides, one per room.** `Dressing.partOk` and `check` refuse a glowing or colliding critter and a
+  second one; the spec's checker cases prove it.
+- **Its own parts.** Two per room on top of the furniture's 14 (`Env.MaxCritterParts`, `MaxCrittersPerRoom`), so a full
+  bio-lab room still gets one (trap 50); `Budget.MaxLocalParts` 240 -> 264 = 16 rooms x (14 + 2) + 8 hazard parts.
+- **Moves like a particle.** Only in a room within `EmitterRadius` (32 studs) whose light is on at full brightness, nearest
+  first, at most `Budget.MaxCritters` = 4 at once; anywhere else it keeps still where it is (a dark room holds nothing that
+  moves). env check E2, on the densest floor D2 reached (2 to 12 rooms in this pass's runs), every band in turn: most
+  bands drew their critter and no two the same kind (the spec holds every band to its own on 60 real rooms; on a 2-room
+  floor the 70 % roll per room misses a band 9 % of the time, by arithmetic, and two early runs of this check missed one
+  and two bands); a critter moves exactly when its room is near and lit and within the
+  cap, all of its parts or none; every drawn part is critter-sized (not its path's size). Then, made certain in memory:
+  with `EmitterRadius` at 1 stud nothing outside the player's room moves; in the nearest lit critter room the light off
+  and the flicker's low step stop it and the light back on starts it; `MaxCritters` at 0 stops every critter, at 1 one
+  room's, a nearest one's. env D and D2 audit every critter where it stands, with every other piece.
+
+**Desktop check F (the lift's hint).** The server's own `roomDying` notice is sent while the bot carries every fuse to the
+lift (stopping once the server has sent the choice), then once more at the powered lift. Before the fix both assertions
+failed (53 passed, 2 failed): the hint read "Your room is going dark — turn on your flashlight." At the powered lift its
+own hint now wins over any event hint (`Hud.client`, `atChoice`). Controls: the notice reached the HUD away from the lift,
+the last one was inside its 3 s, and the State said `atLift`.
+
+**Mutation sweep (pass 2 resumed).** 18 mutations and 3 controls, each applied exactly once to a fresh copy of the final
+tree, proved to be in the rebuilt bundle, and run against all 26 suites (16 specs, the walk, 9 checks), every log read with
+a digit-boundary match and a count of the suites that ran. The baseline ran all 26 green first; afterwards both workers'
+`src` were byte-identical to the frozen copy. Driver: `scratchpad/fnp2b/sweep/driver.py` + `muts.py`. Two earlier runs of
+the same sweep are not counted: they used E2's first far-critter control, which failed on a floor that lay wholly within
+32 studs (seen killing RJ1 alongside the walk), and F's first control, which failed on 1 of 20 desktop runs when the lift
+powered while the bot only passed through. Both controls were rewritten to be certain (EmitterRadius at 1 stud in memory;
+such a floor is extracted and another played), and this sweep ran on the rewritten checks.
+
+**Result: 18 of 18 KILLED, all 3 controls SURVIVED.**
+
+| id | mutation | killed by |
+|---|---|---|
+| H1 | the lift's hint no longer outranks an event hint at the choice | desktop (2 failed) |
+| RJ1 | a returning player's `leaderstats.Deepest` is not set when the file loads | walk (REJOIN) |
+| C1 | critters are never moved by the client | env (6 failed) |
+| C2 | critters move in a dark room too | env |
+| C3 | no cap on the critters that move at once | env |
+| C4 | critters far from the player move too | env |
+| C5 | a scurrier never turns round | Dressing.spec (3 failed) |
+| C6 | the envelope leaves out a scurrier's mirror image | Dressing.spec |
+| C7 | the envelope leaves out the travel along the wall | Dressing.spec |
+| C8 | critters are solid like floor furniture | Dressing.spec (3 failed) |
+| C9 | `check()` lets a room hold two critters | Dressing.spec |
+| C10 | the void has no critter | Dressing.spec |
+| C11 | the offices have no weather | Dressing.spec |
+| C12 | a critter is drawn at its whole path's size | env (12 failed) |
+| C13 | `critterBox` ignores the travel up | Dressing.spec |
+| C14 | `critterBox` ignores the travel out | Dressing.spec |
+| C15 | the local-parts budget left at 240 | EnvConfig.spec |
+| C17 | critters placed before the hangers (the rest of the room moves) | Dressing.spec |
+| CONTROL-1 | a purchase's toast 3.5 s, not 3 | SURVIVED, as it must |
+| CONTROL-2 | the cockroach a shade lighter | SURVIVED, as it must |
+| CONTROL-3 | the moth a little faster | SURVIVED, as it must |
+
+**Gates on the final tree** (bundle md5 `242e1a9873ebea19ea5c833bfda3b065`), three full runs, every count the same each time
+but the walk's: 16 specs **1 649 passed, 0 failed** (Dressing 99 -> 187, EnvConfig 511 -> 514, the rest unchanged);
+check_facilitynightmare 205 / 0, _board 104 / 0, _boardoff 16 / 0, _desktop 47 -> 55 / 0, _env 269 -> 283 / 0, _firstframe
+18 / 0, _hazards 53 / 0, _input 132 / 0, _hud PASS; walk 86, 78, 85 / 0 (the REJOIN adds 15). The desktop check 30 of 30
+more. Five earlier full runs, before F's retry, were green in all 26 suites too. Every file compiles (`luau.exe` +
+`loadstring`, 51 of 51; a broken control fails); Rojo 7.7.0 builds the place. `luau-analyze` NOT run (still not in the
+shared scratchpad). Densest local parts this pass: 229 of 264 (bio-lab, 16 rooms built).

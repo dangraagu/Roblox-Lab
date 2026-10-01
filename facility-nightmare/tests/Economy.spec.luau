@@ -161,6 +161,50 @@ do
 	eq(p.bestSublevel, 3, "…and never falls")
 end
 
+--============================================================ 4b. the TOP DIVERS board's fields (complete-game-standard §3)
+-- The board ranks bestSublevel, ties to whoever reached it FIRST: `bestAt` is the unix second the record was set,
+-- stamped only when the record rises. `boardBest` is the record last written to the board (written only when it
+-- improves). Both are counts in the saved profile.
+
+do
+	local p = Economy.newProfile(Config)
+	eq(p.bestAt, 0, "a fresh profile has no reach time")
+	eq(p.boardBest, 0, "…and nothing written to the board")
+	Economy.beginRun(p, "r", 25)
+	Economy.power(Config, p, 1, 1790000100)
+	eq(p.bestAt, 1790000100, "a new record is stamped with the time it was powered")
+	Economy.power(Config, p, 2, 1790000200)
+	eq(p.bestSublevel .. "@" .. p.bestAt, "2@1790000200", "a deeper record restamps")
+	Economy.settle(p, "extract")
+	Economy.beginRun(p, "r2", 25)
+	Economy.power(Config, p, 1, 1790000900)
+	Economy.power(Config, p, 2, 1790000950)
+	eq(p.bestSublevel .. "@" .. p.bestAt, "2@1790000200", "powering the SAME depth again keeps the first reach time (ties go to the first)")
+	Economy.power(Config, p, 3)
+	eq(p.bestSublevel .. "@" .. p.bestAt, "3@0", "a caller that gives no time stamps 0, never a stale time")
+end
+
+do
+	local raw = { bestSublevel = 7, bestAt = 1790000000.9, boardBest = 5 }
+	local s = Economy.sanitize(Config, raw)
+	eq(s.bestAt, 1790000000, "sanitize keeps the reach time (a whole second)")
+	eq(s.boardBest, 5, "…and the board's last written record")
+	local junk = Economy.sanitize(Config, { bestSublevel = 3, bestAt = "yesterday", boardBest = -2 })
+	eq(junk.bestAt .. "/" .. junk.boardBest, "0/0", "junk reach times and board records fall back to 0")
+	local rt = Economy.sanitize(Config, Services.jsonDecode(Services.jsonEncode(s)))
+	truthy(deepEq(rt, s), "a JSON round-trip keeps both")
+
+	-- saved before the board existed: a record with no reach time is stamped once, with the session it came back in
+	local legacy = Economy.sanitize(Config, { bestSublevel = 6 })
+	eq(Economy.stampBest(legacy, 1790001234), true, "a legacy record gets a reach time")
+	eq(legacy.bestAt, 1790001234, "…the time it was loaded")
+	eq(Economy.stampBest(legacy, 1790009999), false, "and only once")
+	eq(legacy.bestAt, 1790001234, "…it is never moved later")
+	local none = Economy.newProfile(Config)
+	eq(Economy.stampBest(none, 1790001234), false, "a profile with no record needs no reach time")
+	eq(none.bestAt, 0, "…and gets none")
+end
+
 do -- a death with nothing earned still ends the run (runs == 0 is the first-run hold)
 	local p = Economy.newProfile(Config)
 	Economy.beginRun(p, "r", 25)

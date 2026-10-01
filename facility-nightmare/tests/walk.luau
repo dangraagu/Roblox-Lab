@@ -308,6 +308,45 @@ say("   apparitions seen: %d | virtual time played: %.1f s", apparitions, bot.st
 eq(#appInside, 0, string.format("no apparition limb stands inside a wall, prop or item (%d apparitions: %s)", apparitions, table.concat(appInside, "; ")))
 eq(final.runs, 2, "two runs settled")
 eq(final.openRun, nil, "no run left open")
+
+--============================================================================ REJOIN
+
+-- docs/complete-game-standard.md §1: the player's path ends with a rejoin. The same player leaves and comes back: the
+-- file loads under a fresh lock, they land on HubSpawn, the State and leaderstats show what they earned and spent, and
+-- the perk they bought is in their next run.
+say("== REJOIN")
+do
+	h:leave(plr)
+	h:advance(0.5)
+	eq(h.Players:FindFirstChild("NewPlayer"), nil, "control: the player has left")
+	plr = h:join("NewPlayer", UID)
+	h:advance(0.5)
+	h.Players:simulateSpawn(plr, h.workspace)
+	h:advance(0.5)
+	bot = Bot.new(h, plr, { onTick = watch, maxSeconds = 900 })
+	local r, sp = bot:hrp(), hub.HubSpawn
+	truthy(r ~= nil and math.abs(r.Position.X - sp.Position.X) < 0.01 and math.abs(r.Position.Z - sp.Position.Z) < 0.01,
+		"the returning player lands on HubSpawn")
+	eq(plr.RespawnLocation, sp, "…their RespawnLocation")
+	local st = bot:state()
+	eq(st and st.phase, "hub", "…in the break room")
+	eq(st and st.loaded, true, "…with their file loaded")
+	eq(st and st.essence, final.essence, "the State shows the Essence they left with (" .. final.essence .. ")")
+	eq(st and st.runs, final.runs, "…their two runs")
+	eq(st and st.bestSublevel, final.bestSublevel, "…their deepest sublevel (" .. final.bestSublevel .. ")")
+	eq(st and st.perks.deepCell, 1, "…and the perk they bought")
+	eq(plr.leaderstats.Deepest.Value, final.bestSublevel, "leaderstats.Deepest is back")
+	truthy(bot:board(hub) and bot:waitPhase("floor", 6), "the elevator takes them down again")
+	eq(bot:state().run.batteryCap, 55, "…with the perk in the run: battery 55 s")
+	h:leave(plr)
+	h:advance(0.5)
+	local after = stored()
+	eq(after.runs, final.runs + 1, "leaving at once settles that third run")
+	eq(after.essence, final.essence, "…paying a quarter of nothing")
+	eq(after.openRun, nil, "…and closes it")
+	say("   rejoined: %d Essence, %d runs, deepest %d, Deep Cell %d; a third run started with a %d s battery",
+		st.essence, st.runs, st.bestSublevel, st.perks.deepCell, 55)
+end
 eq(#h:errors(), 0, "no scheduler errors (" .. table.concat(h:errors(), " | ") .. ")")
 eq(#h.warnings, 0, "no warnings (" .. table.concat(h.warnings, " | ") .. ")")
 print(string.format("walk: %d passed, %d failed", passed, failed))

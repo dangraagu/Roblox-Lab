@@ -6,7 +6,7 @@
 -- between runs, in the break room, where no clock, front, hazard or penalty exists to pause:
 --   * resting is allowed only in the phases Config.Rest.Phases lists, and validate() refuses any
 --     list that names a phase of a run (ride, floor, dying) or anything it does not know;
---   * you rest by sitting on a break-room bench, or by standing still there for IdleSeconds;
+--   * you rest by sitting on a break-room bench, by pressing REST there, or by standing still there for IdleSeconds;
 --   * getting up, moving, stepping into the elevator car or the run starting ends it;
 --   * the module has no hook into the run at all: Rest.PAUSES_RUN_CLOCK is false and stays false.
 -- Adapted from plus1-jump's Rest (a state, not a frozen world); pure, game-agnostic in shape.
@@ -136,6 +136,75 @@ do -- property: whatever the sequence, a player is never resting outside the bre
 		end
 	end
 	truthy(rested > 1000, "control: the random walk does rest a lot (" .. rested .. " rested steps)")
+	eq(bad, 0, "…and never once outside the break room or in the car")
+end
+
+--================================================================ the REST button: press pause (docs/complete-game-standard.md §2)
+-- "Man skal kunne trykke på pause": in the break room a player can PRESS to rest, not only sit or stand still. The
+-- button is the same rest (a state, presentation only): it starts at once where rest is allowed, pressing it again
+-- or moving ends it, and it is refused, with a reason the HUD shows, anywhere a run is.
+
+do
+	local s = Rest.new()
+	local r, why = Rest.press(s, cfg, ctx("hub"))
+	eq(r, "started", "pressing REST in the break room: resting at once")
+	eq(why, nil, "…with nothing to explain")
+	eq(s.source, "button", "…from the button")
+	eq(Rest.hazardsMayRun(s), false, "…and nothing may bother a resting player")
+	local events = 0
+	for _ = 1, 36000 do
+		if Rest.update(s, cfg, 0.1, ctx("hub", false, false)) ~= nil then events += 1 end
+	end
+	eq(events, 0, "an hour standing still after pressing REST stays rest")
+	eq(Rest.update(s, cfg, 0.1, ctx("hub", false, true)), "woke", "moving ends a pressed rest")
+	eq(Rest.press(s, cfg, ctx("hub")), "started", "pressing again rests again")
+	eq(Rest.press(s, cfg, ctx("hub")), "woke", "and pressing while resting gets up (the button reads GET UP)")
+	eq(Rest.isResting(s), false, "…not resting")
+	eq(Rest.update(s, cfg, 0.1, ctx("hub", false, false)), nil, "and the next frame does not undo it")
+end
+do
+	local s = Rest.new()
+	Rest.press(s, cfg, ctx("hub"))
+	eq(Rest.update(s, cfg, 0.1, ctx("hub", true, false)), nil, "pressed, then sitting on a bench: still resting, no new event")
+	eq(s.source, "bench", "…now on the bench")
+end
+do
+	local s = Rest.new()
+	Rest.press(s, cfg, ctx("hub"))
+	eq(Rest.update(s, cfg, 0.1, ctx("hub", false, false, true)), "woke", "a pressed rest ends on stepping into the car (boarding)")
+end
+for _, c in { { ctx("ride"), "the ride" }, { ctx("floor"), "a floor" }, { ctx("dying"), "the dark's beat" }, { ctx(nil), "loading" },
+	{ ctx("hub", false, false, true), "the car (boarding)" }, { ctx("hub", false, true), "walking" } } do
+	local s = Rest.new()
+	local r, why = Rest.press(s, cfg, c[1])
+	eq(r, "refused", "REST pressed in " .. c[2] .. " is refused")
+	truthy(type(why) == "string" and #why > 8, "…and says why (" .. tostring(why) .. ")")
+	eq(Rest.isResting(s), false, "…and nothing rests")
+end
+do
+	local s = Rest.new()
+	local r = Rest.press(s, { Phases = { floor = true }, IdleSeconds = 20 }, ctx("floor"))
+	eq(r, "refused", "a config that names a run's phase never lets the button rest there (validate refuses it too)")
+end
+do -- property: the button never makes anyone rest outside the break room
+	local seed = 777
+	local function rnd()
+		seed = (1103515245 * seed + 12345) % 2147483648
+		return seed / 2147483648
+	end
+	local phases = { "hub", "hub", "ride", "floor", "dying" }
+	local s = Rest.new()
+	local bad, rested = 0, 0
+	for _ = 1, 100000 do
+		local c = ctx(phases[1 + math.floor(rnd() * #phases)], rnd() < 0.2, rnd() < 0.3, rnd() < 0.05)
+		if rnd() < 0.3 then Rest.press(s, cfg, c) end
+		Rest.update(s, cfg, 0.5, c)
+		if Rest.isResting(s) then
+			rested += 1
+			if c.phase ~= "hub" or c.boarding then bad += 1 end
+		end
+	end
+	truthy(rested > 1000, "control: pressing at random does rest a lot (" .. rested .. " rested steps)")
 	eq(bad, 0, "…and never once outside the break room or in the car")
 end
 

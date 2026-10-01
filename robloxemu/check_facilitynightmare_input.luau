@@ -68,6 +68,10 @@ local plr = h:join("Thumbs", UID)
 h:advance(0.5)
 local okClient, clientErr = h:tryRun("client/Hud.client")
 truthy(okClient, "client/Hud.client loads (" .. tostring(clientErr) .. ")")
+-- Env.client too: the REST button (A2) is the HUD's, the rest itself Env.client's. No RenderStepped is fired in this file,
+-- so the environment's per-frame work (dressing, hazards) never runs here; only its EnvBus handler does.
+local okEnv, envErr = h:tryRun("client/Env.client")
+truthy(okEnv, "client/Env.client loads (" .. tostring(envErr) .. ")")
 h.Players:simulateSpawn(plr, h.workspace)
 h:advance(1)
 
@@ -170,6 +174,29 @@ do
 	eq(shown(perksButton), true, "…and PERKS is back")
 end
 
+--=========================================================================== A2. press pause
+section("A2. break room: REST pressed, GET UP pressed (docs/complete-game-standard.md §2, 'trykke på pause')")
+local restButton = hudRoot:FindFirstChild("RestButton")
+do
+	local EnvBus = h:_require(h.ReplicatedStorage:FindFirstChild("EnvBus"))
+	local hint = hudRoot:FindFirstChild("Hint")
+	h:advance(4.5) -- section A's last toast (a refused BUY) runs out first
+	eq(restButton and restButton.Text, "REST", "the break room has a REST button")
+	press(restButton, "REST")
+	h:advance(0.3)
+	local r = EnvBus.last("rest")
+	eq(r and r.resting, true, "REST rests at once (Env.client says so)")
+	eq(r and r.source, "button", "…from the button")
+	eq(restButton and restButton.Text, "GET UP", "the button now reads GET UP")
+	truthy(hint ~= nil and string.find(hint.Text, "Resting", 1, true) ~= nil, "the hint says the player is resting (" .. tostring(hint and hint.Text) .. ")")
+	eq(hudRoot:FindFirstChild("Toast") and hudRoot.Toast.Visible, false, "no refusal toast")
+	press(restButton, "GET UP")
+	h:advance(0.3)
+	r = EnvBus.last("rest")
+	eq(r and r.resting, false, "GET UP ends the rest")
+	eq(restButton and restButton.Text, "REST", "…and the button reads REST again")
+end
+
 --=========================================================================== B. down on the floor
 section("B. sublevel 1: LIGHT, F, ButtonY, Shift, SPRINT, L3")
 truthy(bot:board(hub) and bot:waitPhase("floor", 6), "walking into the car reaches sublevel 1")
@@ -178,6 +205,15 @@ do
 	local lightButton = hudRoot:FindFirstChild("LightButton")
 	local sprintButton = hudRoot:FindFirstChild("SprintButton")
 	eq(bot:state().run.batteryCap, 55, "control: the Deep Cell bought through the HUD is in the run")
+	eq(restButton ~= nil and shown(restButton), false, "REST is not on screen on a floor (rest never pauses a run)")
+	-- a press that arrives on a floor anyway (tapped as the ride began) is refused on screen, never silently
+	local EnvBus = h:_require(h.ReplicatedStorage:FindFirstChild("EnvBus"))
+	EnvBus.fire("restPress", {})
+	h:advance(0.1)
+	local toast = hudRoot:FindFirstChild("Toast")
+	truthy(toast ~= nil and toast.Visible and string.find(toast.Text, "break room", 1, true) ~= nil,
+		"REST pressed on a floor is refused with a toast (" .. tostring(toast and toast.Text) .. ")")
+	eq(EnvBus.last("rest") and EnvBus.last("rest").resting, false, "…and nothing rests")
 
 	press(lightButton, "LIGHT on")
 	h:advance(0.3)
@@ -392,7 +428,7 @@ do
 			if not pressedSet[d] then table.insert(missed, d:GetFullName()) end
 		end
 	end
-	eq(all, 11, "the HUD builds 11 buttons: PERKS, CLOSE, 5 x BUY, LIGHT, SPRINT, EXTRACT, DESCEND")
+	eq(all, 12, "the HUD builds 12 buttons: PERKS, REST, CLOSE, 5 x BUY, LIGHT, SPRINT, EXTRACT, DESCEND")
 	eq(#missed, 0, "every one was pressed here (" .. table.concat(missed, ", ") .. ")")
 end
 

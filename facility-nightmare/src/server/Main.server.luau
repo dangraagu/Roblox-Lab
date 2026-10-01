@@ -38,6 +38,7 @@ local Survival = require(Shared:WaitForChild("Survival"))
 local Trust = require(Shared:WaitForChild("Trust"))
 local Economy = require(Shared:WaitForChild("Economy"))
 local Fx = require(Shared:WaitForChild("Fx"))
+local Board = require(Shared:WaitForChild("Board"))
 
 -- Visuals from the first build (checklist §2): an unlit room must read DARK, not dim.
 Fx.applyLighting(Fx.Presets.Facility)
@@ -71,6 +72,7 @@ local FlashlightRemote = remote("Flashlight") -- client -> server: (boolean)
 local SprintRemote = remote("Sprint") -- client -> server: (boolean)
 local ChooseRemote = remote("Choose") -- client -> server: ("extract" | "descend")
 local BuyPerkRemote = remote("BuyPerk") -- client -> server: (perkId)
+local BoardRemote = remote("Board") -- server -> one player: THEIR view of the TOP DIVERS board { viewer, mode, rows, note }
 
 local function notice(plr: Player, kind: string, data: any?)
 	NoticeRemote:FireClient(plr, kind, data)
@@ -86,6 +88,27 @@ local okStore, profileStore = pcall(function()
 end)
 if not okStore then
 	profileStore = nil
+end
+-- The TOP DIVERS board's OrderedDataStore (docs/complete-game-standard.md §3). Its own pcall: without it the game
+-- runs and the board says it cannot be reached.
+local okBoardStore, boardStore = pcall(function()
+	return DataStoreService:GetOrderedDataStore(Config.Board.Store)
+end)
+if not okBoardStore then
+	boardStore = nil
+end
+
+-- ONE clock for the board's caches. os.clock() is CPU time in Roblox (a quiet server barely counts), so it is wrong
+-- here; GetServerTimeNow is the wall clock, and tick() the fallback where an engine (or the headless harness) has
+-- none. Chosen once at start, the pattern plus1-jump and fork-tower use.
+local clock: () -> number
+do
+	local ok, t = pcall(function()
+		return (workspace :: any):GetServerTimeNow()
+	end)
+	clock = if ok and type(t) == "number" then function()
+		return (workspace :: any):GetServerTimeNow()
+	end else tick
 end
 
 --============================================================================ parts
@@ -226,6 +249,29 @@ do
 	end)
 end
 
+-- The TOP DIVERS board (docs/complete-game-standard.md §3): on the north wall, facing the room and the spawn, opposite
+-- the DEPTH RECORD board (the client's, on the south wall). Clear of the spawn -> car -> arrival row (z = 0), the perk
+-- terminal (x = 12) and the vending machine (x = -2). The SERVER builds the part and its prompt; each player's
+-- CLIENT draws their own view on it (Board.client.luau), since each player may look at Public or Friends.
+local topBoard = part({ Name = "TopDiversBoard", Size = Vector3.new(13, 7, 0.4),
+	CFrame = CFrame.new(-19, 5.5, H.SizeZ / 2 - 0.2), -- front face (-Z) toward the room
+	Material = Enum.Material.Metal, Color = Color3.fromRGB(18, 20, 24), Parent = hubFolder })
+Fx.attachGlow(topBoard, rgb(Config.Hud.Accent), 0.8, 10) -- what can be pressed reads as pressable (checklist §2)
+local boardPrompt = Instance.new("ProximityPrompt")
+do
+	local at = Instance.new("Attachment")
+	at.Name = "PromptAt"
+	at.Position = Vector3.new(0, -3, -0.4) -- low on the front face, where a player walking up stands
+	at.Parent = topBoard
+	boardPrompt.Name = "BoardPrompt"
+	boardPrompt.ActionText = Config.Board.Text.Prompt
+	boardPrompt.ObjectText = "Top Divers"
+	boardPrompt.HoldDuration = 0
+	boardPrompt.MaxActivationDistance = Config.Board.PromptDistance
+	boardPrompt.RequiresLineOfSight = false
+	boardPrompt.Parent = at
+end
+
 -- The break room's benches: where a player rests between runs (EYECANDY.md §4). Real Seats, so a player
 -- sits the Roblox way (walk into one, jump to stand) and everyone in the break room sees it. On the south
 -- wall, clear of the spawn -> car path (z = 0), the arrival pad and the perk terminal. Resting pauses
@@ -323,6 +369,8 @@ type Session = {
 	wantSprint: boolean,
 	sprintPress: boolean, -- a fresh press since the last floor tick (Survival re-arms on it)
 	debug: Folder?,
+	boardMode: string, -- "public" | "friends": which view of the TOP DIVERS board this player looks at
+	fetchingFriends: boolean,
 }
 
 local sessions: { [Player]: Session } = {}
@@ -340,6 +388,8 @@ end
 local function key(plr: Player): string
 	return "u_" .. plr.UserId
 end
+
+local writeBoard: (Session) -> ()
 
 -- One lock-claim attempt with UpdateAsync. The owner is a STABLE per-session GUID, never a
 -- timestamp we also rewrite (checklist: session lock). Returns got, data, failed.
@@ -384,6 +434,26 @@ local function releaseLock(sess: Session)
 	end)
 end
 
+-- The TOP DIVERS board: written only when the record has risen past what was last written (`boardBest`), only
+-- after the profile itself persisted under the lock, and never lower than what the board holds (Board.keepHigher
+-- aborts). Ties go to whoever reached the depth first: `bestAt` is stamped by Economy.power.
+writeBoard = function(sess: Session)
+	local prof = sess.profile
+	if not boardStore or prof.bestSublevel <= prof.boardBest then
+		return
+	end
+	local best = prof.bestSublevel
+	local value = Board.encode(best, prof.bestAt, Config.Board)
+	local ok = pcall(function()
+		(boardStore :: any):UpdateAsync(key(sess.plr), function(old)
+			return Board.keepHigher(old, value)
+		end)
+	end)
+	if ok then
+		prof.boardBest = best -- also when keepHigher aborted: what the board holds is at least as deep
+	end
+end
+
 -- Flush the WHOLE profile under the lock. Returns true only if the write persisted.
 local function saveProfile(sess: Session, releasing: boolean?): boolean
 	if not profileStore or not sess.canSave then
@@ -414,7 +484,11 @@ local function saveProfile(sess: Session, releasing: boolean?): boolean
 	if ok and lostLock then
 		sess.canSave = false
 	end
-	return ok and result ~= nil and wrote
+	local persisted = ok and result ~= nil and wrote
+	if persisted then
+		writeBoard(sess)
+	end
+	return persisted
 end
 
 local function setDeepest(sess: Session)
@@ -988,7 +1062,8 @@ end
 local function power(sess: Session)
 	local run = sess.run
 	run.powered = true
-	local pay = Economy.power(Config, sess.profile, run.k)
+	local bestBefore = sess.profile.bestSublevel
+	local pay = Economy.power(Config, sess.profile, run.k, os.time()) -- a new record is stamped: the board's tiebreak
 	setDeepest(sess)
 	refreshPanel(run)
 	task.spawn(saveProfile, sess) -- the checkpoint (§7.1)
@@ -998,6 +1073,9 @@ local function power(sess: Session)
 		bank = sess.profile.openRun.runEssence,
 		nextPay = Economy.floorPay(Config, run.k + 1),
 		keepPercent = run.effects.keepPercent,
+		-- this powering raised the saved record: the HUD's fanfare for the brag and the long-term goal (EYECANDY.md §2)
+		-- fires only then, and only the server knows the best before it
+		record = run.k > bestBefore,
 	})
 end
 
@@ -1337,6 +1415,218 @@ BuyPerkRemote.OnServerEvent:Connect(function(plr, perkId)
 	pushState(sess)
 end)
 
+--============================================================================ the TOP DIVERS board
+-- docs/complete-game-standard.md §3, built on plus1-jump's Board.luau (verbatim). The metric is bestSublevel, which only
+-- `power` raises, and only for a trusted cell in the exit with every fuse (Trust.luau): a remote or a teleport puts no
+-- number on it. The public top 10 is read at most once per PublicCacheSeconds. Friends are fetched only when a player
+-- asks for them on the board, capped, cached and throttled (Board.newLimiter + Roblox's own budget). Names are looked
+-- up and remembered in memory, never stored.
+local BC = Config.Board
+
+local nameCache: { [number]: string } = {}
+local function nameOf(userId: number): string
+	local cached = nameCache[userId]
+	if cached then return cached end
+	local here = Players:GetPlayerByUserId(userId)
+	if here then
+		nameCache[userId] = here.Name
+		return here.Name
+	end
+	local ok, res = pcall(function()
+		return Players:GetNameFromUserIdAsync(userId)
+	end)
+	if ok and type(res) == "string" then
+		nameCache[userId] = res
+		return res
+	end
+	return "#" .. tostring(userId) -- not remembered: the next view tries again
+end
+local function withNames(rows: { any }): { any }
+	local out = {}
+	for i, r in rows do
+		out[i] = { rank = r.rank, userId = r.userId, tier = r.tier, you = r.you, name = nameOf(r.userId) }
+	end
+	return out
+end
+
+-- A player's own value, from memory (fresher than the store, which is written after the profile saves).
+local function liveValue(sess: Session?): number
+	if not sess or not sess.loaded or sess.profile.bestSublevel <= 0 then return 0 end
+	return Board.encode(sess.profile.bestSublevel, sess.profile.bestAt, BC)
+end
+
+local function sendBoard(sess: Session, mode: string, view: any)
+	-- `viewer`: FireClient reaches only this player in Roblox; the field lets a client ignore anything else.
+	BoardRemote:FireClient(sess.plr, { viewer = sess.plr.UserId, mode = mode, rows = view.rows, note = view.note })
+end
+
+local publicView: any = { rows = {}, note = if boardStore then BC.Text.Loading else BC.Text.Unavailable }
+local publicEverRead = false
+
+local function refreshPublic()
+	if not boardStore then
+		publicView = { rows = {}, note = BC.Text.Unavailable }
+		return
+	end
+	local ok, page = pcall(function()
+		return (boardStore :: any):GetSortedAsync(false, BC.PublicRows)
+	end)
+	local okPage, items = false, nil
+	if ok and page then
+		okPage, items = pcall(function()
+			return page:GetCurrentPage()
+		end)
+	end
+	if not okPage or type(items) ~= "table" then
+		-- keep the last list; before any list at all, say the board cannot be reached (not "nobody has played")
+		if not publicEverRead then publicView = { rows = {}, note = BC.Text.Unavailable } end
+		return
+	end
+	local entries = {}
+	for _, e in ipairs(items) do
+		local uid = Board.userIdOf(tostring(e.key))
+		if uid and type(e.value) == "number" then
+			table.insert(entries, { userId = uid, value = e.value })
+		end
+	end
+	local view = Board.publicView(entries, BC)
+	publicView = { rows = withNames(view.rows), note = view.note }
+	publicEverRead = true
+end
+
+local friendsCache = Board.newCache(BC.FriendsCacheSeconds)
+local friendsFailed = Board.newCache(60) -- a failed fetch is retried after a minute, not on every press
+local scoreCache = Board.newCache(BC.ScoreCacheSeconds)
+local readLimiter = Board.newLimiter(BC.ReadsBurst, BC.ReadsPerSecond, clock())
+
+local function friendIdsOf(plr: Player): ({ number }, boolean)
+	local now = clock()
+	local hit = Board.cacheGet(friendsCache, plr.UserId, now)
+	if hit then return hit, false end
+	if Board.cacheHas(friendsFailed, plr.UserId, now) then return {}, true end
+	local ok, pages = pcall(function()
+		return (Players :: any):GetFriendsAsync(plr.UserId)
+	end)
+	local ids = {}
+	local broken = not ok or pages == nil
+	while not broken and #ids < BC.FriendsCap do
+		local okPage, items = pcall(function()
+			return pages:GetCurrentPage()
+		end)
+		if not okPage or type(items) ~= "table" then
+			broken = #ids == 0
+			break
+		end
+		for _, item in ipairs(items) do
+			local id = tonumber(item.Id)
+			if id and #ids < BC.FriendsCap then
+				table.insert(ids, id)
+				if type(item.Username) == "string" then nameCache[id] = item.Username end
+			end
+		end
+		if pages.IsFinished or #ids >= BC.FriendsCap then break end
+		if not pcall(function() pages:AdvanceToNextPageAsync() end) then break end
+	end
+	if broken then
+		Board.cachePut(friendsFailed, plr.UserId, true, now)
+		return {}, true
+	end
+	Board.cachePut(friendsCache, plr.UserId, ids, now)
+	return ids, false
+end
+
+-- Always leave BudgetReserve GetAsync in Roblox's budget (when it cannot be read, only the limiter applies).
+local function budgetLeft(): boolean
+	local ok, budget = pcall(function()
+		return DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetAsync)
+	end)
+	return not (ok and type(budget) == "number" and budget < BC.BudgetReserve)
+end
+
+-- A friend's stored value (0 = never powered a lift), or nil while reads are throttled (try again). A read that
+-- fails counts as 0 without being cached, so one bad key does not stop the list.
+local function friendValue(userId: number): number?
+	local here = Players:GetPlayerByUserId(userId)
+	if here and sessions[here] then return liveValue(sessions[here]) end
+	local now = clock()
+	if Board.cacheHas(scoreCache, userId, now) then return Board.cacheGet(scoreCache, userId, now) end
+	if not boardStore then return 0 end
+	if not budgetLeft() or not Board.take(readLimiter, now) then return nil end
+	local ok, v = pcall(function()
+		return (boardStore :: any):GetAsync("u_" .. tostring(userId))
+	end)
+	if not ok then return 0 end
+	local value = if type(v) == "number" then v else 0
+	Board.cachePut(scoreCache, userId, value, now)
+	return value
+end
+
+local function showFriends(sess: Session)
+	if not boardStore then
+		sendBoard(sess, "friends", { rows = {}, note = BC.Text.Unavailable })
+		return
+	end
+	if sess.fetchingFriends then
+		sendBoard(sess, "friends", { rows = {}, note = BC.Text.Loading }) -- the fetch under way sends soon
+		return
+	end
+	sess.fetchingFriends = true
+	task.spawn(function()
+		local plr = sess.plr
+		local function live(): boolean
+			return sessions[plr] == sess and sess.boardMode == "friends"
+		end
+		sendBoard(sess, "friends", { rows = {}, note = BC.Text.Loading })
+		local ids, failedList = friendIdsOf(plr)
+		local values: { [number]: number } = {}
+		local status = { friendCount = #ids, checked = 0, failed = failedList }
+		local function push()
+			values[plr.UserId] = liveValue(sess)
+			local view = Board.friendsView(plr.UserId, values, status, BC)
+			sendBoard(sess, "friends", { rows = withNames(view.rows), note = view.note })
+		end
+		local i, lastPush = 1, -math.huge
+		while i <= #ids and live() do
+			local v = friendValue(ids[i])
+			if v == nil then
+				status.checked = i - 1
+				if clock() - lastPush >= 0.5 then
+					push()
+					lastPush = clock()
+				end
+				task.wait(1) -- throttled: wait for the limiter
+			else
+				values[ids[i]] = v
+				i += 1
+			end
+		end
+		status.checked = i - 1
+		if live() then push() end
+		sess.fetchingFriends = false
+	end)
+end
+
+boardPrompt.Triggered:Connect(function(plr: Player)
+	local sess = sessions[plr]
+	if not sess then return end
+	sess.boardMode = if sess.boardMode == "friends" then "public" else "friends"
+	if sess.boardMode == "friends" then
+		showFriends(sess)
+	else
+		sendBoard(sess, "public", publicView)
+	end
+end)
+
+task.spawn(function()
+	while true do
+		refreshPublic() -- at most one GetSortedAsync per PublicCacheSeconds
+		for _, sess in sessions do
+			if sess.boardMode == "public" then sendBoard(sess, "public", publicView) end
+		end
+		task.wait(BC.PublicCacheSeconds)
+	end
+end)
+
 --============================================================================ join / leave
 
 local function onCharacter(sess: Session, char: Model)
@@ -1412,8 +1702,11 @@ local function onPlayerAdded(plr: Player)
 		wantSprint = false,
 		sprintPress = false,
 		debug = nil,
+		boardMode = "public",
+		fetchingFriends = false,
 	}
 	sessions[plr] = sess
+	sendBoard(sess, "public", publicView)
 
 	plr.CharacterAdded:Connect(function(char)
 		if sessions[plr] == sess then
@@ -1444,6 +1737,8 @@ local function onPlayerAdded(plr: Player)
 			if got then
 				sess.profile = Economy.sanitize(Config, data)
 				sess.canSave = true
+				-- a record saved before the board existed gets its reach time now, once (it is saved with it)
+				Economy.stampBest(sess.profile, os.time())
 				if sess.profile.openRun ~= nil then
 					-- the server died mid-run last time: settle the checkpoint as a death, once
 					local payout = Economy.settle(sess.profile, "load")

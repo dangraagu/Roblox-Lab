@@ -32,8 +32,11 @@ local FxClient = h:_require(h.ReplicatedStorage:FindFirstChild("FxClient"))
 local bands = Config.Env.Bands
 local Kinds = Config.Hazards.Kinds
 
--- Written out, not read from Config: a number checked against itself is not a check.
-local MIN_GAP, MAX_GAP = 120, 180
+-- Written out, not read from Config: a number checked against itself is not a check. The owner's decision of 2026-09-30
+-- (EYECANDY.md §10, option 2): one hazard per 90-140 s of exposed time, up from 120-180.
+local MIN_GAP, MAX_GAP = 90, 140
+-- EYECANDY.md §6: a hazard's warning particles never run faster than the budget's HazardEmitterRate (review 2, U2)
+local HAZARD_RATE = 10
 local LEAK_RING = 2 * (2.0 + 1.5) -- chemLeak: hitRadius 2 + PlayerRadius 1.5
 local LEAK_WARN, LEAK_KNOCK = 3.0, 18
 -- The longest banner the HUD showed before the environment existed ("THE POWER IS FAILING — STAY IN THE
@@ -51,8 +54,10 @@ end
 
 local UID = 9401
 local store = h.services.DataStoreService:GetDataStore("FacilityNightmare_v1")
-store:SetAsync("u_" .. UID, { data = { v = 1, essence = 0, essenceEarned = 0, bestSublevel = 0, runs = 0, extractions = 0,
-	perks = { deepCell = 3, nightEyes = 0, marathon = 0, soulAnchor = 0, secondWind = 0 } } })
+-- Every perk (review 2 round): section E powers up to three sublevels after the first fuse starts the front, and with
+-- Deep Cell alone the bot died there once in 34 runs of this file (a harness flake: nothing here depends on the perks).
+store:SetAsync("u_" .. UID, { data = { v = 1, essence = 0, essenceEarned = 900, bestSublevel = 0, runs = 0, extractions = 0,
+	perks = { deepCell = 3, nightEyes = 3, marathon = 3, soulAnchor = 0, secondWind = 1 } } })
 
 assert(h:tryRun("server/Main.server"))
 h:advance(1)
@@ -79,6 +84,7 @@ local function countPhase(phase, since)
 end
 
 local maxModels, maxParts, overlapFrames = 0, 0, 0
+local warnRateMax, warnRateOver, warnRateFrames = 0, 0, 0
 -- review finding 5 (EYECANDY.md §11): a particle that is not self-lit is lit by the scene (LightInfluence 1; Roblox's
 -- default is 0, unlit, and it reads nil here when never written); a self-lit one says so (0).
 local influence = { glow = 0, plain = 0, wrong = 0 }
@@ -115,6 +121,11 @@ local function frame(dt)
 		models += 1
 		for _, d in m:GetDescendants() do
 			if d.ClassName == "ParticleEmitter" then inspect(d) end
+			if d.ClassName == "ParticleEmitter" and d.Enabled then
+				warnRateFrames += 1
+				warnRateMax = math.max(warnRateMax, d.Rate or 0)
+				if (d.Rate or 0) > HAZARD_RATE + 1e-6 then warnRateOver += 1 end
+			end
 			if d:IsA("BasePart") then
 				parts += 1
 				if d.CanCollide ~= false or d.CanQuery ~= false or d.CanTouch ~= false then overlapFrames += 1 end
@@ -138,7 +149,7 @@ bands[1].hazards = {}
 section("B. sublevel 1 as shipped: the offices are quiet")
 
 -- In memory, the offices wear the flooded kit: its dripping pipe hangs in every room, so the entry room has
--- an emitter for the budget test in C (the offices' own kit has none).
+-- an emitter for the budget test in C (the offices' own dust hangs in only some of its rooms, pass 2).
 bands[1].kit = "flooded"
 truthy(bot:board(h.workspace.Hub), "boarded")
 truthy(bot:waitPhase("floor", 8), "arrived on sublevel 1 (first-ever run: the front is held)")
@@ -250,8 +261,8 @@ print(string.format("    %d hazards in %.1f min on the floor: one per %.1f s (ga
 	n, (lastWarn - enabledAt) / 60, sum / #gaps, lo, hi, gaps[1]))
 print(string.format("    stood still: %d of %d hit; stepped out: %d of %d dodged; %d hits in all", stoodHit, stood, dodged, reacted, hits))
 truthy(gaps[1] >= MIN_GAP - 0.2 and gaps[1] <= MAX_GAP + 0.2,
-	"the first came 120-180 s after the kind was switched on: the break room and the quiet offices never ran the clock (" .. gaps[1] .. ")")
-truthy(lo >= MIN_GAP - 0.2 and hi <= MAX_GAP + 0.2, "every gap within 120-180 s")
+	"the first came " .. MIN_GAP .. "-" .. MAX_GAP .. " s after the kind was switched on: the break room and the quiet offices never ran the clock (" .. gaps[1] .. ")")
+truthy(lo >= MIN_GAP - 0.2 and hi <= MAX_GAP + 0.2, "every gap within " .. MIN_GAP .. "-" .. MAX_GAP .. " s")
 eq(ringOk, n, "every warning drew the ring where the player stood, as wide as the zone")
 eq(bannerOk, n, "…and the HUD named it on the banner")
 eq(shortOk, n, "…in no more characters than the longest banner the HUD already showed (" .. LONGEST_OLD_BANNER .. ")")
@@ -274,6 +285,10 @@ eq(#hazardFolder:GetChildren(), 0, "nothing is left parented between hazards")
 truthy(influence.glow > 0 and influence.plain > 0,
 	"control: self-lit (the leak's warning) and plain (the room's drips) particles were inspected (" .. influence.glow .. ", " .. influence.plain .. ")")
 eq(influence.wrong, 0, "every particle is lit by the scene unless it is self-lit (LightInfluence 1, or 0 with LightEmission > 0)")
+-- review 2, U2: the warning thickens as the burst nears, and never past the budget
+print(string.format("    a hazard's warning particles: at most %.2f/s over %d emitter-frames", warnRateMax, warnRateFrames))
+truthy(warnRateFrames > 0 and warnRateMax >= HAZARD_RATE - 1, "control: the warning thickened toward the burst (" .. warnRateMax .. "/s)")
+eq(warnRateOver, 0, "…and never ran faster than " .. HAZARD_RATE .. " particles/s (the budget's HazardEmitterRate)")
 
 --=========================================================================== D. a dark room freezes the clock
 section("D. the dark freezes the clock (and the dark's warning calls a hazard off)")
@@ -310,6 +325,28 @@ do
 	bot:waitSeconds(6, "floor")
 	eq(countPhase("burst", t0), 0, "…it never bursts")
 	eq(countPhase("hit", t0), 0, "…and never hits, though the player never moved")
+
+	-- review 2, finding 1: the choice (EXTRACT / DESCEND) shows while the State says atLift, and a hazard live at that
+	-- moment is called off: the powered lift is where the player decides, never where a ring lands. The State the
+	-- server pushes is copied and re-sent with atLift set, as the server sends it when the player reaches the lift.
+	local waited2 = 0
+	local prev2 = log[#log].at
+	while countPhase("warn", prev2 + 0.01) == 0 and waited2 < 400 do bot:tick(); waited2 += 0.1 end
+	truthy(countPhase("warn", prev2 + 0.01) == 1, "control: the next hazard came (" .. waited2 .. " s)")
+	bot:waitSeconds(1, "floor")
+	truthy(#hazardFolder:GetChildren() == 1 and hudRoot.Banner.Visible, "control: a second into it the ring and the banner are up")
+	local st = table.clone(bot:state())
+	st.run = table.clone(st.run)
+	st.run.powered, st.run.atLift = true, true
+	local t2 = h.scheduler:now()
+	h.ReplicatedStorage.FacilityRemotes.State:FireClient(plr, st)
+	frame(1 / 60)
+	truthy(countPhase("clear", t2) >= 1, "a State saying the player stands in the powered lift calls the hazard off at once")
+	eq(#hazardFolder:GetChildren(), 0, "…its ring and source are gone")
+	truthy(not (hudRoot.Banner.Visible and string.find(hudRoot.Banner.Text, "CHEMICAL LEAK", 1, true) ~= nil),
+		"…and so is its banner (" .. tostring(hudRoot.Banner.Visible) .. ": " .. hudRoot.Banner.Text .. ")")
+	bot:waitSeconds(6, "floor")
+	eq(countPhase("burst", t2), 0, "…it never bursts")
 end
 
 --=========================================================================== E. pads and arrivals
@@ -335,16 +372,27 @@ do
 	-- 2. the powered freight elevator: the one place a run can stop (the choice has no timer, DESIGN.md §2.2)
 	local attempts, measured = 0, false
 	local liftQuiet, arrivalDelay, bannerKept = nil, nil, nil
+	local liftOffPadQuiet = nil
 	while not measured and attempts < 3 do
 		attempts += 1
 		local r = bot:clearFloor()
-		assert(r == "powered", "E: the bot could not power sublevel " .. tostring(bot:state().run.k) .. " (" .. tostring(r) .. ")")
+		local stE = bot:state()
+		assert(r == "powered", "E: the bot could not power sublevel " .. tostring(stE and stE.run and stE.run.k) .. " ("
+			.. tostring(r) .. ", phase " .. tostring(stE and stE.phase) .. ", " .. tostring(bot.stats.seconds) .. " s)")
 		local rooms2 = bot:rooms()
 		local exitC = rooms2[bot:exitRoom(rooms2)].center
 		bot:walkTo(Vector3.new(exitC.X + 4, 3, exitC.Z), "floor") -- on the lift's pad, clear of the fixture
 		local tl = h.scheduler:now()
 		bot:waitSeconds(200, "floor")
 		liftQuiet = (liftQuiet ~= false) and countPhase("warn", tl) == 0
+		-- review 2, finding 1: the State says atLift in the WHOLE powered exit room, so the choice shows there too.
+		-- 6.5 studs out is off the 10 x 10 pad and a legal spot anywhere else; the clock runs (a lit room of a hazard
+		-- band), so the hazard is long due after the 200 s above, and still none may start where the player decides.
+		assert(bot:state().run.atLift == true, "E: the bot is not at the lift")
+		bot:walkTo(Vector3.new(exitC.X + 6.5, 3, exitC.Z), "floor")
+		local tl2 = h.scheduler:now()
+		bot:waitSeconds(200, "floor")
+		liftOffPadQuiet = (liftOffPadQuiet ~= false) and bot:state().run.atLift == true and countPhase("warn", tl2) == 0
 		-- DESCEND with that hazard long due, and time the first warning on the new sublevel
 		bot:fire("Choose", "descend")
 		assert(bot:waitPhase("ride", 3) and bot:waitPhase("floor", 8), "E: the ride down")
@@ -372,6 +420,7 @@ do
 		end
 	end
 	truthy(liftQuiet == true, "200 s standing in the powered lift at the choice (lit, a hazard long due): never a hazard")
+	truthy(liftOffPadQuiet == true, "…and 200 s more 6.5 studs from its centre, off the pad but still at the choice: never a hazard")
 	truthy(measured, "a clean arrival was measured within 3 descents")
 	truthy(arrivalDelay ~= nil and arrivalDelay >= ARRIVAL_GRACE - 0.15 and arrivalDelay <= ARRIVAL_GRACE + 1,
 		"…and the hazard waited out the arrival: " .. tostring(arrivalDelay) .. " s (the grace is " .. ARRIVAL_GRACE .. " s)")

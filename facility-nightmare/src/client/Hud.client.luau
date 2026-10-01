@@ -12,6 +12,9 @@
 --      ABOVE the jump button's band — DESIGN.md §12 asked for 45-70% of the screen height, but on a
 --      640x300 phone 70% is inside that band, so the band wins and the stack moves up.
 --   4. Layout re-runs on ViewportSize AND on TouchEnabled.
+--   5. While a modal is up, the text rows (banner, toast, hint) move BELOW it (review 2, finding 1): above it they lay
+--      on it on a phone, and on the perk panel on every screen. Where that reaches the band Roblox's touch controls
+--      own, they keep to the middle, clear of the thumbstick's and the jump button's corners.
 --
 -- Labels are plain text. Only glyphs photographed rendering in Studio may ship (the list in
 -- robloxemu/check_forktower.luau): here that is the em dash and the ellipsis, nothing else.
@@ -52,6 +55,9 @@ local TEXT = Color3.fromRGB(236, 234, 228)
 local MUTED = Color3.fromRGB(160, 158, 150)
 
 local M = 12 -- design-px margin
+-- Roblox's own touch controls own the bottom-left (the thumbstick) and the bottom-right (the jump button): the
+-- fractions of the screen's width robloxemu/emu/hudcheck.luau keeps clear, deliberately generous
+local THUMB_FRACTION, JUMP_FRACTION = 0.35, 0.25
 
 --============================================================================ scaffolding
 
@@ -202,6 +208,9 @@ boardBar.Size = UDim2.fromScale(0, 1)
 boardBar.Parent = boardBg
 
 local perksButton = button(root, "PerksButton", "PERKS", GOOD)
+-- REST: press pause in the break room (docs/complete-game-standard.md §2). Env.client owns the rest itself (Rest.press);
+-- the button asks over EnvBus and reads GET UP while resting.
+local restButton = button(root, "RestButton", "REST", TEXT)
 local lightButton = button(root, "LightButton", "LIGHT", ACCENT)
 local sprintButton = button(root, "SprintButton", "SPRINT", TEXT)
 
@@ -319,6 +328,22 @@ local function now()
 	return tick()
 end
 
+-- The brag and the long-term goal (review 2, finding 2; EYECANDY.md §2). The first time the SAVED record reaches the
+-- first sublevel of the brag band (the one marked `brag`, the overgrown bio-lab) or of the last band (THE VOID), the
+-- powering is a fanfare. The server says whether a powering raised the record (the "choice" notice's `record`); the
+-- band comes from the sublevel, as everywhere else. Returns the banner, or nil.
+local function fanfareFor(k: any, record: any): string?
+	local bands = Config.Env and Config.Env.Bands
+	if record ~= true or type(k) ~= "number" or type(bands) ~= "table" or #bands == 0 then return nil end
+	local i = EnvBands.indexAt(bands, k)
+	local first = k <= 1 or EnvBands.indexAt(bands, k - 1) ~= i
+	local b = bands[i]
+	if first and b and (b.brag == true or i == #bands) then
+		return "NEW RECORD — " .. tostring(b.name)
+	end
+	return nil
+end
+
 --============================================================================ layout
 
 local function applyLayout()
@@ -359,6 +384,11 @@ local function applyLayout()
 	perksButton.Visible = inHub and not perksOpen
 	perksButton.Size = UDim2.fromOffset(math.max(120, minTap), btnH)
 	perksButton.Position = UDim2.fromOffset(M, topBottom + 8)
+	local perksW = math.max(120, minTap)
+	restButton.Visible = perksButton.Visible
+	restButton.Size = UDim2.fromOffset(math.max(120, minTap), btnH)
+	restButton.Position = UDim2.fromOffset(M + perksW + 8, topBottom + 8)
+	restButton.Text = if resting then "GET UP" else "REST"
 	local rowBottom = if perksButton.Visible then topBottom + 8 + btnH else topBottom
 
 	local midW = math.min(560, designW - 2 * M)
@@ -389,11 +419,16 @@ local function applyLayout()
 	-- modals: between the top panels and the touch band, never under either
 	local modalTop = topBottom + 8
 	local room = math.max(60, bandTop - modalTop - 8)
+	-- ...and leaving room BELOW them for the banner and the toast, which move there while a modal is up (review 2,
+	-- finding 1). On a touch screen that room is the band's middle; without one, a modal stops short of the bottom.
+	local screenBottom = v.Y / sc - M
+	local ROWS_BELOW = 8 + 76 + 4 + 48
 	local cw = math.min(440, designW - 2 * M)
 	local bodyH = if layout.compact then 34 else 48
 	local ch = math.min(room, 12 + 26 + 4 + bodyH + 8 + btnH + 12)
 	choice.Size = UDim2.fromOffset(cw, ch)
-	choice.Position = UDim2.fromOffset(designW / 2 - cw / 2, modalTop + math.max(0, (room - ch) / 2))
+	local choiceY = math.max(modalTop, math.min(modalTop + math.max(0, (room - ch) / 2), screenBottom - ROWS_BELOW - ch))
+	choice.Position = UDim2.fromOffset(designW / 2 - cw / 2, choiceY)
 	choiceTitle.Position = UDim2.fromOffset(12, 10)
 	choiceTitle.Size = UDim2.new(1, -24, 0, 26)
 	choiceBody.Position = UDim2.fromOffset(12, 40)
@@ -411,7 +446,7 @@ local function applyLayout()
 	descendButton.Text = if touch then "DESCEND" else "DESCEND (Q)"
 
 	local pw = math.min(500, designW - 2 * M)
-	local ph = math.min(470, room)
+	local ph = math.max(60, math.min(470, room, screenBottom - ROWS_BELOW - modalTop))
 	perks.Size = UDim2.fromOffset(pw, ph)
 	perks.Position = UDim2.fromOffset(designW / 2 - pw / 2, modalTop)
 	perksTitle.Position = UDim2.fromOffset(12, 10)
@@ -431,6 +466,32 @@ local function applyLayout()
 	end
 	perks.Visible = perksOpen and inHub
 	perksClose.Modal = perks.Visible -- the cursor is free while the panel is open, whatever the camera
+
+	-- The text rows while a modal is up (review 2, finding 1). Laid out above, they lay ON the modal: on a phone the toast,
+	-- the hint and a hazard's banner covered the EXTRACT / DESCEND modal, and on every screen the toast and the hint
+	-- covered the perk panel's title and first row. So they move below it: the banner nearest, then the toast, then
+	-- the hint. On a touch screen, if that reaches the band Roblox's touch controls own, they keep to the middle,
+	-- between the thumbstick's corner and the jump button's.
+	-- The hint (the standing instruction) is left out while a modal is up when it does not fit below: the modal says
+	-- what to do. A toast (a refused request is never silent) and the banner always fit, by the room kept above.
+	hint.Visible = true
+	if choiceShown or perks.Visible then
+		local modalBottom = if choiceShown then choiceY + ch else modalTop + ph
+		local y = modalBottom + 8
+		local rowW, cx = midW, designW / 2
+		if touch and y + 76 + 4 + 48 + 4 + 44 > (v.Y - layout.controlPad) / sc then
+			local left, right = THUMB_FRACTION * designW, (1 - JUMP_FRACTION) * designW
+			rowW = math.min(midW, right - left - 2 * M)
+			cx = (left + right) / 2
+		end
+		banner.Size = UDim2.fromOffset(rowW, 76)
+		banner.Position = UDim2.new(0, cx, 0, y)
+		toast.Size = UDim2.fromOffset(rowW, 48)
+		toast.Position = UDim2.new(0, cx, 0, y + 80)
+		hint.Size = UDim2.fromOffset(rowW, 44)
+		hint.Position = UDim2.new(0, cx, 0, y + 132)
+		hint.Visible = y + 132 + 44 <= screenBottom
+	end
 	perksList.CanvasSize = UDim2.fromOffset(0, math.ceil(perksLayout.AbsoluteContentSize.Y / math.max(sc, 0.01)) + 12)
 
 	-- vignette thickness follows exposure (screen px, outside the scale)
@@ -509,7 +570,10 @@ local function paint()
 
 	-- the hint line: an event's hint wins for a few seconds, then the standing one
 	local h = ""
-	if hintOverride and now() < hintUntil then
+	-- At the powered lift its own hint wins. An event hint held from the room the player just left ("Your room is going
+	-- dark", 3 s) read over a lift that never goes dark (check_facilitynightmare_desktop section F).
+	local atChoice = S.phase == "floor" and run ~= nil and run.powered == true and run.atLift == true
+	if hintOverride and now() < hintUntil and not atChoice then
 		h = hintOverride
 	elseif S.phase == "hub" then
 		if S.storeless then
@@ -618,6 +682,11 @@ NoticeEvent.OnClientEvent:Connect(function(kind, data)
 		choiceBody.Text = string.format("EXTRACT: bank %d Essence.  DESCEND: sublevel %d pays +%d; if the dark takes you, you keep %d%%.",
 			data.bank, data.k + 1, data.nextPay, data.keepPercent)
 		FxClient.flash(GOOD, 0.25, 0.5)
+		local fanfare = fanfareFor(data.k, data.record)
+		if fanfare then
+			showBanner(fanfare, ACCENT, 5)
+			FxClient.fovPunch(-6, 0.08, 0.4)
+		end
 	elseif kind == "extracted" then
 		showBanner(string.format("BANKED %d ESSENCE", data.banked), GOOD)
 		FxClient.flash(GOOD, 0.35, 0.7)
@@ -668,8 +737,15 @@ EnvBus.on(function(kind, data)
 		end
 	elseif kind == "rest" and type(data) == "table" then
 		resting = data.resting == true
+		restButton.Text = if resting then "GET UP" else "REST"
 		paint()
+	elseif kind == "restRefused" and type(data) == "table" and type(data.reason) == "string" then
+		showToast(data.reason) -- a refused press is answered, never silent
 	end
+end)
+
+restButton.Activated:Connect(function()
+	EnvBus.fire("restPress", {})
 end)
 
 --============================================================================ input

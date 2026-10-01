@@ -204,8 +204,31 @@ end
 
 local Hz = Config.Hazards
 truthy((Hazards.validate(Hz)), "Config.Hazards validates")
-eq(Hz.IntervalMin, 120, "at most one hazard per 2 exposed minutes")
-eq(Hz.IntervalMax, 180, "…at least one per 3 (the owner: about one near-hit per 2-3 minutes)")
+-- DECIDED 2026-09-30 (owner: take recommended), EYECANDY.md §10 option 2: 90-140 s of exposed time between hazards (it
+-- was 120-180), so that in real play a band with hazards brings one about every 2-3 minutes, the brief's number.
+eq(Hz.IntervalMin, 90, "at most one hazard per 90 s of exposed time (the owner's decision, option 2)")
+eq(Hz.IntervalMax, 140, "…at least one per 140 s of it")
+-- Review 2 (U1, U6): numbers EYECANDY.md §3 promises, written out. A shove of 16-24 studs/s and at most 3 up; never
+-- under the light fixture (2.5 either side of the centre), never on the car's or lift's 10 x 10 pad (5.5), never
+-- nearer a wall than an item stands (6).
+eq(Hz.KnockMin, 16, "a hit shoves at least 16 studs/s (it is felt)")
+eq(Hz.KnockMax, 24, "…and at most 24")
+eq(Hz.LiftMax, 3, "…and lifts at most 3 up")
+for kind, k in Hz.Kinds do
+	truthy(type(k.knock) == "number" and k.knock >= 16 and k.knock <= 24, kind .. ": a shove of 16-24 studs/s (" .. tostring(k.knock) .. ")")
+	truthy((k.lift or 0) >= 0 and (k.lift or 0) <= 3, kind .. ": at most 3 up (" .. tostring(k.lift) .. ")")
+end
+eq(Hz.FixtureKeepOut, 2.5, "nothing comes down within 2.5 studs of a room's centre: the light fixture hangs there")
+eq(Hz.PadKeepOut, 5.5, "…nor within 5.5 of it in a room holding the car or the lift (their 10 x 10 pads)")
+eq(Hz.SpotMinWallDistance, 6, "…nor nearer a wall than an item stands (6)")
+do
+	local INNER = F.CellSize / 2 - F.WallThickness
+	eq(Hazards.spotOk(Hz, INNER, 1, 0, false), false, "with the shipped config, a spot 1 stud off an ordinary room's centre is refused (the fixture)")
+	eq(Hazards.spotOk(Hz, INNER, 0, -2.4, false), false, "…and 2.4 off it")
+	truthy(Hazards.spotOk(Hz, INNER, 4, 0, false), "…4 off it is a legal spot")
+	eq(Hazards.spotOk(Hz, INNER, 4, 0, true), false, "…but not in a room holding the car or the lift")
+	truthy(Hazards.spotOk(Hz, INNER, 6.5, 0, true), "…where 6.5 off the centre is")
+end
 truthy(Hz.EscapeSpeed <= 10.4 + 1e-9, "every telegraph is escapable at the SLOW proxy's 10.4 studs/s, not only at walk speed")
 truthy(Hz.MinTelegraphSeconds >= 2.5, "every hazard is telegraphed at least 2.5 s")
 truthy(Hz.SpotMinWallDistance >= F.ItemWallClearance, "a hazard starts no nearer a wall than an item stands (the interior)")
@@ -248,6 +271,32 @@ do -- Banners. Nothing headless can see how a phone wraps a 30 px banner, so no 
 	end
 end
 
+--================================================================ the brag and the long-term goal
+-- Review 2, finding 2: THE VOID was both the brag and the long-term goal, and a medium player first powered sublevel 13
+-- after about 53-71 minutes (a slow one practically never). The brag is now the OVERGROWN BIO-LAB, the deepest band
+-- of the facility itself, whose first sublevel a medium player first powers after about 35 minutes
+-- (tests/pacing.measure.luau); the void stays the long-term goal beyond it. Both get a fanfare the first time the
+-- saved record reaches them. Written out.
+do
+	local brags = {}
+	for i, b in bands do
+		if b.brag == true then table.insert(brags, i) end
+	end
+	eq(#brags, 1, "exactly one band is the brag")
+	local bi = brags[1]
+	eq(bi and bands[bi].id, "biolab", "…the overgrown bio-lab")
+	eq(bi and bands[bi].from, 11, "…from sublevel 11")
+	truthy(bi ~= nil and bi < #bands, "…and the long-term goal, the last band, lies beyond it")
+	eq(bands[#bands].id, "void", "the long-term goal is THE VOID")
+	eq(bands[#bands].from, 13, "…from sublevel 13")
+	-- the fanfare's banner (Hud.client), held to the longest banner the HUD already showed
+	local LONGEST = utf8.len("THE POWER IS FAILING — STAY IN THE LIGHT")
+	for _, b in bands do
+		local len = utf8.len("NEW RECORD — " .. b.name)
+		truthy(len <= LONGEST, string.format("%s's fanfare 'NEW RECORD — %s' is %d characters (max %d)", b.id, b.name, len, LONGEST))
+	end
+end
+
 --================================================================ rest
 
 truthy((Rest.validate(Config.Rest)), "Config.Rest validates")
@@ -273,9 +322,16 @@ do -- the most built rooms that can be within DressRadius of any point of a 5x5 
 			most = math.max(most, c)
 		end
 	end
-	print(string.format("    at most %d rooms within %d studs; %d x %d parts + %d hazard parts = %d (budget %d)",
-		most, Env.DressRadius, most, Env.MaxPartsPerRoom, Bu.MaxHazardParts, most * Env.MaxPartsPerRoom + Bu.MaxHazardParts, Bu.MaxLocalParts))
-	truthy(most * Env.MaxPartsPerRoom + Bu.MaxHazardParts <= Bu.MaxLocalParts, "the worst case fits MaxLocalParts by arithmetic")
+	-- a room's critter has its own parts (pass 2: critters, Dressing.luau), on top of the furniture's MaxPartsPerRoom
+	local perRoom = Env.MaxPartsPerRoom + (Env.MaxCritterParts or 0)
+	print(string.format("    at most %d rooms within %d studs; %d x (%d + %d critter) parts + %d hazard parts = %d (budget %d)",
+		most, Env.DressRadius, most, Env.MaxPartsPerRoom, Env.MaxCritterParts or 0, Bu.MaxHazardParts, most * perRoom + Bu.MaxHazardParts,
+		Bu.MaxLocalParts))
+	truthy(type(Env.MaxCritterParts) == "number" and Env.MaxCritterParts >= 2, "a critter has parts of its own to be drawn with (" .. tostring(Env.MaxCritterParts) .. ")")
+	eq(Env.MaxCrittersPerRoom, 1, "one critter per room at most")
+	truthy(most * perRoom + Bu.MaxHazardParts <= Bu.MaxLocalParts, "the worst case fits MaxLocalParts by arithmetic, critters included")
+	truthy(type(Bu.MaxCritters) == "number" and Bu.MaxCritters >= 1 and Bu.MaxCritters <= 6,
+		"Budget.MaxCritters caps the critters that move at once, nearest first (" .. tostring(Bu.MaxCritters) .. ")")
 	truthy(Bu.MaxHubParts <= Bu.MaxLocalParts, "the break room's dressing fits too (it is never shown at the same time as a floor's)")
 end
 eq(Bu.MaxLights, 0, "the environment adds NO light source: glow is self-lit surfaces only, off when their room is dark")

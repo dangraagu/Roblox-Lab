@@ -291,7 +291,11 @@ for _, kit in kits do
 			if not p.emissive and not Dressing.MATERIALS[p.material] then problem(kit .. ": material " .. tostring(p.material)) end
 			if p.screen and p.shape ~= "Block" then problem(kit .. ": " .. p.name .. " carries a screen but is a " .. tostring(p.shape)) end
 		end
-		if #parts > Env.MaxPartsPerRoom then problem(kit .. ": " .. #parts .. " parts in one room") end
+		-- the furniture's parts; a critter's own (pass 2) are held to MaxCritterParts on top
+		local furniture, critterN = 0, 0
+		for _, p in parts do if p.critter == nil then furniture += 1 else critterN += 1 end end
+		if furniture > Env.MaxPartsPerRoom then problem(kit .. ": " .. furniture .. " parts in one room") end
+		if critterN > (Env.MaxCritterParts or 0) then problem(kit .. ": " .. critterN .. " critter parts in one room") end
 		if emitters > 1 then problem(kit .. ": " .. emitters .. " emitters in one room") end
 		if screens > Env.MaxScreensPerRoom then problem(kit .. ": " .. screens .. " screens in one room") end
 		stats.emitters += emitters
@@ -418,6 +422,205 @@ do
 	end
 	eq(Dressing.roomBand(Env, EnvBands, 1, 5), 1, "sublevel 1 is the first band")
 	eq(Dressing.roomBand(Env, EnvBands, 999, 5), #bands, "sublevel 999 is the last band")
+end
+
+--================================================================ critters and weather (pass 2 of the standard, 2026-10-01)
+-- docs/complete-game-standard.md §2: every band has "its own light, colour, scenery, critters and weather". Light, colour
+-- and scenery are the grade, the palette and the kit above; the particles are its weather. Until this pass no band had a
+-- critter and the offices had no weather at all. A critter is a small thing that MOVES (a roach along the foot of a wall,
+-- a moth under the ceiling), placed like any other piece and held to every rule above over its WHOLE path: its parts'
+-- boxes are the envelope of every place it can be (the bob's rule, generalised), and critterBox(p, t, phase), which the
+-- client draws it at, never leaves that box. It never glows, never collides, is one per room at most, and is placed after
+-- everything else, so a room's other dressing is exactly what it was without it.
+
+local function critterParts(parts)
+	local out = {}
+	for _, p in parts do if p.critter ~= nil then table.insert(out, p) end end
+	return out
+end
+
+do
+	local kinds = {}
+	for _, b in Env.Bands do
+		local kit = Dressing.KITS[b.kit]
+		local crit = kit.critters or {}
+		truthy(#crit >= 1, b.id .. ": its kit has a critter")
+		for _, c in crit do
+			local name = c.piece.name
+			truthy(kinds[name] == nil, b.id .. ": its critter (" .. name .. ") is its own, no other band has it (" .. tostring(kinds[name]) .. ")")
+			kinds[name] = b.id
+			truthy(Dressing.CRITTER_MOTIONS[c.piece.motion and c.piece.motion.kind or "?"] == true,
+				b.id .. ": " .. name .. " moves in a known way (" .. tostring(c.piece.motion and c.piece.motion.kind) .. ")")
+		end
+		local weather = false
+		for _, list in { kit.wall, kit.runs, kit.hangers } do
+			for _, e in list or {} do
+				local piece = e.piece or e
+				for _, t in piece.parts do if t.emitter then weather = true end end
+			end
+		end
+		truthy(weather, b.id .. ": its kit has weather (particles)")
+	end
+end
+
+do -- the motions: fractions of the travel in [0, 1], the whole travel used, a scurrier turns round to run back
+	local P = Dressing.critterPose
+	for kind in Dressing.CRITTER_MOTIONS do
+		for _, phase in { 0, 1.3, 4.9 } do
+			local lo, hi = { math.huge, math.huge, math.huge }, { -math.huge, -math.huge, -math.huge }
+			local bad, wrongWay, paused = 0, 0, 0
+			local last = nil
+			for i = 0, 2400 do
+				local t = i * 0.05
+				local fa, fu, fo, flipped = P({ kind = kind, speed = 1 }, t, phase)
+				for j, v in { fa, fu, fo } do
+					if v < -1e-9 or v > 1 + 1e-9 then bad += 1 end
+					lo[j], hi[j] = math.min(lo[j], v), math.max(hi[j], v)
+				end
+				if last and kind == "scurry" then
+					if fa < last - 1e-6 and not flipped then wrongWay += 1 end
+					if fa > last + 1e-6 and flipped then wrongWay += 1 end
+					if math.abs(fa - last) < 1e-9 then paused += 1 end
+				end
+				last = fa
+			end
+			eq(bad, 0, kind .. " (phase " .. phase .. "): every fraction of the travel is within 0..1")
+			truthy(hi[1] - lo[1] > 0.95, kind .. " (phase " .. phase .. "): it uses its whole travel along the wall (" .. string.format("%.2f", hi[1] - lo[1]) .. ")")
+			if kind == "scurry" then
+				eq(wrongWay, 0, "scurry (phase " .. phase .. "): it faces the way it runs (flipped exactly while running back)")
+				truthy(paused > 100, "scurry (phase " .. phase .. "): it stops now and then, as if to sniff (" .. paused .. " still samples)")
+				truthy(hi[2] - lo[2] < 1e-9 and hi[3] - lo[3] < 1e-9, "scurry: it stays on the floor, against the wall")
+			else
+				truthy(hi[2] - lo[2] > 0.9, kind .. " (phase " .. phase .. "): it also moves up and down")
+			end
+		end
+	end
+end
+
+do -- the checker knows critters
+	local function crit(p)
+		local q = part(p)
+		q.critter = { kind = "scurry" }
+		q.solid = false
+		q.piece, q.pieceId = p.piece or "roach", p.pieceId or 1
+		return q
+	end
+	local okCrit = crit({ min = { 11.5, 0, 7.5 }, max = { 13, 0.4, 11.5 } })
+	truthy((Dressing.check(Env, F, { okCrit }, noProps)), "control: a critter at the foot of a wall, off the door column, passes")
+	local two = { crit({ min = { 11.5, 0, 7.5 }, max = { 13, 0.4, 11.5 }, pieceId = 1 }),
+		crit({ min = { -13, 0, -11.5 }, max = { -11.5, 0.4, -7.5 }, pieceId = 2 }) }
+	local ok2, why2 = Dressing.check(Env, F, two, noProps)
+	eq(ok2, false, "check() rejects a second critter in one room (" .. tostring(why2) .. ")")
+	local glowing = crit({ emissive = true, color = { 90, 200, 255 }, min = { 11.5, 0, 7.5 }, max = { 13, 0.4, 11.5 } })
+	local ok3, why3 = Dressing.check(Env, F, { glowing }, noProps)
+	eq(ok3, false, "check() rejects a glowing critter: glow means power here, and a critter has none (" .. tostring(why3) .. ")")
+	local solid = crit({ min = { 11.5, 0, 7.5 }, max = { 13, 0.4, 11.5 } })
+	solid.solid = true
+	local ok4, why4 = Dressing.check(Env, F, { solid }, noProps)
+	eq(ok4, false, "check() rejects a critter that collides (" .. tostring(why4) .. ")")
+end
+
+do -- real rooms: where critters live, that they stay in their checked box, and that they change nothing else
+	local withCritter, rooms, outside, moved, rigid, notStill, glow, collide = {}, 0, 0, 0, 0, 0, 0, 0
+	local samples, prefixBad, short = 0, 0, 0
+	for _, kit in kits do
+		withCritter[kit] = 0
+		for i = 1, 60 do
+			local k = 1 + (i % 14)
+			local seeds = { layout = i * 2654435 + 17, loot = i * 40503 + 3, decor = i * 69069 + 11 }
+			local plan = Facility.planForSublevel(Config, k, seeds, Rng, MazeGen)
+			local room = 1 + (i * 7) % plan.n2
+			local props = propsOf(plan, room)
+			local parts = Dressing.build(Env, F, kit, room, k, props)
+			rooms += 1
+			local cps = critterParts(parts)
+			if #cps > 0 then withCritter[kit] += 1 end
+			for _, p in cps do
+				if p.emissive then glow += 1 end
+				if p.solid then collide += 1 end
+				local rs = { p.rest.max[1] - p.rest.min[1], p.rest.max[2] - p.rest.min[2], p.rest.max[3] - p.rest.min[3] }
+				local wentAway = false
+				local lo, hi = { math.huge, math.huge, math.huge }, { -math.huge, -math.huge, -math.huge }
+				for j = 0, 400 do
+					local t = j * 0.15 -- 60 s: the slowest motion (the drifter's out, 45 s) goes through its whole range
+					for _, phase in { 0, 2.1 } do
+						local b = Dressing.critterBox(p, t, phase)
+						samples += 1
+						for ax = 1, 3 do
+							if b.min[ax] < p.min[ax] - 1e-6 or b.max[ax] > p.max[ax] + 1e-6 then outside += 1 end
+							if math.abs((b.max[ax] - b.min[ax]) - rs[ax]) > 1e-6 then rigid += 1 end
+							if math.abs(b.min[ax] - p.rest.min[ax]) > 0.5 then wentAway = true end
+							lo[ax], hi[ax] = math.min(lo[ax], (b.min[ax] + b.max[ax]) / 2), math.max(hi[ax], (b.min[ax] + b.max[ax]) / 2)
+						end
+					end
+				end
+				if wentAway then moved += 1 else notStill += 1 end
+				-- it uses its whole path: along, up and out each spanned to at least 90 % of its travel (a scurrier's
+				-- mirror only adds to the along span)
+				local mv = p.mv
+				local spans = { [mv.ax] = mv.along, [2] = mv.up, [mv.ox] = mv.out }
+				for ax, want in spans do
+					if want > 0 and hi[ax] - lo[ax] < 0.9 * want then
+						short += 1
+						if short <= 3 then print(string.format("   %s %s: axis %d spans %.2f of its %.2f travel", kit, p.name, ax, hi[ax] - lo[ax], want)) end
+					end
+				end
+			end
+			-- placed last, drawing nothing before the others: without critters the room is dressed exactly the same
+			local saved = Dressing.KITS[kit].critters
+			Dressing.KITS[kit].critters = {}
+			local plain = Dressing.build(Env, F, kit, room, k, props)
+			Dressing.KITS[kit].critters = saved
+			local rest = {}
+			for _, p in parts do if p.critter == nil then table.insert(rest, p) end end
+			local same = #rest == #plain
+			for j = 1, math.min(#rest, #plain) do
+				for ax = 1, 3 do
+					if rest[j].min[ax] ~= plain[j].min[ax] or rest[j].max[ax] ~= plain[j].max[ax] then same = false end
+				end
+				if rest[j].piece ~= plain[j].piece then same = false end
+			end
+			if not same then prefixBad += 1 end
+		end
+	end
+	for _, kit in kits do
+		truthy(withCritter[kit] >= 18, kit .. ": a critter in at least 30 % of 60 real rooms (" .. withCritter[kit] .. ")")
+	end
+	eq(outside, 0, "every critter stays inside its checked box over 60 s, two phases (" .. samples .. " poses)")
+	eq(rigid, 0, "…and keeps its size: it moves, it does not stretch")
+	eq(short, 0, "…and uses its whole path: along, up and out, each at least 90 % of its travel")
+	eq(notStill, 0, "…and every critter really moves (" .. moved .. " critter parts went more than half a stud)")
+	eq(glow, 0, "no critter glows")
+	eq(collide, 0, "no critter collides")
+	eq(prefixBad, 0, "a room's other dressing is exactly what it was without critters (" .. rooms .. " rooms)")
+end
+
+--================================================================ which side of a door leaf the player is on
+-- Review 2, finding 3: a door leaf is one thin slab between two rooms, seen from one side at a time and set in THAT
+-- side's wall. On a blend sublevel its two rooms can be of two bands, so it must wear the band of the room on the
+-- viewer's side (it wore its lower room's from both sides: 71 % or 138 % of the designed contrast). Dressing.leafSide
+-- answers which room that is from plain numbers: the leaf's (x, z) and size (its thin axis is the doorway's normal),
+-- a centre for each of its rooms when that room is built (an unbuilt one is the built one's mirror image through the
+-- leaf), and the viewer's (x, z). On the plane itself it answers nil: the caller keeps what the leaf wore.
+do
+	local S = Dressing.leafSide
+	-- a doorway in a wall across x: the leaf is 0.4 thick in x, 6 wide in z, at x = 14 between rooms at x = 0 and 28
+	local ew = { x = 14, z = 0, sx = 0.4, sz = 6 }
+	local c0, c28 = { x = 0, z = 0 }, { x = 28, z = 0 }
+	eq(S(ew, 3, 4, c0, c28, { x = 5, z = 3 }), 3, "a viewer in the lower room's half sees the lower room's side")
+	eq(S(ew, 3, 4, c0, c28, { x = 20, z = -8 }), 4, "…in the higher room's half, the higher room's")
+	eq(S(ew, 3, 4, c28, c0, { x = 5, z = 3 }), 4, "…whichever id is lower: the side is geometry, not the id")
+	eq(S(ew, 3, 4, c0, c28, { x = 13.9, z = 0 }), 3, "a tenth of a stud from the plane still counts")
+	eq(S(ew, 3, 4, c0, c28, { x = 14.01, z = 0 }), nil, "…on the plane (a doorway's middle): nil, the leaf keeps its colour")
+	eq(S(ew, 3, 4, c0, c28, { x = -30, z = 56 }), 3, "a viewer rooms away is still on one side of the plane")
+	eq(S(ew, 3, 4, nil, c28, { x = 5, z = 0 }), 3, "the lower room not built: it lies opposite the higher one")
+	eq(S(ew, 3, 4, nil, c28, { x = 22, z = 0 }), 4, "…and the higher room's side is still the higher room")
+	eq(S(ew, 3, 4, c0, nil, { x = 22, z = 0 }), 4, "the higher room not built: the same, mirrored")
+	eq(S(ew, 3, 4, nil, nil, { x = 22, z = 0 }), nil, "neither room known: nil")
+	-- a doorway in a wall across z: 6 wide in x, 0.4 thick in z, at z = 14 between rooms at z = 28 (id 2) and 0 (id 9)
+	local ns = { x = 0, z = 14, sx = 6, sz = 0.4 }
+	eq(S(ns, 2, 9, { x = 0, z = 28 }, { x = 0, z = 0 }, { x = 0, z = 5 }), 9, "a doorway across z: a viewer at z = 5 is on room 9's side")
+	eq(S(ns, 2, 9, { x = 0, z = 28 }, { x = 0, z = 0 }, { x = 11, z = 25 }), 2, "…at z = 25, room 2's (x plays no part)")
 end
 
 print(string.format("Dressing: %d passed, %d failed", passed, failed))

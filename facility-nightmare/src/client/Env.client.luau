@@ -11,13 +11,19 @@
 --      and AT ONCE on the frame a room that should be dressed is not (a door just opened, the player just
 --      arrived), so a room is ready on the first frame it can be seen. During the ride (the car is closed on
 --      all sides) the entry room is dressed wherever it is, so it is ready the moment the player arrives in it;
+--      Every door leaf wears the band of the room on the player's side of it (Dressing.leafSide): a leaf is seen from
+--      one side at a time, set in that side's wall, and on a blend sublevel its two rooms can be of two bands;
 --   3. the rare environmental hazard (Hazards.luau), only in a lit room, never on the car or lift pad,
+--      never at the powered lift's EXTRACT / DESCEND choice (a live one is called off when the player reaches it),
 --      never in the first ArrivalGraceSeconds on a sublevel, called off if its room flickers; floors are
 --      first person, so the HUD banner (over EnvBus) says STEP OUT while the player is in the ring and
 --      YOU ARE CLEAR once out; then glow follows each room's own light (off when it is off, flickering
 --      when it flickers), the rooms sharing what the hazard leaves of the emitter budget;
 --   4. the break room's dressing while you are in it, and its DEPTH RECORD board;
---   5. rest (Rest.luau): only in the break room — a bench, or standing still there.
+--   5. rest (Rest.luau): only in the break room — a bench, the HUD's REST button (over EnvBus), or standing still there.
+--   The local dressing's parts are capped in code (nearest rooms first, Budget.MaxLocalParts less the hazard's reserve).
+--   Each band's critters (a roach, a lab mouse, a moth, a rat, a bat, a beetle, a drifter: Dressing.luau) move only in
+--   near, lit rooms, nearest first, at most Budget.MaxCritters at once; elsewhere they keep still.
 -- It fires no remote, adds no remote, sets no attribute, never reads ServerStorage, an item, a plan or a
 -- seed, and creates no light source. It never writes the character's CFrame; a hazard hit only sets the
 -- character's velocity (the client owns its own character's physics) and nothing is lost by it.
@@ -193,13 +199,54 @@ local function propsOf(rf: Instance, o: Vector3): { any }
 	return out
 end
 
-local function recolourDoors(floor: Instance, k: number)
-	local doors = floor:FindFirstChild("Doors")
-	if not doors then return end
+-- Door leaves (review 2, finding 3). A leaf is one thin slab between two rooms, seen from one side at a time and set in
+-- THAT side's wall, so it wears the band of the room on the player's side of it. Painting every leaf in its lower
+-- room's band gave a server-vault room a labs door at 71 % of the designed contrast (and the reverse 138 %) on 21 % of
+-- sublevel 4's doors. Every frame, after the dressing pass, so a leaf is right on the first frame it is seen; a colour
+-- is written only when it changes. On the leaf's plane itself (a doorway's middle, where the leaf is edge-on or
+-- overhead) it keeps what it wore. Keyed by Instance, weakly: a floor's leaves die with it.
+local leafInfo: { [Instance]: any } = setmetatable({}, { __mode = "k" }) :: any
+local leafPal: { [Instance]: any } = setmetatable({}, { __mode = "k" }) :: any
+local roomIdOf: { [Instance]: any } = setmetatable({}, { __mode = "k" }) :: any
+local function paintDoors(k: number, root: BasePart)
+	local floor = myZone and myZone:FindFirstChild("Floor")
+	local doors = floor and floor:FindFirstChild("Doors")
+	local rooms = floor and floor:FindFirstChild("Rooms")
+	if not doors or not rooms then return end
+	local centres = {}
+	for _, rf in rooms:GetChildren() do
+		local id = roomIdOf[rf]
+		if id == nil then
+			id = tonumber(string.match(rf.Name, "^Room_(%d+)$")) or false
+			roomIdOf[rf] = id
+		end
+		local fl = id and rf:FindFirstChild("Floor")
+		if id and fl and fl:IsA("BasePart") then centres[id] = { x = fl.Position.X, z = fl.Position.Z } end
+	end
+	local p = root.Position
+	local viewer = { x = p.X, z = p.Z }
 	for _, leaf in doors:GetChildren() do
-		local lo = tonumber(string.match(leaf.Name, "^Door_(%d+)_%d+$"))
-		if lo and leaf:IsA("BasePart") then
-			art:recolourDoor(leaf, bands[Dressing.roomBand(Env, EnvBands, k, lo)].palette)
+		local info = leafInfo[leaf]
+		if info == nil then
+			local lo, hi = string.match(leaf.Name, "^Door_(%d+)_(%d+)$")
+			if lo and leaf:IsA("BasePart") then
+				local lp, ls = (leaf :: BasePart).Position, (leaf :: BasePart).Size
+				info = { lo = tonumber(lo), hi = tonumber(hi), geom = { x = lp.X, z = lp.Z, sx = ls.X, sz = ls.Z } }
+			else
+				info = false
+			end
+			leafInfo[leaf] = info
+		end
+		if info then
+			local side = Dressing.leafSide(info.geom, info.lo, info.hi, centres[info.lo], centres[info.hi], viewer)
+			if side == nil and leafPal[leaf] == nil then side = info.lo end -- first seen from its plane: either will do
+			if side ~= nil then
+				local pal = bands[Dressing.roomBand(Env, EnvBands, k, side)].palette
+				if leafPal[leaf] ~= pal then
+					leafPal[leaf] = pal
+					art:recolourDoor(leaf :: BasePart, pal)
+				end
+			end
 		end
 	end
 end
@@ -207,12 +254,12 @@ end
 local function dressPass(inRun: boolean, k: number?, riding: boolean)
 	local root = hrp()
 	local seen = {}
+	local want = {} -- the rooms in range, parented below nearest first while the local-parts cap allows
 	myZone = if inRun then zoneOf(root) else nil
 	if inRun and myZone and k and root then
 		local floor = myZone:FindFirstChild("Floor")
 		local rooms = floor and floor:FindFirstChild("Rooms")
 		if floor and rooms then
-			local newRoom = false
 			for _, rf in rooms:GetChildren() do
 				local id = tonumber(string.match(rf.Name, "^Room_(%d+)$"))
 				local fl = rf:FindFirstChild("Floor")
@@ -244,16 +291,29 @@ local function dressPass(inRun: boolean, k: number?, riding: boolean)
 							rec.k = k
 							rec.bandIndex = bi
 							recs[rf] = rec
-							newRoom = true
 						end
-						art:setParented(rec, true)
+						table.insert(want, { rec = rec, d = d })
 					elseif rec then
 						art:setParented(rec, false)
 					end
 				end
 			end
-			if newRoom then recolourDoors(floor, k) end
 		end
+	end
+	-- The local-parts budget, in code (docs/complete-game-standard.md §2): nearest rooms first, and never more parented
+	-- dressing parts than MaxLocalParts less the hazard's reserve. Dressing.check caps a room at MaxPartsPerRoom, and
+	-- EnvConfig.spec shows every room within DressRadius fits at once (232 of 240), so on a real floor this never binds;
+	-- it is the guarantee if a kit or the radius ever grows (env check D1 lowers the cap in memory).
+	table.sort(want, function(a, b)
+		if a.d ~= b.d then return a.d < b.d end
+		return a.rec.key < b.rec.key
+	end)
+	local room = Budget.MaxLocalParts - Budget.MaxHazardParts
+	for _, w in want do
+		local n = #w.rec.parts
+		if n > room then room = -1 end -- full: this room and every farther one are put away
+		art:setParented(w.rec, room >= 0)
+		if room >= 0 then room -= n end
 	end
 	for rf, rec in recs do
 		if not seen[rf] then
@@ -302,6 +362,7 @@ local function updateRooms(t: number, hazardEmitters: number)
 	end)
 	local emitBudget = Budget.MaxEmitters - hazardEmitters
 	local screenBudget = Budget.MaxScreens
+	local critterBudget = Budget.MaxCritters
 	for _, e in list do
 		local rec = e.rec
 		local near = e.d <= Env.EmitterRadius
@@ -314,7 +375,13 @@ local function updateRooms(t: number, hazardEmitters: number)
 		end
 		local screensOn = near and screenBudget >= #rec.screens
 		if screensOn then screenBudget -= #rec.screens end
-		art:updateRoom(rec, t, powered, near, emitterOn, screensOn)
+		-- critters move like particles: near, in a lit room (nothing moves in a dark one), nearest first, within the cap
+		local crittersOn = false
+		if near and powered and rec.critterCount > 0 and critterBudget >= rec.critterCount then
+			crittersOn = true
+			critterBudget -= rec.critterCount
+		end
+		art:updateRoom(rec, t, powered, near, emitterOn, screensOn, crittersOn)
 	end
 end
 
@@ -358,6 +425,7 @@ local floorK: number? = nil -- the sublevel this client last saw the player arri
 local floorSeconds: number? = nil -- seconds since that arrival
 local lastPos: Vector3? = nil
 local benches: Instance? = nil
+local lastMoving = false -- the last frame's reading, for a REST press between frames
 
 local function hazardName(kind: string): string
 	local k = Hz.Kinds[kind]
@@ -397,6 +465,8 @@ local function frame(dt: number)
 		passInRun, passK = inRun, k
 		dressPass(inRun, k, riding)
 	end
+	-- 2b. the door leaves, every frame, from the player's side of each (after the pass: a new room's leaves too)
+	if inRun and k and root then paintDoors(k, root) end
 
 	-- 3. hazards (before the rooms take their emitters: a live hazard's warning is one of the budget's)
 	if hazardsOn and root then
@@ -409,6 +479,11 @@ local function frame(dt: number)
 			floorSeconds = if onK then 0 else nil
 		end
 		if floorSeconds then floorSeconds += dt end
+		-- The powered lift, where the player chooses EXTRACT or DESCEND (the server's atLift covers its whole room, and the
+		-- HUD's modal shows there): a live hazard is called off and none starts (review 2, finding 1). The clock runs on
+		-- there, as on the car's pad, so a hazard that falls due waits for the next legal spot. Hazards.step decides both
+		-- from callOff alone (one place: CLAUDE.md trap 37).
+		ctx.callOff = phase == "floor" and run ~= nil and run.powered == true and run.atLift == true
 		if phase == "floor" and run and rf and id and o and Rest.hazardsMayRun(rest) and Hazards.arrivalOk(Hz, floorSeconds) then
 			local lit = EnvArt.roomPowered(rf, F.RoomLightBrightness) and not run.flicker and not run.dark
 			if lit then
@@ -498,6 +573,7 @@ local function frame(dt: number)
 			if lastPos and (root.Position - lastPos).Magnitude > 0.2 then moving = true end
 			lastPos = root.Position
 		end
+		lastMoving = moving
 		local wasResting = Rest.isResting(rest)
 		Rest.update(rest, RestCfg, dt, { phase = phase, seated = seated, moving = moving,
 			boarding = S ~= nil and (S.boarding or 0) > 0 })
@@ -507,6 +583,26 @@ local function frame(dt: number)
 		end
 	end
 end
+
+-- The HUD's REST button (press pause, docs/complete-game-standard.md §2): the same rest, started by a press. Refused,
+-- with the reason on the HUD, anywhere but the break room (Rest.press); nothing here reaches the server.
+EnvBus.on(function(kind)
+	if kind ~= "restPress" then return end
+	if not restOn then
+		EnvBus.fire("restRefused", { reason = "Resting is switched off on this server." })
+		return
+	end
+	local was = Rest.isResting(rest)
+	local result, why = Rest.press(rest, RestCfg, { phase = if S then S.phase else nil, moving = lastMoving,
+		boarding = S ~= nil and (S.boarding or 0) > 0 })
+	if result == "refused" then
+		EnvBus.fire("restRefused", { reason = why })
+	end
+	if Rest.isResting(rest) ~= was then
+		restFocus.Enabled = Rest.isResting(rest)
+		EnvBus.fire("rest", { resting = Rest.isResting(rest), source = rest.source })
+	end
+end)
 
 RunService.RenderStepped:Connect(function(dt)
 	local ok, err = pcall(frame, dt)

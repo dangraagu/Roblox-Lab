@@ -20,7 +20,8 @@
 
 local Hazards = {}
 
--- A hazard is a stagger, never a launch: a horizontal shove and at most a hop.
+-- A hazard is a stagger, never a launch: a horizontal shove and at most a hop. These are the module's absolute
+-- ceiling; a game's config promises its own, narrower range (KnockMin..KnockMax, LiftMax) and every kind is held to it.
 Hazards.MAX_KNOCK = 30
 Hazards.MAX_LIFT = 4
 
@@ -41,6 +42,15 @@ function Hazards.validate(cfg: any): (boolean, string?)
 	if not num(cfg.PadKeepOut) or cfg.PadKeepOut < 0 then return false, "PadKeepOut must be >= 0" end
 	if not num(cfg.FixtureKeepOut) or cfg.FixtureKeepOut < 0 then return false, "FixtureKeepOut must be >= 0" end
 	if not num(cfg.ArrivalGraceSeconds) or cfg.ArrivalGraceSeconds < 0 then return false, "ArrivalGraceSeconds must be >= 0" end
+	-- the shove the game promises (FACILITY: 16-24 studs/s, at most 3 up; review 2, U1): a retune past it switches
+	-- hazards off with a warning instead of shipping a harder hit than the text says
+	if not num(cfg.KnockMin) or cfg.KnockMin < 0 then return false, "KnockMin must be >= 0" end
+	if not num(cfg.KnockMax) or cfg.KnockMax < cfg.KnockMin or cfg.KnockMax > Hazards.MAX_KNOCK then
+		return false, "KnockMax must be within KnockMin.." .. Hazards.MAX_KNOCK
+	end
+	if not num(cfg.LiftMax) or cfg.LiftMax < 0 or cfg.LiftMax > Hazards.MAX_LIFT then
+		return false, "LiftMax must be within 0.." .. Hazards.MAX_LIFT
+	end
 	if type(cfg.Kinds) ~= "table" then return false, "no Kinds" end
 	for name, k in cfg.Kinds do
 		local function bad(why: string): (boolean, string?)
@@ -59,12 +69,12 @@ function Hazards.validate(cfg: any): (boolean, string?)
 			return bad("the warning is too short to escape: react in " .. cfg.ReactionSeconds .. " s and walk "
 				.. radius .. " studs at " .. cfg.EscapeSpeed .. " studs/s")
 		end
-		if not num(k.knock) or k.knock < 0 or k.knock > Hazards.MAX_KNOCK then
-			return bad("knock must be within 0.." .. Hazards.MAX_KNOCK)
+		if not num(k.knock) or k.knock < cfg.KnockMin or k.knock > cfg.KnockMax then
+			return bad("knock must be within " .. cfg.KnockMin .. ".." .. cfg.KnockMax)
 		end
 		local lift = k.lift or 0
-		if not num(lift) or lift < 0 or lift > Hazards.MAX_LIFT then
-			return bad("lift must be within 0.." .. Hazards.MAX_LIFT)
+		if not num(lift) or lift < 0 or lift > cfg.LiftMax then
+			return bad("lift must be within 0.." .. cfg.LiftMax)
 		end
 	end
 	return true, nil
@@ -151,12 +161,14 @@ end
 --   ctx = { eligible: boolean (on a sublevel, in a lit room, not resting), kinds: { string } (the kinds of
 --           the band dressing the room the player is in), spot: Vec? (where the player stands when that
 --           is a legal spot, else nil), room: any, activeRoomLit: boolean? (false = the active hazard's
---           room has started to flicker or is dark) }
+--           room has started to flicker or is dark), callOff: boolean? (true = the player stands where no
+--           hazard may be, the powered lift at the EXTRACT / DESCEND choice: a live one is called off and none
+--           starts; the clock runs on, as on the car's pad, so a due hazard waits for the next legal spot) }
 function Hazards.step(state: any, cfg: any, dt: number, ctx: any, rand: () -> number): any
 	local ev = nil
 	local plan = state.active
 	if plan then
-		if ctx.activeRoomLit == false then
+		if ctx.activeRoomLit == false or ctx.callOff == true then
 			state.active = nil
 			return { type = "cancel", plan = plan }
 		end
@@ -176,7 +188,7 @@ function Hazards.step(state: any, cfg: any, dt: number, ctx: any, rand: () -> nu
 	if ev ~= nil or state.active ~= nil or state.clock < state.nextAt then
 		return ev
 	end
-	if not ctx.eligible or #kinds == 0 or ctx.spot == nil then
+	if not ctx.eligible or #kinds == 0 or ctx.spot == nil or ctx.callOff == true then
 		return nil -- due, and it waits: exactly one launches at the next legal moment
 	end
 	local kind = kinds[math.clamp(1 + math.floor(rand() * #kinds), 1, #kinds)]

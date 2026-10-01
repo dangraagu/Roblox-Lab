@@ -343,6 +343,74 @@ do
 	end
 end
 
+--=========================================================================== F. the lift's hint
+section("F. at the powered lift, the lift's hint wins over a dying room's (this file's rare flake)")
+do
+	-- The server sends "roomDying" once, when the room the player stands in starts to flicker, and the HUD holds that
+	-- hint for 3 s. A player who walks out of a flickering room into the lift within those 3 s, or steps out of the
+	-- powered lift into one and back, read "Your room is going dark" at the choice, over a lift that never goes dark.
+	-- Section C saw it once in about 190 runs of this file (EYECANDY.md §10): the bot had come through a dying room.
+	-- Here it is certain: the server's own notice, sent while the bot carries every fuse to the lift (it stops once the
+	-- server has sent the choice), and once more while the bot stands in the powered lift.
+	local NoticeRemote = remotes:FindFirstChild("Notice")
+	local LIFT_HINT = "EXTRACT (E) to bank it, or DESCEND (Q) for more."
+	local DYING = "Your room is going dark — turn on your flashlight."
+	local powered, fired, dyingShown, lastFire = false, 0, false, -math.huge
+	for _ = 1, 6 do
+		if bot:phase() ~= "hub" then bot:waitPhase("hub", 12) end
+		if not (bot:board(hub) and bot:waitPhase("floor", RIDE + 2)) then break end
+		fired, dyingShown, lastFire = 0, false, -math.huge
+		local n0 = #bot.notices
+		bot.onTick = function(b)
+			b:drainNotices()
+			for i = n0 + 1, #b.notices do
+				if b.notices[i].kind == "choice" then return end
+			end
+			if fired > 0 and hudRoot.Hint.Text == DYING then dyingShown = true end
+			local s = b:state()
+			if s and s.phase == "floor" and s.run and not s.run.powered
+				and s.run.fuses + s.run.fusesIn >= s.run.fusesNeeded then
+				NoticeRemote:FireClient(plr, "roomDying")
+				fired += 1
+				lastFire = h.scheduler:now()
+			end
+		end
+		local r = bot:clearFloor()
+		bot.onTick = nil
+		-- The lift can power while the bot only passes through its room; it then walks on and comes back later, and the
+		-- last notice is long gone by the choice (1 of 20 runs). That floor tests nothing: extract and play another.
+		if r == "powered" and h.scheduler:now() - lastFire < 2.5 then
+			powered = true
+			break
+		end
+		if r == "powered" then
+			key(Enum.KeyCode.E)
+			bot:waitPhase("hub", RIDE + 3)
+		elseif bot:phase() == "floor" then
+			plr.Character:FindFirstChildOfClass("Humanoid"):TakeDamage(1000)
+			h:advance(0.5)
+			h.Players:simulateSpawn(plr, h.workspace)
+			h:advance(1)
+		end
+	end
+	truthy(powered, "control: the bot powers a lift within 2.5 s of the last notice")
+	if powered then
+		h:advance(0.3)
+		truthy(fired > 0, "control: a roomDying notice was sent on the way to the lift (" .. fired .. ")")
+		truthy(dyingShown, "control: away from the lift the HUD shows it: '" .. DYING .. "'")
+		local age = h.scheduler:now() - lastFire
+		truthy(age < 3, string.format("control: the last one is %.1f s old, inside the 3 s it is held", age))
+		eq(bot:state().run.atLift, true, "control: the State says the player is at the powered lift")
+		eq(hudRoot.Hint.Text, LIFT_HINT, "0.3 s after powering, the hint is the lift's, not the dying room's")
+		-- out of the powered lift into a dying room and straight back: the notice arrives while the choice is up
+		NoticeRemote:FireClient(plr, "roomDying")
+		h:advance(0.3)
+		eq(hudRoot.Hint.Text, LIFT_HINT, "a dying room's hint that comes in while the player is at the lift stays off it")
+		key(Enum.KeyCode.E)
+		truthy(bot:waitPhase("hub", RIDE + 3), "E extracts, back to the break room")
+	end
+end
+
 local errs = h:errors()
 eq(#errs, 0, "no scheduler errors (" .. table.concat(errs, " | ") .. ")")
 eq(#h.warnings, 0, "no warnings (" .. table.concat(h.warnings, " | ") .. ")")

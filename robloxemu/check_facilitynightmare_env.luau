@@ -37,6 +37,15 @@ local Dressing = h:_require(h.ReplicatedStorage:FindFirstChild("Dressing"))
 local EnvBands = h:_require(h.ReplicatedStorage:FindFirstChild("EnvBands"))
 local EnvBus = h:_require(h.ReplicatedStorage:FindFirstChild("EnvBus"))
 local Fx = h:_require(h.ReplicatedStorage:FindFirstChild("Fx"))
+local FxClient = h:_require(h.ReplicatedStorage:FindFirstChild("FxClient"))
+local punches = 0 -- the fanfare's FOV punch (review 2, finding 2)
+do
+	local real = FxClient.fovPunch
+	FxClient.fovPunch = function(...)
+		punches += 1
+		return real(...)
+	end
+end
 
 -- Written out, not read from Config: a number checked against itself is not a check.
 local INNER, WALLBAND, OVERHEAD, DOORHALF, DOORTOP, EYE = 13, 2.5, 6.5, 3 + 4, 9.5, 4.5
@@ -50,6 +59,9 @@ local function lin(v)
 	return if c <= 0.04045 then c / 12.92 else ((c + 0.055) / 1.055) ^ 2.4
 end
 local function Y(c) return 0.2126 * lin(c[1]) + 0.7152 * lin(c[2]) + 0.0722 * lin(c[3]) end
+-- the light a surface of colour s returns under a light of colour l, per channel (Y is the same under white)
+local function YL(sc, l) return 0.2126 * lin(sc[1]) * lin(l[1]) + 0.7152 * lin(sc[2]) * lin(l[2]) + 0.0722 * lin(sc[3]) * lin(l[3]) end
+local SERVER_LIGHT = { 255, 240, 215 } -- the RoomLight colour Main.server.luau builds (section A proves Base.light equals it)
 local function rgbOf(c3) return { math.floor(c3.R * 255 + 0.5), math.floor(c3.G * 255 + 0.5), math.floor(c3.B * 255 + 0.5) } end
 -- A ParticleEmitter's LightInfluence defaults to 0 in Roblox (unaffected by light) and reads nil here when never
 -- written. A particle that is not self-lit must be lit by the scene (1); a self-lit one says so (0). Review finding 5.
@@ -336,6 +348,18 @@ do
 	local seats = 0
 	for _, c in benches and benches:GetChildren() or {} do if c.ClassName == "Seat" then seats += 1 end end
 	eq(seats, 2, "the break room has two benches (real Seats, built by the server)")
+	-- review 2 (U5): a Seat seats you looking along its front (LookVector); both benches stand against the south
+	-- wall, so a sitter must face north, into the room, not the wall a stud behind them
+	local hubCentre = h.workspace.Hub:FindFirstChild("HubFloor") and h.workspace.Hub.HubFloor.Position
+		or h.workspace.Hub:FindFirstChild("HubSpawn").Position
+	for _, c in benches and benches:GetChildren() or {} do
+		if c.ClassName == "Seat" then
+			local look = c.CFrame.LookVector
+			local toRoom = Vector3.new(hubCentre.X - c.Position.X, 0, hubCentre.Z - c.Position.Z).Unit
+			truthy(look.Z > 0.99 and look.X * toRoom.X + look.Z * toRoom.Z > 0,
+				c.Name .. " seats a player facing into the room, away from the south wall (look " .. tostring(look) .. ")")
+		end
+	end
 	local enabled = 0
 	for _, d in h.workspace:GetDescendants() do
 		if d.ClassName == "SpawnLocation" and d.Enabled ~= false then enabled += 1 end
@@ -348,6 +372,21 @@ do
 	eq(best and best.Text, "DEEPEST: —", "the DEPTH RECORD board, for a player who has never gone down")
 	local row1 = board and board.Screen:FindFirstChild("Row1")
 	eq(row1 and row1.Text, " 1  ???", "…names nothing it has not seen")
+	-- review 2 (U4): the board "faces a player who has just spawned". Its SurfaceGui draws on one face; that face's
+	-- outward normal must point at HubSpawn (a board drawn on its wall side is a blank slab from the room)
+	do
+		local gui = board and board:FindFirstChild("Screen")
+		local cf = board.CFrame
+		local face = gui and gui.Face and gui.Face.Name
+		local nrm = if face == "Left" then -cf.RightVector elseif face == "Right" then cf.RightVector
+			elseif face == "Front" then cf.LookVector elseif face == "Back" then -cf.LookVector
+			elseif face == "Top" then cf.UpVector else -cf.UpVector
+		local spawnPos = h.workspace.Hub:FindFirstChild("HubSpawn").Position
+		local toSpawn = Vector3.new(spawnPos.X - board.Position.X, 0, spawnPos.Z - board.Position.Z)
+		truthy(nrm.X * toSpawn.X + nrm.Z * toSpawn.Z > 0, "the DEPTH RECORD board's screen faces HubSpawn (" .. tostring(face) .. ")")
+		local wallZ = -20 -- written out: the break room's south wall's inner face (hub-local, z = -20)
+		truthy(nrm.Z > 0.99 and board.Position.Z < wallZ + 0.5, "…from the south wall, into the room")
+	end
 	-- review finding 4: the row of the band you have reached is highlighted in amber, THE VOID (the last row, the
 	-- brag) included. On a second EnvArt in memory, never parented, so the live board is untouched.
 	do
@@ -417,6 +456,47 @@ do
 	local hazards = 0
 	for _, m in busLog do if m.kind == "hazard" then hazards += 1 end end
 	eq(hazards, 0, "no hazard in the break room")
+
+	-- Review 2, finding 2: the brag (the bio-lab) and the long-term goal (the void, the last band) each get a fanfare
+	-- the first time the SAVED record reaches their first sublevel. The server's "choice" notice says whether this
+	-- powering raised the record (check_facilitynightmare D and E); here the HUD's side, with the notice sent to the
+	-- client exactly as the server sends it, and the bands moved IN MEMORY so the offices' first sublevel (1) is a brag.
+	do
+		local Notice = h.ReplicatedStorage.FacilityRemotes.Notice
+		local function choice(k, record)
+			return { k = k, pay = 10, bank = 10, nextPay = 15, keepPercent = 25, record = record }
+		end
+		local function fanfare(k, record)
+			hudRoot.Banner.Visible = false
+			local p0 = punches
+			Notice:FireClient(plr, "choice", choice(k, record))
+			h:advance(0.05)
+			local shown = hudRoot.Banner.Visible and string.find(hudRoot.Banner.Text, "NEW RECORD", 1, true) ~= nil
+			return shown, hudRoot.Banner.Text, punches - p0
+		end
+		local was = bands[1].brag
+		bands[1].brag = true
+		local shown, text, n = fanfare(1, true)
+		truthy(shown and text == "NEW RECORD — ADMIN OFFICES" and n == 1,
+			"a record on the first sublevel of the brag band: its fanfare (" .. tostring(text) .. ", " .. n .. " FOV punch)")
+		shown, text, n = fanfare(1, false)
+		truthy(not shown and n == 0, "…not when that powering did not raise the record (" .. tostring(text) .. ")")
+		shown, text, n = fanfare(2, true)
+		truthy(not shown and n == 0, "…nor for a record on a sublevel that starts no band (" .. tostring(text) .. ")")
+		bands[1].brag = was
+		shown, text, n = fanfare(1, true)
+		truthy(not shown and n == 0, "control: the offices as shipped are no brag, and get none (" .. tostring(text) .. ")")
+		-- the long-term goal: the last band, moved in memory to cover sublevel 1
+		local saved = {}
+		for i, b in bands do saved[i] = { from = b.from, fade = b.fade } end
+		for j, b in bands do
+			if j < #bands then b.from, b.fade = -1000 + j, 0 else b.from, b.fade = 0, 0 end
+		end
+		shown, text, n = fanfare(1, true)
+		truthy(shown and text == "NEW RECORD — THE VOID" and n == 1, "the long-term goal, THE VOID, gets its fanfare too (" .. tostring(text) .. ")")
+		for i, b in bands do b.from, b.fade = saved[i].from, saved[i].fade end
+		hudRoot.Banner.Visible = false
+	end
 end
 
 --=========================================================================== C. the first ride down
@@ -664,6 +744,39 @@ do
 	for _, rf in roomFolders() do if dressOf(rf) ~= nil then back += 1 end end
 	truthy(back >= 2, "…and back in range, the others are dressed again (" .. back .. " rooms)")
 
+	-- the local-parts cap, in code (pass 2; docs/complete-game-standard.md §2 "capped in code"). The arithmetic worst case
+	-- (EnvConfig.spec) never reaches MaxLocalParts, so lower it in memory until only the player's own room fits beside the
+	-- hazard's reserve: the nearest room keeps its dressing, the others are put away, and the parented parts stay in it.
+	local function parentedParts()
+		local n = 0
+		for _, d in envFolder.Rooms:GetDescendants() do if d:IsA("BasePart") then n += 1 end end
+		return n
+	end
+	local own, ownParts = nil, 0
+	for _, rf in roomFolders() do
+		local o = originOf(rf)
+		if math.abs(o.X - c.X) < 1 and math.abs(o.Z - c.Z) < 1 then
+			own = rf
+			local d = dressOf(rf)
+			if d then for _, x in d:GetDescendants() do if x:IsA("BasePart") then ownParts += 1 end end end
+		end
+	end
+	truthy(own ~= nil and ownParts >= 1 and back >= 2, "control: the player's own room is dressed (" .. ownParts .. " parts) among " .. back)
+	local partsCap = Budget.MaxLocalParts
+	Budget.MaxLocalParts = Budget.MaxHazardParts + ownParts -- in memory
+	bot:waitSeconds(1, "floor")
+	local dressedNow = 0
+	for _, rf in roomFolders() do if dressOf(rf) ~= nil then dressedNow += 1 end end
+	eq(dressedNow, 1, "with the parts cap at the hazard reserve + one room, only one room keeps its dressing")
+	truthy(own ~= nil and dressOf(own) ~= nil, "…the player's own (the nearest)")
+	truthy(parentedParts() <= Budget.MaxLocalParts - Budget.MaxHazardParts,
+		"…and the parented parts stay inside the cap (" .. parentedParts() .. " of " .. (Budget.MaxLocalParts - Budget.MaxHazardParts) .. ")")
+	Budget.MaxLocalParts = partsCap
+	bot:waitSeconds(1, "floor")
+	local again = 0
+	for _, rf in roomFolders() do if dressOf(rf) ~= nil then again += 1 end end
+	eq(again, back, "…and with the real cap every room in range is dressed again")
+
 	-- the screen cap: find a kit whose near rooms carry at least two screens, then allow one (in memory).
 	-- A room's screens run all or none, nearest room first.
 	local function screensOn()
@@ -812,6 +925,94 @@ do
 	end
 	for i, b in bands do b.from, b.fade = original[i].from, original[i].fade end
 	bot:waitSeconds(2)
+
+	-- D3. Review 2, finding 3: on a blend sublevel a door leaf between rooms of two bands was painted in its LOWER room's
+	-- band, so from the other room it stood in a wall of another band: 71 % (a servers room, a labs door) or 138 % (the
+	-- reverse) of the contrast the server built, on 21 % of sublevel 4's doors. A leaf is seen from one side at a time,
+	-- set in that side's wall, so it wears the band of the room on the player's side of it. In memory: the labs on this
+	-- floor with the server vault blended in (the shipped pair on sublevel 4), the blend chosen so that as many of the
+	-- entry room's leaves as possible join two bands. Then from inside the entry and from a stud past each leaf's plane
+	-- into the neighbour (every entry door is open; an item stands at least 6 studs from that point), each leaf must wear
+	-- the door colour of the band on the player's side and stand out from that side's wall 90-110 % as much as the
+	-- server built it, in white light and in that room's own light.
+	do
+		where = "cross-band doors"
+		local rooms = bot:rooms()
+		local entryLeaves = {}
+		for _, d in bot:doors() do
+			if (d.lo == entryRoom or d.hi == entryRoom) and rooms[d.lo] and rooms[d.hi] then table.insert(entryLeaves, d) end
+		end
+		local function blend(from)
+			for j, b in bands do
+				if j < 2 then b.from, b.fade = -1000 + j, 0
+				elseif j == 2 then b.from, b.fade = 0, 0
+				elseif j == 3 then b.from, b.fade = from, 1.5
+				else b.from, b.fade = 1000 + j, 0 end
+			end
+		end
+		local bestFrom, bestCross = nil, -1
+		for i = 0, 29 do
+			local f = 1.0 + 0.05 * i
+			blend(f)
+			local n = 0
+			for _, d in entryLeaves do
+				if Dressing.roomBand(Env, EnvBands, 1, d.lo) ~= Dressing.roomBand(Env, EnvBands, 1, d.hi) then n += 1 end
+			end
+			if n > bestCross then bestFrom, bestCross = f, n end
+		end
+		blend(bestFrom)
+		bot:waitSeconds(1)
+		local serverWhite = Y(SERVER_WALL) / Y(SERVER_DOOR)
+		local serverLit = YL(SERVER_WALL, SERVER_LIGHT) / YL(SERVER_DOOR, SERVER_LIGHT)
+		local sides, crossSides, loSide, hiSide, bad = 0, 0, 0, 0, {}
+		local function measure(d, id)
+			local rf = bot:rooms()[id].folder
+			local bi = Dressing.roomBand(Env, EnvBands, 1, id)
+			local pal = bands[bi].palette
+			local wall, door = rgbOf((palette(rf))), rgbOf(d.part.Color)
+			sides += 1
+			local cross = Dressing.roomBand(Env, EnvBands, 1, d.lo) ~= Dressing.roomBand(Env, EnvBands, 1, d.hi)
+			if cross then
+				crossSides += 1
+				if id == d.lo then loSide += 1 else hiSide += 1 end
+			end
+			if not same(d.part.Color, pal.door) then
+				table.insert(bad, string.format("%s seen from Room_%d wears %s, not the %s door", d.name, id, table.concat(door, ","), bands[bi].id))
+			end
+			for _, lt in { { "white", nil }, { "room", pal.light } } do
+				local c = if lt[2] then (YL(wall, lt[2]) / YL(door, lt[2])) / serverLit else (Y(wall) / Y(door)) / serverWhite
+				if c < DOOR_MIN or c > DOOR_MAX then
+					table.insert(bad, string.format("%s seen from Room_%d stands out %.0f %% as much as the server built it (%s light)",
+						d.name, id, 100 * c, lt[1]))
+				end
+			end
+		end
+		local c = bot:rooms()[entryRoom].center
+		for _, d in entryLeaves do
+			local other = if d.lo == entryRoom then d.hi else d.lo
+			bot:walkTo(Vector3.new(c.X, 3, c.Z), "floor")
+			bot:waitSeconds(0.2, "floor")
+			measure(d, entryRoom)
+			-- a stud past the leaf's plane, in the doorway: on the neighbour's side of it
+			local leaf = d.part.Position
+			local oc = bot:rooms()[other].center
+			local dir = Vector3.new(oc.X - c.X, 0, oc.Z - c.Z).Unit
+			bot:walkTo(Vector3.new(leaf.X - dir.X * 3, 3, leaf.Z - dir.Z * 3), "floor")
+			bot:walkTo(Vector3.new(leaf.X + dir.X * 1, 3, leaf.Z + dir.Z * 1), "floor")
+			bot:waitSeconds(0.2, "floor")
+			measure(d, other)
+			bot:walkTo(Vector3.new(leaf.X - dir.X * 3, 3, leaf.Z - dir.Z * 3), "floor")
+		end
+		bot:walkTo(Vector3.new(c.X, 3, c.Z), "floor")
+		print(string.format("    blend from %.2f: %d leaf sides measured, %d of them on a leaf joining two bands (%d from its lower room, %d from its higher)",
+			bestFrom, sides, crossSides, loSide, hiSide))
+		for j = 1, math.min(6, #bad) do print("   " .. bad[j]) end
+		truthy(loSide >= 1 and hiSide >= 1, "control: leaves joining two bands were measured from both sides")
+		eq(#bad, 0, "every leaf wears the door of the band on the player's side and stands out from that side's wall 90-110 % as much as the server built it")
+		eq(bot:state().run.fuses, 0, "control: no fuse was picked up (the front is still held)")
+		for i, b in bands do b.from, b.fade = original[i].from, original[i].fade end
+		bot:waitSeconds(1)
+	end
 	print("    the densest floor, per band (peak while walking every room's centre and corners):")
 	for _, b in bands do
 		local p = densest[b.id]
@@ -904,6 +1105,207 @@ do
 	bot:waitSeconds(2)
 end
 
+--=========================================================================== E2. critters
+section("E2. critters: every band its own, moving only in near lit rooms, within their cap")
+
+do
+	-- docs/complete-game-standard.md §2: every band has its own critters (pass 2; until then none had any). On the densest
+	-- floor D2 built, every band in turn (in memory): which critters the client drew, and which of them move. They move like
+	-- particles: only in a room within EmitterRadius whose light is on, nearest first, at most Budget.MaxCritters at once;
+	-- everything else keeps still. Their every pose obeys every rule (auditRoom in D and D2 audits them where they are).
+	local original = {}
+	for i, b in bands do original[i] = { from = b.from, fade = b.fade } end
+	local function onlyBand(i)
+		for j, b in bands do
+			if j < i then b.from, b.fade = -1000 + j, 0 elseif j == i then b.from, b.fade = 0, 0 else b.from, b.fade = 1000 + j, 0 end
+		end
+	end
+	local function critters()
+		-- { [room folder] = { parts } } for every dressed room of my floor
+		local out = {}
+		for _, rf in roomFolders() do
+			local d = dressOf(rf)
+			if d then
+				for _, p in d:GetDescendants() do
+					if p:IsA("BasePart") and string.sub(p.Name, 1, 7) == "Critter" then
+						out[rf] = out[rf] or {}
+						table.insert(out[rf], p)
+					end
+				end
+			end
+		end
+		return out
+	end
+	-- the largest distance each critter part travelled from where it was, ticking `seconds` of frames
+	local function watch(seconds)
+		local start, most = {}, {}
+		for _, list in critters() do
+			for _, p in list do start[p] = p.Position; most[p] = 0 end
+		end
+		local n = math.floor(seconds / 0.1 + 0.5)
+		for _ = 1, n do
+			bot:tick()
+			for p, s in start do most[p] = math.max(most[p], (p.Position - s).Magnitude) end
+		end
+		return most
+	end
+	local here = bot:rooms()[entryRoom].center
+	local function dist(rf)
+		local o = originOf(rf)
+		return math.sqrt((o.X - here.X) ^ 2 + (o.Z - here.Z) ^ 2)
+	end
+	local function lit(rf)
+		local l = rf.Fixture.RoomLight
+		return l.Enabled == true and l.Brightness >= 0.5 * Config.Facility.RoomLightBrightness
+	end
+	local kinds, kindOf, bandsWith, wrong, nearMoving, farStill = {}, {}, 0, {}, 0, 0
+	local probe = nil -- a band and a near room with a critter, for the light and cap tests below
+	for i, b in bands do
+		onlyBand(i)
+		where = "critters " .. b.id
+		bot:waitSeconds(1)
+		local seen = critters()
+		local names, nRooms = {}, 0
+		for _, list in seen do
+			nRooms += 1
+			for _, p in list do
+				names[p.Name] = true
+				-- drawn at its own size, not its path's (the checked box is the whole path)
+				local s = p.Size
+				if math.max(s.X, s.Y, s.Z) > 1.5 then
+					table.insert(wrong, string.format("%s: %s is drawn %.1f x %.1f x %.1f, not critter-sized", b.id, p.Name, s.X, s.Y, s.Z))
+				end
+			end
+		end
+		local list = {}
+		for nm in names do table.insert(list, nm) end
+		table.sort(list)
+		kindOf[b.id] = table.concat(list, "+")
+		if nRooms > 0 then
+			bandsWith += 1
+			kinds[kindOf[b.id]] = (kinds[kindOf[b.id]] or 0) + 1
+		end
+		-- who moves: near (EmitterRadius) and lit rooms, at most MaxCritters of them; a far or dark room's critter never.
+		-- A critter moves whole: all of its parts or none.
+		local moved = watch(2)
+		local nearLit, nearLitMoving = 0, 0
+		for rf, parts in seen do
+			local should = dist(rf) <= Env.EmitterRadius and lit(rf)
+			local any, all = false, true
+			for _, p in parts do
+				if (moved[p] or 0) > 0.05 then any = true else all = false end
+			end
+			if any and not all then table.insert(wrong, b.id .. ": " .. rf.Name .. "'s critter moved only in part") end
+			if should then
+				nearLit += 1
+				if any then nearLitMoving += 1 end
+			elseif any then
+				table.insert(wrong, string.format("%s: %s's critter moved %.0f studs away, %s", b.id, rf.Name, dist(rf), if lit(rf) then "lit" else "dark"))
+			else
+				farStill += 1
+			end
+		end
+		if nearLitMoving ~= math.min(nearLit, Budget.MaxCritters) then
+			table.insert(wrong, string.format("%s: %d of %d near lit rooms' critters moved (cap %d)", b.id, nearLitMoving, nearLit, Budget.MaxCritters))
+		end
+		nearMoving += nearLitMoving
+		-- the probe for the light and cap tests: the band with the most near lit rooms that have a critter
+		if nearLit > 0 and (probe == nil or nearLit > probe.nearLit) then
+			local best, bestD = nil, math.huge
+			for rf in seen do
+				if dist(rf) <= Env.EmitterRadius and lit(rf) and dist(rf) < bestD then best, bestD = rf, dist(rf) end
+			end
+			probe = { band = i, room = best, nearLit = nearLit }
+		end
+		print(string.format("    %-9s %2d rooms with a critter (%s), %d near and lit, %d moving", b.id, nRooms, kindOf[b.id], nearLit, nearLitMoving))
+	end
+	-- Dressing.spec holds every band's kit to its own critter on 60 real rooms each; the floor D2 reached can be as small
+	-- as 2 rooms (a band then shows none about 1 time in 11), so here: most bands drew theirs, and no two drew the same
+	truthy(bandsWith >= 3, "the client drew critters in most bands on this floor (" .. bandsWith .. " of " .. #bands .. ")")
+	local distinct = 0
+	for _ in kinds do distinct += 1 end
+	eq(distinct, bandsWith, "…each band its own kind (" .. distinct .. " kinds in " .. bandsWith .. " bands)")
+	for j = 1, math.min(6, #wrong) do print("   " .. wrong[j]) end
+	eq(#wrong, 0, "a critter moves exactly when its room is near and lit and within the cap, nearest first")
+	truthy(nearMoving >= 1, "control: near critters moved (" .. nearMoving .. "; " .. farStill .. " far or dark ones kept still)")
+
+	-- far ones keep still, made certain: the floor D2 reached may lie wholly within EmitterRadius, so lower it in memory
+	-- to 1 stud (only the room the player stands in is near) and look for a band with a critter in another room
+	do
+		local tested, farTotal, farMoved = nil, 0, 0
+		local radius = Env.EmitterRadius
+		for i, b in bands do
+			onlyBand(i)
+			bot:waitSeconds(0.5)
+			Env.EmitterRadius = 1
+			local m = watch(2)
+			Env.EmitterRadius = radius
+			for rf, parts in critters() do
+				if dist(rf) > 1 then
+					for _, p in parts do
+						farTotal += 1
+						if (m[p] or 0) > 0.05 then farMoved += 1 end
+					end
+				end
+			end
+			if farTotal > 0 then tested = b.id; break end
+		end
+		truthy(tested ~= nil, "control: a band put a critter in a room other than the player's (" .. tostring(tested) .. ")")
+		eq(farMoved, 0, "with EmitterRadius at 1 stud, no critter outside the player's room moves (" .. farTotal .. " parts)")
+	end
+
+	-- a dark room: its critter keeps still (nothing moves in a dark room), and moves again when the light is back
+	truthy(probe ~= nil, "control: a near lit room with a critter")
+	if probe then
+		onlyBand(probe.band)
+		bot:waitSeconds(0.5)
+		local rf = probe.room
+		local rl = rf.Fixture.RoomLight
+		local function roomMoved(seconds)
+			local m = watch(seconds)
+			local most = 0
+			for _, p in critters()[rf] or {} do most = math.max(most, m[p] or 0) end
+			return most
+		end
+		truthy(roomMoved(2) > 0.05, "control: " .. rf.Name .. "'s critter moves while its light is on")
+		rl.Enabled = false
+		eq(roomMoved(2), 0, "its light off: the critter keeps still")
+		rl.Enabled = true
+		rl.Brightness = Config.Facility.FlickerLowBrightness
+		eq(roomMoved(1), 0, "the flicker's low step: still")
+		rl.Brightness = Config.Facility.RoomLightBrightness
+		truthy(roomMoved(2) > 0.05, "back on: it moves again")
+
+		-- the cap, in memory. At 0 nothing moves; at 1 one room's critter does, a nearest one's (two near rooms with a
+		-- critter make that a choice: the probe band has the most there were)
+		local cap = Budget.MaxCritters
+		Budget.MaxCritters = 0
+		local m0 = watch(2)
+		local moved0 = 0
+		for _, list in critters() do
+			for _, p in list do if (m0[p] or 0) > 0.05 then moved0 += 1 end end
+		end
+		eq(moved0, 0, "with Budget.MaxCritters at 0, no critter moves")
+		Budget.MaxCritters = 1
+		local m = watch(2)
+		local movingRooms, nearestD, movedD = {}, math.huge, nil
+		for r, list in critters() do
+			for _, p in list do
+				if (m[p] or 0) > 0.05 then movingRooms[r] = true; movedD = dist(r) end
+			end
+			if dist(r) <= Env.EmitterRadius and lit(r) then nearestD = math.min(nearestD, dist(r)) end
+		end
+		local nMoving = 0
+		for _ in movingRooms do nMoving += 1 end
+		eq(nMoving, 1, "with Budget.MaxCritters at 1, one room's critter moves (of " .. probe.nearLit .. " near lit rooms with one)")
+		truthy(movedD ~= nil and math.abs(movedD - nearestD) < 0.5,
+			string.format("…a nearest lit one's (%s studs; the nearest with a critter is %.1f)", tostring(movedD), nearestD))
+		Budget.MaxCritters = cap
+	end
+	for i, b in bands do b.from, b.fade = original[i].from, original[i].fade end
+	bot:waitSeconds(1)
+end
+
 --=========================================================================== F. the real sublevels
 section("F. played through the server: sublevels 1 -> 2 -> 3, the real front, the real bands")
 
@@ -927,6 +1329,15 @@ do
 		end
 	end
 	bot.onTick = function() frame(0.1); powerAudit() end
+	-- review 2, finding 2, through the server: the first powering of sublevel 1 raises this profile's record from 0, and
+	-- with the offices marked as the brag IN MEMORY that is the brag's fanfare. Sublevels 2 and 3 raise it too, but 2
+	-- starts no band and the labs (3) are neither the brag nor the last band: no fanfare.
+	local fanfares = {}
+	local wasBrag = bands[1].brag
+	bands[1].brag = true
+	local bannerConn = hudRoot.Banner:GetPropertyChangedSignal("Text"):Connect(function()
+		if string.find(hudRoot.Banner.Text, "NEW RECORD", 1, true) then table.insert(fanfares, hudRoot.Banner.Text) end
+	end)
 
 	local reached, attempts = 1, 0
 	local restMidRun = false
@@ -996,6 +1407,10 @@ do
 		end
 	end
 	eq(reached, 3, "the bot reached sublevel 3 (in " .. attempts .. " attempt(s))")
+	bannerConn:Disconnect()
+	bands[1].brag = wasBrag
+	eq(table.concat(fanfares, " | "), "NEW RECORD — ADMIN OFFICES",
+		"one fanfare in three new records: the brag band's first sublevel, and no other")
 	do
 		local labs = 0
 		for _, rf in roomFolders() do

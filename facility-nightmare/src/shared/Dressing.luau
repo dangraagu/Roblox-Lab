@@ -20,6 +20,10 @@
 --     is near-white; no painted surface is a bright, saturated fuse-amber or cell-green either.
 --   * Particles never reach the item volume. At most one emitter, three screens and MaxPartsPerRoom
 --     parts per room. Materials come from a matte list: no Neon on a dull part, no Glass, no Foil.
+--   * CRITTERS (pass 2: every band has its own) move, so each critter part's box is the envelope of every
+--     place it can be along its path (the bob's rule, generalised), and every rule above holds for that
+--     whole box; critterBox() is where the client draws it at a moment, always inside it. A critter never
+--     glows and never collides; one per room, with MaxCritterParts of its own on top of MaxPartsPerRoom.
 -- Glow is SELF-LIT surfaces (Neon, glowing screens, light-emitting particles), never a light source;
 -- the client switches all of it off in a room whose light is off, and follows the room's flicker.
 --
@@ -181,6 +185,26 @@ function Dressing.roomBand(env: any, EnvBands: any, k: number, roomId: number): 
 	return i
 end
 
+-- Which of a door leaf's two rooms is on the viewer's side of it (review 2, finding 3)? A leaf is one thin slab in
+-- the doorway between two rooms, seen from one side at a time and set in THAT side's wall, so on a blend sublevel,
+-- where its rooms can be of two bands, it wears the band of the room on the viewer's side (painting it in its lower
+-- room's band gave a server-vault room a labs door at 71 % of the designed contrast, and the reverse 138 %).
+-- leaf = { x, z, sx, sz } (its thin axis is the doorway's normal); loC / hiC = { x, z } of each room's centre, nil for
+-- a room not built yet (it is the other's mirror image through the leaf); viewer = { x, z }. Returns lo or hi, or nil
+-- within `eps` of the leaf's plane (a doorway's middle: the caller keeps what the leaf wore) or with no centre known.
+function Dressing.leafSide(leaf: any, lo: number, hi: number, loC: any, hiC: any, viewer: any, eps: number?): number?
+	local alongX = leaf.sx < leaf.sz
+	local function across(p: any): number
+		return if alongX then p.x - leaf.x else p.z - leaf.z
+	end
+	local loAcross = if loC then across(loC) elseif hiC then -across(hiC) else 0
+	local me = across(viewer)
+	if loAcross == 0 or math.abs(me) < (eps or 0.05) then
+		return nil
+	end
+	return if (me > 0) == (loAcross > 0) then lo else hi
+end
+
 --============================================================================ geometry
 
 local WALLS = { "+x", "-x", "+z", "-z" }
@@ -300,6 +324,11 @@ function Dressing.partOk(env: any, fac: any, p: any, props: { any }): (boolean, 
 			return false, p.name .. "'s screen glows like a fuse or a cell"
 		end
 	end
+	if p.critter ~= nil then
+		-- glow means power in this game (it follows the room's light), and a critter is never furniture to walk into
+		if p.emissive then return false, p.name .. ": a critter never glows" end
+		if p.solid then return false, p.name .. ": a critter never collides" end
+	end
 	if p.emitter then
 		local e = p.emitter
 		if e.rate > env.MaxRoomEmitterRate + EPS then return false, p.name .. ": emitter rate above MaxRoomEmitterRate" end
@@ -317,7 +346,23 @@ end
 
 -- A whole room: every part, the counts, and no two pieces through each other. (ok, why)
 function Dressing.check(env: any, fac: any, parts: { any }, props: { any }): (boolean, string?)
-	if #parts > env.MaxPartsPerRoom then return false, #parts .. " parts (max " .. env.MaxPartsPerRoom .. ")" end
+	local furniture, critterParts, critterPieces = 0, 0, {}
+	local nCritters = 0
+	for _, p in parts do
+		if p.critter ~= nil then
+			critterParts += 1
+			local id = p.pieceId or p.piece
+			if not critterPieces[id] then
+				critterPieces[id] = true
+				nCritters += 1
+			end
+		else
+			furniture += 1
+		end
+	end
+	if furniture > env.MaxPartsPerRoom then return false, furniture .. " parts (max " .. env.MaxPartsPerRoom .. ")" end
+	if critterParts > (env.MaxCritterParts or 0) then return false, critterParts .. " critter parts (max " .. tostring(env.MaxCritterParts) .. ")" end
+	if nCritters > (env.MaxCrittersPerRoom or 0) then return false, nCritters .. " critters (max " .. tostring(env.MaxCrittersPerRoom) .. ")" end
 	local emitters, screens = 0, 0
 	for i, p in parts do
 		local ok, why = Dressing.partOk(env, fac, p, props)
@@ -401,7 +446,23 @@ Dressing.KITS = {
 			} },
 		},
 		runs = {},
-		hangers = {},
+		-- the offices' weather (pass 2): dust drifting in the fluorescent light, high in the room, lit by it
+		hangers = {
+			{ chance = 0.6, piece = { name = "dust", parts = {
+				{ n = "DustHost", a = 0, o = 4.5, w = 0.6, d = 0.6, y = 10.4, h = 0.3, color = c3(176, 172, 160), mat = "SmoothPlastic", hidden = true,
+					emitter = { rate = 3, life = { 6, 8 }, speed = { 0.1, 0.3 }, spread = 40, dir = "up", accel = { 0, -0.06, 0 }, size = 0.14,
+						color = c3(186, 182, 170), lightEmission = 0 } },
+			} } },
+		},
+		-- Critters (pass 2). Template parts are at the START of the path (a, o, y as for any piece; `a` from the wall slot);
+		-- `motion` = { kind, speed, along, up, out } (travel in studs). A scurrier faces the way it runs: its parts are
+		-- mirrored about its middle when it runs back, so its tail is behind it.
+		critters = {
+			{ chance = 0.7, piece = { name = "roach", motion = { kind = "scurry", speed = 0.9, along = 3.4, up = 0, out = 0 }, parts = {
+				{ n = "CritterRoach", a = -1.7, o = 0.3, w = 0.55, d = 0.32, y = 0.06, h = 0.2, color = c3(62, 40, 26), mat = "SmoothPlastic" },
+				{ n = "CritterRoachHead", a = -1.355, o = 0.36, w = 0.14, d = 0.2, y = 0.08, h = 0.15, color = c3(40, 28, 22), mat = "SmoothPlastic" },
+			} } },
+		},
 	},
 
 	labs = {
@@ -449,6 +510,12 @@ Dressing.KITS = {
 			} } },
 		},
 		hangers = {},
+		critters = { -- an escaped lab mouse along the foot of a wall
+			{ chance = 0.7, piece = { name = "mouse", motion = { kind = "scurry", speed = 1.1, along = 3.4, up = 0, out = 0 }, parts = {
+				{ n = "CritterMouse", a = -1.6, o = 0.35, w = 0.6, d = 0.34, y = 0, h = 0.32, color = c3(172, 170, 166), mat = "SmoothPlastic" },
+				{ n = "CritterMouseTail", a = -2.15, o = 0.48, w = 0.5, d = 0.08, y = 0.04, h = 0.24, color = c3(168, 122, 122), mat = "SmoothPlastic" },
+			} } },
+		},
 	},
 
 	servers = {
@@ -493,6 +560,12 @@ Dressing.KITS = {
 				{ n = "DroopCable", shape = "Cylinder", axis = "up", a = 0, o = 4.5, w = 0.25, d = 0.25, y = 8, h = 6, color = c3(22, 22, 24), mat = "SmoothPlastic" },
 			} } },
 		},
+		critters = { -- a moth fluttering under the cable trays (there is no light here to circle; it circles anyway)
+			{ chance = 0.7, piece = { name = "moth", motion = { kind = "flutter", speed = 0.9, along = 2.6, up = 2.2, out = 2.2 }, parts = {
+				{ n = "CritterMoth", a = -1.3, o = 3.2, w = 0.36, d = 0.14, y = 8.2, h = 0.12, color = c3(110, 104, 92), mat = "SmoothPlastic" },
+				{ n = "CritterMothWings", a = -1.3, o = 2.95, w = 0.3, d = 0.64, y = 8.26, h = 0.04, color = c3(150, 142, 124), mat = "Fabric" },
+			} } },
+		},
 	},
 
 	flooded = {
@@ -529,6 +602,12 @@ Dressing.KITS = {
 			} } },
 		},
 		hangers = {},
+		critters = { -- a rat along the water's edge
+			{ chance = 0.7, piece = { name = "rat", motion = { kind = "scurry", speed = 0.8, along = 3.3, up = 0, out = 0 }, parts = {
+				{ n = "CritterRat", a = -1.3, o = 0.3, w = 0.8, d = 0.42, y = 0.05, h = 0.36, color = c3(74, 68, 64), mat = "SmoothPlastic" },
+				{ n = "CritterRatTail", a = -2.05, o = 0.47, w = 0.7, d = 0.08, y = 0.1, h = 0.18, color = c3(150, 112, 112), mat = "SmoothPlastic" },
+			} } },
+		},
 	},
 
 	reactor = {
@@ -570,6 +649,12 @@ Dressing.KITS = {
 			} } },
 		},
 		hangers = {},
+		critters = { -- a bat roosting in the warmth, out under the coolant ducts
+			{ chance = 0.7, piece = { name = "bat", motion = { kind = "flutter", speed = 1.4, along = 3.0, up = 1.8, out = 1.6 }, parts = {
+				{ n = "CritterBat", a = -1.5, o = 3.4, w = 0.34, d = 0.3, y = 8.6, h = 0.3, color = c3(36, 34, 40), mat = "SmoothPlastic" },
+				{ n = "CritterBatWings", a = -1.5, o = 2.9, w = 0.36, d = 1.3, y = 8.75, h = 0.05, color = c3(30, 28, 34), mat = "Fabric" },
+			} } },
+		},
 	},
 
 	biolab = {
@@ -622,6 +707,12 @@ Dressing.KITS = {
 						color = c3(120, 230, 220), lightEmission = 0.6 } },
 			} } },
 		},
+		critters = { -- a beetle crawling high on the wall, above the doorways
+			{ chance = 0.7, piece = { name = "beetle", motion = { kind = "crawl", speed = 0.5, along = 3.0, up = 1.6, out = 0 }, parts = {
+				{ n = "CritterBeetle", shape = "Ball", a = -1.5, o = 0, w = 0.5, d = 0.5, y = 9.7, h = 0.5, color = c3(34, 58, 70), mat = "SmoothPlastic" },
+				{ n = "CritterBeetleHead", a = -1.5, o = 0.05, w = 0.24, d = 0.24, y = 10.2, h = 0.2, color = c3(24, 30, 34), mat = "SmoothPlastic" },
+			} } },
+		},
 	},
 
 	void = {
@@ -657,6 +748,14 @@ Dressing.KITS = {
 				{ n = "DebrisC", a = 0, o = 3.4, w = 1.6, d = 0.6, y = 12.0, h = 0.9, color = c3(28, 24, 36), mat = "Slate", anim = "bob" },
 			} } },
 		},
+		critters = { -- something pale and half there, drifting overhead
+			{ chance = 0.7, piece = { name = "drifter", motion = { kind = "drift", speed = 0.6, along = 2.4, up = 1.6, out = 1.6 }, parts = {
+				{ n = "CritterDrifter", shape = "Ball", a = -1.2, o = 3.4, w = 0.9, d = 0.9, y = 8.6, h = 0.9, color = c3(150, 140, 176),
+					mat = "SmoothPlastic", alpha = 0.45 },
+				{ n = "CritterDrifterTendrils", a = -1.2, o = 3.7, w = 0.3, d = 0.3, y = 7.8, h = 0.8, color = c3(136, 126, 164),
+					mat = "SmoothPlastic", alpha = 0.5 },
+			} } },
+		},
 	},
 }
 
@@ -671,11 +770,86 @@ end
 -- resting place, so the checked box is exactly where it can be).
 Dressing.BOB_STUDS = 0.4
 
--- One template part -> a room part. `lift` raises it (a monitor on a desk).
-local function expand(env: any, inner: number, tmpl: any, wall: string, along: number, lift: number, pieceName: string, pieceId: number): any
+--============================================================================ critters (pass 2)
+
+-- scurry: runs along the foot of a wall, stops, runs back (facing the way it runs), stops; crawl: wanders on a wall
+-- face; flutter: loops in the air; drift: a slow float. All four are pure functions of time.
+Dressing.CRITTER_MOTIONS = { scurry = true, crawl = true, flutter = true, drift = true }
+
+local function smooth(x: number): number
+	return x * x * (3 - 2 * x)
+end
+
+-- Where a critter is `t` seconds in, as fractions 0..1 of its travel along the wall, up and out into the room, and
+-- whether it faces back along the wall (its parts mirrored about its middle). `phase` staggers critters.
+function Dressing.critterPose(m: any, t: number, phase: number): (number, number, number, boolean)
+	local w = m.speed or 1
+	local kind = m.kind
+	if kind == "scurry" then
+		local s = (t * w + phase) % 4
+		if s < 1 then return smooth(s), 0, 0, false end
+		if s < 2 then return 1, 0, 0, false end -- stops at the far end
+		if s < 3 then return 1 - smooth(s - 2), 0, 0, true end -- turns round and runs back
+		return 0, 0, 0, true -- stops, then turns round again
+	elseif kind == "crawl" then
+		return 0.5 + 0.5 * math.sin(w * t + phase), 0.5 + 0.5 * math.sin(0.71 * w * t + 2 * phase), 0, false
+	elseif kind == "flutter" then
+		return 0.5 + 0.5 * math.sin(w * t + phase), 0.5 + 0.5 * math.sin(2.3 * w * t + 1.7 * phase),
+			0.5 + 0.5 * math.sin(0.61 * w * t + 2.3 * phase), false
+	end
+	-- drift
+	return 0.5 + 0.5 * math.sin(0.37 * w * t + phase), 0.5 + 0.5 * math.sin(w * t + 2 * phase),
+		0.5 + 0.5 * math.sin(0.23 * w * t + 3 * phase), false
+end
+
+-- The room box a critter part is drawn at `t` seconds in: its resting box moved along its path, mirrored about the
+-- critter's middle while it faces back. Always inside the part's checked box (Dressing.spec: every kit, real rooms).
+function Dressing.critterBox(p: any, t: number, phase: number): any
+	local fa, fu, fo, flipped = Dressing.critterPose(p.critter, t, phase)
+	local mv = p.mv
+	local mn, mx = table.clone(p.rest.min), table.clone(p.rest.max)
+	local da, du, dout = fa * mv.along, fu * mv.up, fo * mv.out * mv.os
+	mn[mv.ax] += da
+	mx[mv.ax] += da
+	mn[2] += du
+	mx[2] += du
+	mn[mv.ox] += dout
+	mx[mv.ox] += dout
+	if flipped then
+		local m = mv.mirror + da
+		local lo, hi = mn[mv.ax], mx[mv.ax]
+		mn[mv.ax], mx[mv.ax] = 2 * m - hi, 2 * m - lo
+	end
+	return { min = mn, max = mx }
+end
+
+-- One template part -> a room part. `lift` raises it (a monitor on a desk). `crit` (a critter's part): { motion, mid },
+-- `mid` the critter's middle along the wall at rest, in the template's frame.
+local function expand(env: any, inner: number, tmpl: any, wall: string, along: number, lift: number, pieceName: string, pieceId: number, crit: any?): any
 	local mn, mx
+	local rest, mv = nil, nil
 	if tmpl.min then -- room-frame film
 		mn, mx = table.clone(tmpl.min), table.clone(tmpl.max)
+	elseif crit then
+		-- the envelope: the part and its mirror image about the critter's middle (a scurrier turns round), swept over
+		-- the whole travel along, up and out (out: away from the wall, into the room)
+		local m = crit.motion
+		local lo, hi = tmpl.a - tmpl.w / 2, tmpl.a + tmpl.w / 2
+		if m.kind == "scurry" then
+			lo, hi = math.min(lo, 2 * crit.mid - hi), math.max(hi, 2 * crit.mid - lo)
+		end
+		hi += m.along
+		mn, mx = toRoom(inner, wall, along + (lo + hi) / 2, tmpl.o, hi - lo, tmpl.d + m.out, tmpl.y + lift, tmpl.h + m.up)
+		local rmn, rmx = toRoom(inner, wall, along + tmpl.a, tmpl.o, tmpl.w, tmpl.d, tmpl.y + lift, tmpl.h)
+		rest = { min = rmn, max = rmx }
+		local xWall = wall == "+x" or wall == "-x"
+		mv = {
+			ax = if xWall then 3 else 1, -- the room axis along the wall (toRoom: +along is + on it for every wall)
+			ox = if xWall then 1 else 3, -- the room axis out of the wall
+			os = if wall == "+x" or wall == "+z" then -1 else 1, -- out of the wall, into the room
+			along = m.along, up = m.up, out = m.out,
+			mirror = along + crit.mid, -- the critter's middle at rest, room coordinate on `ax`
+		}
 	else
 		mn, mx = toRoom(inner, wall, along + tmpl.a, tmpl.o, tmpl.w, tmpl.d, tmpl.y + lift, tmpl.h)
 	end
@@ -701,11 +875,14 @@ local function expand(env: any, inner: number, tmpl: any, wall: string, along: n
 		wall = if tmpl.min then nil else wall,
 		class = nil :: string?,
 		solid = false,
+		critter = if crit then crit.motion else nil,
+		rest = rest,
+		mv = mv,
 	}
 	p.class = classOf(env, inner, mn, mx)
 	-- Floor-standing wall furniture collides for THIS client only (you cannot walk through a filing
-	-- cabinet); overhead pieces, films, hidden hosts and anything see-through do not.
-	p.solid = p.class == "wall" and mn[2] < 0.5 and not p.hidden and (tmpl.alpha or 0) < 0.3
+	-- cabinet); overhead pieces, films, hidden hosts and anything see-through do not, and nor does a critter.
+	p.solid = p.class == "wall" and mn[2] < 0.5 and not p.hidden and (tmpl.alpha or 0) < 0.3 and crit == nil
 	return p
 end
 
@@ -742,18 +919,32 @@ function Dressing.build(env: any, fac: any, kitName: string, roomId: number, k: 
 	local out = {}
 	local nextId = 0
 	local screens, emitters = 0, 0
+	local furniture, critterParts, critters = 0, 0, 0
 
 	local function tryPiece(piece: any, wall: string, along: number, lift: number): boolean
 		nextId += 1
 		local parts = {}
 		local s, e = 0, 0
+		local crit = nil
+		if piece.motion then
+			-- a critter: its middle along the wall at rest, for the mirror when it runs back
+			local lo, hi = math.huge, -math.huge
+			for _, t in piece.parts do
+				lo, hi = math.min(lo, t.a - t.w / 2), math.max(hi, t.a + t.w / 2)
+			end
+			crit = { motion = piece.motion, mid = (lo + hi) / 2 }
+		end
 		for _, t in piece.parts do
-			local p = expand(env, inner, t, wall, along, lift, piece.name, nextId)
+			local p = expand(env, inner, t, wall, along, lift, piece.name, nextId, crit)
 			if p.screen then s += 1 end
 			if p.emitter then e += 1 end
 			table.insert(parts, p)
 		end
-		if #out + #parts > env.MaxPartsPerRoom then return false end
+		if crit then
+			if critterParts + #parts > (env.MaxCritterParts or 0) or critters + 1 > (env.MaxCrittersPerRoom or 0) then return false end
+		elseif furniture + #parts > env.MaxPartsPerRoom then
+			return false
+		end
 		if screens + s > env.MaxScreensPerRoom or emitters + e > 1 then return false end
 		for _, p in parts do
 			if not Dressing.partOk(env, fac, p, props) then return false end
@@ -764,6 +955,12 @@ function Dressing.build(env: any, fac: any, kitName: string, roomId: number, k: 
 		for _, p in parts do table.insert(out, p) end
 		screens += s
 		emitters += e
+		if crit then
+			critterParts += #parts
+			critters += 1
+		else
+			furniture += #parts
+		end
 		return true
 	end
 
@@ -827,6 +1024,17 @@ function Dressing.build(env: any, fac: any, kitName: string, roomId: number, k: 
 		if rand() < hg.chance then
 			local slot = slots[1 + math.floor(rand() * #slots)]
 			tryPiece(hg.piece, slot.wall, slot.along, 0)
+		end
+	end
+	-- 6. critters (pass 2), LAST: every draw above is unchanged, so the rest of the room is dressed exactly as without
+	-- them. A rolled critter takes the first wall slot, from a random start, where its whole path fits.
+	for _, cr in kit.critters or {} do
+		if rand() < cr.chance then
+			local first = math.floor(rand() * #slots)
+			for n = 0, #slots - 1 do
+				local slot = slots[1 + (first + n) % #slots]
+				if tryPiece(cr.piece, slot.wall, slot.along, 0) then break end
+			end
 		end
 	end
 	return out

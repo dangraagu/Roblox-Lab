@@ -81,6 +81,8 @@ function Economy.newProfile(cfg: any): any
 		essenceEarned = 0,
 		perks = perks,
 		bestSublevel = 0,
+		bestAt = 0, -- unix second the record was set: the TOP DIVERS board's tiebreak (earliest first)
+		boardBest = 0, -- the record last written to the board (it is written only when it improves)
 		runs = 0,
 		extractions = 0,
 		openRun = nil,
@@ -100,7 +102,7 @@ function Economy.sanitize(cfg: any, raw: any): any
 	if type(raw) ~= "table" then
 		return p
 	end
-	for _, field in { "essence", "essenceEarned", "bestSublevel", "runs", "extractions" } do
+	for _, field in { "essence", "essenceEarned", "bestSublevel", "bestAt", "boardBest", "runs", "extractions" } do
 		local v = count(raw[field])
 		if v ~= nil then p[field] = v end
 	end
@@ -149,7 +151,8 @@ function Economy.beginRun(p: any, id: string, keepPercent: number)
 end
 
 -- An elevator powered on sublevel k: pay into the run, write the checkpoint fields, raise the best.
-function Economy.power(cfg: any, p: any, k: number): number
+-- `now` (unix seconds) stamps a NEW record's reach time, the board's tiebreak; the same depth again keeps the first.
+function Economy.power(cfg: any, p: any, k: number, now: number?): number
 	local r = p.openRun
 	if r == nil then return 0 end
 	local pay = Economy.floorPay(cfg, k)
@@ -157,8 +160,19 @@ function Economy.power(cfg: any, p: any, k: number): number
 	r.sublevel = k
 	if k > p.bestSublevel then
 		p.bestSublevel = k
+		p.bestAt = math.max(0, math.floor(tonumber(now) or 0))
 	end
 	return pay
+end
+
+-- A record saved before the board existed has no reach time. It is stamped once, with the session it came back in
+-- (it then ranks behind everyone who reached the same depth before). Returns whether it stamped.
+function Economy.stampBest(p: any, now: number): boolean
+	if p.bestSublevel > 0 and p.bestAt <= 0 then
+		p.bestAt = math.max(0, math.floor(now))
+		return true
+	end
+	return false
 end
 
 -- Pay the open run and close it. Idempotent: with no open run it pays 0 and changes nothing.

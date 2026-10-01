@@ -14,7 +14,11 @@
 --     a ride every built room (the car is closed on all four sides, so the entry room must be ready on arrival), is
 --     dressed, its dressing parented, its walls and its light wearing the palette of the band Dressing.roomBand
 --     gives it;
---   * every door leaf of such a room wears the door colour of its band.
+--   * every door leaf of such a room wears the door colour of the band of the room ON THE PLAYER'S SIDE of it (review 2,
+--     finding 3: a leaf between rooms of two bands is seen from one side at a time, set in that side's wall; it used to
+--     wear its lower room's band from both sides). Re-derived here from the leaf's own geometry: its thin axis is the
+--     doorway's normal, and a neighbour not built yet is the built room's mirror image through the leaf. Standing on
+--     the plane itself (a doorway's middle), either band will do.
 -- It opens doors in the void (the band furthest from the server's colours, in memory), walks on through fuse-free
 -- rooms, then plays sublevel 1 for real and rides down to sublevel 2.
 
@@ -68,7 +72,7 @@ end
 local bot
 local auditOn = true
 local frames = 0
-local stats = { roomsSeen = 0, roomFrames = 0, rideFrames = 0, leafFrames = 0, violations = 0, worst = 0 }
+local stats = { roomsSeen = 0, roomFrames = 0, rideFrames = 0, leafFrames = 0, crossFrames = 0, violations = 0, worst = 0 }
 local firstSeen = {} -- room folder -> frame it was first seen
 local stale = {} -- room folder -> consecutive frames it has been in view and not ready
 local examples = {}
@@ -118,8 +122,28 @@ local function audit()
 					lo, hi = tonumber(lo), tonumber(hi)
 					if lo and (lo == id or hi == id) and leaf:IsA("BasePart") then
 						stats.leafFrames += 1
-						local want = bands[Dressing.roomBand(Env, EnvBands, k, lo)].palette.door
-						if not same(leaf.Color, want) then problem = (problem or "") .. " door " .. leaf.Name .. " in " .. tostring(leaf.Color) end
+						local lp = leaf.Position
+						local alongX = leaf.Size.X < leaf.Size.Z
+						local function across(p) return if alongX then p.X - lp.X else p.Z - lp.Z end
+						local loRoom, hiRoom = rooms:FindFirstChild("Room_" .. lo), rooms:FindFirstChild("Room_" .. hi)
+						local loAcross = if loRoom and loRoom:FindFirstChild("Floor") then across(loRoom.Floor.Position)
+							elseif hiRoom and hiRoom:FindFirstChild("Floor") then -across(hiRoom.Floor.Position) else 0
+						local me = across(root)
+						local wants = {}
+						if math.abs(me) < 0.05 then
+							wants = { lo, hi }
+						else
+							wants = { if (me > 0) == (loAcross > 0) then lo else hi }
+						end
+						if loAcross ~= 0 and (math.abs(me) >= 0.05) then
+							local lb, hb = Dressing.roomBand(Env, EnvBands, k, lo), Dressing.roomBand(Env, EnvBands, k, hi)
+							if lb ~= hb then stats.crossFrames += 1 end
+						end
+						local ok = false
+						for _, wid in wants do
+							if same(leaf.Color, bands[Dressing.roomBand(Env, EnvBands, k, wid)].palette.door) then ok = true end
+						end
+						if not ok then problem = (problem or "") .. " door " .. leaf.Name .. " in " .. tostring(leaf.Color) end
 					end
 				end
 				if problem then
@@ -251,8 +275,8 @@ truthy(stats.rideFrames > rideBefore, "control: the audit saw the second ride ("
 truthy(stats.roomsSeen >= 6, "control: at least six rooms appeared while the audit watched, over two sublevels (" .. stats.roomsSeen .. ")")
 
 --=========================================================================== summary
-print(string.format("    %d frames at 60 Hz, %d rooms seen, %d room-frames and %d door-frames audited (%d during rides)",
-	frames, stats.roomsSeen, stats.roomFrames, stats.leafFrames, stats.rideFrames))
+print(string.format("    %d frames at 60 Hz, %d rooms seen, %d room-frames and %d door-frames audited (%d during rides; %d door-frames of a leaf joining two bands)",
+	frames, stats.roomsSeen, stats.roomFrames, stats.leafFrames, stats.rideFrames, stats.crossFrames))
 for _, e in examples do print("   " .. e) end
 print(string.format("    the worst room was in view and not ready for %d frame(s)", stats.worst))
 eq(stats.violations, 0, "no room was ever in view in the server's colours or undressed, not for a single frame")

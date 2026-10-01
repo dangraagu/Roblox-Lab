@@ -177,6 +177,10 @@ end
 -- Build one dressing part at room origin `o` (the floor top at the room's centre, world space).
 local function buildPart(spec: any, o: Vector3, parent: Instance): (BasePart, CFrame)
 	local mn, mx = spec.min, spec.max
+	if spec.critter and spec.rest then
+		-- a critter is built at the start of its path; its checked box (min/max) is its whole path (Dressing.critterBox)
+		mn, mx = spec.rest.min, spec.rest.max
+	end
 	local size = Vector3.new(mx[1] - mn[1], mx[2] - mn[2], mx[3] - mn[3])
 	if spec.anim == "bob" then
 		size = Vector3.new(size.X, size.Y - 0.4, size.Z) -- the bob's travel is the top of the checked box
@@ -254,8 +258,9 @@ function EnvArt:dressRoom(roomFolder: Instance, parts: { any }, band: any, key: 
 	local rec = {
 		key = key, band = band, folder = roomFolder, origin = o, model = model,
 		glows = {}, screens = {}, emitters = {}, anims = {}, parts = {}, powered = nil, near = nil,
-		lightRef = nil,
+		lightRef = nil, critters = {}, critterCount = 0,
 	}
+	local critterPhase = {} -- one phase per critter, shared by its parts
 	for _, spec in parts do
 		local p, cf = buildPart(spec, o, model)
 		table.insert(rec.parts, p)
@@ -273,6 +278,14 @@ function EnvArt:dressRoom(roomFolder: Instance, parts: { any }, band: any, key: 
 		end
 		if spec.anim then
 			table.insert(rec.anims, { part = p, kind = spec.anim, base = cf, phase = self.rng:NextNumber() * math.pi * 2, spec = spec })
+		end
+		if spec.critter then
+			local id = spec.pieceId or 0
+			if critterPhase[id] == nil then
+				critterPhase[id] = self.rng:NextNumber() * 4
+				rec.critterCount += 1
+			end
+			table.insert(rec.critters, { part = p, spec = spec, phase = critterPhase[id] })
 		end
 	end
 	self:recolour(roomFolder, band.palette)
@@ -335,7 +348,9 @@ end
 
 -- Per frame: power-follow, screens near and powered, animations near. `emitterOn` says whether this room's
 -- emitter may run this frame: the client gives it only to near, POWERED rooms, nearest first, within the cap.
-function EnvArt:updateRoom(rec: any, t: number, powered: boolean, near: boolean, emitterOn: boolean, screensOn: boolean)
+-- `crittersOn` is the same decision for its critter (Budget.MaxCritters): otherwise it keeps still where it is.
+function EnvArt:updateRoom(rec: any, t: number, powered: boolean, near: boolean, emitterOn: boolean, screensOn: boolean,
+	crittersOn: boolean?)
 	if not rec.parented then return end
 	if rec.powered ~= powered then
 		rec.powered = powered
@@ -355,6 +370,13 @@ function EnvArt:updateRoom(rec: any, t: number, powered: boolean, near: boolean,
 		if e.pe.Enabled ~= on then e.pe.Enabled = on end
 	end
 	rec.near = near
+	if crittersOn then
+		local o = rec.origin
+		for _, c in rec.critters do
+			local b = self.D.critterBox(c.spec, t, c.phase)
+			c.part.CFrame = CFrame.new(o + Vector3.new((b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2, (b.min[3] + b.max[3]) / 2))
+		end
+	end
 	if not near then return end
 	-- animations only where they can be seen
 	for _, a in rec.anims do

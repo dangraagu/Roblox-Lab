@@ -9,7 +9,8 @@
 -- BETWEEN runs, in the break room, where there is no front, no hazard, no penalty and nothing to lose:
 --   * `Phases` lists where rest may happen; validate() refuses a list naming any phase of a run
 --     ("ride", "floor", "dying") and anything it does not know (a typo must not open a hole);
---   * you rest by sitting on a break-room bench (at once) or by standing still there IdleSeconds;
+--   * you rest by sitting on a break-room bench (at once), by pressing the HUD's REST button there (at once:
+--     press(), "trykke på pause"), or by standing still there IdleSeconds;
 --   * standing up, moving, stepping into the elevator car or the run starting ends it;
 --   * Rest.PAUSES_RUN_CLOCK is false: nothing here has, or will get, a hook into the run.
 -- update() takes ctx = { phase: string?, seated: boolean, moving: boolean, boarding: boolean }.
@@ -74,6 +75,29 @@ local function stop(s: any)
 	s.resting = false
 	s.source = nil
 	s.idle = 0
+end
+
+-- The REST button: press pause ("man skal kunne trykke på pause", docs/complete-game-standard.md §2). The same rest,
+-- started by a press: at once where rest is allowed (the break room, not in the car, standing still), and a press
+-- while resting gets up. Moving ends it as it ends an idle rest (update, below). Anywhere else it is refused WITH a
+-- reason the HUD shows, never silently. ctx = { phase, moving, boarding }.
+-- -> "started" | "woke" | "refused", reason?
+function Rest.press(s: any, cfg: any, ctx: any): (string, string?)
+	if s.resting then
+		stop(s)
+		return "woke", nil
+	end
+	if not Rest.allowed(cfg, ctx.phase) then
+		return "refused", "You can rest in the break room, between runs."
+	end
+	if ctx.boarding then
+		return "refused", "Step out of the elevator to rest."
+	end
+	if ctx.moving then
+		return "refused", "Stand still to rest, or sit on a bench."
+	end
+	start(s, "button")
+	return "started", nil
 end
 
 -- nil | "started" | "woke"

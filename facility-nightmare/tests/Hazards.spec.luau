@@ -47,6 +47,9 @@ local cfg = {
 	PadKeepOut = 5.5,
 	FixtureKeepOut = 2.5,
 	ArrivalGraceSeconds = 6,
+	KnockMin = 16,
+	KnockMax = 24,
+	LiftMax = 3,
 	Kinds = {
 		leak = { telegraph = 3.0, burst = 0.5, hitRadius = 2.0, knock = 20, lift = 0 },
 		arc = { telegraph = 2.8, burst = 0.4, hitRadius = 1.8, knock = 24, lift = 2 },
@@ -76,6 +79,18 @@ eq((without(function(c) c.Kinds.leak.hitRadius = 4.6 end)), false,
 	"a zone that reaches SpotMinWallDistance is rejected: it could reach a wall and the doorway in it")
 eq((without(function(c) c.Kinds.leak.knock = Hazards.MAX_KNOCK + 1 end)), false, "a knock above MAX_KNOCK is rejected")
 eq((without(function(c) c.Kinds.leak.lift = Hazards.MAX_LIFT + 1 end)), false, "a lift above MAX_LIFT is rejected")
+-- Review 2 (U1): the promise is a shove of KnockMin..KnockMax studs/s and at most LiftMax up (EYECANDY.md §3: 16-24, at
+-- most 3). The module's own MAX_KNOCK / MAX_LIFT (30 / 4) are the absolute ceiling; the config's bounds are what a kind
+-- is held to, so a retune that shoves harder than the game promises switches hazards off instead of shipping.
+eq((without(function(c) c.Kinds.arc.knock = 25 end)), false, "a knock above the config's KnockMax is rejected (25 > 24)")
+eq((without(function(c) c.Kinds.leak.knock = 15 end)), false, "…and below its KnockMin (15 < 16): a hit must be felt")
+eq((without(function(c) c.Kinds.arc.lift = 3.5 end)), false, "a lift above the config's LiftMax is rejected (3.5 > 3)")
+truthy((without(function(c) c.Kinds.arc.knock = 24; c.Kinds.arc.lift = 3 end)), "the bounds themselves are allowed (24 and 3)")
+eq((without(function(c) c.KnockMax = Hazards.MAX_KNOCK + 1 end)), false, "a KnockMax above the module's MAX_KNOCK is rejected")
+eq((without(function(c) c.LiftMax = Hazards.MAX_LIFT + 1 end)), false, "a LiftMax above the module's MAX_LIFT is rejected")
+eq((without(function(c) c.KnockMin = 25 end)), false, "a KnockMin above KnockMax is rejected")
+eq((without(function(c) c.KnockMin = nil end)), false, "no KnockMin is rejected")
+eq((without(function(c) c.LiftMax = nil end)), false, "no LiftMax is rejected")
 eq((without(function(c) c.Kinds.leak.burst = 0 end)), false, "a burst of 0 s is rejected (it could never hit, or never end)")
 eq((without(function(c) c.Kinds.leak.hitRadius = 0 end)), false, "a hitRadius of 0 is rejected")
 eq((without(function(c) c.Kinds = nil end)), false, "no Kinds is rejected")
@@ -321,6 +336,35 @@ do
 	local c = Hazards.step(s, cfg, 0.1, dying, rand)
 	eq(c and c.type, "cancel", "its room starts to flicker: the hazard is called off (the dark's warning outranks it)")
 	eq(s.active, nil, "…and nothing is active")
+end
+
+--================================================================ the powered lift: where the player decides
+-- Review 2, finding 1: the server says atLift for the WHOLE powered exit room, and the EXTRACT / DESCEND modal shows
+-- there. ctx.callOff = the player stands where no hazard may be: a live one is called off at once and none starts,
+-- however long one has been due. The clock still runs (a lit room of a hazard band), exactly as on the car's pad:
+-- a hazard that falls due there waits and comes on the next legal spot (after the next arrival's grace).
+do
+	local rand = lcg(11)
+	local s = Hazards.newScheduler(cfg, rand)
+	s.nextAt = 0
+	local e = Hazards.step(s, cfg, 0.1, LIVE, rand)
+	eq(e and e.type, "spawn", "control: due on a legal spot, one starts")
+	local lift = { eligible = true, kinds = { "leak" }, spot = SPOT, room = 1, activeRoomLit = true, callOff = true }
+	local c = Hazards.step(s, cfg, 0.1, lift, rand)
+	eq(c and c.type, "cancel", "the player reaches the powered lift: the live hazard is called off")
+	eq(s.active, nil, "…and nothing is active")
+	s.nextAt = s.clock -- due again
+	local clock0 = s.clock
+	local started = 0
+	for _ = 1, 3000 do
+		local ev = Hazards.step(s, cfg, 0.1, lift, rand)
+		if ev and ev.type == "spawn" then started += 1 end
+	end
+	eq(started, 0, "300 s at the lift with a hazard due and a legal spot under the player: none starts")
+	truthy(s.clock > clock0 + 299, "…while the clock runs, as on the car's pad (" .. (s.clock - clock0) .. " s)")
+	local ev = Hazards.step(s, cfg, 0.1, LIVE, rand)
+	eq(ev and ev.type, "spawn", "the first legal moment after it, the waiting hazard comes (exactly one)")
+	eq(s.spawned, 2, "…two in all: none piled up at the lift")
 end
 
 --================================================================ escape: every direction, both speeds

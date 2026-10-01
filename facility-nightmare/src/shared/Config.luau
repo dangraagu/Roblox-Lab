@@ -169,6 +169,37 @@ Config.Data = {
 	SessionLockSeconds = 45,
 }
 
+-- The TOP DIVERS board: public + friends (docs/complete-game-standard.md §3; shared/Board.luau is plus1-jump's,
+-- verbatim). The metric is the profile's bestSublevel: the deepest sublevel whose freight elevator the SERVER powered,
+-- behind the trusted position (Trust.luau), so a script cannot put a number on it. Ties go to whoever reached it
+-- first (`bestAt`, stamped by Economy.power). Stored in an OrderedDataStore under u_<userId> as
+-- metric * 2e9 + (2e9 - reachedAtUnix), written only when it improves (Board.keepHigher).
+Config.Board = {
+	Store = "FacilityNightmare_TopDivers_v1",
+	PublicRows = 10,            -- GetSortedAsync(false, 10)
+	PublicCacheSeconds = 60,    -- the public top 10 is read from the store at most once a minute
+	FriendsRows = 10,
+	FriendsCap = 200,           -- Players:GetFriendsAsync is never read past this many
+	FriendsCacheSeconds = 300,  -- a player's friends list
+	ScoreCacheSeconds = 120,    -- a friend's best, per server (also "never powered a lift")
+	ReadsBurst = 40,            -- GetAsync on the board for friends: 40 at once ...
+	ReadsPerSecond = 1,         -- ... then 1 a second (Roblox allows 60 + 10 per player a minute)
+	BudgetReserve = 10,         -- always leave this many GetAsync in Roblox's budget
+	MaxMetric = 4000000,        -- the stored value stays exact in a double up to here (4e6 * 2e9 < 2^53)
+	PromptDistance = 10,        -- studs, as the perk terminal's
+	Text = {
+		Title = "TOP DIVERS",
+		EmptyPublic = "No one has powered a lift yet. Power one and be the first on the board!",
+		FriendsFailed = "Couldn't load your Roblox friends right now. Try again in a minute.",
+		NoFriends = "No Roblox friends yet. Friends you add show up here, ranked against you.",
+		FriendsNoScores = "None of your %d friends has powered a lift yet. Invite one and race them down!",
+		FriendsChecking = "Checking your friends: %d of %d so far...",
+		Loading = "Loading...",
+		Unavailable = "The board can't be reached on this server right now.",
+		Prompt = "Public / Friends",
+	},
+}
+
 Config.Hud = {
 	Accent = { r = 255, g = 196, b = 92 }, -- amber, the fuse colour
 	Danger = { r = 235, g = 72, b = 72 },
@@ -204,6 +235,10 @@ Config.Env = {
 	FilmMaxTop = 0.2, -- water, moss, papers: at most this thick (items float at >= 0.7)
 	MaxDullLuma = 190, -- a painted (non-glowing) piece is at most this bright
 	MaxPartsPerRoom = 14,
+	-- A critter (pass 2: docs/complete-game-standard.md §2, every band has its own) is drawn with parts of its own, on top
+	-- of the furniture's MaxPartsPerRoom: a full room still gets one. One per room; Budget.MaxCritters move at once.
+	MaxCritterParts = 2,
+	MaxCrittersPerRoom = 1,
 	MaxScreensPerRoom = 3,
 	MaxRoomEmitterRate = 10,
 	-- A palette repaints the server's room parts on this client; it may change their hue and material, not how
@@ -273,7 +308,10 @@ Config.Env = {
 				atmosColor = rgb3(56, 34, 28), atmosDecay = rgb3(12, 5, 4) },
 			palette = { wall = rgb3(142, 130, 125), wallMaterial = "Metal", floor = rgb3(80, 76, 73), floorMaterial = "DiamondPlate",
 				ceiling = rgb3(44, 38, 36), door = rgb3(100, 82, 36), light = rgb3(255, 229, 217) } },
-		{ id = "biolab", name = "OVERGROWN BIO-LAB", from = 11, fade = 1.5, kit = "biolab", hazards = { "sporePod" },
+		-- the BRAG (review 2, finding 2): the deepest band of the facility itself, first reached (powered) after about 35
+		-- minutes by a medium player (tests/pacing.measure.luau); a fanfare when the saved record first reaches it. The
+		-- last band, THE VOID, is the long-term goal beyond it and has one too.
+		{ id = "biolab", name = "OVERGROWN BIO-LAB", from = 11, fade = 1.5, kit = "biolab", hazards = { "sporePod" }, brag = true,
 			line = "Something grew while nobody was looking.",
 			grade = { tint = rgb3(186, 222, 196), saturation = -0.1, contrast = 0.24, brightness = -0.03,
 				atmosColor = rgb3(28, 45, 34), atmosDecay = rgb3(5, 9, 6) },
@@ -293,8 +331,11 @@ Config.Env = {
 -- legal spot (the interior, off the car/lift pad), called off the moment the room starts to flicker. A hit
 -- is a shove and a camera shake: nothing is lost, and the server never hears of it.
 Config.Hazards = {
-	IntervalMin = 120, -- seconds of EXPOSED time (on a sublevel, in a lit room whose band has hazards)
-	IntervalMax = 180,
+	-- seconds of EXPOSED time (on a sublevel, in a lit room whose band has hazards). DECIDED 2026-09-30 (owner: take
+	-- recommended), EYECANDY.md §10 option 2: 90-140, up from 120-180, so a band with hazards brings one about every
+	-- 2-3 minutes of real play (the dark still freezes the clock)
+	IntervalMin = 90,
+	IntervalMax = 140,
 	MinTelegraphSeconds = 2.5,
 	ReactionSeconds = 1.0, -- assumed, [STUDIO]
 	PlayerRadius = 1.5,
@@ -305,6 +346,10 @@ Config.Hazards = {
 	-- none in the first seconds on a sublevel: the arrival's THE POWER IS FAILING banner (3 s, the dark's own
 	-- warning) and hint (6 s) have the screen, and a hazard that fell due at the lift's choice must wait
 	ArrivalGraceSeconds = 6,
+	-- the shove EYECANDY.md §3 promises: 16-24 studs/s horizontally, at most 3 up (Hazards.validate holds every kind to it)
+	KnockMin = 16,
+	KnockMax = 24,
+	LiftMax = 3,
 	Kinds = {
 		chemLeak = { name = "CHEMICAL LEAK", telegraph = 3.0, burst = 0.5, hitRadius = 2.0, knock = 18, lift = 0 },
 		cableArc = { name = "ARCING CABLE", telegraph = 2.8, burst = 0.4, hitRadius = 1.8, knock = 22, lift = 2 },
@@ -324,13 +369,14 @@ Config.Rest = {
 
 -- Client budgets, measured headless by robloxemu/check_facilitynightmare_env.luau (EYECANDY.md §6).
 Config.Budget = {
-	MaxLocalParts = 240, -- every BasePart the environment client has parented at once
+	MaxLocalParts = 264, -- every BasePart the environment client has parented at once: 16 rooms x (14 + 2 critter) + 8 hazard
 	MaxHazardParts = 8,
 	MaxHubParts = 40,
 	MaxEmitters = 4, -- enabled at once, nearest first
 	MaxEmitterRate = 40, -- particles per second, all enabled emitters together
 	HazardEmitterRate = 10, -- a hazard's warning particles at their fastest (rooms get MaxEmitters - 1 while one is live)
 	MaxScreens = 16, -- SurfaceGuis enabled at once (dressing screens only run near the player)
+	MaxCritters = 4, -- critters that move at once: near, lit rooms, nearest first; the rest keep still
 	MaxLights = 0, -- NO light source: glow is self-lit surfaces, off when their room is dark
 	MaxHazards = 1,
 }

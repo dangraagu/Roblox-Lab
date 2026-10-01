@@ -8,7 +8,10 @@
 -- HUD's panels are. Messages:
 --   "hazard" { phase = "warn" | "zone" | "burst" | "hit" | "clear", name = string,
 --              seconds = the telegraph (warn), inside = boolean (zone: the player left or re-entered the ring) }
---   "rest"   { resting = boolean, source = "bench" | "idle" | nil }
+--   "rest"   { resting = boolean, source = "bench" | "idle" | "button" | nil }
+-- and the other way, HUD -> Env.client, for the REST button (press pause):
+--   "restPress"   {}                    the button was pressed (Env.client decides, Rest.press)
+--   "restRefused" { reason = string }   Env.client refused it; the HUD shows the reason as a toast
 -- EnvBus.new() makes a private bus (tests); the module itself is the shared one.
 
 type Handler = (string, any) -> ()

@@ -273,6 +273,9 @@ do
 	for _, n in vetBot.notices do if n.kind == "choice" then choice = n.data end end
 	truthy(choice ~= nil and choice.bank == 10 and choice.nextPay == 15 and choice.keepPercent == 25,
 		"the choice panel offers bank 10 / next pays 15 / keep 25%")
+	-- review 2, finding 2: the HUD's fanfare for the brag and the long-term goal fires only on a NEW record, and only
+	-- the server knows the saved best before this powering (0 here)
+	eq(choice and choice.record, true, "…and says this powering raised the saved record (0 -> 1)")
 	eq(stored(VET).openRun and stored(VET).openRun.runEssence, 10, "the checkpoint is written at powering")
 	eq(stored(VET).bestSublevel, 1, "…with bestSublevel 1")
 	eq(vet.leaderstats.Deepest.Value, 1, "leaderstats.Deepest = 1")
@@ -432,6 +435,11 @@ section("E. a second run: descend, the front, a death in the dark (VET)")
 truthy(vetBot:board(hub), "the second run starts from HubArrival")
 truthy(vetBot:waitPhase("floor", RIDE + 1), "sublevel 1 again")
 eq(vetBot:clearFloor(), "powered", "sublevel 1 cleared again — a floor that has never existed before")
+do
+	local choice
+	for _, n in vetBot.notices do if n.kind == "choice" then choice = n.data end end
+	eq(choice and choice.record, false, "…and this time the choice says it raised no record (the best is already 1)")
+end
 do
 	local s1 = debugOf(VET):GetAttribute("LayoutSeed")
 	-- the flashlight is left ON at the exit, the way a player in a hurry would leave it
