@@ -143,4 +143,47 @@ function Progression.rebirthHighlighted(highestTier: number, bestTier: number, r
 	return bestTier >= (rb.HighlightAgainAtBestTier or 0)
 end
 
+-- ── Klatre-vakt (2026-09-30, docs/complete-game-standard.md §3) ─────────────────────────────────────
+-- Topplista rangerer beste etasje, og den skal ikke kunne blåses opp av et skript. Et skript kan «berøre»
+-- en plattform fra hvor som helst, og det kan teleportere karakteren sin. Så serveren krediterer en ny
+-- plattform bare når (1) rot-delen er ved den (nearBox), og (2) stigningen siden forrige kreditt er fysisk
+-- mulig. Fysikken: et hopp på h studs når toppen etter sqrt(2h/g) s, så ingen kjede av hopp stiger raskere
+-- enn h / sqrt(2h/g) = sqrt(g*h/2) studs i sekundet (tett grense: et hopp som lander akkurat på toppen).
+-- En bøtte på BurstJumps * h studs som fylles med den farten tar lagg (mange berøringer levert samtidig).
+
+function Progression.riseRate(jumpHeight: number, gravity: number): number
+	return math.sqrt(gravity * math.max(jumpHeight, 0) / 2)
+end
+
+-- `y` = høyden til siste krediterte plattform (eller der spilleren ble satt: sokkel, frontier, rebirth).
+function Progression.newGuard(y: number, now: number, jumpHeight: number, gc: any): any
+	return { y = y, t = now, bank = gc.BurstJumps * jumpHeight }
+end
+
+-- Får plattformen i høyde `y` krediteres nå? Ja: bøtta betaler stigningen og `y` blir ny grunnlinje.
+-- Nei: ingenting annet endres (grunnlinjen står), men bøtta har fått fylle seg fram til `now`.
+function Progression.allowRise(guard: any, y: number, now: number, jumpHeight: number, gravity: number, gc: any): boolean
+	local cap = gc.BurstJumps * jumpHeight
+	local dt = math.max(0, now - guard.t)
+	guard.bank = math.min(cap, guard.bank + gc.RateFactor * Progression.riseRate(jumpHeight, gravity) * dt)
+	guard.t = now
+	local rise = math.max(0, y - guard.y)
+	if rise > guard.bank + 1e-9 then
+		return false
+	end
+	guard.bank -= rise
+	guard.y = y
+	return true
+end
+
+-- Er punktet (px,py,pz) innen `reach` studs fra boksen med senter (cx,cy,cz) og halve størrelser (hx,hy,hz)?
+-- Avstand til boksen (0 inni), ikke per akse.
+function Progression.nearBox(px: number, py: number, pz: number, cx: number, cy: number, cz: number,
+	hx: number, hy: number, hz: number, reach: number): boolean
+	local dx = math.max(math.abs(px - cx) - hx, 0)
+	local dy = math.max(math.abs(py - cy) - hy, 0)
+	local dz = math.max(math.abs(pz - cz) - hz, 0)
+	return dx * dx + dy * dy + dz * dz <= reach * reach
+end
+
 return Progression

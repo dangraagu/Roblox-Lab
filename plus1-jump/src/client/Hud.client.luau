@@ -289,25 +289,34 @@ codeBtn.Text = "Redeem"
 codeBtn.Parent = codeFrame
 corner(codeBtn, 8)
 
+-- Every refusal says why (docs/complete-game-standard.md §1). An empty box used to return silently.
+local CODE_REPLY = {
+	already = "Already used",
+	unknown = "Invalid code",
+	empty = "Type a code first",
+	notready = "Loading your save...",
+	nosave = "Can't save now, try later",
+	savefail = "Save failed, try again",
+}
 codeBtn.Activated:Connect(function()
 	local input = codeBox.Text
-	if input == "" then return end
-	local ok, res = pcall(function()
-		return RedeemFunc:InvokeServer(input)
-	end)
+	local ok, res = true, { ok = false, reason = "empty" }
+	if string.match(input, "%S") then
+		ok, res = pcall(function()
+			return RedeemFunc:InvokeServer(input)
+		end)
+	end
 	if ok and type(res) == "table" then
 		if res.ok then
 			codeBox.Text = ""
 			codeBtn.Text = "✅ +" .. tostring(res.jump)
-		elseif res.reason == "already" then
-			codeBtn.Text = "Already used"
-		elseif res.reason == "unknown" then
-			codeBtn.Text = "Invalid code"
 		else
-			codeBtn.Text = "Try again"
+			codeBtn.Text = CODE_REPLY[res.reason] or "Try again"
 		end
-		task.delay(2, function() codeBtn.Text = "Redeem" end)
+	else
+		codeBtn.Text = "Try again"
 	end
+	task.delay(2, function() codeBtn.Text = "Redeem" end)
 end)
 
 -- ── Topp-10 (høyre) ─────────────────────────────────────────────────────────
@@ -360,9 +369,12 @@ local function renderLeaderboard(entries)
 		l.TextXAlignment = Enum.TextXAlignment.Left
 		l.TextColor3 = Color3.fromRGB(225, 230, 245)
 		l.LayoutOrder = i
-		local name = "Player"
-		local ok, res = pcall(function() return Players:GetNameFromUserIdAsync(entry.userId) end)
-		if ok then name = res end
+		local name = entry.name
+		if type(name) ~= "string" then
+			name = "Player"
+			local ok, res = pcall(function() return Players:GetNameFromUserIdAsync(entry.userId) end)
+			if ok then name = res end
+		end
 		l.Text = string.format("%d. %s — %d %s", i, name, entry.tier, bandEmoji(entry.tier))
 		l.Parent = lbList
 		local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 15; cc.Parent = l
@@ -587,12 +599,9 @@ end
 -- Connected BEFORE the first layout pass on purpose. Layout is cosmetic; these are the only
 -- thing that keeps the numbers on screen true. If applyLayout ever throws, the player should
 -- lose the polish, not the game.
-StateEvent.OnClientEvent:Connect(function(s)
-	jumpLabel.Text = "🔼 " .. tostring(s.jumpPower)
-	tierLabel.Text = "🏛️ Tier: " .. tostring(s.tier)
-	bestLabel.Text = "⭐ Best: " .. tostring(s.bestTier) .. " " .. bandEmoji(s.bestTier)
-	multLabel.Text = "✖️ Multiplier: " .. tostring(s.multiplier) .. "x"
-	heightLabel.Text = string.format("📏 Jump: %.1f", s.jumpHeight)
+local lastState = nil
+local rebirthNotice = 0 -- > 0 while a refusal is on the button (a counter, so an older delay cannot clear a newer one)
+local function renderRebirth(s)
 	-- The button always works when the server allows a rebirth; it is only LIT when
 	-- Progression.rebirthHighlighted says so (the first rebirth, then again past the last sky band), so
 	-- the HUD never walks a climber away from reaching space in the owner's 30-45 min (Pacing.spec).
@@ -609,6 +618,33 @@ StateEvent.OnClientEvent:Connect(function(s)
 		rebirthBtn.Text = "Reach tier " .. tostring(s.nextRebirthTier)
 		rebirthBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
 	end
+end
+
+StateEvent.OnClientEvent:Connect(function(s)
+	lastState = s
+	jumpLabel.Text = "🔼 " .. tostring(s.jumpPower)
+	tierLabel.Text = "🏛️ Tier: " .. tostring(s.tier)
+	bestLabel.Text = "⭐ Best: " .. tostring(s.bestTier) .. " " .. bandEmoji(s.bestTier)
+	multLabel.Text = "✖️ Multiplier: " .. tostring(s.multiplier) .. "x"
+	heightLabel.Text = string.format("📏 Jump: %.1f", s.jumpHeight)
+	if rebirthNotice == 0 then renderRebirth(s) end
+end)
+
+-- A refused rebirth says why, on the button, for 2 s (the server replies on the same remote).
+RebirthEvent.OnClientEvent:Connect(function(reply)
+	if type(reply) ~= "table" or reply.ok ~= false then return end
+	if reply.reason == "tier" then
+		rebirthBtn.Text = "Not yet: reach tier " .. tostring(reply.need)
+	else
+		rebirthBtn.Text = "Loading your save..."
+	end
+	rebirthNotice += 1
+	local mine = rebirthNotice
+	task.delay(2, function()
+		if rebirthNotice ~= mine then return end
+		rebirthNotice = 0
+		if lastState then renderRebirth(lastState) end
+	end)
 end)
 
 LeaderboardEvent.OnClientEvent:Connect(renderLeaderboard)

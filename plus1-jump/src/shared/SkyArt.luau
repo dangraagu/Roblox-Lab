@@ -744,6 +744,9 @@ end
 
 -- Draw the hazard for this frame. `plan` positions are {x,y,z}; `pos` is the hazard's position now;
 -- `zone` is Hazards.zone(plan, PlayerRadius): the ring is drawn exactly there, because it IS the hit rule.
+-- The caller passes `zone` while Hazards.threatLive holds and nil once the hazard can no longer hit, so the
+-- ring stays up past the arrival time for as long as it matters (second review, 2026-09-27). The lane line
+-- shows the way in, so it goes at the arrival time as before.
 function SkyArt:showHazard(plan, pos, now, zone)
 	local item = self:hazardModel(plan.kind)
 	setWeight(item, 1, self.folder)
@@ -761,16 +764,21 @@ function SkyArt:showHazard(plan, pos, now, zone)
 	local target = Vector3.new(plan.target.x, plan.target.y, plan.target.z)
 	local beyond = target + (if v.Magnitude > 0 then v.Unit * 30 else Vector3.zero)
 	local len = (beyond - p).Magnitude
-	if plan.t > plan.arriveAt or len < 1 then
+	if zone == nil then
 		setWeight(lane, 0, self.folder)
 		return
 	end
 	setWeight(lane, 1, self.folder)
 	local colour = if plan.locked then rgb(255, 60, 60) else rgb(255, 210, 60)
 	local laneE, zoneE = lane.entries[1], lane.entries[2]
-	laneE.part.Color = colour
-	laneE.part.Size = Vector3.new(0.35, 0.35, len)
-	laneE.part.CFrame = CFrame.lookAt(p:Lerp(beyond, 0.5), beyond)
+	if plan.t > plan.arriveAt or len < 1 then
+		if laneE.part.Parent ~= nil then laneE.part.Parent = nil end
+	else
+		if laneE.part.Parent ~= self.folder then laneE.part.Parent = self.folder end
+		laneE.part.Color = colour
+		laneE.part.Size = Vector3.new(0.35, 0.35, len)
+		laneE.part.CFrame = CFrame.lookAt(p:Lerp(beyond, 0.5), beyond)
+	end
 	local d = 2 * zone.radius
 	zoneE.part.Color = colour
 	zoneE.part.Size = Vector3.new(0.3, d, d)

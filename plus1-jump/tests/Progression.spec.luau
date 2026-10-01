@@ -122,5 +122,89 @@ do
 	eq(again, Config.Env.Bands[#Config.Env.Bands].from, "HighlightAgainAtBestTier follows the last sky band")
 end
 
+--======================================================================= the climb guard (2026-09-30)
+-- docs/complete-game-standard.md §3: the board ranks a server-measured metric a script cannot inflate. The
+-- server credits a platform only when the root is at it and the rise since the last credit is physically
+-- possible. Physics: a jump of height h reaches h after sqrt(2h/g) s, so no chain of jumps rises faster than
+-- sqrt(g*h/2) studs per second. The guard is a bucket of BurstJumps * h studs that refills at that rate.
+do
+	local gc = Config.Guard
+	local g = Config.Pacing.Gravity
+	truthy(type(gc) == "table" and gc.Enabled == true, "Config.Guard exists and is on")
+	approx(P.riseRate(60, 196.2), math.sqrt(196.2 * 60 / 2), "riseRate = sqrt(g*h/2)")
+
+	-- a teleport past the buffer is refused, and the refusal changes nothing it should not
+	local gd = P.newGuard(8, 0, 7.2, gc)
+	eq(P.allowRise(gd, 8 + gc.BurstJumps * 7.2 + 1, 0, 7.2, g, gc), false, "a fresh climber cannot be credited 1 stud past the buffer at once")
+	eq(gd.y, 8, "a refusal leaves the last credited height alone")
+	eq(P.allowRise(gd, 8 + gc.BurstJumps * 7.2 - 1, 0, 7.2, g, gc), true, "but inside the buffer at once is fine (lag burst)")
+	eq(gd.y, 8 + gc.BurstJumps * 7.2 - 1, "a credit moves the last credited height")
+	eq(P.allowRise(gd, gd.y + 2, 0, 7.2, g, gc), false, "the buffer is spent: 2 more studs in the same instant are refused")
+	eq(P.allowRise(gd, gd.y + 2, 2 / P.riseRate(7.2, g) + 1e-6, 7.2, g, gc), true, "and allowed once it has refilled 2 studs")
+	eq(P.allowRise(gd, gd.y - 50, 1e6, 7.2, g, gc), true, "a lower height costs nothing")
+
+	-- every physically possible climb is credited, at every jump height and step, jumping back to back with
+	-- no pause at all (airtime only, the fastest a human can go), 2000 jumps each
+	local worstRefusals, worstCase = 0, nil
+	for _, h in { 7.2, 10, 20, 35, 50, 60 } do
+		for _, frac in { 0.1, 0.35, 0.7, 0.9, 1.0 } do
+			local s = h * frac
+			local air = math.sqrt(2 * h / g) + math.sqrt(2 * math.max(h - s, 0) / g)
+			local gd2 = P.newGuard(0, 0, h, gc)
+			local y, t, refused = 0, 0, 0
+			for _ = 1, 2000 do
+				t += air
+				y += s
+				if not P.allowRise(gd2, y, t, h, g, gc) then refused += 1; y = gd2.y end
+			end
+			if refused > worstRefusals then worstRefusals, worstCase = refused, string.format("h %.1f step %.1f", h, s) end
+		end
+	end
+	eq(worstRefusals, 0, "no physically possible back-to-back climb is ever refused (h 7.2-60, steps 10-100 % of h)"
+		.. (if worstCase then "; worst " .. worstCase else ""))
+
+	-- lag: up to BurstJumps full-height platforms arrive in one burst after the time they took; all credited
+	do
+		local h = 60
+		local air = math.sqrt(2 * h / g)
+		local gd3 = P.newGuard(0, 0, h, gc)
+		local ok = true
+		local y = 0
+		for _ = 1, gc.BurstJumps do
+			y += h
+			if not P.allowRise(gd3, y, gc.BurstJumps * air, h, g, gc) then ok = false end
+		end
+		truthy(ok, "a lag burst of " .. gc.BurstJumps .. " full-height jumps, delivered at once, is all credited")
+	end
+
+	-- a script that climbs twice as fast as physics allows, for five minutes: credited no faster than a
+	-- perfect jumper plus the buffer, and most of its touches are refused
+	do
+		local h = 60
+		local rate = P.riseRate(h, g)
+		local gd4 = P.newGuard(0, 0, h, gc)
+		local credited, refused, t = 0, 0, 0
+		for _ = 1, 3000 do
+			t += 0.1
+			local want = gd4.y + 2 * rate * 0.1 * 5 -- tries to skip ahead five steps' worth each time
+			if P.allowRise(gd4, want, t, h, g, gc) then credited += 1 else refused += 1 end
+		end
+		truthy(gd4.y <= gc.BurstJumps * h + gc.RateFactor * rate * t + 1e-6,
+			string.format("a script rising 10x too fast gets at most buffer + rate * t (%.0f of %.0f studs)", gd4.y,
+				gc.BurstJumps * h + gc.RateFactor * rate * t))
+		truthy(refused > credited, "and most of its touches are refused (" .. refused .. " refused, " .. credited .. " credited)")
+	end
+
+	-- where the root must be: within ReachStuds of the platform's box
+	local r = gc.ReachStuds
+	eq(P.nearBox(0, 0, 0, 0, 0, 0, 4, 0.5, 4, r), true, "a root inside the platform box is at it")
+	eq(P.nearBox(0, 3.5, 0, 0, 0, 0, 4, 0.5, 4, r), true, "a root standing on it (3.5 above the centre) is at it")
+	eq(P.nearBox(4 + r - 0.01, 0, 0, 0, 0, 0, 4, 0.5, 4, r), true, "just inside the reach, beside it")
+	eq(P.nearBox(4 + r + 0.01, 0, 0, 0, 0, 0, 4, 0.5, 4, r), false, "just outside the reach, beside it")
+	eq(P.nearBox(0, 0.5 + r + 0.01, 0, 0, 0, 0, 4, 0.5, 4, r), false, "just outside the reach, above it")
+	eq(P.nearBox(4 + r * 0.8, 0.5 + r * 0.8, 0, 0, 0, 0, 4, 0.5, 4, r), false, "outside diagonally (distance, not per axis)")
+	eq(P.nearBox(0, 8 - 1000, 0, 0, 8, 0, 4, 0.5, 4, r), false, "a script touching from the ground far below is not at it")
+end
+
 print(string.format("Progression: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Progression tests failed")

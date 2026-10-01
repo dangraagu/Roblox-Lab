@@ -355,6 +355,11 @@ end
 -- earn a couple of platforms the honest way, so the rescue has something better than the pad
 local function touch(name)
 	local part = h.workspace:FindFirstChild("Tower"):FindFirstChild(name)
+	-- Stand on it, a jump's time after the last one, then touch: since 2026-09-30 the server credits a platform
+	-- only when the root is at it and the rise is one a jump could make (Config.Guard, check_plus1jump_walk).
+	-- This used to fire Touched from wherever the climber was, which is exactly what the guard now refuses.
+	hrp.CFrame = CFrame.new(part.Position + Vector3.new(0, 3.5, 0))
+	h:advance(1)
 	part.Touched:Fire(hrp)
 end
 for i = 1, 6 do touch("P_1_" .. i) end

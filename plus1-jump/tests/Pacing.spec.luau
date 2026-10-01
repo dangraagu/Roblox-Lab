@@ -208,5 +208,58 @@ do
 		.. string.format("%.1f", shortest) .. ")")
 end
 
+--================================================================ the climb guard on the real tower (2026-09-30)
+-- The server credits a platform only when the rise since the last credit is physically possible
+-- (Progression.allowRise, Config.Guard). Every profile, with and without the codes' +185 and a 100x rebirth,
+-- climbs 300 tiers at its FASTEST (setup + airtime, never a miss): not one platform may be refused.
+do
+	local gc, g, tw = Config.Guard, Config.Pacing.Gravity, Config.Tower
+	local refusedTotal, worst = 0, nil
+	for _, name in { "fast", "normal", "slow" } do
+		for _, mult in { 1, 2, 100 } do
+			for _, bonus in { 0, 185 } do
+				local gd = Progression.newGuard(tw.BaseY, 0, Progression.jumpHeight(bonus, mult, Config.Jump), gc)
+				local t, refused = 0, 0
+				for tier = 1, 300 do
+					local step = Progression.stepHeight(tier, tw)
+					local base = tw.BaseY + Progression.climbHeight(tier - 1, tw)
+					for i = 1, tw.TilesPerTier do
+						local jp = bonus + (tier - 1) * tw.TilesPerTier + (i - 1)
+						local h = Progression.jumpHeight(jp, mult, Config.Jump)
+						t += profiles[name].setupSeconds + ClimbModel.airtime(h, step, g)
+						if not Progression.allowRise(gd, base + i * step, t, h, g, gc) then refused += 1 end
+					end
+				end
+				if refused > 0 then worst = worst or string.format("%s x%d +%d", name, mult, bonus) end
+				refusedTotal += refused
+			end
+		end
+	end
+	eq(refusedTotal, 0, "the climb guard never refuses a modelled climber, 300 tiers x 18 variants" .. (if worst then " (first: " .. worst .. ")" else ""))
+
+	-- what the guard lets a teleport script do: try the next platform every 0.05 s from a fresh profile
+	local function botMinutesTo(targetTier)
+		local gd = Progression.newGuard(tw.BaseY, 0, Progression.jumpHeight(0, 1, Config.Jump), gc)
+		local t, jp = 0, 0
+		for tier = 1, targetTier do
+			local step = Progression.stepHeight(tier, tw)
+			local base = tw.BaseY + Progression.climbHeight(tier - 1, tw)
+			for i = 1, (if tier == targetTier then 1 else tw.TilesPerTier) do
+				while not Progression.allowRise(gd, base + i * step, t, Progression.jumpHeight(jp, 1, Config.Jump), g, gc) do
+					t += 0.05
+				end
+				jp += 1
+			end
+		end
+		return t / 60
+	end
+	local botSpace = botMinutesTo(bands[spaceIdx].from)
+	local botGalaxy = botMinutesTo(bands[galaxyIdx].from)
+	print(string.format("  climb guard: a teleport script reaches space (tier %d) in %.1f min at the earliest, the galaxy (tier %d) in %.1f min;"
+		.. " a normal player %.1f / %.1f", bands[spaceIdx].from, botSpace, bands[galaxyIdx].from, botGalaxy, normalSpace, galaxyNormal))
+	truthy(botSpace >= 4, string.format("the guard holds a teleport script to at least 4 min to space (%.1f)", botSpace))
+	truthy(botGalaxy >= 12, string.format("and at least 12 min to the galaxy (%.1f)", botGalaxy))
+end
+
 print(string.format("Pacing: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Pacing tests failed")

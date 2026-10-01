@@ -68,12 +68,13 @@ Config.Rebirth = {
 	HighlightAgainAtBestTier = 0, -- = Config.Env.Bands[#Bands].from, satt etter Config.Env
 }
 
--- ── Gamepasses (fyll inn ekte IDs når laget på Roblox; AV til da) ───────────
+-- ── Gamepasses: AV i v1, og bare kosmetiske ─────────────────────────────────
+-- docs/complete-game-standard.md §3: aldri Robux-kostnad i v1, aldri pay-to-win. Et pass får endre hvordan en
+-- spiller SER UT, aldri hvordan hen klatrer. AutoWalk (gikk av seg selv) og DoubleJump (2x jump power pr plattform)
+-- sto her til 2026-10-01 og er fjernet; serveren gir +1 pr plattform uansett pass (check_plus1jump_paywin).
 Config.Passes = {
 	Enabled = false,
-	AutoWalk = 0,   -- går fremover automatisk
-	DoubleJump = 0, -- 2x jump power-opptjening
-	SkyTrails = 0,  -- kosmetisk spor
+	SkyTrails = 0,  -- kosmetisk spor (ingen effekt på klatringen); fyll inn ekte ID når den finnes
 }
 
 -- ── Koder (kosmetikk/boost — engangs pr spiller) ────────────────────────────
@@ -89,9 +90,55 @@ Config.Codes = {
 Config.Save = {
 	Enabled = true,
 	Store = "Plus1Jump_v1",       -- per-spiller data
-	Leaderboard = "Plus1Jump_LB_v1", -- OrderedDataStore (høyeste etasje)
+	-- OrderedDataStore for topplista. v2 (2026-09-30): verdien er Board.encode(beste, nåddUnix), ikke rå
+	-- etasje. v1 holdt rå etasjer, som ville sortert under hver kodet verdi; en spiller fra v1 kommer
+	-- tilbake på tavla ved neste lagring (profilen har beste etasje), med nåddUnix = den økta.
+	Leaderboard = "Plus1Jump_LB_v2",
 	AutosaveSeconds = 20,         -- fornyer også session-låsen; MÅ være < SessionLockSeconds
 	SessionLockSeconds = 45,      -- soft lås mot dupe; utløper raskt så crash-rejoin ikke låses ute
+}
+
+-- ── Topplista: offentlig + venner (docs/complete-game-standard.md §3) ─────────────────────────
+-- Rangerer på BESTE ETASJE (server-målt, se Config.Guard), uavgjort til den som nådde den FØRST.
+-- Lagret i OrderedDataStore Config.Save.Leaderboard, nøkkel u_<userId>, verdi
+-- beste * 2e9 + (2e9 - nåddUnix) (Board.encode). Skrives bare når beste etasje stiger.
+-- Tavla står fysisk ved spawn; en ProximityPrompt bytter Public/Friends (per spiller).
+Config.Board = {
+	PublicRows = 10,            -- GetSortedAsync(false, 10)
+	PublicCacheSeconds = 60,    -- serveren spør datastoren om topp 10 høyst én gang i minuttet
+	FriendsRows = 10,
+	FriendsCap = 200,           -- Players:GetFriendsAsync leses aldri lenger enn dette
+	FriendsCacheSeconds = 300,  -- venne-lista per spiller
+	ScoreCacheSeconds = 120,    -- en venns beste, per server (også «har ikke klatret»)
+	ReadsBurst = 40,            -- GetAsync på topplista for venner: 40 med en gang ...
+	ReadsPerSecond = 1,         -- ... så 1 i sekundet (Roblox gir 60 + 10 per spiller i minuttet)
+	BudgetReserve = 10,         -- la alltid så mange GetAsync stå igjen i Roblox-budsjettet
+	MaxMetric = 4000000,        -- verdien er eksakt i en double opp hit (4e6 * 2e9 < 2^53)
+	PromptDistance = 9,         -- studs; spawn-senteret er ~11 unna, så prompten dukker opp når du går bort
+	Text = {
+		Title = "TOP CLIMBERS",
+		EmptyPublic = "No climbers on the board yet. Step on a tile and be the first!",
+		FriendsFailed = "Couldn't load your Roblox friends right now. Try again in a minute.",
+		NoFriends = "No Roblox friends yet. Friends you add show up here, ranked against you.",
+		FriendsNoScores = "None of your %d friends has climbed yet. Invite one and race them to space!",
+		FriendsChecking = "Checking your friends: %d of %d so far...",
+		Loading = "Loading...",
+		Prompt = "Public / Friends",
+	},
+}
+
+-- ── Klatre-vakt: topplista skal ikke kunne blåses opp av et skript ──────────────────────────────
+-- En ny plattform gir +1 (og teller mot beste etasje) bare hvis (1) karakterens rot faktisk er ved
+-- plattformen (ReachStuds fra boksen: et skript som «berører» tårnet fra sokkelen får ingenting), og
+-- (2) stigningen siden forrige krediterte plattform er fysisk mulig: ingen hopper raskere oppover enn
+-- sqrt(g * h / 2) studs i sekundet (et hopp på h studs stiger h på sqrt(2h/g) sekunder), med en buffer
+-- på BurstJumps hopp for lagg. Et teleport-skript kommer ikke fortere enn et perfekt hopp.
+-- Progression.allowRise; tests/Progression.spec + Pacing.spec måler at ingen ekte klatrer avvises.
+Config.Guard = {
+	Enabled = true,
+	BurstJumps = 10,  -- buffer: så mange fulle hopp kan komme samtidig (lagg) uten å avvises
+	RateFactor = 1,   -- ganger den fysiske grensa sqrt(g*h/2); < 1 ville avvise perfekte hopp
+	ReachStuds = 12,  -- rot-delen må være innen så mange studs fra plattform-boksen
 }
 
 Config.WalkSpeed = 16

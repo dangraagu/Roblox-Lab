@@ -99,6 +99,69 @@ do
 		string.format("a queued rest (%.1f s) outlives the longest hazard flight (%.1f s) by at least 2 s",
 			Config.Rest.PendingSeconds, longest))
 end
+-- Second review, night of 2026-09-27 (LOW finding 1), measured with +1 Jump's own kinds the way the reviewer
+-- did it: at the lock, 400 players per kind step to a random point inside the ring and stay. The old client
+-- hid the ring and the banner at arriveAt; hits later than that came with nothing on screen. The ring now
+-- stays up while Hazards.threatLive says the rest of the flight can still hit someone inside it.
+do
+	local s = 20260927 % 4294967296
+	local function r()
+		s = (1664525 * s + 1013904223) % 4294967296
+		return s / 4294967296
+	end
+	local names = {}
+	for name in Hz.Kinds do table.insert(names, name) end
+	table.sort(names)
+	local dt = 1 / 60
+	local rows, oldHidden, newHidden, lateMax = {}, 0, 0, 0
+	local lingerRows, stuck = {}, 0
+	for _, name in names do
+		local k = Hz.Kinds[name]
+		local R = k.hitRadius + Hz.PlayerRadius
+		local late, linger = 0, 0
+		for _ = 1, 400 do
+			local aim = { x = 0, y = 5000, z = 0 }
+			local plan = Hazards.plan(Hz, name, aim, r() * 6.283, r, math.rad(-30 + 60 * r()))
+			while plan.t < plan.commitAt do
+				plan.t += dt
+				Hazards.retarget(Hz, plan, aim)
+			end
+			Hazards.retarget(Hz, plan, aim)
+			local rr, ra = R * math.sqrt(r()), r() * 6.283
+			local pos = { x = aim.x + rr * math.cos(ra), y = aim.y, z = aim.z + rr * math.sin(ra) }
+			local goneAt = nil
+			while plan.t < plan.duration do
+				local t0 = plan.t
+				plan.t += dt
+				local live = type(Hazards.threatLive) == "function" and Hazards.threatLive(plan, Hz.PlayerRadius, t0)
+				if goneAt == nil and type(Hazards.threatLive) == "function" then
+					local wasHit = plan.hit
+					plan.hit = false -- when the ring goes: geometry only
+					if not Hazards.threatLive(plan, Hz.PlayerRadius, t0) then goneAt = t0 end
+					plan.hit = wasHit
+				end
+				if Hazards.checkHit(plan, t0, plan.t, pos, Hz.PlayerRadius) then
+					plan.hit = true
+					if t0 > plan.arriveAt then
+						late += 1
+						lateMax = math.max(lateMax, t0 - plan.arriveAt)
+					end
+					if not live then newHidden += 1 end
+				end
+			end
+			if goneAt == nil then stuck += 1 else linger = math.max(linger, goneAt - plan.arriveAt) end
+		end
+		oldHidden += late
+		table.insert(rows, name .. " " .. late)
+		table.insert(lingerRows, string.format("%s %.2f", name, linger))
+	end
+	print(string.format("  inside the ring at a random point, 400 per kind: hit after arriveAt (the old ring gone) %s; up to %.2f s late",
+		table.concat(rows, ", "), lateMax))
+	truthy(oldHidden > 0, "set-up: with the old rule some players inside the ring were hit after it vanished (" .. oldHidden .. ")")
+	eq(newHidden, 0, "with the ring up while Hazards.threatLive holds, no hit comes while it is hidden")
+	print("  the ring now stays up after arrival for at most (s): " .. table.concat(lingerRows, ", "))
+	eq(stuck, 0, "and it goes before the end of every flight, once the hazard is out of reach")
+end
 
 --================================================================ the temple island is below the rescue
 

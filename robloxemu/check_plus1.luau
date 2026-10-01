@@ -8,5 +8,7 @@ require("./emu/hudcheck").run({
 	server = "server/Main.server",
 	-- Sky.client adds the band chip, the Rest button (tappable) and the hazard warning to the top row;
 	-- measured here like every other control. Its no-overlap-with-the-HUD rule: check_plus1_sky.luau.
-	clients = { "client/Hud.client", "client/Sky.client" },
+	-- Board.client (2026-09-30) draws the Top Climbers board on its part in the world, never in PlayerGui, so it adds
+	-- nothing to measure here; it is loaded so a change that puts it on screen is measured like everything else.
+	clients = { "client/Hud.client", "client/Sky.client", "client/Board.client" },
 })

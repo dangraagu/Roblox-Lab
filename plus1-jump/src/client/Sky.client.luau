@@ -620,7 +620,11 @@ local function frame(dt: number)
 		local plan = scheduler.active
 		if plan then
 			local hp = Hazards.positionAt(plan, plan.t)
-			art:showHazard(plan, hp, now, Hazards.zone(plan, Hz.PlayerRadius))
+			-- The ring and the banner stay up while the rest of this frame's flight can still hit someone in the
+			-- ring (second review, 2026-09-27: they went at arriveAt, and a player on the far side of the ring
+			-- was hit up to 0.08 s later with nothing on screen). From `before`, so the frame of a hit shows it.
+			local live = Hazards.threatLive(plan, Hz.PlayerRadius, before or 0)
+			art:showHazard(plan, hp, now, if live then Hazards.zone(plan, Hz.PlayerRadius) else nil)
 			if Hazards.checkHit(plan, before or 0, plan.t, pos, Hz.PlayerRadius) then
 				plan.hit = true
 				local kv = Hazards.knockVelocity(Hz, plan, pos)
@@ -632,7 +636,7 @@ local function frame(dt: number)
 				FxClient.shake(0.4, 0.9)
 				FxClient.flash(Color3.fromRGB(255, 255, 255), 0.3, 0.35)
 			end
-			if plan.t <= plan.arriveAt and not plan.hit then
+			if live and not plan.hit then
 				local b = Hazards.bearing(vec(camPos), vec(look), hp)
 				local label = hazardNames[plan.kind] or string.upper(plan.kind)
 				local text = if plan.locked then "⚠️ MOVE! " .. label .. " " .. ARROWS[b] else "⚠️ " .. label .. " INCOMING " .. ARROWS[b]
@@ -695,7 +699,12 @@ local function frame(dt: number)
 				-- fanfare for a player who reached it in an earlier session). The announcer also counts the
 				-- band of the tier the server credits them with, so a placement that reaches this client only
 				-- after the timeout does not announce, or celebrate, a climb from an earlier session.
-				EnvBands.announce(announcer, math.max(bandIdx, EnvBands.indexAt(bands, credited)))
+				-- Second review, 2026-09-27: `credited` is the FRONTIER, which a rebirth resets, so a space climber
+				-- who rebirthed earlier was told "YOU REACHED SPACE!" again. The seed also counts the best tier
+				-- ever, which the server publishes as the Player attribute BestTier before leaderstats appear.
+				local best = player:GetAttribute("BestTier")
+				local seedTier = math.max(credited, if type(best) == "number" then best else 0)
+				EnvBands.announce(announcer, math.max(bandIdx, EnvBands.indexAt(bands, seedTier)))
 				local b = bands[bandIdx]
 				showCard(b.emoji .. " " .. string.upper(b.name), "tier " .. tostring(tierNow), false)
 			end

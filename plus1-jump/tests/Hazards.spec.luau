@@ -698,6 +698,90 @@ do
 	eq(dodged, total, "a 4-stud sidestep away from the lane dodges every hazard (" .. dodged .. "/" .. total .. ")")
 end
 
+--================================================================ how long the ring and the banner stay up
+-- Second review, night of 2026-09-27 (LOW finding 1): the client hid the ring and the banner at `arriveAt`,
+-- but checkHit runs until `duration`. A player standing at the far side of the ring from a jittered target
+-- is reached AFTER arriveAt, so 6-22 of 400 players per kind were hit 0.02-0.15 s after the ring had gone.
+-- The rule now: Hazards.threatLive(plan, playerRadius, fromT) is true while the rest of the flight (from
+-- fromT, default plan.t) can still hit SOMEONE standing inside the zone, at any height. The client draws
+-- the ring and the banner exactly that long. It only ever keeps them up longer, never shorter.
+do
+	truthy(type(Hazards.threatLive) == "function", "Hazards.threatLive exists (how long the ring and the banner stay up)")
+	if type(Hazards.threatLive) == "function" then
+		local r = lcg(2709)
+		local dt = 1 / 60
+		local hitsAfterArrival, hitsWhileNotLive, hits, trials = 0, 0, 0, 0
+		local lingerMax, goneBeforeEnd, plans = 0, 0, 0
+		local soundBad = nil
+		local liveAfterEnd = 0
+		for _, name in kindNames do
+			local kind = cfg.Kinds[name]
+			local R = kind.hitRadius + cfg.PlayerRadius
+			for i = 1, 400 do
+				local aim = { x = 0, y = 100, z = 0 }
+				local plan = Hazards.plan(cfg, name, aim, r() * 6.283, r, math.rad(-30 + 60 * r()))
+				while plan.t < plan.commitAt do
+					plan.t += dt
+					Hazards.retarget(cfg, plan, aim)
+				end
+				Hazards.retarget(cfg, plan, aim)
+				-- at the lock the player steps to a random point inside the ring and stays there
+				local rr, ra = R * math.sqrt(r()), r() * 6.283
+				local pos = { x = aim.x + rr * math.cos(ra), y = aim.y, z = aim.z + rr * math.sin(ra) }
+				trials += 1
+				local goneAt = nil
+				while plan.t < plan.duration do
+					local t0 = plan.t
+					plan.t += dt
+					local live = Hazards.threatLive(plan, cfg.PlayerRadius, t0)
+					-- when the RING goes (geometry only: after a hit the plan is over anyway)
+					local wasHit = plan.hit
+					plan.hit = false
+					if goneAt == nil and not Hazards.threatLive(plan, cfg.PlayerRadius, t0) then goneAt = t0 end
+					plan.hit = wasHit
+					if Hazards.checkHit(plan, t0, plan.t, pos, cfg.PlayerRadius) then
+						plan.hit = true
+						hits += 1
+						if t0 > plan.arriveAt then hitsAfterArrival += 1 end
+						if not live then hitsWhileNotLive += 1 end
+					end
+				end
+				if Hazards.threatLive(plan, cfg.PlayerRadius) then liveAfterEnd += 1 end
+				-- soundness: from the moment the rule says "over", no point inside the zone, at any height from
+				-- 10 below to 70 above the aim, can be hit by the rest of the flight (the unhit copy of the plan)
+				if goneAt ~= nil then
+					plans += 1
+					if goneAt < plan.duration - 1e-9 then goneBeforeEnd += 1 end
+					lingerMax = math.max(lingerMax, goneAt - plan.arriveAt)
+					local fresh = table.clone(plan)
+					fresh.hit = false
+					local z = Hazards.zone(fresh, cfg.PlayerRadius)
+					for k = 1, 60 do
+						local qr, qa = z.radius * math.sqrt(r()), r() * 6.283
+						local q = { x = z.x + qr * math.cos(qa), y = aim.y - 10 + 80 * r(), z = z.z + qr * math.sin(qa) }
+						if Hazards.checkHit(fresh, goneAt, fresh.duration, q, cfg.PlayerRadius) then
+							soundBad = soundBad or string.format("%s: a point inside the ring is hit %.2f s after the ring would go", name, fresh.duration - goneAt)
+						end
+					end
+				end
+			end
+		end
+		print(string.format("  ring rule: %d random points inside the ring, %d hit; %d of the hits came after arriveAt (the old rule's ring was gone); ring gone %.2f s after arrival at most, before the flight's end in %d of %d",
+			trials, hits, hitsAfterArrival, lingerMax, goneBeforeEnd, plans))
+		truthy(hitsAfterArrival > 0, "set-up: some players inside the ring ARE reached after arriveAt (" .. hitsAfterArrival .. ")")
+		eq(hitsWhileNotLive, 0, "no player is hit once threatLive says the hazard can no longer hit")
+		eq(soundBad, nil, "and no point anywhere inside the ring can be hit after that")
+		eq(liveAfterEnd, 0, "nothing is live once the flight is over")
+		eq(goneBeforeEnd, plans, "the ring does not linger to the end of the flight: it goes once the hazard is out of reach")
+		truthy(lingerMax < 1.5, string.format("and within 1.5 s of arrival for these kinds (%.2f s)", lingerMax))
+		-- before the lock the lane tracks the player, so the threat is live from launch
+		local p2 = Hazards.plan(cfg, "bird", { x = 0, y = 0, z = 0 }, 0, lcg(5))
+		eq(Hazards.threatLive(p2, cfg.PlayerRadius), true, "a hazard just launched is live")
+		p2.hit = true
+		eq(Hazards.threatLive(p2, cfg.PlayerRadius), false, "a hazard that has hit is over (it hits once)")
+	end
+end
+
 --================================================================ knockback
 
 do

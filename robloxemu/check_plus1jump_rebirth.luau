@@ -47,11 +47,15 @@ local function isLoud()
 	return math.abs(c.R * 255 - LOUD[1]) < 1 and math.abs(c.G * 255 - LOUD[2]) < 1 and math.abs(c.B * 255 - LOUD[3]) < 1
 end
 local function climbTo(tier)
-	-- touch every platform from the start up to P_<tier>_1, the way a climber earns them
+	-- touch every platform from the start up to P_<tier>_1, the way a climber earns them: standing on each, a
+	-- jump's time after the last (since 2026-09-30 the server credits only a touch it could physically be, see
+	-- Config.Guard; a touch from where the climber happened to be is now refused, as a script's would be)
 	for t = 1, tier do
 		for i = 1, (if t == tier then 1 else Tower.TilesPerTier) do
 			local part = towerFolder:FindFirstChild("P_" .. t .. "_" .. i)
 			assert(part, "the server built P_" .. t .. "_" .. i)
+			hrp.CFrame = CFrame.new(part.Position + Vector3.new(0, 3.5, 0))
+			h:advance(1)
 			part.Touched:Fire(hrp)
 		end
 	end

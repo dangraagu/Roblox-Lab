@@ -4,10 +4,13 @@ Owner's brief (Gustav, 2026-09-17): richer, never monotonous; climb from the tem
 out into space and out of the galaxy; rare, telegraphed hazards that knock you down; space in about
 30-45 minutes for a normal player; a way to rest that can never be exploited; a thumbnail shot list.
 
-**State: built, unit-tested, headless-tested, mutation-tested, adversarially reviewed twice. Round 1 found 8
+**State: built, unit-tested, headless-tested, mutation-tested, adversarially reviewed three times. Round 1 found 8
 issues, all closed test-first (§12). Round 2 reviewed those fixes and found 4 more (1 high, 1 medium, 2 low),
-all reproduced first and closed test-first (§14). NOT yet seen in Studio.** Nothing was committed, pushed or
-published. The round-2 fixes have not had their own independent review.
+all reproduced first and closed test-first (§14). A second independent review (night of 2026-09-27) could not
+refute any round-2 fix and found 4 LOW issues; three were closed test-first on 2026-09-30 and one did not
+reproduce (§15).** Studio has been opened once (night of 2026-09-27): the Rest button was fixed there, the rest
+of the needs-Studio list (§8) is still open. The sky is on `main` (09c76b6, 20212cf, ad62955) but not published:
+the live place is versionNumber 7 of 2026-09-10, from before the sky. The 2026-09-30 changes are not committed.
 
 **Resumed after the owner's 45-minute pause (§13).** The build was stopped while this file was being
 written. The resume session re-read every file, rebuilt the bundle (byte-identical to the one on disk),
@@ -21,11 +24,35 @@ hazard shot and its space fanfare. No game code changed in the resume session.
 **Review round 2 (§14).** (1, high) Only a step at right angles to a hazard's lane dodged it: backing away,
 or leaving the red ring along the lane, was still a hit. The red ring is now the rule: a hit needs you inside
 it, so leaving it in any direction dodges. (2, medium) Round 1 had dimmed the REBIRTH button for every rebirth
-after the first, changing an existing mechanic's HUD without the owner. The default is back to the HUD before
-the sky (every rebirth lit), and the first-only rule is a one-line option for him, with both measured.
+after the first, changing an existing mechanic's HUD without the owner. Round 2 put every rebirth back to lit and
+made first-only a one-line option for him, with both measured. **He chose first-only on 2026-09-24** (§11), so
+that is the default now (`HighlightFirstRebirths = 1`).
 (3, low) A profile load slower than 15 s showed a returning space climber a TEMPLE card and a repeat
 "YOU REACHED SPACE!"; the settle clocks now start when the profile has loaded. (4, low) The weather emitter
 budget was not enforced in code (5 on at once after fast teleports); it is now capped at 2.
+
+**Pass 1 of 2026-09-30 (§15).** (1) The ring and the MOVE! banner went at the hazard's arrival time, but the hit
+test runs to the end of the flight, and the lane is aimed up to 1.2 studs from where you stood: a player on the
+far side of the ring was hit up to 0.08 s after the ring had gone (30 of 4 000 random points inside the ring).
+They now stay up while `Hazards.threatLive` says the rest of the flight can still hit someone in the ring: 0.08 s
+(jet) to 0.77 s (weather balloon) past the arrival. (2) A space climber who had rebirthed in an earlier session
+got "YOU REACHED SPACE!" again, because the first card seeded the announcer from the frontier tier (which a
+rebirth resets); it now also counts the best tier ever, which the server publishes as the Player attribute
+`BestTier`. (3) Passages in this file that still said every rebirth is lit by default are fixed. (4) Duplicate
+Lighting objects did not reproduce headless. Owner decision (b), the rebirth mechanic: **DECIDED 2026-09-30
+(owner: take recommended)**, keep it and stop promising a faster climb (§11).
+
+**Pass 2 of 2026-09-30 (§16): the complete-game standard.** Every item of `docs/complete-game-standard.md` was
+checked. Built test-first where missing: a Top Climbers board by the spawn (Public / Friends, ties to whoever got
+there first, written only when the best tier rises), a climb guard so a script cannot put itself on that board
+(a touch from afar or a teleport earns nothing), an owner token on every save, codes granted only when they can be
+saved, refusals that say why, `MARKETING.md` (10 clips) and a 987-character store description in `README.md`.
+
+**Pass 2 re-run of 2026-10-01 (§17).** Every item was checked again against the build. Two gaps were left: a
+stubbed `DoubleJump` pass that the server already paid (+2 per tile to any save that claimed it) next to `AutoWalk`,
+against the standard's "never pay-to-win"; both are gone and passes are cosmetic only and off in v1, closed
+test-first (`check_plus1jump_paywin`). And `MARKETING.md`'s staging table under the climb guard named the wrong
+platforms; it is now measured through the real server.
 
 ---
 
@@ -38,15 +65,17 @@ budget was not enforced in code (5 on at once after fast teleports); it is now c
 | `src/shared/Rest.luau` | **template** — rest rules: manual + idle, queued when unsafe (a dodge keeps the request), wake on move, freezes (never resets) hazard clocks. Pure. |
 | `src/shared/Progression.luau` | + `climbHeight`, `tierProgressAtY`, `yAtProgress` (altitude ↔ tiers climbed), `tierAtY` (the tier NUMBER the HUD shows), `rebirthHighlighted` (when the HUD lights REBIRTH). |
 | `src/shared/TowerGen.luau` | + `platformCentres` (world positions of the tower, stacked the way the server builds it). |
-| `src/shared/Config.luau` | + `Tower.BaseY`, `Env` (8 bands, 2 layers, critters, `FloorBelowRoot`, `IslandTopBelowPad`, `SceneryClearance`), `Hazards` (10 kinds, `SpreadDegrees`, `ViewPitchDegrees`, `KindFitDegrees`), `Rest`, `Pacing` (model assumptions, `RescueLatencySeconds`), `Budget` (+ `MaxWeatherEmitters`, round 2), `Rebirth.HighlightFirstRebirths` / `HighlightAgainAtBestTier` (round 2: default `math.huge` = every rebirth lit, as before the sky; `1` is the owner's option). |
+| `src/shared/Config.luau` | + `Tower.BaseY`, `Env` (8 bands, 2 layers, critters, `FloorBelowRoot`, `IslandTopBelowPad`, `SceneryClearance`), `Hazards` (10 kinds, `SpreadDegrees`, `ViewPitchDegrees`, `KindFitDegrees`), `Rest`, `Pacing` (model assumptions, `RescueLatencySeconds`), `Budget` (+ `MaxWeatherEmitters`, round 2), `Rebirth.HighlightFirstRebirths` / `HighlightAgainAtBestTier` (default `1` since the owner's decision of 2026-09-24: only the first rebirth is lit, then again from best tier 240; `math.huge` would light every rebirth, as before the sky). |
 | `src/shared/SkyArt.luau` | +1 Jump's scenery, critters, hazard models, weather, lightning — code-only, pooled, client-only. |
 | `src/client/Sky.client.luau` | the glue: altitude → bands → Lighting/scenery/life/weather; hazards + knock; rest + UI; title cards. |
-| `src/client/Hud.client.luau` | band emoji next to Best and on the top-10 board (`85 🚀`); REBIRTH lit when `rebirthHighlighted` says so (default: every rebirth the server allows, as before the sky); the next multiplier read from `Config.Rebirth.Multipliers` (the old text said `4x` where rebirth #2 gives `5x`). |
-| `src/server/Main.server.luau` | ONE line: `BASE_POS` reads `Config.Tower.BaseY` (still 8). Nothing else on the server, in either round. |
+| `src/client/Hud.client.luau` | band emoji next to Best and on the top-10 board (`85 🚀`); REBIRTH lit when `rebirthHighlighted` says so (default since 2026-09-24: the first rebirth, then again from best tier 240; the others show muted but work); the next multiplier read from `Config.Rebirth.Multipliers` (the old text said `4x` where rebirth #2 gives `5x`). |
+| `src/server/Main.server.luau` | Round 0: ONE line, `BASE_POS` reads `Config.Tower.BaseY` (still 8); nothing in rounds 1-2. 2026-09-30: the Player attribute `BestTier` (the best tier ever; public, the HUD and the top-10 board already show it), set before leaderstats appear and in `pushState` (§15). |
 | `tests/` | specs `EnvBands` `Hazards` `Rest` `Altitude` `EnvConfig` `Pacing` + `ClimbModel.luau` (test-side model); review round 1 extended `Progression` and `TowerGen` too. |
 | `robloxemu/check_plus1_sky.luau`, `check_plus1_sky_rejoin.luau` | headless glue checks (round 0). `check_plus1.luau` also loads `Sky.client`. |
 | `robloxemu/check_plus1jump_{hazards,rest,join,bands,world,leftout,rebirth}.luau` | headless glue checks for the review findings (§12). |
 | `robloxemu/check_plus1jump_life.luau` | resume session (§13): critters keep recycling around the climber, scenery glides on a teleport, the suit light lights in space. |
+| `robloxemu/check_plus1jump_sitdrop.luau` | night of 2026-09-27 (found in Studio): the Rest button rests; a seatless sit drops the root for about 0.3 s and that is not a fall. |
+| `robloxemu/check_plus1jump_{ringtime,bestseed}.luau` | pass 1, 2026-09-30 (§15): the ring and the banner stay up while the hazard can still hit; a space climber who rebirthed earlier is not congratulated again. |
 | `robloxemu/check_plus1jump_{dodge,slowload,budget}.luau` | review round 2 (§14): leaving the drawn ring in any direction dodges; 16-40 s profile loads and a placement 20 s late; the budgets under 400 fast teleports. `check_plus1jump_rebirth.luau` was rewritten for the restored default, and `tests/ClimbModel.luau` gained `dodgeDegrees`. |
 
 ---
@@ -95,15 +124,15 @@ sends the climber back to the pad and, with the jump capped at 60 studs and ever
 space at 38.4 min; at 10 and 18 → 46.0; at 10, 18, 26 → 56.9; every rebirth offered before tier 85 (ten of
 them) → 227.4. Before the sky, the HUD lit the button purple every time a rebirth was possible, so a normal
 player who followed it missed the owner's window. Round 1 dimmed every rebirth after the first. Round 2 found
-that this changed the HUD of an existing mechanic (rebirth at 10/18/26) without the owner, so **the default is
-back to the HUD before the sky: every rebirth the server allows is lit** (`REBIRTH → 5x?`, purple; the
-corrected multiplier text stays). The first-only rule is kept as a one-line option:
-`Config.Rebirth.HighlightFirstRebirths = 1` lights only the first rebirth, then again once the best tier
-reaches **Tier 240**, and a player who presses the button whenever it is lit then reaches space in 38.4 min
-and the galaxy in 103.1. `Pacing.spec` measures both: the option follower inside 30-45 min, the default
-follower outside it (227.4), so the choice put to the owner stays true (§11). `check_plus1jump_rebirth`
-drives both through the real server and HUD. The deeper question (should the multiplier make re-climbing
-faster at all?) is his too.
+that this changed the HUD of an existing mechanic (rebirth at 10/18/26) without the owner and put every rebirth
+back to lit, with first-only as a one-line option. **The owner chose first-only on 2026-09-24** ("ca 38 min er
+bra", §11), so the default is `Config.Rebirth.HighlightFirstRebirths = 1`: only the first rebirth is lit
+(`REBIRTH → 2x?`, purple), later ones show muted (`Rebirth → 5x`) and still work, and the button lights again
+once the best tier reaches **Tier 240**. A player who presses the button whenever it is lit reaches space in
+38.4 min and the galaxy in 103.1. `Pacing.spec` measures both settings: the default follower inside 30-45 min,
+the old every-lit follower (`math.huge`) outside it (227.4). `check_plus1jump_rebirth` drives both through the
+real server and HUD. The deeper question (should the multiplier make re-climbing faster at all?) was decided on
+2026-09-30: no, rebirth stays as it is and the text stops promising it (§11).
 
 Also on screen: a band chip under the jump counter (`☁️ Cloud Sea · 🚀 Space in 62`, counted in tiers), a
 title card on entering a new band (`🚀 YOU REACHED SPACE!` with a white flash and FOV punch when you LAND on
@@ -128,8 +157,8 @@ with the human part written down in `Config.Pacing.Profiles` instead of hidden i
 
 Asserted: normal reaches space in 30-45 min (34.4), still does with the first rebirth (38.4) and as a
 follower of the lit button with the owner's first-only option (38.4), and sits within 5 min of the window's
-centre, so a retune that drifts fails loudly; with the default HUD that follower misses the window (227.4,
-asserted, so the owner decision in §11 stays true); the galaxy is at least twice the time to space but under
+centre, so a retune that drifts fails loudly; with the old every-lit HUD (`math.huge`) that follower misses the
+window (227.4, asserted, which is why the owner chose first only, §11); the galaxy is at least twice the time to space but under
 3 h, for the option follower too; every band lasts ≥ 2 min;
 the last band starts below 100 000 studs. **When real session data exists, retune `Profiles.normal`
 first, then the `from` numbers — the spec tells you where space lands.**
@@ -169,7 +198,9 @@ first, then the `from` numbers — the spec tells you where space lands.**
   and a HUD banner `⚠️ PLANE INCOMING ◀` with a direction arrow. While the warning runs the lane
   re-aims at you (it visibly comes *for* you); **1.5-2 s before arrival it LOCKS** — line and ring turn
   red, banner says `⚠️ MOVE! PLANE ◀`. The arrival time never moves, so the warning never shortens. A
-  lane that would have to chase you faster than 1.5× its speed (a teleport, a fall) locks instead;
+  lane that would have to chase you faster than 1.5× its speed (a teleport, a fall) locks instead. The lane
+  line goes at the arrival time; **the ring and the banner stay up until the hazard can no longer hit anyone
+  in the ring** (`Hazards.threatLive`, 2026-09-30): 0.08 s (jet) to 0.77 s (weather balloon) past the arrival;
 * hitboxes are smaller than the models. **The red ring is the danger zone** (review round 2): its radius is
   hitbox + player radius, it is centred where you stood when the lane locked, and a hit needs you INSIDE it
   as well as the hazard passing within reach. The radius is under half a tile, so **stepping out of the ring
@@ -195,6 +226,8 @@ first, then the `from` numbers — the spec tells you where space lands.**
 | on screen: every band's kinds, camera pitch -60..60°, 16:9 and 4:3, 4° margin | `EnvConfig.spec`, `Hazards.spec` | 5 880 + 5 400 launches, **every one on screen from launch until its lane locks** (with the camera pitch ignored: 2 394 of 5 400 off screen; the reviewer measured balloons on screen 0 % of the time with a level or raised camera on the old rule) |
 | on screen through the real client: storm, edge and galaxy × pitch -40/-20/0/+20/+40 (1280×720) and ±35 (1024×768), 8 hazards each | `check_plus1jump_hazards` | **every frame of every INCOMING warning on screen** (old build: up to 120 of 120 frames off screen, e.g. storm at +20°) |
 | through the real client, 20 simulated minutes, standing in the lane | `check_plus1_sky` | 7-8 hazards per 20 min (the emulator's `Random` is unseeded; the resume session saw 7); never 2 at once; only the band's kinds; every hazard visible ≥ 3 s before it hit; knock ≥ 20 studs/s sideways, ≤ 15 up; rescued to the earned platform within 0.5 studs |
+| hit after the ring had gone: at the lock, 400 players per kind step to a random point inside the ring | `EnvConfig.spec` | before 2026-09-30: **30 of 4 000** (weather balloon 13, asteroid 5, astronaut 5, bird 3, booster 2, junk 2, the fast kinds 0), up to 0.08 s after arrival; now **0**, the ring up 0.08-0.77 s past arrival and gone before the flight ends |
+| same through the real client: stand inside the drawn ring where the locked lane arrives late | `check_plus1jump_ringtime` | 20-37 such hazards per run (40 per band, unseeded): before 2026-09-30 every one hit with no ring and no banner on screen the frame before; now **0** |
 | rest-toggle exploit probe (6 h climbing) | `Hazards.spec` | never rests: 142 · toggles every 7 s: **142** · rests 40 s of every 150 s: **142** |
 
 "About one near-hit per 2-3 minutes" therefore holds for a player who reacts to the warning (which
@@ -251,7 +284,9 @@ A Roblox server cannot stop the world for one player, so **rest is a state the p
 | band emoji on HUD/leaderboard, when REBIRTH is lit | client (`Hud.client`) | derived from tier numbers already on the board, in leaderstats and in the player's own state |
 
 **Leak review.** The client reads its own character's position, its own camera, its own
-`leaderstats.Tier` (to know its profile has loaded before the first title card) and `Config` (already
+`leaderstats.Tier` (to know its profile has loaded before the first title card), its own Player attribute
+`BestTier` (the best tier ever, set by the server since 2026-09-30; public, the HUD and the top-10 board
+already show it) and `Config` (already
 replicated), and computes the tower's path from `TowerGen` + `Config.WorldSeed` (the same public numbers
 the server builds from). It fires no remote, adds no remote, sets no attribute on anything the server
 built, and every part it creates is local and non-collidable, non-queryable, non-touchable (the camera
@@ -261,7 +296,8 @@ at spawn. `check_plus1_spawn` and `check_plus1_rejoin` are byte-identical to bef
 `Main.server.luau` differs by exactly one line, `BASE_POS` reading `Config.Tower.BaseY` (still 8). Its
 `onCharacter` wait-for-parent and its fall rescue are unchanged, and the rejoin checks confirm the server
 still places a tier-90 climber on their own platform, fast or slow load. (An earlier draft of this
-paragraph called `Main.server.luau` byte-identical. `git diff` says one line, as §1 does.)
+paragraph called `Main.server.luau` byte-identical. `git diff` says one line, as §1 does.) Since 2026-09-30
+the server also sets that `BestTier` attribute (§15); nothing else on the server changed.
 
 **What other players see.** Hazards are local, so when you are knocked off, other players see you fall
 with nothing hitting you. That is the price of keeping hazards off the server, and nothing is lost by it.
@@ -373,6 +409,28 @@ hazard kind flying for the first time, and that each kind's model is built once 
 | `luau-compile --binary` | — | 27 files clean | **34 files clean** (all sources, tests and the new checks) | **40 files clean**: 15 sources, 12 test files, all 13 `check_plus1*` | **43 files clean**: 15 sources, 12 test files, all 16 `check_plus1*` |
 | `luau-analyze` (changed pure modules) | — | clean apart from Roblox noise | Hazards, Rest, EnvBands, Progression clean; TowerGen only its existing `script`/`require` noise | same. `SkyArt`, `Sky.client` and `Hud.client` show only unknown-global and unknown-type noise (`Vector3`, `Enum`, `warn` …) | same. (`capRates` first drew a sort-comparator type error in EnvBands; annotated, clean) |
 
+**Current gates: the re-run of pass 2 (2026-10-01) is in §17** (696 / 0 in 12 specs, 645 / 0 + PASS in the 22
+headless files). Pass 2 itself (§16) ended at 696 / 0 and 639 / 0 + PASS.
+**Gates after pass 1 (2026-09-30).** The table above stops at review round 2. Since then the owner's
+2026-09-24 commit added one assertion each to `Progression.spec` (39) and `check_plus1jump_rebirth` (21), and the
+night of 2026-09-27 added `check_plus1jump_sitdrop`. Measured on this pass, every file run with the bundle rebuilt
+first:
+
+| gate | before pass 1 | after pass 1 |
+|---|---|---|
+| `tests/Hazards.spec` | 102 / 0 | **111 / 0** (`threatLive`: 9 new) |
+| `tests/EnvConfig.spec` | 67 / 0 | **70 / 0** (the ring measured with +1 Jump's kinds: 3 new) |
+| the other nine specs (Altitude 21, Codes 12, EnvBands 124, Pacing 28, Progression 39, Rest 55, Rng 56, TowerGen 21, responsive 70) | 426 / 0 | 426 / 0 |
+| **spec total, 11 files** | **595 / 0** | **607 / 0** |
+| `robloxemu/check_plus1` (HUD fit, 10 viewports, overlap on) | PASS | PASS |
+| `check_plus1jump_ringtime` | — | **16 / 0** (new) |
+| `check_plus1jump_bestseed` | — | **14 / 0** (new) |
+| the other 16 counted checks (rejoin 8, spawn 25, sky 242, sky_rejoin 13, bands 16, budget 11, dodge 16, hazards 6, join 33, leftout 8, life 21, rebirth 21, rest 16, sitdrop 9, slowload 24, world 18) | 487 / 0 | 487 / 0 |
+| **headless check total** | **487 / 0 + PASS** | **517 / 0 + PASS** |
+
+30 files, 0 failing. `luau-compile` and `luau-analyze` were not in this session's tooling (only the `luau` CLI);
+every changed source is compiled when the specs require it or the checks load the bundle.
+
 The emulator's `Random` is unseeded. After round 1, `check_plus1_sky`, `check_plus1_sky_rejoin` and all seven
 `check_plus1jump_*` checks were run 5 more times each after the final build, green every time. The resume
 session repeated that: 5 runs of each, all green with identical counts. `check_plus1jump_life` got 8 runs,
@@ -466,9 +524,9 @@ sources were byte-identical and the bundle identical to its baseline.
     pad, or too far down; the marble column carrying the pad; the forest canopy now under the island;
     and whether a real walk-off (with real latency) is rescued before the grass (0.5 s network allowance
     assumed, `Config.Pacing.RescueLatencySeconds`).
-19. **The muted REBIRTH button** (`Rebirth → 5x`, grey-violet): only shown if the owner picks the first-only
-    option (§11); with the default HUD every rebirth is lit, as before the sky. If he picks it: readable as
-    "available", not as "disabled".
+19. **The muted REBIRTH button** (`Rebirth → 5x`, grey-violet): with the owner's first-only default (§11) every
+    rebirth after the first shows this way until best tier 240. Is it readable as "available", not as
+    "disabled"?
 20. **The dodge on a real tile** (resume session, rule changed in review round 2). The red ring is the danger
     zone: `2 × (hitRadius + PlayerRadius)` wide, 7.8 studs for the five big kinds on an 8-stud tile, centred where
     the player stood when the lane locked. Leaving it in any direction dodges, but from the tile's centre the
@@ -485,10 +543,33 @@ sources were byte-identical and the bundle identical to its baseline.
     keeps its straight line and can pass through the avatar with no knock. Does that read as "I dodged it" or
     as a glitch? If it reads badly, the cheap fix is visual only: after arrival, lift the model's path
     (a pull-up) when the player is outside the ring.
+23. **The ring after the arrival** (2026-09-30, §15). The ring and the MOVE! banner now stay up while the hazard
+    can still hit someone in the ring: up to 0.08 s past the arrival for a jet, 0.77 s for a weather balloon
+    rising on a steep lane. Does that read as "still dangerous, stay out", or as a ring left behind?
+24. **The Top Climbers board** (pass 2, §16). Readable from the spawn at 40 px per stud on a 16 x 11-stud face; the
+    emoji (🏆 🌍 👥 and the band emoji) in SurfaceGui labels; does the drawn face really face the spawn (`Face =
+    Front` on a part built with `CFrame.lookAt` toward +Z); the gold Neon trim under bloom (glow or blown out); does
+    the prompt appear about 2 studs after leaving the spawn centre (`MaxActivationDistance` 9, measured from an
+    attachment low on the front) and is its tap button easy to hit on a phone.
+25. **Which way a player faces at spawn.** `TempleSpawn` is unrotated. If Roblox faces a spawned character along the
+    SpawnLocation's front (-Z), a new player looks at the board with the tower (which climbs +Z) behind them. Not
+    measured: the emulator does not model orientation. If that is what happens and the tower should be the first
+    view, rotate the spawn 180 degrees (the board then stands behind the player).
+26. **The climb guard on a real client** (§16). No real climb may lose a +1. The model says 0 refusals (18 profiles x
+    300 tiers, `Pacing.spec`) and the headless walk agrees, but real touch replication, lag spikes and a head bump on
+    the underside of the next platform are only in Studio. Test with a temporary `warn` in `grantStep`'s two refusal
+    branches (never committed), climbing tiers 1-20 fast, then again with Studio's network simulator at 250 ms+.
+    Expect no warning. If one appears, `Config.Guard.ReachStuds` (12) or `BurstJumps` (10) is the knob.
+27. **The friends board with a real account** (§16). `Players:GetFriendsAsync` page shape (`Id`, `Username`), the
+    real `GetRequestBudgetForRequestType` numbers, and how "Checking your friends: N of M" reads on a long list.
+    The emulator has no `GetFriendsAsync`; `check_plus1jump_board` supplies a FriendPages-shaped one.
 
 ---
 
 ## 9. Thumbnail shot list (for the night Studio session)
+
+Every shot is **1920 x 1080** (Roblox's thumbnail size): set the Studio viewport to 16:9 and capture at 1920 x 1080 or
+larger, then scale down. Keep the subject inside the middle 1280 px, which is what a phone's carousel crop shows.
 
 **Getting there without touching real saves.** *This recipe has not been tried in Studio. Verify step 1
 before relying on the rest.* The resume session fixed four traps in the first draft:
@@ -513,6 +594,9 @@ say that the place file on disk predates the sky.
    * **Session B, shot 5:** `Tower.StreamAhead = 260`, `Hazards.IntervalMin = 8`,
      `Hazards.IntervalMax = 10`, and **`Rest.IdleSeconds = 0`**. `Rest.validate` accepts 0 and it turns
      idle rest off; without it the sky rests after 20 s of standing still and the hazard never comes.
+   **Since 2026-09-30 a teleport earns nothing** (the climb guard, §16): after a `PivotTo` the HUD keeps the fresh
+   profile's numbers (Tier 0). For any shot with the HUD on, hide `Plus1Hud` and keep `Plus1Sky` (the band chip and
+   the title cards live there), or accept Tier 0 in frame. Do not switch the guard off for a picture of the HUD.
 4. **Move the avatar by platform name** (command bar, Server context), then let the sky glide in for
    about 4 s (half-life 0.6 s):
    `local c = game.Players:GetPlayers()[1].Character; c:PivotTo(workspace.Tower.P_23_4.CFrame + Vector3.new(0, 4, 0))`
@@ -567,6 +651,11 @@ platform *i* of tier *t* in `workspace.Tower`.
    Character small on a platform; camera ~150 studs above and behind, looking down past them. In frame:
    the **spiral galaxy below** (bright core, curved arms), nebula glow at the edges, a comet trail, the
    platform line continuing down toward the galaxy.
+7. **"Top Climbers by the temple"** (optional; spawn, temple band, pass 2). Character on the pad's back half facing
+   the board (-Z), camera low behind and to the side, ≈ (14, 12, 18) looking at ≈ (0, 14, -11), so the board with
+   its gold trim fills the left half and the first tiers climb away on the right. With API access off (step 2) the
+   board says "No climbers on the board yet...": frame it so the text is not the subject, and never show a real
+   friends list (players' usernames).
 
 ---
 
@@ -595,7 +684,12 @@ platform *i* of tier *t* in `workspace.Tower`.
   *through* must keep off the play path (`EnvBands.keepClear`); non-collidable ground under a spawn must
   sit below where your rescue catches a falling player, network included.
 * A first title card must wait for the player's saved state to have LOADED (and the server's placement
-  to arrive), not for a fixed timer.
+  to arrive), not for a fixed timer. Seed the announcer from the BEST progress ever, not the current one:
+  a prestige reset (rebirth) lowers the current one (2026-09-30).
+* **2026-09-30 template change:** draw the ring and the banner while `Hazards.threatLive(plan, PlayerRadius,
+  frameStart)` holds, not until `arriveAt`. `checkHit` runs to `duration`, and a lane aimed with `AimJitter`
+  reaches a player on the far side of the ring after its arrival time. `SkyArt:showHazard` takes `zone = nil`
+  once the threat is over.
 * **Timed-round games**: rest is between rounds. Never feed a round clock, raid timer or penalty
   through `Rest`; it only pauses things that exist to bother the player. `Rest.validate` refuses
   `WakeOnMove = false` and `BlockWhileThreat = false`.
@@ -609,21 +703,39 @@ platform *i* of tier *t* in `workspace.Tower`.
 
 ## 11. Not done / open
 
-* The review-round-1 fixes (§12) were reviewed in round 2 (§14). The round-2 fixes have **not** had their own
-  independent adversarial review.
+* The review-round-1 fixes (§12) were reviewed in round 2 (§14), and the round-2 fixes by a second independent
+  reviewer on the night of 2026-09-27 (no high or medium; 4 LOW, §15). The pass-1 fixes of 2026-09-30 have
+  **not** had their own independent review.
 * **Owner decisions:** (a) **which rebirths the HUD lights: TAKEN 2026-09-24, first only** (Gustav: "ca 38 min
   er bra"). `Config.Rebirth.HighlightFirstRebirths = 1` lights only the first rebirth and again past tier 240,
   and a normal player who presses it every time it is lit reaches space in 38.4 min. The old HUD, restored in
   review round 2 (every rebirth lit, `math.huge`), would take that player ten rebirths before tier 85 and
   227.4 min. Both are measured in `Pacing.spec` and checked through
-  the real HUD in `check_plus1jump_rebirth`. (b) **the underlying mechanic:** with the jump capped at 60 and
-  every tier reachable without rebirth, the rebirth multiplier never speeds the climb, so rebirth is pure
-  prestige that costs altitude. Making it genuinely "climb faster next run" (README's promise) is a
-  server-side design change, not done. Deciding (b) may make (a) moot.
+  the real HUD in `check_plus1jump_rebirth`. (b) **the underlying mechanic: DECIDED 2026-09-30 (owner: take
+  recommended).** The question: with the jump capped at 60 and every tier reachable without rebirth, the
+  multiplier never speeds the climb, so rebirth is prestige that costs altitude; make it genuinely "climb faster
+  next run" (README's old promise, a server-side design change) or not? No option was marked recommended.
+  **Taken: keep the mechanic exactly as it is, and make every text say what it does** (a permanent multiplier on
+  jump HEIGHT, you still earn +1 per platform: prestige, not a shortcut). Why this serves the brief best: the
+  owner approved the pacing measured on THIS mechanic on 2026-09-24 ("ca 38 min er bra", space in 38.4 min for
+  a player who presses every lit button), and any rebirth speed-up would move every number in §2 and change who
+  ranks where on the best-tier board. Keeping it is fair (no one gains an edge), never punishing (rebirth is
+  optional and the HUD lights only the first, which costs 4 minutes: 34.4 → 38.4 to space) and cannot open an
+  exploit, because nothing changes. The live store text (`docs/marketing/store-text.json`) already says "on
+  jump HEIGHT only"; the README's "so you climb faster next run" was the one false promise and is gone. No game
+  code changed for (b), so (a) stands as taken.
 * The island depth assumes a 0.5 s network allowance for the rescue; a player on a very laggy connection
   can still reach the grass (Studio / real device).
-* Not committed, not pushed, not published. Studio not opened.
+* The 2026-09-30 changes are not committed or published (the live place predates the sky). Studio was opened
+  once (night of 2026-09-27); the rest of §8 and the thumbnails (§9) are the night shift's.
 * §8 in full.
+* **Pass 2 of 2026-09-30 (§16)**: the board, the climb guard, the owner token and the code/rebirth refusals have
+  had no independent adversarial review. Nothing of it is committed or published.
+* The board store moved to `Plus1Jump_LB_v2` (encoded values). The live place's v1 board (raw tiers) is not
+  migrated: a returning player's saved best goes onto v2 at their first save, stamped with that session, so the
+  live board starts empty and fills as players come back (the place is reach-gated and has few players).
+* `MARKETING.md` lists 10 clips; 7 need a scenario added to `tools/film_game.py` (tools owner). The store text in
+  `README.md` replaces `docs/marketing/store-text.json` (which predates the sky and the board) after publishing.
 
 ---
 
@@ -636,7 +748,7 @@ files (`robloxemu/check_plus1jump_*.luau`); no existing check was edited.
 | # | finding (severity) | reproduced | failing test first | fix |
 |---|---|---|---|---|
 | 1 | hazards off screen: the ±50° rule was horizontal only (medium) | `probe_view`: weather balloon on screen 0 % with a level or raised camera; booster/comet 0 % looking down 30° | `Hazards.spec` view window + frustum property (2 394 of 5 400 off screen with the pitch ignored), `EnvConfig.spec` every band's kinds, `check_plus1jump_hazards` through the client (old build: up to 120 of 120 warning frames off screen) | `Hazards.viewWindow` / `pickKind`; lanes start within ±35° / ±20° of the camera's view; `Sky.client` passes the camera pitch; validate caps both |
-| 2 | 30-45 min only if the player skips rebirths the HUD lights up (medium) | `probe_rebirth`: 34.6 / 38.6 / 46.1 / 57.0 / 226.5 min | `Progression.spec` rule, `Pacing.spec` HUD follower, `check_plus1jump_rebirth` via the real server (old build: 3 failures — rebirth #2 lit at tiers 18 and 40) | `Progression.rebirthHighlighted` + `Config.Rebirth.HighlightFirstRebirths/HighlightAgainAtBestTier`; HUD lights only those; button still works (§2). **Round 2 made this the owner's option and restored the old default (§14)** |
+| 2 | 30-45 min only if the player skips rebirths the HUD lights up (medium) | `probe_rebirth`: 34.6 / 38.6 / 46.1 / 57.0 / 226.5 min | `Progression.spec` rule, `Pacing.spec` HUD follower, `check_plus1jump_rebirth` via the real server (old build: 3 failures — rebirth #2 lit at tiers 18 and 40) | `Progression.rebirthHighlighted` + `Config.Rebirth.HighlightFirstRebirths/HighlightAgainAtBestTier`; HUD lights only those; button still works (§2). **Round 2 made it the owner's option and restored every-lit (§14); the owner chose first-only on 2026-09-24 (§11)** |
 | 3 | returning space player: TEMPLE card + space fanfare when the load takes > 1.5 s (low) | `probe_rejoin_slow`: 1.6 / 2.0 / 4.0 s → TEMPLE + YOU REACHED SPACE + flash | `check_plus1jump_join`: a real slow `UpdateAsync` (6 s), a late placement (3 s), a Tier value replicating 1 s after its folder; old build: 15 of 33 assertions failed | first card waits for `leaderstats` (profile loaded), then 1.5 s, and until the character stands near its credited tier; 15 s timeout |
 | 4 | storm-deck cloud (r 121, 92 % opaque) swallowed P_42_5 (low) | `probe_deck2`: P_42_5, P_42_6, P_43_1 inside; P_42_5 hidden from a camera 14 back / 6 below | `EnvBands.spec` `pathDistance`/`keepClear`, `TowerGen.spec` `platformCentres`, `check_plus1jump_world` against the server's parts at 162 camera positions per deck (old build: 6 failures — 12 holds, 12 hides, nearest surface −28 studs) | tiled decks shrink or leave out any cloud within `Config.Env.SceneryClearance` = 40 studs of the climb (path from `TowerGen`); left-out clouds stay out when the band returns |
 | 5 | walk off the pad → sink through the island's grass before the rescue (low) | `probe_island`: 89.2 % of falls, deepest root −131 | `EnvConfig.spec` island depth vs poll + latency, `check_plus1jump_world` falling under gravity through the real server rescue at 8 poll phases (old build: feet 71 studs below the grass) | island top 320 studs below the pad (`Config.Env.IslandTopBelowPad`), column carrying the pad, canopy moved under the island; lowest rescued feet now 36.5 studs above the grass with a 0.5 s network allowance |
@@ -797,3 +909,306 @@ instances 373-382 by cycle 100, 382 by the end every time).
 not change in this round. Nothing committed, pushed or published; Studio not opened. Scratch evidence:
 `scratchpad/fix2_p1/` (`sweep_r2.py`, `sweep_r2.log`, `sweep_r2_first_aborted.log`, `sweep_r2_results.json`,
 `gates_*.txt`, `work/` with the reviewer's probes re-run on the fixed build).
+
+---
+
+## 15. Pass 1 (2026-09-30): the second review's LOW findings and the open owner decision
+
+The owner's go of 2026-09-30: "take the recommended option for all". The queued job was the second independent
+review's four LOW findings (night of 2026-09-27, `docs/night-queue.md` "H. Eye-candy - plus1-jump"). The review
+list handed to this pass was empty, so there was nothing else to reproduce. Every finding was reproduced first,
+then a failing test was written and watched failing, then the game was fixed.
+
+| # | finding | reproduced | failing test first | fix | after |
+|---|---|---|---|---|---|
+| 1 | the ring and the banner go at `arriveAt`, `checkHit` runs until `duration` | `EnvConfig.spec` (the reviewer's method, +1 Jump's kinds, 400 random points inside the ring per kind): **30 of 4 000** hit after the arrival time, up to 0.08 s late (weather balloon 13, asteroid 5, astronaut 5, bird 3, booster 2, junk 2; comet, jet, plane, ship 0). The reviewer had 6-22 of 400 per kind with its own sampling | `Hazards.spec` (`threatLive` missing: 1 failure), `EnvConfig.spec` (1), new `check_plus1jump_ringtime` through the real client, against the HEAD build: every late hit came with no ring and no banner on screen the frame before, 11-26 per run with 30 hazards per band (3 runs) and 20 and 28 with the final 40 (2 runs), 3 failures each run | `Hazards.threatLive(plan, playerRadius, fromT)` (template, pure): live while the rest of the flight passes within 2 x (hitRadius + playerRadius) of the zone's centre in the ground plane, so no point in the ring at any height can be hit after it says over. `Sky.client` draws the ring and the banner while it holds (from the frame's start), `SkyArt:showHazard` takes `zone = nil` after; the lane line still goes at the arrival | 0 hits while hidden (spec and client); the ring stays up 0.08 s (jet) to 0.77 s (weather balloon) past the arrival and is gone before every flight ends; soundness (`Hazards.spec`, its own three kinds): 60 points per plan inside the ring, 10 below to 70 above the aim, never hit after it says over |
+| 2 | a returning space climber who rebirthed earlier gets "YOU REACHED SPACE!" again (seeded from the frontier) | new `check_plus1jump_bestseed`: saves with best 90, frontier 3, one rebirth; climbing back to tier 85 showed `YOU REACHED SPACE!` and 1 flash, fast load and 16 s load | the same check: 4 failures | the server sets the Player attribute `BestTier` (public) before leaderstats appear and in `pushState`; the first card seeds the announcer from max(frontier, best) | no card and 0 flashes on the way back to space; the control (best 84, never reached space) still gets the fanfare and 1 flash |
+| 3 | EYECANDY.md still said the default lights every rebirth (first-only since 20212cf) | 9 stale passages by a phrase check (`scratchpad/p1j_pass1/stale_docs.sh`) | the same check, exit 1 | the header, §1 (two rows), §2 (two paragraphs), §8 item 19 and §12 row 2 rewritten; §14 is kept as the record of round 2 | 0 stale passages |
+| 4 | duplicate `FxAtmosphere`/`FxBloom` when the client runs before they replicate; a second DoF next to the server's | **not reproduced.** Headless, after the server and the client start, Lighting holds exactly one each of FxAtmosphere, FxBloom, FxColorCorrection, FxSunRays, Plus1Sky and one DepthOfFieldEffect (the client's `Plus1RestFocus`, off). The Temple preset has no `depthOfField`, so there is no server DoF to double. The emulator has one DataModel and `game:IsLoaded()` is always true, so a late-replication race cannot happen there without a hand-built fixture, and Studio (2026-09-27) showed one of each | — | none | stays on the Studio list: in a live server, is there ever a second Atmosphere? |
+
+### The owner decision
+
+(b), the rebirth mechanic, was the only open owner decision (§11; (a) was taken on 2026-09-24). No option was
+marked. **DECIDED 2026-09-30 (owner: take recommended): keep the mechanic as it is, and make the text honest.**
+Why is in §11. What changed: `README.md` no longer says rebirth makes you "climb faster next run"; it says the
+multiplier is on jump height, prestige and not a shortcut. No game code changed for it.
+
+### Mutation sweep
+
+`scratchpad/p1j_pass1/sweep.py`, on a scratch copy of the game and the emulator (the real tree was never
+mutated). For each mutation: sha256 of the target, exactly one occurrence replaced, bundle rebuilt and proved to
+contain it (the mutated bundle equals the baseline bundle with the same single replacement), all 29 suites run
+(11 specs, 18 checks), original bytes restored and the sha256 re-checked. Baseline green; afterwards the bundle
+was back to its baseline and all 29 suites green again, and the real tree's files matched the restored copy.
+
+| mutation | result | killed by |
+|---|---|---|
+| M1a `threatLive` over at `arriveAt` (the old ring rule) | KILLED | Hazards.spec, EnvConfig.spec, check_plus1jump_ringtime |
+| M1b `threatLive` reach = the zone radius only | KILLED | Hazards.spec (soundness) |
+| M1c `threatLive` live until the hit, always | KILLED | Hazards.spec, EnvConfig.spec (the ring never goes) |
+| M1d `Sky.client` measures from `plan.t`, not the frame's start | SURVIVED (equivalent in practice) | a probe of 40 000 plans per frame rate at 20, 30 and 60 fps (about 39 000 hits each) found 0 hit frames where the end of the frame already says "over". Kept: it is one argument, and safer for a game with faster hazards |
+| M1e banner back to `t <= arriveAt` | KILLED | check_plus1jump_ringtime |
+| M1f `SkyArt` hides the ring after `arriveAt` again | KILLED | check_plus1jump_ringtime |
+| M1g `SkyArt` keeps the lane line after the arrival | KILLED | check_plus1jump_ringtime |
+| M1h `threatLive` ignores `fromT` | KILLED | Hazards.spec |
+| M2a the first card seeds from the frontier only | KILLED | check_plus1jump_bestseed |
+| M2b no `BestTier` before leaderstats (`pushState` still sets it) | SURVIVED (redundant by design) | `pushState` runs in the same server step; the early set only matters if `onCharacter` yields more than the 1.5 s settle, which the emulator cannot produce |
+| M2c `pushState` does not set `BestTier` (the early set still does) | SURVIVED (redundant by design) | nothing reads it in-session today; it keeps the public attribute current |
+| M2d the client reads the wrong attribute name (= no attribute at all) | KILLED | check_plus1jump_bestseed |
+| CONTROL hazard blink light range 24 → 25 | SURVIVED (as it must) | — |
+| M3 (docs) one stale "default: every rebirth" passage put back, on a copy | KILLED | stale_docs.sh; its control (an unrelated wording change) passed |
+
+### Stability
+
+After the final build: `check_plus1jump_ringtime` (final version, 40 hazards per band) 6 runs plus the final gate
+run, 16 / 0 each, 20-37 hazards met late inside the ring per run (the set-up threshold is 8; with 30 per band the
+lowest seen was 11, so the sample was raised after the sweep and the check re-watched failing on the HEAD build);
+`check_plus1jump_bestseed` 5 runs plus the gate runs, 14 / 0 each.
+
+### Files written in pass 1
+
+`plus1-jump/src/shared/Hazards.luau` (`threatLive`), `src/shared/SkyArt.luau` (`showHazard`),
+`src/client/Sky.client.luau` (ring, banner, announcer seed), `src/server/Main.server.luau` (`BestTier`);
+`tests/Hazards.spec.luau`, `tests/EnvConfig.spec.luau`; `robloxemu/check_plus1jump_ringtime.luau`,
+`robloxemu/check_plus1jump_bestseed.luau` (new); `robloxemu/build/plus1-jump.luau` (rebuilt);
+`plus1-jump/EYECANDY.md`, `README.md`, `CLAUDE.md`. Nothing committed, pushed or published; Studio not opened.
+Scratch evidence: `scratchpad/p1j_pass1/` (`gates.py`, `gates_*.txt`, `sweep.py`, `sweep.log`,
+`sweep_results.json`, `stale_docs.sh`, `probe4/`, `probe_m1d/`).
+
+---
+
+## 16. Pass 2 (2026-09-30): the complete-game standard
+
+The owner: "lag komplette spill for alle spillene inkludert alt vi har diskutert". `docs/complete-game-standard.md`
+is the finish line, and it was checked here item by item against the game (the reviewer's list of standard gaps was
+empty). Where an item was missing it was built test-first: the failing test was written and watched failing on the
+build before the change, then the game was changed. Nothing was committed, pushed or published; Studio was not
+opened.
+
+### The standard, item by item
+
+| standard | before this pass | now |
+|---|---|---|
+| §1 the real path walked headless: spawn, first objective, a loop, earn, spend, rejoin | in pieces (rebirth, rejoin, spawn checks); no check walked it end to end | `check_plus1jump_walk` (57): pad, +1 per new tile, tier 10, rebirth, codes, rejoin, all through the real server and HUD |
+| §1 spawn per `SPAWN-ORDER.md` | met (`RespawnLocation` first, real `TempleSpawn`) | unchanged |
+| §1 nothing secret replicates | met: profiles live in server memory; the seed only shapes a tower everyone sees; `BestTier` is public | unchanged; the board's payload is public rows only |
+| §1 an owner token on every DataStore write | **missing**: a save wrote whatever the record said | per-session token (`old.session`, fork-tower's pattern); a record another session has taken is never written again, and that session goes read-only with one warning |
+| §1 one-time grants refused when they cannot be saved | **missing**: a code was granted in memory when the save failed or the session was read-only | refused (`nosave`), or granted and saved in one write and rolled back when the write fails (`savefail`); the HUD says which |
+| §1 no silent no-ops | **a refused rebirth returned silently; an empty code box did nothing** | the server replies with the reason and the tier needed ("Not yet: reach tier 18" on the button for 2 s); an empty box says "Type a code first" |
+| §2 Fx, eye candy, hazards, rest, budgets | met (§1-§15) | unchanged |
+| §2 brag moment in 30-45 min and a long-term goal | met: space 34.4 min (38.4 pressing the lit rebirth), the galaxy 99.1 min | unchanged, re-measured |
+| §2 phone first, overlap rule 4b | met: `check_plus1` runs with `overlap = true` | `Board.client` loaded in it too; still PASS |
+| §3 a metric a script cannot inflate | **missing**: best tier came from `Touched`, which a client fires for its own character from anywhere; one loop put any tier on the board | the climb guard (below) |
+| §3 OrderedDataStore `u_<id>`, `metric * 2e9 + (2e9 - reachedAt)`, written only on improvement | **raw best tier, `SetAsync` on every autosave** | `Board.encode` in `Plus1Jump_LB_v2`, written when the best tier passes `boardTier`, through `Board.keepHigher` (never lowered, a later equal reach never replaces the first) |
+| §3 public top 10 cached ~60 s | refreshed every 30 s | one `GetSortedAsync` per 60 s |
+| §3 friends board: on demand, capped, cached, throttle-safe | **none** | `GetFriendsAsync` only when the player asks, first 200 friends, list cached 300 s, scores 120 s, reads 40 at once then 1/s and 10 left in Roblox's budget, all pcall'd |
+| §3 a physical board near spawn with a Public/Friends ProximityPrompt | **none** (a HUD panel only) | `workspace.TopClimbersBoard` on the pad's back edge, gold trim, prompt 9 studs; each player's view is drawn by `Board.client` |
+| §3 names resolved and cached, never stored; an empty friends board says something useful | the HUD looked names up on every render; no friends board | one server-side name cache (memory only); four different notes: no friends, none climbed, still checking, could not load |
+| §3 codes public, no Robux, no gambling | met | unchanged (the re-run found a stubbed pay-to-win pass and removed it, §17) |
+| §4 README store description | **none** (the live text predates the sky) | 987 characters, ASCII only |
+| §4 needs-Studio list and thumbnail shot list | present | §8 items 24-27; §9 gets 1920 x 1080, the guard's effect on staging, shot 7 |
+| §4 clip list in `MARKETING.md` | **none** | 10 clips, 7-15 s, vertical, each with its staging |
+| §4 `CLAUDE.md` gates and traps | present | the new gates and five new traps |
+
+### The climb guard
+
+`Config.Guard`, `Progression.allowRise` and `Progression.nearBox`, called from `grantStep` before anything is
+credited. (1) The root must be within 12 studs of the touched platform's box. (2) The rise since the last credited
+platform must fit a bucket of 10 jumps' height, refilled at sqrt(g * h / 2) studs per second, the fastest any chain
+of jumps can rise (a jump of h reaches h after sqrt(2h/g) s; tight for a jump that lands at its apex). The server
+resets it where it places the player: the frontier platform at join, the pad at rebirth.
+
+* `Progression.spec` (20 new): every back-to-back climb at h 7.2-60 and steps of 10-100 % of h, 2 000 jumps each,
+  no pause at all: 0 refused. A lag burst of 10 full-height jumps delivered at once: all credited.
+* `Pacing.spec` (3 new): the three profiles x rebirth 1/2/100x x the codes' +0/+185, 300 tiers each at their
+  fastest: **0 refused**. A teleport script trying the next platform every 0.05 s reaches space in **4.5 min** and the
+  galaxy in **13.4 min** at the earliest (a normal player: 34.4 / 99.1; the fast profile: 19.7 / 56.9).
+* `check_plus1jump_walk`: a touch from the pad earns nothing; a teleport three tiers up (to `P_14_1` at y 1 605) earns nothing,
+  even 5 s later; a bot teleporting every 0.05 s for 10 s had **32 of 200** tries credited and rose 1 135 studs (a
+  60-stud jumper could rise at most 1 367); after a rebirth a teleport from the pad to tier 5 earns nothing.
+* What it does not stop: a bot that climbs no faster than physics allows. The claim is "a teleport cannot put anyone
+  on the board faster than a perfect jumper", not "no bot can climb".
+* Two existing checks credited platforms the way a script would (`Touched` from wherever the character stood, many
+  in one instant): `check_plus1_sky`'s hazard set-up and `check_plus1jump_rebirth`'s `climbTo`. Both now stand on
+  each platform and let 1 s pass; their counts are unchanged (242, 21), 5 more runs each green.
+* Staging: a teleport more than about ten jumps above the last earned platform shows a flat counter. `MARKETING.md`
+  and §9 say how to film around it; the guard is never switched off for a picture.
+
+### The board, measured (`check_plus1jump_board`, 65)
+
+Through the real server and `Board.client`, with a FriendPages-shaped `GetFriendsAsync` supplied by the check (the
+emulator has none): two saves on tier 12 rank Bo (reached 1770000000) above Ava (1780000000); a save from before
+`bestTierAt` goes on the board stamped with that session; 0 board writes over two autosaves without a new best and
+exactly 1 after one; a stored 25 is never lowered to a profile's 15; **3** `GetSortedAsync` calls in 180 s; 0
+friends calls before anyone asks, 1 after the prompt, still 1 after toggling back and forth, and only the 3 friends
+not in the server are read; with 450 friends **41** reads in the first second, **100** in the first minute, **200** in
+all, 3 pages turned; the empty cases each get their own note; Ava's board shows only Ava's views; no saved profile
+holds a name, the board's store holds only numbers.
+
+### Gates (bundle rebuilt first, 33 files, 0 failing)
+
+| gate | after pass 1 | after pass 2 |
+|---|---|---|
+| `tests/Board.spec` | — | **66 / 0** (new) |
+| `tests/Progression.spec` | 39 / 0 | **59 / 0** (the guard: 20 new) |
+| `tests/Pacing.spec` | 28 / 0 | **31 / 0** (the guard on the real tower: 3 new) |
+| the other nine specs (Altitude 21, Codes 12, EnvBands 124, EnvConfig 70, Hazards 111, Rest 55, Rng 56, TowerGen 21, responsive 70) | 540 / 0 | 540 / 0 |
+| **spec total** | **607 / 0 (11 files)** | **696 / 0 (12 files)** |
+| `robloxemu/check_plus1` (HUD fit, overlap on; now also loads `Board.client`) | PASS | PASS |
+| `check_plus1jump_board` | — | **65 / 0** (new) |
+| `check_plus1jump_walk` | — | **57 / 0** (new) |
+| `check_plus1_sky` / `check_plus1jump_rebirth` (climb helpers made honest) | 242 / 0, 21 / 0 | 242 / 0, 21 / 0 |
+| the other 16 counted checks (rejoin 8, sky_rejoin 13, spawn 25, bands 16, bestseed 14, budget 11, dodge 16, hazards 6, join 33, leftout 8, life 21, rest 16, ringtime 16, sitdrop 9, slowload 24, world 18) | 254 / 0 | 254 / 0 |
+| **headless check total** | **517 / 0 + PASS (18 counted)** | **639 / 0 + PASS (20 counted)** |
+
+Before this pass the same run gave 607 / 0 and 517 / 0 + PASS. The two new checks are deterministic (5 runs each,
+identical output); `check_plus1_sky` (unseeded `Random`) and `check_plus1jump_rebirth` got 5 more runs each, green.
+`luau-compile` and `luau-analyze` were not in this session's tooling; every source is compiled by the specs and
+checks that load it.
+
+### Mutation sweep
+
+`scratchpad/p1j_pass2/sweep.py`, on a scratch copy of the game and the emulator (the real tree was never mutated):
+sha256 of the target, exactly one occurrence replaced, bundle rebuilt and proved to contain the mutation, all 33
+suites run, original bytes restored and the sha256 re-checked. Baseline green; afterwards the bundle was back to its
+baseline, all 33 suites green, and the copy's sources identical to the real tree.
+
+| mutation | result | killed by |
+|---|---|---|
+| B1 a tie goes to the LATER reach | KILLED | Board.spec, check_plus1jump_board |
+| B2 `keepHigher` also replaces an equal metric | KILLED | Board.spec |
+| B3 the friends view drops the viewer's row when outside the top | KILLED | Board.spec |
+| B4 the read limiter never caps its refill | KILLED | Board.spec, check_plus1jump_board |
+| B5 the public view lists tier-0 entries | KILLED | Board.spec |
+| S1 the board write ignores `keepHigher` | KILLED | check_plus1jump_board |
+| S2 a new best tier is not time-stamped | KILLED | check_plus1jump_board, check_plus1jump_walk |
+| S3 a pre-2026-09-30 save gets no time stamp | KILLED | check_plus1jump_board |
+| S4 the board is written on every save | KILLED | check_plus1jump_board |
+| S5 the public top 10 refreshed every 30 s | KILLED | check_plus1jump_board |
+| S6 friends cap 200 → 1000 | KILLED | check_plus1jump_board |
+| S7 the friends list is not cached | KILLED | check_plus1jump_board |
+| S8 friends fetched at join, not on demand | KILLED | check_plus1jump_board |
+| S9 friends' score reads bypass the limiter | KILLED | check_plus1jump_board |
+| S10 a failed friends call reads as "no friends" | KILLED | check_plus1jump_board |
+| S12 guard: no reach check | KILLED | check_plus1jump_walk |
+| S13 guard: no rise check | KILLED | check_plus1jump_walk |
+| S14 guard not reset at the pad on rebirth | KILLED | check_plus1jump_walk |
+| S15 guard starts at the pad for a returning climber | KILLED | check_plus1jump_board |
+| G1 guard rate x2 (`RateFactor` 1 → 2) | KILLED | Pacing.spec |
+| S16 saves ignore the owner token | KILLED | check_plus1jump_walk |
+| S17 a read-only session is granted codes | KILLED | check_plus1jump_walk |
+| S18 a code whose save failed is kept | KILLED | check_plus1jump_walk |
+| S19 a refused rebirth is silent again | KILLED | check_plus1jump_walk |
+| C1 HUD: an empty code box gets no reply | KILLED | check_plus1jump_walk |
+| C2 HUD: the refused rebirth is not shown | KILLED | check_plus1jump_walk |
+| C3 HUD: the server's names are ignored | KILLED | check_plus1jump_board |
+| C4 `Board.client` draws views addressed to other players | KILLED | check_plus1jump_board |
+| CONTROL the board trim a shade less orange | SURVIVED (as it must) | — |
+
+28 KILLED, the control SURVIVED. Four of these (S1, S14, C3, C4) were first predicted to survive when the assertions
+were drafted; the assertions that kill them (a stored value higher than the profile, a teleport right after the
+rebirth, the HUD row's name, Ava's board after other players' views) were added before the sweep, and each passes on
+the real build. `Board.improves`, which only the spec used, was removed rather than mutated. `Config.Guard.BurstJumps`
+is a tuning knob with no requirement pinning 10; it was not mutated.
+
+### Files written in pass 2
+
+New: `plus1-jump/src/shared/Board.luau`, `src/client/Board.client.luau`, `tests/Board.spec.luau`, `MARKETING.md`;
+`robloxemu/check_plus1jump_board.luau`, `robloxemu/check_plus1jump_walk.luau`. Changed: `src/server/Main.server.luau`
+(board, guard, owner token, codes, rebirth reply), `src/client/Hud.client.luau` (refusal texts, server names),
+`src/shared/Config.luau` (`Board`, `Guard`, store v2), `src/shared/Progression.luau` (the guard),
+`tests/Progression.spec.luau`, `tests/Pacing.spec.luau`; `robloxemu/check_plus1.luau` (loads `Board.client`),
+`check_plus1_sky.luau` and `check_plus1jump_rebirth.luau` (honest climb helpers); `robloxemu/build/plus1-jump.luau`
+(rebuilt); `README.md`, `CLAUDE.md`, this file. Scratch evidence: `scratchpad/p1j_pass2/` (`gates.py`,
+`gates_baseline.txt`, `gates_run1.txt`, `gates_final.txt`, `sweep.py`, `sweep.log`, `sweep_results.json`,
+`store.txt`, `probe_y.luau`).
+
+---
+
+## 17. Pass 2 re-run (2026-10-01): the standard checked again, two gaps closed
+
+The workflow ran pass 2 again. The tree on disk was exactly what §16 describes (all 58 files in pass 2's final sha256
+list identical), and every gate was green before anything changed: 33 files, 696 / 0 in 12 specs and 639 / 0 + PASS
+in 21 headless files. Every item of `docs/complete-game-standard.md` was then checked against the build itself, not
+against §16. Nothing was committed, pushed or published; Studio was not opened.
+
+### The standard, re-checked
+
+| standard | evidence, measured on this run | result |
+|---|---|---|
+| §1 the real path walked headless | `check_plus1jump_walk` 57 / 0: TempleSpawn, +1 per new tile, tier 10, rebirth, codes, rejoin, owner token | met |
+| §1 spawn order | `check_plus1_spawn` 25 / 0; `RespawnLocation` is the first line of `onPlayerAdded` | met |
+| §1 nothing secret replicates | public by design: the `BestTier` attribute, the platforms' `Tier`/`Idx`, `Config` (codes are public). Profiles, session tokens, the guard and the board caches live in server memory; a board view carries rank, user id, name and tier only | met |
+| §1 DataStore | every call pcall'd; `canSave` only with the lock; the owner token on every write (`old.session`); string keys (`u_<id>`, code names); a code and its reward in one `UpdateAsync`, refused or rolled back when it cannot land (walk §5-§8) | met |
+| §1 no silent no-ops | rebirth, codes and Rest (a queued rest shows `☕ …`) say why. The climb guard's refusal is silent on purpose; the reason is now written in `CLAUDE.md` (traps) | met, one written exception |
+| §2 Fx, 8 bands, hazards, rest, budgets | `Hazards.spec`: one hazard per 150.9 s of climbing; `Pacing.spec`: 0.394 near-hits a minute for a player who reacts; `check_plus1_sky`: most at once 1; `check_plus1jump_budget` 11 / 0 | met |
+| §2 brag moment in 30-45 min, a goal beyond it | `Pacing.spec`: space (tier 85) at 34.4 min for a normal player, 38.4 pressing the lit rebirth; deep space 57.4, the galaxy 99.1 | met |
+| §2 phone first, rule 4b | `check_plus1` runs with `overlap = true`; `hudcheck` asserts 44 px tap targets and nothing tappable in the thumbstick and jump zones | met |
+| §3 the board | `check_plus1jump_board` 65 / 0, `Board.spec` 66 / 0 (encode, write on improvement, public 60 s, friends on demand / 200 / cached / throttled, the physical board and its prompt, names never stored, the empty notes) | met |
+| §3 no Robux cost in v1, never gambling or pay-to-win | **gap.** `Config.Passes` still listed `DoubleJump` ("2x jump power per tile") and `AutoWalk`, `grantStep` paid +2 a tile to any save whose `passes` said `DoubleJump`, and `CLAUDE.md`'s next step was to fill in ids and switch them on. Nothing could sell them yet (`Enabled = false`, no purchase code) | **closed**, below |
+| §4 store description | 987 characters, ASCII only, measured from README's block. Every claim checked against `Config`: 0.6 studs per +1, 6 platforms a tier, space at tier 85, the galaxy at 240, rebirth from tier 10 with 2x / 5x / 10x | met |
+| §4 needs-Studio and thumbnail lists | §8 items 1-27, §9 shots 1-7 at 1920 x 1080. The 19 platform positions they and `MARKETING.md` name were recomputed from `TowerGen`: all match | met |
+| §4 clip list | `MARKETING.md`: 10 clips, 7-15 s, vertical 1080 x 1920, each with staging. **Its table under the climb guard was wrong:** it named `P_3_1`, `P_5_1` and `P_6_1` as the first platform after the teleport, but `film_game.py`'s setup puts the character on the LAST tile of the tier below | **fixed**, measured |
+| §4 `CLAUDE.md` gates and traps | present | updated (22 check files, two new traps) |
+
+### No pay-to-win, closed test-first
+
+`robloxemu/check_plus1jump_paywin.luau` (new) was written first and run on the unchanged build: **2 passed, 4 failed**.
+`Config.Passes` listed the non-cosmetic `AutoWalk, DoubleJump`; a save that claimed `DoubleJump` got 2 jump power for
+its first tile and 12 for the six of tier 1, and its jump was 14.40 studs where a passless climber's is 10.80. The fix:
+`grantStep` pays +1 to everyone and never reads `p.passes` (saved passes are kept as they are), and `Config.Passes`
+is `{ Enabled = false, SkyTrails = 0 }`. Now **6 / 0**, identical output over 5 runs. A later cosmetic pass has to
+change that check's `Enabled = false` on purpose (`CLAUDE.md`, Next 5).
+
+### The clip staging, measured
+
+A probe (not a gate: `scratchpad/p1j_pass2b/probe/staging.luau`) ran `film_game.py`'s own steps and sleeps through the
+real server: WELCOME and SKYHIGH, 1 s, a teleport onto `P_(t-1)_6` 4 studs up, 0.8 s, then the hops. The codes make the
+jump 28.2 studs (a full buffer of 282 studs), but a fresh profile's buffer starts at 72 (ten jumps of 7.2 at join).
+
+| scenario | teleported onto | above the pad | from a fresh profile | in order, one Play session |
+|---|---|---|---|---|
+| `climb_tier3` | `P_2_6`, y 83 | 75 | credited (setup 0.5, 2, 5 or 30 s after the join) | credited, 6 of 6 hops |
+| `saw_tier5` | `P_4_6`, y 218 | 210 | **not** at 0.5 s; credited at 2, 5 and 30 s | credited, 5 of 5 hops |
+| `pendulum_tier6` | `P_5_6`, y 308 | 300 | **never** (0.5 and 30 s), and 0 of its 6 hops | credited, 6 of 6 hops |
+
+§16's conclusion (run them in that order in one session) stands; the platforms and heights in `MARKETING.md` are now
+these.
+
+### Gates (bundle rebuilt first, 34 files, 0 failing)
+
+| gate | start of this run | end |
+|---|---|---|
+| 12 specs (Altitude 21, Board 66, Codes 12, EnvBands 124, EnvConfig 70, Hazards 111, Pacing 31, Progression 59, Rest 55, Rng 56, TowerGen 21, responsive 70) | 696 / 0 | 696 / 0 |
+| `check_plus1` (HUD fit, overlap on) | PASS | PASS |
+| `check_plus1jump_paywin` | — | **6 / 0** (new) |
+| the other 20 counted checks (rejoin 8, sky 242, sky_rejoin 13, spawn 25, bands 16, bestseed 14, board 65, budget 11, dodge 16, hazards 6, join 33, leftout 8, life 21, rebirth 21, rest 16, ringtime 16, sitdrop 9, slowload 24, walk 57, world 18) | 639 / 0 | 639 / 0 |
+| **headless total** | **639 / 0 + PASS (21 files)** | **645 / 0 + PASS (22 files)** |
+
+`luau-compile` and `luau-analyze` were not in this session's tooling; every source is compiled by the specs and the
+checks that load it.
+
+### Mutation sweep
+
+`scratchpad/p1j_pass2b/sweep.py` (pass 2's harness, on a fresh scratch copy of the game and the emulator; the real
+tree was never mutated): sha256 of the target, exactly one occurrence replaced, the rebuilt bundle proved to be the
+baseline bundle with that same replacement, all 34 suites run, the original bytes restored and the sha256
+re-checked. Baseline green; afterwards the bundle was back to its baseline, all 34 suites green, and the copy's
+sources, tests and checks identical to the real tree.
+
+| mutation | result | killed by |
+|---|---|---|
+| P1 a save that claims `DoubleJump` earns +2 a tile again | KILLED | check_plus1jump_paywin |
+| P2 `DoubleJump` back in `Config.Passes` | KILLED | check_plus1jump_paywin |
+| P3 gamepasses switched on in v1 (`Enabled = true`) | KILLED | check_plus1jump_paywin |
+| CONTROL the `SkyTrails` pass id 0 -> 1 (cosmetic) | SURVIVED (as it must) | — |
+
+3 KILLED, the control SURVIVED. The `MARKETING.md` table is documentation; its numbers come from the probe above.
+
+### Files written in this run
+
+New: `robloxemu/check_plus1jump_paywin.luau`. Changed: `src/server/Main.server.luau` (+1 per tile for everyone),
+`src/shared/Config.luau` (`Passes`), `MARKETING.md` (the staging table), `README.md`, `CLAUDE.md`, this file;
+`robloxemu/build/plus1-jump.luau` (rebuilt). Scratch evidence: `scratchpad/p1j_pass2b/` (`sha_start.txt`,
+`gates_start.txt`, `paywin_red.txt`, `probe/staging.luau`, `probe/staging_out.txt`, `gates_fix.txt`, `sweep.py`,
+`sweep.log`, `sweep_results.json`, `gates_final.txt`, `sha_final.txt`).
