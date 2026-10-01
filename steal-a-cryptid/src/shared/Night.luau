@@ -168,6 +168,21 @@ function Night.rank(cfg: any, state: any, prev: number?): number
 	return math.max(r, keep)
 end
 
+-- The home sky's level, the progress Config.Night.Home is blended on: the Journal's rank (0 .. #Tiers), and one step
+-- past the Mythic (the gathering) once the best lair income the player has ever had (State.best, the Top Lairs board's
+-- metric, which never goes down) reaches Config.Night.GatheringRate with the Mythic in the Journal. Never below `prev`.
+function Night.level(cfg: any, state: any, prev: number?): number
+	local keep = prev or 0
+	if type(state) ~= "table" then return keep end
+	local top = #cfg.Tiers
+	local level = Night.rank(cfg, state, 0)
+	local best = tonumber(state.best)
+	if level >= top and best ~= nil and best == best and best >= (cfg.Night.GatheringRate or math.huge) then
+		level = top + 1
+	end
+	return math.max(level, keep)
+end
+
 --============================================================================ where
 
 -- Pocket s owns the slice [origin(s) - pitch/2, origin(s) + pitch/2). Home is everything before slot 0.
@@ -288,6 +303,40 @@ function Night.limitKnock(rect: any, pos: any, kv: any, seconds: number, keepIn:
 		return v
 	end
 	return { x = axis(kv.x, pos.x, rect.cx, rect.sx / 2), y = kv.y, z = axis(kv.z, pos.z, rect.cz, rect.sz / 2) }
+end
+
+-- Where the rest campfire burns: (x, z) for a player at (px, pz) looking along (lx, lz) on the flat. It went
+-- Campfire.Distance straight ahead with no look at the ground, so a player resting at the cliff had it
+-- floating over the ravine (second review of the night, 2026-09-30, finding 3). Now: the first of ahead,
+-- behind, right, left whose whole ring (Campfire.Radius) is on the Ground rect; if none is (a corner nook),
+-- the one of those, pulled onto the Ground, that is farthest from the player. No Ground known: ahead.
+function Night.campfireSpot(cfg: any, rect: any, px: number, pz: number, lx: number, lz: number): (number, number)
+	local C = cfg.Night.Campfire
+	local d, r = C.Distance, C.Radius
+	local len = math.sqrt(lx * lx + lz * lz)
+	if len < 1e-6 then
+		lx, lz = 0, 1
+	else
+		lx, lz = lx / len, lz / len
+	end
+	if rect == nil then
+		return px + lx * d, pz + lz * d
+	end
+	local hx, hz = math.max(0, rect.sx / 2 - r), math.max(0, rect.sz / 2 - r)
+	local bestX, bestZ, bestD = nil, nil, -1
+	for _, dir in { { lx, lz }, { -lx, -lz }, { lz, -lx }, { -lz, lx } } do
+		local x, z = px + dir[1] * d, pz + dir[2] * d
+		local cx = math.clamp(x, rect.cx - hx, rect.cx + hx)
+		local cz = math.clamp(z, rect.cz - hz, rect.cz + hz)
+		if cx == x and cz == z then
+			return x, z
+		end
+		local dd = (cx - px) * (cx - px) + (cz - pz) * (cz - pz)
+		if dd > bestD then
+			bestX, bestZ, bestD = cx, cz, dd
+		end
+	end
+	return bestX :: number, bestZ :: number
 end
 
 --============================================================================ the camera's view of a camp
@@ -437,19 +486,30 @@ end
 --     instead of through them. The bump never lowers a point. (+1 Jump's open question 22, closed here.)
 --     (No drawn point is below the root's height: lanes come down TO it and then end or climb. Should one
 --     ever be, it is lifted less the lower it is, reaching zero ClearStuds down, so the path never jumps.)
-function Night.drawPosition(cfg: any, plan: any, t: number, avoid: any?): (any, boolean)
+--   * liveUntil = the last flight time the client kept the ring and the warning up (Hazards.threatLive: the
+--     rest of the flight could still hit someone in the ring). Second review, 2026-09-30, finding 1: a player
+--     on the far side of the ring from the lane's jittered aim is hit up to 0.2 s AFTER arrival, and the
+--     drawing had already swooped away (the meteorite had vanished). Between arrival and liveUntil the hazard
+--     keeps its lane's line, level (never lower than where it arrived, so it never dives into the ground);
+--     the swoop, or the meteorite's end, starts at liveUntil. nil (or a time at or before arrival) draws as
+--     before: the swoop starts at arrival.
+function Night.drawPosition(cfg: any, plan: any, t: number, avoid: any?, liveUntil: number?): (any, boolean)
 	local H = cfg.Night.Hazards
 	local k = H.Kinds[plan.kind] or {}
 	local st, vel = plan.start, plan.velocity
 	local x, y, z = st.x + vel.x * t, st.y + vel.y * t, st.z + vel.z * t
 	local visible = true
 	if t > plan.arriveAt then
-		if k.impact then
+		local arriveY = st.y + vel.y * plan.arriveAt
+		local endAt = math.max(plan.arriveAt, liveUntil or plan.arriveAt)
+		if t <= endAt then
+			y = math.max(y, arriveY)
+		elseif k.impact then
 			visible = false
 		else
-			local arriveY = st.y + vel.y * plan.arriveAt
+			local endY = math.max(st.y + vel.y * endAt, arriveY)
 			local vh = math.sqrt(vel.x * vel.x + vel.z * vel.z)
-			y = arriveY + (t - plan.arriveAt) * vh * math.tan(math.rad(H.SwoopDegrees))
+			y = endY + (t - endAt) * vh * math.tan(math.rad(H.SwoopDegrees))
 		end
 	end
 	if avoid ~= nil and visible then
@@ -467,6 +527,68 @@ function Night.drawPosition(cfg: any, plan: any, t: number, avoid: any?): (any, 
 		end
 	end
 	return { x = x, y = y, z = z }, visible
+end
+
+--============================================================================ the budget, capped in code
+
+-- Second review of the night, 2026-09-30, finding 5: Config.Night.Budget was asserted by the checks and read by
+-- nothing in the game. NightArt now admits every piece of scenery, critter and habitat against the budget minus
+-- Budget.Reserve (what the always-shown pieces keep: a hazard, its lane and ring, the campfire, the weather
+-- host) before drawing it; a refused item stays hidden and is asked again next frame. The costs counted are
+-- everything the item can ever switch on (all its parts, beams, trails and lights), so an admitted item never
+-- goes over by fading in. Emitters are switched by their owners every frame (the lit habitat, the weather),
+-- so they are capped separately, every frame, in priority order (capEmitters).
+local GATED = { "parts", "beams", "trails", "lights" }
+
+function Night.budgetGate(cfg: any): any
+	local B = cfg.Night.Budget
+	local R = B.Reserve or {}
+	return {
+		limit = {
+			parts = B.MaxLocalParts - (R.parts or 0),
+			beams = B.MaxBeams - (R.beams or 0),
+			trails = B.MaxTrails - (R.trails or 0),
+			lights = B.MaxLights - (R.lights or 0),
+		},
+		used = { parts = 0, beams = 0, trails = 0, lights = 0 },
+		refused = 0,
+	}
+end
+
+-- Admit an item costing `cost` ({ parts, beams, trails, lights }): true (and counted) if it fits every limit.
+function Night.admit(g: any, cost: any): boolean
+	for _, k in GATED do
+		if g.used[k] + (cost[k] or 0) > g.limit[k] then
+			g.refused += 1
+			return false
+		end
+	end
+	for _, k in GATED do
+		g.used[k] += cost[k] or 0
+	end
+	return true
+end
+
+function Night.release(g: any, cost: any)
+	for _, k in GATED do
+		g.used[k] = math.max(0, g.used[k] - (cost[k] or 0))
+	end
+end
+
+-- rates: particles/s of each emitter that wants to be on, in priority order. Returns keep[i]: on while the
+-- count stays within maxCount and the sum within maxRate (a later, smaller one may still fit).
+function Night.capEmitters(rates: { number }, maxCount: number, maxRate: number): { boolean }
+	local keep, n, sum = {}, 0, 0
+	for i, r in rates do
+		if n + 1 <= maxCount and sum + r <= maxRate + 1e-9 then
+			keep[i] = true
+			n += 1
+			sum += r
+		else
+			keep[i] = false
+		end
+	end
+	return keep
 end
 
 --============================================================================ habitats

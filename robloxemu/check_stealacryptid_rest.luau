@@ -11,6 +11,8 @@
 --      hazards made rapid launches none (the clock is frozen); moving wakes you and they return;
 --   2. not a panic button: pressed with a hazard inbound it only queues, the hazard still arrives, a hit
 --      voids the request; stepping out of the ring keeps it and rest starts once the sky is clear;
+--      2c pressed DURING a stumble it is queued too, never dropped without a word (second review, 2026-09-30);
+--      2d the same when a poacher's warning has already cleared the sky: still no sit until back on your feet;
 --   3. idle rest: standing still 20 s pauses them too (not seated, no campfire);
 --   4. a raid is never paused: starting one while resting ends the rest on the teleport, and in a camp
 --      the button is gone and a press does nothing;
@@ -253,6 +255,82 @@ press()
 run(0.1)
 eq(restButton.Text, T.RestButton, "2b: pressing again ends rest")
 eq(hum.Sit, false, "2b: standing")
+
+-- 2c: pressed DURING a stumble (second review of the night, 2026-09-30, finding 2: the press was dropped with
+-- no word, 5 of 5 times). It is queued like any press with a hazard about: the button reads "Rest...", the chip
+-- says rest starts when the sky is clear, nobody sits while stumbling, and rest begins once the player is back
+-- on their feet, the sky is clear and they stand still.
+do
+	local pressed, queuedLabel, queuedChip, seatedStumbling, rested = 0, 0, 0, 0, 0
+	for _ = 1, 3 do
+		run(10, function() return not inFlightNow end)
+		run(12, function() return inFlightNow end)
+		standAt(hrp.Position)
+		local h0 = hitCount
+		run(8, function() return hitCount > h0 end)
+		if hitCount > h0 then
+			run(0.1)
+			if hum.PlatformStand == true then
+				pressed += 1
+				press()
+				local sawLabel, sawChip = false, false
+				for _ = 1, 90 do
+					frame(1 / 30)
+					if restButton.Text == T.QueuedButton then sawLabel = true end
+					if bus.Status.Value == T.Queued and hudRoot.RaidChip.Visible and hudRoot.RaidChip.Text.Text == T.Queued then sawChip = true end
+					if hum.Sit == true and hum.PlatformStand == true then seatedStumbling += 1 end
+				end
+				if sawLabel then queuedLabel += 1 end
+				if sawChip then queuedChip += 1 end
+				run(8, function()
+					if hum.Sit == true and hum.PlatformStand == true then seatedStumbling += 1 end
+					return restButton.Text == T.RestingButton
+				end)
+				if restButton.Text == T.RestingButton and hum.Sit == true then rested += 1 end
+				press()
+				run(0.1)
+			end
+		end
+	end
+	eq(pressed, 3, "2c: three presses landed 0.1 s into a stumble")
+	eq(queuedLabel, pressed, "2c: each press during a stumble is queued: the button reads Rest...")
+	eq(queuedChip, pressed, "2c: and the chip says rest starts when the sky is clear")
+	eq(seatedStumbling, 0, "2c: nobody sits down while stumbling")
+	eq(rested, pressed, "2c: rest began once back on their feet under a clear sky")
+	eq(hum.Sit, false, "2c: standing again after the last")
+end
+
+-- 2d: the same press when the hazard that knocked you is already gone (a poacher's warning removes a hazard in
+-- flight, so the sky is clear while you are still stumbling): still queued until you are back on your feet, never
+-- a sit mid-stumble. (Sweep mutant M11 showed 2c alone could not tell "not on your feet" from "a hazard is
+-- about": in 2c the hazard is always still flying.) The warning reaches the client as the server sends it, in State.
+do
+	run(10, function() return not inFlightNow end)
+	run(12, function() return inFlightNow end)
+	standAt(hrp.Position)
+	local h0 = hitCount
+	run(8, function() return hitCount > h0 end)
+	eq(hitCount > h0 and hum.PlatformStand == true, true, "2d: knocked over")
+	local s = table.clone(st())
+	s.poacher = { warningLeft = 9 }
+	remState:FireClient(plr, s)
+	frame(1 / 30)
+	eq(flying(), false, "2d: the poacher's warning removed the hazard: the sky is clear")
+	eq(hum.PlatformStand, true, "2d: still stumbling")
+	press()
+	local seated, queued = 0, false
+	for _ = 1, 20 do
+		frame(1 / 30)
+		if restButton.Text == T.QueuedButton then queued = true end
+		if hum.Sit == true and hum.PlatformStand == true then seated += 1 end
+	end
+	eq(seated, 0, "2d: a press mid-stumble under a clear sky does not sit a stumbling player down")
+	eq(queued, true, "2d: it is queued (Rest...)")
+	run(3, function() return restButton.Text == T.RestingButton end)
+	eq(restButton.Text, T.RestingButton, "2d: and rest begins once back on their feet")
+	press()
+	run(0.2)
+end
 
 --============================================================ 3. idle rest (the shipped interval)
 

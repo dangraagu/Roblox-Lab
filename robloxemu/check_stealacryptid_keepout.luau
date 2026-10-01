@@ -165,6 +165,52 @@ for tier = 1, #Config.Camps do
 	eq(back[tier], shippedCount[tier], "camp " .. tier .. ": every part left out came back at the shipped keep-out")
 end
 
+-- A critter is kept out by the box it DRAWS: Night.client tests each kind's centre with its own `reach` (3 studs by
+-- default; the Jersey Devil's wings reach 6.1, so 7). One devil for a few seconds rarely flies near the keep-out
+-- (sweep round 1: testing it by the 3-stud box survived every gate). Fifteen devils over the Pine Barrens for 60 s, in
+-- memory, at the shipped keep-out, the camera orbiting: no part of any of them, wing tips included, ever enters it.
+do
+	local barrens = GameConfig.Night.Camp[2]
+	local devil = nil
+	for _, a in barrens.ambient do if a.kind == "devil" then devil = a end end
+	truthy(devil ~= nil, "the Pine Barrens camp has the Jersey Devil")
+	local count0 = devil and devil.count
+	if devil then devil.count = 15 end
+	inside, firstInside, framesChecked = 0, nil, 0
+	local devilFrames = 0
+	local function countDevils()
+		for _, d in folder:GetChildren() do
+			if d.Name == "DevilBody" then devilFrames += 1 end
+		end
+	end
+	hrp.CFrame = CFrame.new(boardAt)
+	run(0.2, "home")
+	remotes.Hunt:simulateFireServer(plr, 2)
+	h:advance(0.05)
+	truthy(Night.pocketSlot(GameConfig, hrp.Position.X) ~= nil, "devils: in the Pine Barrens camp")
+	-- Critters fly roughly tangent to a ring round the CAMERA (EnvBands.ambientSpawn), so with the camera at the gate a
+	-- devil's wings point at the keep-out only near its far corners. The camera orbits the camp instead (radius 120,
+	-- 60 up, one lap in 30 s), as a raider's zoomed-out camera may: then devils fly along the keep-out's edges with
+	-- their wings toward it. Measured: the 3-stud box let wings in 23-27 times in 60 s; the devil's own reach, never.
+	local ox = Night.pocketOriginX(GameConfig, Night.pocketSlot(GameConfig, hrp.Position.X))
+	local centre = Vector3.new(ox + 36, 0, 56)
+	for f = 1, 60 * 30 do
+		local ang = f / (30 * 30) * math.pi * 2
+		local camPos = centre + Vector3.new(math.sin(ang) * 120, 60, math.cos(ang) * 120)
+		cam.CFrame = CFrame.lookAt(camPos, centre)
+		RunService.RenderStepped:Fire(1 / 30)
+		h:advance(1 / 30)
+		check("barrens, 15 devils, the camera orbiting")
+		countDevils()
+	end
+	remotes.LeaveCamp:simulateFireServer(plr)
+	h:advance(0.05)
+	if devil then devil.count = count0 end
+	print(string.format("  15 devils over the Pine Barrens for 60 s: %d devil-frames, %d camp frames checked", devilFrames, framesChecked))
+	truthy(devilFrames > 30 * 60 * 3, "devils: at least three were out on average (" .. devilFrames .. " devil-frames)")
+	eq(inside, 0, "devils: no part of any devil, wings included, ever entered the keep-out (" .. tostring(firstInside) .. ")")
+end
+
 for _, e in h:errors() do truthy(false, "scheduler error: " .. tostring(e)) end
 for _, w in h.warnings do
 	if string.find(w, "Night", 1, true) then truthy(false, "the client warned: " .. w) end

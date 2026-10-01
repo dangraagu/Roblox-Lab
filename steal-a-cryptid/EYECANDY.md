@@ -6,10 +6,17 @@ RARE (about one near-hit per 2-3 minutes) and easy to see coming; a way to rest 
 exploit; environments worth photographing, and a thumbnail shot list for the night Studio session.
 +1 Jump was built first; its `EnvBands`, `Hazards` and `Rest` modules are the template, copied here verbatim.
 
-**State (2026-09-24): built, unit-tested, headless-tested through the real server and the real client
-scripts, reviewed once, mutation-tested (the resume session's 49 edits re-run plus 28 new ones: 70 of 70
-mutations killed, 6 of 6 controls survived, one equivalent mutant set aside, every edit proven to reach the bundle). NEVER OPENED IN ROBLOX STUDIO. Not committed, not pushed,
-not published.**
+**State (2026-09-30): built, unit-tested, headless-tested through the real server and the real client
+scripts, reviewed twice, mutation-tested after each review. The second review's five findings are closed
+test-first and the four open owner decisions are DECIDED (§14; §11 has the decisions). NEVER OPENED IN ROBLOX
+STUDIO. Not published. The 2026-09-30 pass did not commit or push (the orchestrating session owns git).**
+(2026-10-01: the pass was re-run and every claim re-measured; one test gap closed in `check_stealacryptid_nighthud`,
+no game change; 38 of 38 mutations killed, 4 of 4 controls survived. §14, last subsection.)
+**(2026-10-01, pass 2 toward the complete-game standard, §15: a fifth home band, the Gathering, past Mythic Night; every
+camp with its own weather and its own critters; the band times measured in Luau. Nobody has reviewed it yet.)**
+
+(State 2026-09-24: reviewed once, mutation-tested: the resume session's 49 edits re-run plus 28 new ones, 70 of 70
+mutations killed, 6 of 6 controls survived, one equivalent mutant set aside, every edit proven to reach the bundle.)
 
 This work was resumed from an interrupted build (§12 says what that build left, what was wrong with it, and
 what that session changed). In short: the art, rules and most checks were there and green, one check had
@@ -38,23 +45,30 @@ edge in the hazards check's telegraph timing (a test-arithmetic bug).
 | `robloxemu/check_stealacryptid_{night,hazards,rest,nighthud,budget,compile}.luau` | the glue, headless (the interrupted build's, extended here). |
 | `robloxemu/check_stealacryptid_{lateroad,keepout,life,longroad}.luau` | new in the resume session (§12). |
 | review fixes (§13) | `Night.luau` gains `farGroundRects` (the ravine), `limitKnock` (a knock near the edge), `viewHull` / `boxOverlapsHull` / `campViewHull` / `hidesCamp` (the camera's view) and `critterClear`; `NightArt` builds the ravine and hides what stands in the view; `Night.client` cuts the knock, keeps camp critters out of the view and tells the art where the player is; `Config.Night.Ravine` and `HomeViewRadius`. New checks `check_stealacryptid_edge` and `_view`; `_lateroad` and `_longroad` extended. |
+| pass 2 (2026-10-01, §15) | a fifth home band, **the Gathering** (`Night.level`: one step past the Mythic once `State.best`, the best lair income ever and the Top Lairs board's metric, reaches `Config.Night.GatheringRate` 1 350/s): a crimson moon (`bloodMoon`, rides with the camera), the legends of Pine Hollow on the far floor (`gathering`: a Mothman and a Dogman on one side, a Jersey Devil and a Mothman on the other), moths, embers, Mythic Night's pieces kept; each camp its own weather and critters (Badlands `sand`, Barrens the Jersey Devil `devil`, Loch Shore `moth`, Redwoods `spores`; the camp keep-out tests a critter by its own `reach`); the server's `State.best`. Checks: `_night` (the fifth band through real purchases; every band's weather and critters drawn; the art builds every kind Config names), `_budget` (the mythic -> gathering seam; nothing refused by the cap), `_view` and `_longroad` now run at the Gathering. |
+| second review fixes and owner decisions (2026-09-30, §14, §11) | `Hazards.threatLive` (template update) and the lingering ring/chip/drawing (`Night.drawPosition` `liveUntil`); a Rest press mid-stumble queued; `Night.campfireSpot`; the title card placed from the HUD's NightBus room and deferred while a panel is open; the budget capped in code (`Night.budgetGate`/`admit`/`capEmitters`, `Budget.Reserve`); the server's fall rescue (`World.FallRescueStuds`). New checks `_latehit`, `_card`, `_budgetcap`, `_fall`. |
 
 `check_stealacryptid.luau`, `check_stealacryptid_guards.luau`, `check_stealacryptid_hud.luau` and `tests/walk.luau`
-are **unchanged** and green: the game they guard is the same game.
+are **unchanged** and green: the game they guard is the same game. (2026-09-30: they are still unchanged and
+green after the server's fall rescue.)
 
 ---
 
 ## 2. The bands and what triggers them
 
 **Trigger: the Journal's rank, never time.** `rank` = the highest tier the player has ever owned (0-4), the
-value the pedestals and the camp unlocks already follow; the server reports it in the player's own State.
+value the pedestals and the camp unlocks already follow; the server reports it in the player's own State. Past the
+Mythic the home sky takes one more step, **the Gathering**, once the best lair income the player has ever had
+(`State.best`, the Top Lairs board's metric, which never goes down) reaches `Config.Night.GatheringRate` (1 350/s,
+three Bigfoots' worth; above the 900/s of the best lair without a Mythic, so it always follows Mythic Night). The
+blend's progress is `Night.level` (0-5).
 The rarer your collection, the deeper the night over Pine Hollow. Inside a raid the night is the **camp's**
 place, named by the camp's tier. Where you are comes from your own root's position (a pocket is at
 x ≥ 3 936), so a State that arrives before the teleport cannot show the wrong place.
 
 **Why "the night deepens" instead of a day/night clock:** the brief says environment changes are driven by
 progress, not time, and the game is a night game by design (DESIGN.md §13: moonlit, readable nets). The
-four home bands step the sky from sundown to 3 am as the Journal fills. `ClockTime` is written in *night
+five home bands step the sky from sundown to 4:36 am as the Journal and the lair fill. `ClockTime` is written in *night
 hours* (18 = 6 pm … 27 = 3 am; the client writes h mod 24) inside 17.5-30, so a glide between any two bands
 never passes through daylight (asserted over every blend of every pair, and on every frame of the headless
 runs).
@@ -62,8 +76,8 @@ runs).
 **The readability floor.** No band, and no frame the client writes, may be darker, foggier, less saturated
 or harder to bloom than the game as it shipped (`Config.Lighting`), and no band may carry depth of field: a
 raider must read a whole camp from its gate, tier colours must survive, neon nets must bloom. `Night.readable`
-checks every band, every 5-step blend of every pair (8 bands + the v1 take-over, 405 blends), and every frame
-of `check_stealacryptid_night` (join, 4 bands, 4 camps, every seam).
+checks every band, every 5-step blend of every pair (9 bands + the v1 take-over, 500 blends; 405 before the
+fifth band), and every frame of `check_stealacryptid_night` (join, 5 bands, 4 camps, every seam).
 
 **Transitions never cut.** Every written value glides with a 0.6 s half-life; lighting is written at most
 10×/s and only when it changed. Measured through the real client: 0.3 s after a purchase raises the rank the
@@ -79,18 +93,26 @@ client starts from exactly the server's lighting and glides to the player's band
 | 2 | **Moonrise** — "A Rare cryptid stirs the woods" | 2 (a Rare) | 20:24 | blue moonlight, a big moon, 1 500 stars | + owls on the road's own pine crowns, turning to watch you, blinking | 6 bats | mist 3/s | bat, crow |
 | 3 | **Strange Lights** — "Legendary lights over the ridge" | 3 (a Legendary) | 23:42 | teal grade, stronger bloom, 3 000 stars | + a green-violet **aurora** (3 ribbons) | will-o'-wisps, **red eyes blinking in the treeline**, bats | wisp-lights 6/s | wisp, bat |
 | 4 | **Mythic Night** — "Bigfoot walks Pine Hollow" | 4 (the Mythic) | 02:48 | warm grade, strongest bloom, 4 500 stars, the biggest moon | + a gold aurora, **three UFOs** with tractor beams over the ridge, **Bigfoot, 98 studs tall, walking the horizon** | **meteors** streaking overhead, wisps, red eyes | stardust 6/s | meteorite, wisp |
+| 5 | **The Gathering** — "Every legend comes to look" | level 5: the Mythic, and a best lair income of 1 350/s | 04:36 | crimson grade, the strongest bloom (threshold 0.78), 5 000 stars; the sky's moon shrinks to 6 | Mythic Night's pieces + a **crimson moon** low over the ridge + **the legends of Pine Hollow** (a Mothman and a Dogman, a Jersey Devil and a Mothman, 30 studs tall, glowing eyes) standing on the far floor past the ravine, looking at the lairs | **moths**, red eyes, meteors | embers 6/s | meteorite, bat |
 
 A title card names the band quietly when the player's State first arrives, and again each time a new band is
-reached (`MOONRISE / A Rare cryptid stirs the woods`) — never over a camp, where it would cover the nets.
+reached (`MOONRISE / A Rare cryptid stirs the woods`) — never over a camp, where it would cover the nets, never over
+the HUD's top stack or into the thumb band, and never over an open Hunt panel or build sheet: a band reached with
+one open is named when it closes (2026-09-30, §14 finding 4).
 
 ### Camps: each tier its own place
 
 | camp tier | place | clock | scenery (all outside the fences) | life | weather |
 |---|---|---|---|---|---|
-| 1 Common | **Badlands Camp** | 21:36 | red sand, 9 mesas on the horizon, cacti | tumbleweeds rolling past, bats | — |
-| 2 Rare | **Pine Barrens Camp** | 23:00 | pine-needle floor, a ring of 14 pines | bats | fireflies behind the back fence |
-| 3 Legendary | **Loch Shore Camp** | 00:48 | pebble shore; a loch 1 400 × 800 behind the cages with a moon glint; a castle tower with one lit window; **Nessie gliding across the water** | bats | mist behind the back fence |
-| 4 Mythic | **Redwood Camp** | 03:12 | fern floor, 12 redwoods 190 studs tall, **a Bigfoot glimpsed between them** | wisps | mist behind the back fence |
+| 1 Common | **Badlands Camp** | 21:36 | red sand, 9 mesas on the horizon, cacti | tumbleweeds rolling past, bats | sand blowing sideways behind the back fence (4/s; 2026-10-01) |
+| 2 Rare | **Pine Barrens Camp** | 23:00 | pine-needle floor, a ring of 14 pines | **the Jersey Devil circling high over the pines** (2026-10-01), bats | fireflies behind the back fence |
+| 3 Legendary | **Loch Shore Camp** | 00:48 | pebble shore; a loch 1 400 × 800 behind the cages with a moon glint; a castle tower with one lit window; **Nessie gliding across the water** | **moths** (drawn to the lit window; 2026-10-01: they replaced bats, the Barrens' life) | mist behind the back fence |
+| 4 Mythic | **Redwood Camp** | 03:12 | fern floor, 12 redwoods 190 studs tall, **a Bigfoot glimpsed between them** | wisps | spores drifting down behind the back fence (2026-10-01: they replaced mist, the Loch's) |
+
+Every band, home and camp, has its own weather and its own life: among the five home bands and among the four camps
+no two share a weather kind or the same set of critters (`NightConfig.spec`), and `check_stealacryptid_night` sees
+each band's weather falling and its critters out after 8 s there. A critter that draws wider than the camp keep-out's
+3-stud box names its own `reach` (the Jersey Devil's wings: 7).
 
 **Camp visuals reveal nothing.** The place depends on the camp's TIER only (which the raider chose). No hazard
 ever flies in a camp. Every camp part and critter is kept out of `Night.keepOut`: the camp (fences, sign, cage
@@ -115,15 +137,24 @@ Only the rarest one also has particles (dust, smoke, fireflies, embers, moths or
 your own lair is dressed (the neighbour's Bigfoot cage stays plain, asserted), and it is local: other players
 see the cages as before.
 
-### How long to each band (not measured in Luau)
+### How long to each band (measured in Luau, 2026-10-01)
 
-There is no Luau pacing model for this game yet (CLAUDE.md Next 3). DESIGN.md §4's Python model (greedy
-buyer, raids at 2-3× optimal time) puts a first Rare (Moonrise) at 3.1-6.0 min for a raider (8-10 idle-only),
-a first Legendary (Strange Lights) at 14.2-17.6 min (61-70 idle-only) and a first Mythic (Mythic Night) at
-107-183 min (315-326 idle-only). So Strange Lights is the "I got the aurora" milestone of a first session and
-Mythic Night the long-term goal. The one Luau measurement: the headless walk (a competent scripted player
-that also builds traps and sits out a poacher) reaches rank 2 at 490.9 s. **Treat the Python figures as a
-model, not the game** (CLAUDE.md says the same).
+`tests/Pacing.spec.luau` plays 24 sessions per player model on the game's own modules (real camps solved by the
+raid solver, raid success judged by the server's catch rule against a timing error, real prices, pedestals,
+permits, alerts and poachers; README.md has the table). Median minutes of play for the **normal** raider (timing
+error 0.25 s, raids at 2x the solver's time), fastest-slowest in brackets:
+
+| band | reached at | normal | casual (0.35 s, 3x) | never raids |
+|---|---|---|---|---|
+| Moonrise | first Rare | 3.9 (3.7-5.0) | 4.9 | 10.8 |
+| Strange Lights | first Legendary | 14.5 (13.8-18.0) | 17.4 | 61.2 |
+| **Mythic Night** (the brag moment) | first Mythic | **35.6** (31.8-76.3) | 59.5 | 180.5 |
+| **The Gathering** | best lair 1 350/s | **97.3** (92.7-137.7) | 122.5 | 222.0 |
+| (the end goal) | nine Mythics | 190.9 (184.5-228.2) | 213.8 | 325.0 |
+
+Mythic Night used to come at 81.6 minutes in this model (107-183 in DESIGN.md's Python one): the Mythic's payback is
+now 3 600 s instead of 14 400 (CLAUDE.md Deviations), so the brag moment lands inside the standard's 30-45 minutes,
+and the Gathering is the step between it and the full lair. **These are a model's minutes, not playtests.**
 
 ---
 
@@ -151,12 +182,15 @@ model, not the game** (CLAUDE.md says the same).
   lanes come in level; looking level or up, they come down out of the sky.
 * **Telegraph**: an always-on-top `!` marker on the hazard, a blinking red light, a lane line through you and
   a ring at your feet (yellow while it tracks you, red once it locks), and the HUD chip: `Bat incoming from the
-  left`, then `Move! Leave the red ring - bat`. The arrival time never moves. Marker and light go off at arrival
-  (or the hit): nothing blinks `!` once the danger has passed.
+  left`, then `Move! Leave the red ring - bat`. The arrival time never moves. The lane line goes at arrival; the
+  ring, the chip, the marker and the light stay up while the rest of the flight can still hit someone in the ring
+  (`Hazards.threatLive`, the +1 Jump template's rule) and go then, or at the hit: nothing blinks `!` once the danger
+  has passed, and nothing hits after its warning has gone (2026-09-30, §14 finding 1).
 * **The red ring is the danger zone** (template round-2 rule): a hit needs you inside it. Stepping out in any
   direction dodges. `NightConfig.spec`: leaving the ring from where you stand at walk speed after 0.5 s to react
   fits inside every kind's lock (tightest: a crow, 0.71 s of its 1.5 s).
-* **Drawn, not just computed** (new here): until arrival the hazard is exactly on its lane; after arrival a
+* **Drawn, not just computed** (new here): until arrival the hazard is exactly on its lane; while the ring
+  lingers after arrival it keeps the lane's line, level at the height it arrived (never into the ground); then a
   flier swoops up at 35° instead of flying on into the ground, and the meteorite ends at the ring; for a player
   who has left the ring the drawn path rises over a smooth bump so its centre stays 4.5 studs from their root —
   it passes over a dodger instead of through them. The hit rule is untouched.
@@ -223,6 +257,9 @@ A Roblox server cannot stop the world for one player, so **rest is a state the p
    mandatory in `Rest.validate`): pressing it then only *queues*; the hazard still arrives and a hit voids the
    request; stepping out of the ring keeps the request, and rest begins once the sky is clear and you stand
    still. A request expires after 10 s (the longest flight is 7.6 s). Rest never removes a hazard in flight.
+   A press **during a stumble** is queued the same way (the button reads `Rest...`, the chip says rest starts when
+   the sky is clear) and rest begins once the player is back on their feet under a clear sky; it used to be
+   dropped with no word (second review, 2026-09-30, finding 2; `check_stealacryptid_rest` 2c).
 5. **Toggling does not thin hazards** (143 / 143 / 143 above), and hazards take nothing anyway.
 6. **There is no leaderboard or timed rule in v1** for rest to touch (README: no leaderboards).
 
@@ -236,6 +273,7 @@ A Roblox server cannot stop the world for one player, so **rest is a state the p
 | hazards: schedule, telegraph, hit test, stumble | **client** | harms only the local player, whose character physics the client already owns; takes nothing. An exploiter who deletes hazards gains nothing |
 | rest | **client** | it only pauses the client's hazards |
 | rank and plot in State | **server** (2 fields) | the client must not guess progress; both are the owner's own facts (the pedestals already follow rank, the sign already shows the plot) |
+| the fall rescue (owner decision (d), 2026-09-30) | **server** (the 10 Hz lair loop) | a character at home 12 studs under the Ground's top goes back to its own arrival marker; the server already owns where a player is sent home |
 | economy, raids, poachers, traps, trusted position, saves | **server, unchanged** | authoritative as before |
 
 **Leak review.** The client reads its own character, its own camera, `Config`, its own State (rank, plot,
@@ -261,26 +299,39 @@ frame of `check_stealacryptid_night` (join, four home bands, four camps, every s
 `check_stealacryptid_budget` (the worst reachable case: nine habitats, a hazard flying most of the time, the
 strange → mythic seam, the campfire, all four camps, three cycles).
 
+**Capped in code since 2026-09-30** (second review, finding 5, §14): every piece of scenery, critter and habitat
+is admitted against the budget minus `Budget.Reserve` before it is drawn (`Night.admit` inside NightArt's
+`setWeight`; a refused item stays hidden and asks again next time), the emitters are capped every frame in
+priority order (campfire, weather, the lit habitat: `Night.capEmitters`), and only the hazard in flight is ever
+drawn (`MaxHazards`). The Reserve (10 parts, 1 trail, 2 lights) is what the always-drawn pieces may use: a hazard,
+its lane and ring, the campfire and the weather host, measured at 3 + 2 + 4 + 1 parts. With the shipped numbers
+the cap trims nothing (the table below is unchanged); `check_stealacryptid_budgetcap` lowers the budget in memory
+and holds every frame to it.
+
 | where (8 s there) | parts | emitters (rate) | beams | trails |
 |---|---|---|---|---|
 | dusk | 61 (53 before the ravine) | 2 (9.0/s) | 0 | 0 |
 | moonrise | 89 (81) | 2 (6.8/s) | 0 | 0 |
 | strange lights | 103 (95) | 2 (9.9/s) | 3 | 0 |
 | mythic night | 110 (102) | 2 (9.9/s) | 5 | 3 |
-| Badlands camp | 52 | 0 | 0 | 0 |
-| Pine Barrens camp | 42 | 1 (2.8/s) | 0 | 0 |
-| Loch Shore camp | 22 | 1 (2.8/s) | 0 | 0 |
+| **the gathering** (2026-10-01; five habitats) | 154 | 2 (9.9/s) | 5 | 2 |
+| Badlands camp | 53 (52 before its sand) | 1 (3.9/s) | 0 | 0 |
+| Pine Barrens camp | 44 (42 with bats only) | 1 (2.8/s) | 0 | 0 |
+| Loch Shore camp | 31 (22 with bats) | 1 (2.8/s) | 0 | 0 |
 | Redwood camp | 32 | 1 (3.9/s) | 0 | 0 |
 
 | metric | measured peak | where | budget |
 |---|---|---|---|
-| local parts | **150** (140 before the ravine: its 9 parts, four far-floor slabs, the bluff and four rim walls, replace the one old floor) | strange → mythic seam, hazard flying, eight habitats | 200 |
+| local parts | **176-180** (2026-10-01; 150 before the fifth band) | mythic → gathering seam, hazard flying, nine habitats | 200, and **190 for scenery** (the budget minus its Reserve): `check_stealacryptid_budget` asserts the worst case stays at or under 190, so the cap never refuses a piece. Three legends a side measured 195 there; two a side, 179 |
 | particle emitters | 3 | seams (two weathers + the lit habitat) | 4 |
 | particles per second | 17.9 | resting by the campfire | 40 |
 | beams | **8** | strange → mythic seam (5 aurora + 3 UFO) | 8 — **at the limit, no headroom** |
 | trails | 4 | mythic, hazard flying | 6 |
 | point lights | 1 | a hazard's blink, or the campfire (never both: no hazard launches while resting) | 3 |
 | hazards at once | 1 | | 1 |
+
+(2026-10-01) Unique instances ever built over three cycles of the budget check, with the fifth band: 400, 400, 400
+(415, 415, 415 in a run whose crow hazard flew).
 
 **Pooled and cheap:** scenery is built the first time a band needs it and unparented at weight 0 (asserted per
 band); critters are pooled per kind, one group spawned per kind per frame, recycled at 1.35 × their ring
@@ -517,12 +568,37 @@ at least a whole frame (0.033 s) or not at all.
     SMALLEST axis; if Roblox does that, a far pine is a 12-stud ball floating 9 studs over the forest floor.
     Check one in Studio; if so, give those parts a SpecialMesh (MeshType Sphere scales per axis). The view
     checks already test every part as the box of its declared Size, so they hold either way.
+23. **The fall rescue** (owner decision (d), §11): a server CFrame on a falling, client-owned character 12+ studs
+    below the Ground's top. Does it land cleanly on the arrival marker (no fling, no camera snap from the ravine),
+    is the toast noticed, and does the engine's own FallenPartsDestroyHeight never get there first on a slow server?
+24. **The band title card's new place** (§14 finding 4): under the HUD's top stack (the chip's slot kept) and
+    above the touch-control band, shrunk (title first) or title-only on a short phone. Does it still read as a
+    moment, and does it feel right that a band reached with the Hunt panel open is named when the panel closes?
+25. **The lingering ring** (§14 finding 1): after arrival the hazard keeps its lane's line, level at the height it
+    arrived, for as long as the ring stays up (0.63 s at most in `Night.spec`'s replay of players inside the ring), then swoops away. Does a
+    crow skimming through the ring at root height read as "still coming", and the meteorite resting a moment?
+26. **The campfire at the cliff** (§14 finding 3): it moves behind or beside a player who sits facing the ravine.
+    Does a fire behind the avatar read, or should the seated player be turned to face it?
+27. **The Gathering's sky** (§15): the crimson moon is a 120-stud Neon ball with a 200-stud halo, 730 studs from the
+    camera and riding with it, while the sky's own moon shrinks to 6. Does it read as a blood moon or as a red blob;
+    does the halo band against the atmosphere; is the crimson grade too much over a lair full of tier colours?
+28. **The legends on the far floor**: dark 30-stud silhouettes 54 studs past the Ground's edge, eyes glowing. Do they
+    read at 4:36 am against the far pines and the fog (FogEnd 600), from the apron and from behind the cage row; are
+    they too scary for the audience; do players walk to the edge to look (the fall rescue catches them)?
+29. **Moths and the Jersey Devil**: pale Neon moth wings at 40-120 studs (visible flutter, or specks?); the Jersey
+    Devil circling 110-220 studs out and 40-90 up over the Pine Barrens (a silhouette against the sky?).
+30. **The new weather**: sand blowing sideways behind the Badlands camp (does it read as wind?), spores in the
+    redwoods, embers at home.
+31. **Frame time at the mythic → gathering seam**: 176-180 local parts with nine habitats and a hazard, on a phone.
 
 ---
 
 ## 10. Thumbnail shot list (for the night Studio session)
 
-**This recipe has not been tried in Studio. Check step 1 before relying on the rest.**
+**This recipe has not been tried in Studio. Check step 1 before relying on the rest.** Every shot is **1920x1080**
+(16:9, the size Roblox shows an experience's thumbnails at): set the Studio viewport or the capture to 1920x1080
+before framing, and keep the subject inside the middle 1440x1080 (a list tile crops the sides). The vertical gameplay
+clips are a separate list: MARKETING.md.
 
 **Getting there without touching real saves**
 
@@ -591,28 +667,60 @@ at least a whole frame (0.033 s) or not at all.
    (4036, 4, −20) looking up at (4036, 120, 220). In frame: 190-stud **redwoods** towering over the camp's back
    fence, mist, wisps, and the **Bigfoot glimpse** between the trunks (`GlimpseTorso`, 150 studs from the camp
    centre, swinging ±55° over ~2 minutes).
+7. **"The Gathering"** (session A; added 2026-10-01). From Mythic Night (shot 2), buy two more Bigfoots at P3, 2.5 s
+   apart: the second takes the best lair income past 1 350/s and the sky glides to the Gathering (the card names it).
+   Camera behind the cage row ≈ (0, 30, 118), `c.FieldOfView = 80`, looking at ≈ (40, 60, 400): this side's legends on
+   the far floor at the left (with MaxPlayers 8 near (96, −1, 184) and (256, −1, 184): `for _, d in
+   workspace.CryptidNight:GetChildren() do if d.Name == "Legend_Body" then print(d.Position) end end`), the crimson
+   moon high on the right (it rides with the camera, ≈ camera + (−280, 190, 660)), embers in the air, the nine
+   habitats' glow below. `c.FieldOfView = 70` after.
 
 ---
 
 ## 11. Not done / open
 
-* **One adversarial review** (§13), three findings, all closed. Nobody has reviewed the fixes: a next reviewer
-  should look at the ravine (`farGroundRects`, the bluff, the walls), `limitKnock`, the view guard in camps and at
-  home (`campViewHull`, `NightArt:occlude`, the camp critters' hull), and `critterClear`.
-* **Owner decisions, surfaced, not taken:**
+* **Two adversarial reviews** (§13: three findings; §14: five findings), all closed test-first. Nobody has reviewed
+  the second round's fixes: a next reviewer should look at `Hazards.threatLive` in the client (the lingering ring
+  and chip, `Night.drawPosition`'s `liveUntil`), the queued rest mid-stumble, `Night.campfireSpot`, the card's
+  place (`NightBus` CardTop/CardBottom) and its deferral, the budget gate (`Night.admit` in `setWeight`,
+  `capEmitters`, `Budget.Reserve`) and the server's fall rescue.
+* **Owner decisions.** The owner decided on 2026-09-30: "take the recommended option for all". None of the four
+  below had an option marked as recommended, so each takes the option that best serves the brief (fair, fun,
+  never punishing, never exploitable), with the reason:
   (a) **Knock rate for a player who ignores warnings**: one per 2.9-6.7 min of home time (§3, R3). The brief
   says hazards are rare; a knock costs nothing. The knob is `Config.Night.Hazards.IntervalMin/Max` (120/180).
+  **DECIDED 2026-09-30 (owner: take recommended): keep 120/180.** The warned player gets the brief's "one
+  near-hit per 2-3 minutes"; the one who ignores every warning is knocked every 3-7 minutes and loses nothing. A
+  shorter interval would make the reacting player's near-hits more frequent than the brief asks; a longer one
+  makes hazards forgettable. Pinned: `NightConfig.spec` asserts 120 and 180 exactly (mutant M34 killed, §14).
   (b) **The theme direction's yeti (snowy peaks) and aliens (UFO field)**: this game has eight species and no
   yeti or aliens, so there is no snowy habitat or camp; the UFOs appear in the Mythic Night sky instead. A snowy
   camp tier or a Yeti species is a design change (DESIGN.md §16).
+  **DECIDED 2026-09-30 (owner: take recommended): keep the eight species and four camp tiers; the aliens stay in
+  the Mythic Night sky (three UFOs with tractor beams) and Bigfoot, the yeti's cousin, walks the horizon.** A new
+  species or tier changes prices, the saved profile, the camp solver and the pacing, all measured and tested for
+  eight species; nothing in the brief asks for it, and it would reopen every economy number. No code change.
   (c) **A clock-driven day/night cycle** was not built: the brief says progress drives the environment, and the
   game is a night game. A slow cosmetic drift inside each band is possible later.
+  **DECIDED 2026-09-30 (owner: take recommended): no clock cycle; the Journal's rank drives the sky.** The brief
+  says progress drives the environment; a clock would change the lair's light while the player does nothing and
+  would have to be held to the readability floor on every frame for no gameplay gain. No code change: the
+  existing `Night.spec` progress rules (rank, never a timer, never backwards) already pin it.
   (d) **A server-side world boundary.** As in v1, a player who walks off the Ground falls into the void and
   respawns (nothing is lost); the night now shows the edge as a ravine instead of hiding it (§13). Invisible
   walls would stop the fall but change v1's geometry and may hide cage prompts from a camera behind them
   (Studio item 21). Not built.
-* **luau-analyze was not run** (§7); only compile-by-loadstring.
-* **No Luau pacing model** for time-to-band (§2); the Python model's figures are quoted as a model.
+  **DECIDED 2026-09-30 (owner: take recommended): no invisible walls; the server catches the fall instead.** A
+  character at home whose root falls `Config.World.FallRescueStuds` (12) below the Ground's top is put back on its
+  own arrival marker at once, at rest, with the toast "That is a long way down - back to your lair". Walls were
+  rejected for the prompt risk above; doing nothing kept a death and a respawn for a walk off a cosmetic cliff,
+  which is punishing for no reason. Not exploitable: it only returns a player to their own lair, which Reset
+  already does (slower), and never in a raid (a camp pocket still belongs to the raid). Test first:
+  `check_stealacryptid_fall` (13 assertions; 9 failed before the rescue existed). Studio item 23.
+* **luau-analyze was not run** (§7); only compile-by-loadstring. (2026-10-01: the binary is still missing.)
+* ~~No Luau pacing model for time-to-band~~ (2026-10-01: `tests/Pacing.spec.luau`, §2).
+* **Nobody has reviewed pass 2** (§15): the fifth band, `Night.level`, the camps' weather and critters, the
+  critter `reach`, the budget-under-the-Reserve rule.
 * Not committed, not pushed, not published. Studio not opened.
 
 ---
@@ -819,3 +927,394 @@ the same intent for the new shape), `check_stealacryptid_longroad.luau` (+ the r
 `build/steal-a-cryptid.luau` (rebuilt). `src/server/Main.server.luau`, the HUD, the three original checks
 (`check_stealacryptid`, `_guards`, `_hud`) and `tests/walk.luau` are untouched. Nothing in another game, `robloxemu/emu`, `tools`, `docs` or any marketing
 folder. Not committed, not pushed, not published; Studio not opened.
+
+---
+
+## 14. Second review 2026-09-30: five findings, reproduced, fixed test-first; the owner's decisions
+
+A second reviewer probed the night (and its review fixes) through the real server and client and reported five
+low findings. Each was reproduced first with the reviewer's own probes (`scratchpad/sacrev2_eye_z4q7`, run
+unchanged on a copy of this tree in `scratchpad/sacfix30p1`), then a failing test was written and watched fail,
+then the game was fixed (never the test), then the probes were re-run. None was rejected: all five reproduced
+with the reviewer's numbers.
+
+### Finding 1: a hazard could land after its ring and warning were gone
+
+**Reproduced.** `probe_latehit` (rank 2, a player who stops at 0.99 R on the ring's far side): 24 of 120 knocks
+landed after the ring, the chip and the marker had gone (worst 0.033 s); `probe_latehit4` (rank 4): 25 of 114, all
+wisps (worst 0.083 s). The pure `probe_late`: 3.3-3.5 % of hits after `arriveAt`; latest meteorite 0.067 s (model
+already hidden at all 2 189 of its late hits), crow 0.100, bat 0.117, wisp 0.200 s: the review's numbers exactly.
+
+**Test first.** `tests/Hazards.spec.luau` gets the +1 Jump template's `threatLive` block verbatim (1 failure: the
+function did not exist). `Night.spec`: the client's per-frame rule replayed purely (300 plans per kind, 48 players
+standing still inside each ring): 3 failures on the old drawing (541 hits with the meteorite hidden, 7 drawn more
+than the ring's radius plus a frame away, 4 834 lingering frames off the lane's line). New
+`check_stealacryptid_latehit` (the reviewer's set-up as a gate, 60 hazards at rank 2 and 60 at rank 4): 4 failures
+(20 of 116 knocks after the ring went, 20 after the chip went, 11 with nothing drawn, 6 rings kept after a knock).
+
+**Fixed.** `src/shared/Hazards.luau` now carries `Hazards.threatLive` exactly as +1 Jump's working tree has it
+(the file and its spec are byte-identical to `plus1-jump/src/shared/Hazards.luau` and
+`plus1-jump/tests/Hazards.spec.luau` as of 2026-09-30: sha256 `bd470578ce83...` and `cafb80675fa6...`). The client
+keeps the ring and the chip (and the marker and blink) up while `threatLive(plan, PlayerRadius, before)` holds and
+records `plan.liveUntil`; `Night.drawPosition`'s new `liveUntil` keeps the hazard on its lane's line, level at the
+height it arrived, until then, and only then swoops away (or, a meteorite, is gone). The lane line still goes at
+arrival. **After:** `probe_latehit` 0 of 120, `probe_latehit4` 0 of 120; `check_stealacryptid_latehit` 12 / 0 (120
+of 120 knocked, 20 of them after the arrival, 0 after the ring or the chip, 0 with nothing drawn, the drawn hazard
+at most 0.76 studs past the ring's radius); the ring lingers at most 0.63 s past arrival in `Night.spec`'s replay.
+(`probe_late` itself replays the OLD rule by hand, so its numbers do not change; `Night.spec` is its fixed twin.)
+
+### Finding 2: Rest pressed during a stumble was silently dropped
+
+**Reproduced.** `probe_restknock`: 5 of 5 presses 0.1 s into a stumble; the button read `Rest` and the chip was
+empty for the next 3 s. **Test first:** `check_stealacryptid_rest` 2c (three stumbles): 3 failures (never
+`Rest...`, never the queued line, rest never began). **Fixed:** the press is queued like any press with a hazard
+about (a stumbling player is not on their feet). **After:** 2c green; the probe: 0 presses unanswered. The sweep's
+mutant M11 (a stumbling player counts as on their feet) survived round 1: in 2c the hazard is always still flying
+during the stumble, so the queue came from the threat, not from the stumble. 2d closes that gap (a poacher's warning
+removes the hazard mid-stumble, so the sky is clear while the player is still down: the press must still queue and
+nobody may sit while stumbling); `_rest` 75 / 0.
+
+### Finding 3: the rest campfire hung over the ravine
+
+**Reproduced.** `probe_campfire`: sitting 0.5 and 2.0 studs from the back edge facing out, 4 of 4 campfire parts
+stood past the edge at y -0.10 (stones 3.5 and 2.0 studs out); at 4.0 the stones' centre was on the edge.
+**Test first:** `Night.spec` for `Night.campfireSpot` (failed: missing), `check_stealacryptid_edge` E4 (14 spots:
+0.5 / 2 / 4 studs from all four edges facing out, two corners; it errored: no `Campfire.Distance`; mutant M12,
+which restores the old placement, fails it). **Fixed:** `Night.campfireSpot` puts the fire at the first of ahead /
+behind / right / left whose whole stone ring (`Config.Night.Campfire.Radius`, which NightArt now builds the ring
+from) is on the Ground; in a corner nook, the farthest of those pulled onto the Ground. **After:** the probe 0 of 4
+at all three distances; E4 0 parts past the Ground at 14 spots; a 20 000-spot sweep in `Night.spec` 0.
+
+### Finding 4: the band title card overlapped the HUD on phones
+
+**Reproduced.** `probe_cardtext`: Card x RaidChip 252 x 14 px on 800x360; Card x Toast 360 x 21 and x RaidChip
+252 x 13 on 640x300. `probe_cardflow` (800x360): MOONRISE over the open Hunt panel on 129 of 150 frames, up to
+10 598 px^2. **Test first:** `check_stealacryptid_nighthud` gets a card overlap rule (the card and its subtitle
+overlap nothing the HUD draws, with the not-saving banner, the first hint, a 100-character toast and the longest
+warning up): 9 overlaps. New `check_stealacryptid_card` (the reviewer's flow): C1 129 of 150, C2 never shown.
+**Fixed:** the HUD publishes the card's room on its NightBus (`CardTop`: under the chip's slot, kept even while
+the chip is hidden; `CardBottom`: above the touch-control band); the card sits at 46 % where there is room, else
+right under the stack, shrinking the title first (never below 22 design px, the subtitle never below 20) or
+showing the title alone; a band reached with a panel open waits until it closes, and a panel opened over a card
+hides it. **After:** 0 overlaps in 10 viewports, legibility still green (4 PASS lines); the flow 0 of 150 frames,
+the card named once the panel closed; `probe_cardtext` "none" in every viewport.
+
+### Finding 5: the budget was only asserted; beams sat at 8 of 8
+
+**Reproduced.** Nothing in `src/` read `MaxLocalParts`, `MaxEmitters`, `MaxEmitterRate`, `MaxBeams`, `MaxTrails`,
+`MaxLights` or `MaxHazards` (grep); `check_stealacryptid_budget`: parts 146 of 200, beams 8.0 of 8 at the
+strange -> mythic seam. **Test first:** new `check_stealacryptid_budgetcap` lowers the budget in memory (90 parts,
+5 beams, 2 trails, 2 lights, 2 emitters, 12 particles/s) and drives the heaviest scene: parts 150, beams 8, trails
+4 before (6 failures, with the missing `Budget.Reserve`); `Night.spec` and `NightConfig.spec` for the gate and the
+reserve (failed: missing). **Fixed:** section 6 (admission in `setWeight` against Budget - Reserve, the per-frame
+emitter cap in priority order, one hazard drawn). **After:** under the lowered budget parts 86 of 90, beams 5 of 5,
+trails 2 of 2, emitters 2 of 2, 9.9 of 12 particles/s; the telegraph drawn on all 1 026 warning frames and the
+campfire on all 301 resting frames; the seam still 86 parts and 5 beams. The shipped scene is untouched: `_budget`
+still peaks at 150 parts and 8 beams and builds 340 unique instances per cycle. The sweep's mutant M27 (a home piece
+destroyed when the road arrives late keeps its budget) survived round 1; B6 now checks the gate's books on the
+game's own NightArt after a late road (used = the cost of what is shown: 63 parts and 5 beams both ways).
+`_budgetcap` itself raced once in 7 runs on the unchanged tree (its rest procedure's dodge steps woke a rest that
+had just begun); the check now presses again until rest holds (12 of 12 runs green after), and every round-1
+verdict that leaned on it alone was re-run in round 2.
+
+### The owner's decisions (section 11)
+
+(a) keep the 120-180 s interval (pinned in `NightConfig.spec`); (b) keep the eight species and four camp tiers,
+the UFOs stay in the Mythic sky; (c) no clock cycle, the Journal's rank drives the sky; (d) no invisible walls, a
+server fall rescue instead (`check_stealacryptid_fall`, 13 / 0; 9 failed before it existed). Each is recorded as
+DECIDED 2026-09-30 (owner: take recommended) in section 11 with its reason.
+
+### Gates (final tree of this pass)
+
+Every gate, run on the real tree after the last edit (bundle sha256 `9fe7e3553f6a...`): **34 suites, 3 594
+assertions passed, 0 failed, plus 6 PASS lines.**
+
+| gate | before this pass | after |
+|---|---|---|
+| 9 original specs (Rng, Responsive, Economy, Offers, Layout, Heist, Trace2D, Poacher, CryptidModel) | 1 267 / 0 | 1 267 / 0 (unchanged) |
+| `tests/EnvBands.spec` / `Rest.spec` (template) | 124 / 0, 55 / 0 | 124 / 0, 55 / 0 |
+| `tests/Hazards.spec` (template) | 102 / 0 | **111 / 0** (+ `threatLive`) |
+| `tests/Night.spec` | 427 / 0 | **465 / 0** |
+| `tests/NightConfig.spec` | 222 / 0 | **232 / 0** |
+| **spec total (14 files)** | 2 197 / 0 | **2 254 / 0** |
+| `check_stealacryptid` / `_guards` / `tests/walk` | 332 / 184 / 46 | 332 / 184 / 46 (the fall rescue changed nothing they see) |
+| `check_stealacryptid_hud` | 2 PASS | 2 PASS |
+| `check_stealacryptid_nighthud` | 3 PASS | **4 PASS** (the card overlaps nothing) |
+| `_compile`, `_night`, `_hazards`, `_budget`, `_lateroad`, `_keepout`, `_life`, `_longroad`, `_view` | 40, 386, 69, 28, 12, 24, 4, 4, 44 | the same |
+| `check_stealacryptid_rest` | 63 / 0 | **75 / 0** (2c, 2d) |
+| `check_stealacryptid_edge` | 25 / 0 | **42 / 0** (E4) |
+| `check_stealacryptid_latehit` (new) | - | **12 / 0** |
+| `check_stealacryptid_card` (new) | - | **13 / 0** |
+| `check_stealacryptid_budgetcap` (new) | - | **12 / 0** |
+| `check_stealacryptid_fall` (new, owner decision (d)) | - | **13 / 0** |
+| **headless total** (counted) | 1 261 / 0 + 5 PASS | **1 340 / 0 + 6 PASS** |
+
+**Stability** (unseeded `Random`): on the final checks `_latehit`, `_card`, `_fall` and `_edge` 5 of 5 runs green
+(4 stability runs plus the final gate run), `_rest` 7 of 7 with 2d, `_budgetcap` 13 of 13 after its procedure fix.
+
+### Mutation sweep
+
+Driver `scratchpad/sacfix30p1/sweep/sweep.py` (mutation list `mk.py`, results `results_*.json`, logs
+`sweep_round*.log`; scratch, not in the repo), on a scratch copy verified identical to the real tree: for each
+mutation every edit is applied exactly once, the bundle is rebuilt and **proved to carry it** (the mutated bundle
+equals the baseline bundle with the same replacements, and differs from it), all 34 suites run, the bytes are
+restored; after each round the tracked files' sha256 manifest and the bundle (`9830815adf9a`) matched the start.
+Each round began from an all-green baseline.
+
+* **Round 1** (31 mutations, 3 controls): 29 killed; **2 survivors, both gaps in the new TESTS**, closed there (never
+  by weakening a mutation): M11 (2c could not tell "not on your feet" from "a hazard is about": 2d added) and M27
+  (nothing checked the gate's books after a late road: B6 added). One control, CTRL2, went red on `_budgetcap`
+  alone: its rest procedure raced (a rest that began during the dodge steps was woken by them), the same
+  `budgetcap 9/2` seen beside other kills below. Fixed in the check (press again until rest holds); 12 of 12 runs
+  green after.
+* **Round 2** (the two survivors, every mutation that `_budgetcap` alone had killed, and all three controls, on the
+  final checks): all 6 mutations killed, 3 of 3 controls survived.
+
+**Final: 31 of 31 mutations KILLED, 3 of 3 controls SURVIVED, 34 of 34 edit sets proven to reach the bundle.** Three edits were considered and left out, each equivalent or unreachable
+under the shipped config, so a survivor would say nothing: the ring judged from `plan.t` instead of `before`, a
+larger stone ring (the fire keeps 4 studs from the player), and a second hazard model left drawn (the scheduler
+flies one at a time). The
+`budgetcap 9/2` entries of round 1 are that race, and every such mutant is killed by another suite as well.
+
+| # | mutation | round 1 | final | bundle | red suites in the final round (passed/failed) |
+|---|---|---|---|---|---|
+| M01 | F1 the ring goes at arrival again (client) | KILLED | KILLED | 1d704df5f3f7 | budgetcap 10/1, latehit 11/1 |
+| M02 | F1 the chip warning goes at arrival again (client) | KILLED | KILLED | faa4c0a7ff9e | latehit 10/2 |
+| M03 | F1 the drawing ignores liveUntil (swoop / meteorite end at arrival) | KILLED | KILLED | 57793f70ef73 | budgetcap 10/1, latehit 11/1 |
+| M04 | F1 while the ring lingers the drawing follows the lane down (dives) | KILLED | KILLED | cb134354fb12 | Night 463/2 |
+| M05 | F1 a meteorite still vanishes at arrival (drawPosition) | KILLED | KILLED | 7bedbc68efca | budgetcap 10/1, latehit 11/1, Night 463/2 |
+| M06 | F1 template threatLive: live only until arrival | KILLED | KILLED | cc4e352057ee | latehit 9/3, Hazards 109/2, Night 462/3 |
+| M08 | F1 the lane line stays after arrival | KILLED | KILLED | 5d97871ec413 | latehit 11/1 |
+| M09 | F1 after a knock the ring stays until arrival | KILLED | KILLED | 4024bcb09a15 | latehit 11/1 |
+| M10 | F2 a rest press mid-stumble dropped again | KILLED | KILLED | c5e17b3b281b | edge 40/1, rest 66/3 |
+| M11 | F2 a stumbling player counts as on their feet | SURVIVED | KILLED | 0e2e7840610b | rest 73/2 |
+| M12 | F3 the campfire straight ahead again (no Ground) | KILLED | KILLED | 2de1d8342512 | edge 41/1 |
+| M13 | F3 campfireSpot ignores the ring radius | KILLED | KILLED | ae59ea0413d7 | budgetcap 9/2, edge 41/1, Night 464/1 |
+| M14 | F3 campfireSpot never tries behind or aside | KILLED | KILLED | 518da4064a20 | budgetcap 9/2, edge 41/1, Night 463/2 |
+| M16 | F4 the card at a fixed 46 % again (ignores the HUD room) | KILLED | KILLED | 17fee2d0347b | nighthud 3 PASS |
+| M17 | F4 the HUD's card room forgets the chip's slot | KILLED | KILLED | f5ba6bbc3b55 | nighthud 2 PASS |
+| M18 | F4 the card is not deferred while a panel is open | KILLED | KILLED | 0578badb4d5e | budgetcap 9/2, card 10/3 |
+| M19 | F4 opening a panel does not hide the card | KILLED | KILLED | 63a4b87b5dc0 | card 11/2 |
+| M20 | F4 a band reached with a panel open is never named | KILLED | KILLED | 3ba654d571da | card 10/3 |
+| M21 | F4 the subtitle may shrink below legible | KILLED | KILLED | f9f8b5abad8e | nighthud 3 PASS |
+| M22 | F5 no admission (every item drawn) | KILLED | KILLED | 6b2bf0c049f3 | budgetcap 10/5 |
+| M23 | F5 the hazard model is gated too (the telegraph can be refused) | KILLED | KILLED | cd4c150af048 | budgetcap 11/1 |
+| M24 | F5 the emitter cap never runs | KILLED | KILLED | 79bf85ddbd0a | budgetcap 11/3 |
+| M25 | F5 the campfire last in the emitter priority | KILLED | KILLED | b954c74a31a6 | budgetcap 11/1 |
+| M26 | F5 the reserve ignored for parts | KILLED | KILLED | ec95c934b538 | budgetcap 8/4, Night 464/1 |
+| M27 | F5 setHome does not give destroyed pieces' budget back | SURVIVED | KILLED | edcf9e532cab | budgetcap 11/1 |
+| M29 | D the fall rescue never runs | KILLED | KILLED | 1fe0698059d5 | fall 6/7 |
+| M30 | D the fall rescue also in a raid | KILLED | KILLED | ff95a511b72a | budgetcap 9/2, fall 12/1 |
+| M31 | D the rescue fires at the Ground's top (no depth) | KILLED | KILLED | 766c86c166ae | fall 11/2 |
+| M32 | D the rescued player keeps the fall speed | KILLED | KILLED | 53ab57b70fd8 | fall 8/5 |
+| M33 | D the rescue is silent | KILLED | KILLED | a4c8754c11b4 | budgetcap 9/2, fall 8/5 |
+| M34 | A hazard interval 120-240 s | KILLED | KILLED | 4b25742f382a | budgetcap 9/2, NightConfig 229/3 |
+| CTRL1 | CONTROL card text a shade cooler | SURVIVED | SURVIVED | 618df65f607b | - |
+| CTRL2 | CONTROL campfire flicker 0.08 -> 0.07 | KILLED (control!) | SURVIVED | f9ca5e75c60b | - |
+| CTRL3 | CONTROL tracking ring a shade less green | SURVIVED | SURVIVED | 7284df0a4f0b | - |
+
+### New traps (CLAUDE.md 29-33)
+
+29. **A hit rule that runs past the warning is a hit with no warning.** The hit test ran to the flight's end, the
+    ring and the chip stopped at arrival. Keep the warning up exactly as long as the hit can still land
+    (`Hazards.threatLive`), and draw the thing where it hits.
+30. **A refusal inside a condition is still a silent no-op.** `if ... or knockUntil ~= nil then return end` looked
+    like a guard; it swallowed a player's press. Queue it or say why.
+31. **A local prop placed "ahead of the player" needs the same ground rule as the player.** The campfire floated
+    over the ravine the knock cut (Trap 25) keeps players out of.
+32. **An overlap rule that looks at one ScreenGui misses the other.** The night's card lives in its own gui;
+    measure it against every drawn HUD element, with the busiest HUD, in every viewport.
+33. **A budget asserted only by a check is a promise, not a cap.** Admit costs where things are shown, keep a
+    reserve for what must always show (the telegraph), and prove it with a check that lowers the budget.
+
+### Files written in this pass
+
+In `steal-a-cryptid/`: `src/shared/Hazards.luau` (template update), `src/shared/Night.luau`, `NightArt.luau`,
+`Config.luau`, `src/client/Night.client.luau`, `src/client/Hud.client.luau`, `src/server/Main.server.luau` (the
+fall rescue), `tests/Hazards.spec.luau` (template update), `tests/Night.spec.luau`, `tests/NightConfig.spec.luau`,
+this file and `CLAUDE.md`. In `robloxemu/`: `check_stealacryptid_{latehit,card,budgetcap,fall}.luau` (new),
+`check_stealacryptid_{rest,edge,nighthud}.luau` (new blocks) and `build/steal-a-cryptid.luau` (rebuilt). Nothing
+in another game, `robloxemu/emu`, `tools` or `docs`. Not committed, not pushed, not published; Studio not opened.
+
+### Re-run of this pass (2026-10-01): re-verified from scratch; one test gap closed
+
+The workflow ran pass 1 again ("try again"). The tree was as the 2026-09-30 pass left it: every source, spec and
+check byte-identical to that pass's sweep copy, and `Hazards`, `EnvBands`, `Rest` and their specs still
+byte-identical to +1 Jump's. Nothing in `src/` changed in this re-run. Every number below was measured again.
+
+* **Reproduced again on the reviewed tree** (git HEAD, byte-identical to the reviewer's copy), with the reviewer's
+  probes: F1 `probe_latehit` 24 of 120 knocks after the ring, chip and marker had gone (worst 0.017 s),
+  `probe_latehit4` 25 of 114 (all wisps, worst 0.067 s), `probe_late` 3.3-3.5 % of hits after `arriveAt` (latest
+  meteorite 0.067 s with the model hidden at all 2 189 such hits, crow 0.100, bat 0.117, wisp 0.200); F2
+  `probe_restknock` 5 of 5 presses unanswered; F3 `probe_campfire` 4 of 4 parts past the edge at 0.5 and 2.0
+  studs; F4 `probe_cardtext` Card x RaidChip 252 x 14 px (800x360), Card x Toast 360 x 21 and Card x RaidChip
+  252 x 13 (640x300), `probe_cardflow` MOONRISE over the open Hunt panel on 129 of 150 frames (up to 10 598
+  px^2); F5 nothing in `src/` reads a Budget field, `_budget` parts 148 of 200 and beams 8.0 of 8 at the seam.
+* **The tests fail on that tree:** `Hazards.spec` 102 / 1, `Night.spec` stops at its first new block (a missing
+  function), `NightConfig.spec` 224 / 1, `_latehit` 8 / 4 (26 knocks after the ring, 26 after the chip, 14 with
+  nothing drawn, 12 rings kept after a knock), `_card` 10 / 3, `_budgetcap` 8 / 9, `_fall` 4 / 9, `_rest` 70 / 5,
+  `_edge` stops at E4 (no `Campfire.Distance`), `_nighthud` 9 card overlaps.
+* **On the fixed tree** the same probes give 0 of 120, 0 of 120, 0 presses unanswered, 0 of 4 parts at 0.5, 2.0
+  and 4.0 studs, no overlap in 10 viewports, and 0 of 150 frames. Stability: `_latehit`, `_card`, `_budgetcap`,
+  `_fall`, `_edge`, `_rest` and `_nighthud` 35 of 35 runs green (5 each).
+* **Sweep, round 1** (driver `scratchpad/sac_try2/sw/sweep`, the same rules as above; 40 entries: the 31 mutations
+  and 3 controls in the table above plus five new mutations X1-X5 and a fourth control): 35 of 36 mutations
+  killed, 4 of 4 controls survived, 40 of 40 edit sets proven in the bundle, sources restored byte-identical.
+  Every mutation in the table was killed by the suites it names, less the `budgetcap 9/2` race, which did not
+  recur (M13, M14, M18, M30, M33, M34 were killed by their other suites alone). New: X2 (`threatLive` stays live after a hit: Hazards 110 / 1, latehit
+  11 / 1), X3 (no particles/s cap: Night 464 / 1, budgetcap 11 / 2), X4 (`admit` never counts: budgetcap 10 / 5,
+  Night timed out), X5 (`threatLive` forgets the ring radius: Hazards 110 / 1), CTRL4 (the fall toast's wording)
+  survived.
+* **The survivor, X1, was a gap in the TESTS:** with the HUD never publishing `CardBottom` the card ignores the
+  touch-control band, and on 640x300 its title went 10 and its subtitle 28 screen px into the band; no gate looked.
+  `check_stealacryptid_nighthud` gets a fifth PASS line: the card and its subtitle stay above the touch-control
+  band (Responsive's `controlPad`, as the HUD measures it) in every touch viewport, and the subtitle shows on
+  every screen 600 px or taller. Writing it exposed a staging error in the check's own card mode: it set the
+  subtitle Visible by hand and measured at once, so it measured a subtitle the game never draws (7 px "into the
+  band" on 640x300 on the unchanged game). The card mode now re-lays-out the screen with the card up (a
+  rotation) so the game decides what of the card it shows, and measures that: the title alone on the three
+  phone-landscape touch viewports with the whole top stack up, title and subtitle on the other seven. The
+  game was not changed.
+* **Sweep, round 2** (the new rule, from an all-green baseline): X1 killed (nighthud 4 PASS), two new mutations X6
+  (no room for the subtitle anywhere) and X7 (a re-layout always hides it) killed, the three mutants the card
+  mode's change could affect (M16, M17, M21) still killed, 4 of 4 controls survived, sources restored
+  byte-identical. **Final: 38 of 38 mutations KILLED, 4 of 4 controls SURVIVED, every edit set proven in the
+  bundle.**
+* Owner decisions: the four in section 11 were already recorded as DECIDED 2026-09-30 (owner: take recommended);
+  a search of this file, CLAUDE.md, REVIEW-1.md, README.md and DESIGN.md found no other open owner decision.
+* **Gates on the real tree after the last edit** (bundle sha256 `9fe7e3553f6a...`, unchanged: no source changed):
+  34 suites, 3 594 assertions passed (specs 2 254, headless 1 340), 0 failed, plus 7 PASS lines (`_hud` 2,
+  `_nighthud` 5). The changed `_nighthud` was green in 7 of 7 runs of its final version.
+* Files written in this re-run: `robloxemu/check_stealacryptid_nighthud.luau` (the touch-band rule and the card
+  mode's re-layout), this file and `CLAUDE.md`; `robloxemu/build/steal-a-cryptid.luau` rebuilt (byte-identical).
+  Not committed, not pushed, not published; Studio not opened.
+
+---
+
+## 15. Pass 2 (2026-10-01): the complete-game standard
+
+`docs/complete-game-standard.md` is the owner's finish line. This pass checked every item of it against the game, took
+the reviewer's list of gaps and added one of its own, and built what was missing test-first: each new test was run
+and watched fail before the code it guards existed, and every new assertion was mutation-tested with controls
+(below). Where a number is quoted it was measured in this pass.
+
+| standard | what was missing | built | test written first, and how it failed before |
+|---|---|---|---|
+| §3 highscore board | everything (DESIGN.md had cut leaderboards) | the Top Lairs board: `Board.luau` (+1 Jump's template, verbatim, md5 848ed9ca...), the metric `bestRate` / `bestRateAt` (`Economy.noteBest`), a board on every plot's front fence behind the Collect Pad, `Board.client` drawing each player's view on every board | `Board.spec` (66; no module), `Economy.spec` +26 (`noteBest` a nil call), `check_stealacryptid_board` (31 failures: no Config.Board, no boards, no remote, nothing written, no views), guards G10 +2 (a failed grant's best) |
+| §2 brag moment in 30-45 min, measured in `tests/` | no Luau model; DESIGN.md's Python put the first Mythic at 107-183 min | `tests/Pacing.spec.luau`; the Mythic payback 14 400 s -> 3 600 s | the brag assertion failed at 81.6 min; `Economy.spec`'s hand-written Mythic price, permit and alert failed (5) on the old Config |
+| §2 at least 5 bands, each its own weather and critters | 4 home bands; the Badlands had no weather; the Barrens and the Loch shared bats as their only life | the Gathering (`Night.level`, `State.best`, `GatheringRate` 1 350/s): crimson moon, the legends, moths, embers; camp sand, the Jersey Devil, moths, spores | `Night.spec` +12 (`Night.level` a nil call), `NightConfig.spec` (6 failures: 4 bands, no gathering, no GatheringRate, Badlands no weather, Loch = Barrens' critters, Redwoods = Loch's weather), `_night` (2: pieces it did not know), `_budget` (195 parts > 190, below) |
+| §1 RespawnLocation | never set | `plr.RespawnLocation = trailhead` at PlayerAdded | `check_stealacryptid` +2. Written after the one-line fix; its failure without it is mutant M20 |
+| §1 an owner token on every write | the token was `game.JobId`, one per server (CLAUDE.md known gap) | a per-session `session` GUID beside `jobId`, checked on every write and release; a same-server rejoin waits for that player's leave-write | guards G25 + G25b: 5 failures before the fix (the rejoin played 3 cages, not the 4 the leave carried; the lock went nil under it; its own change wrote 4 over the old 4; the late write unlocked and overwrote) |
+| §4 clip list | no MARKETING.md | 10 vertical clips with staging | - |
+| §4 store text, shot list | the copy did not mention the board; the shot list stated no size | 989 characters, ASCII; shots at 1920x1080, a seventh (the Gathering) | measured from the file |
+
+### Found while building it
+
+* **A capped budget hides an overrun** (CLAUDE.md Traps 35). The fifth band's first build peaked at 194-195 parts at the
+  mythic -> gathering seam with nine habitats and a hazard flying, and every "within budget" assertion passed, because
+  the cap admits scenery only up to the budget minus its Reserve (190) and refuses the rest: a piece would have popped
+  in late. `_budget` now asserts the worst case stays at or under 190, which failed at 195; the legends went from three
+  a side to two and the moths from 6 to 5: 176-180. The gathering keeps Mythic Night's UFOs, so its set contains
+  every rank-4 piece and the seam's union did not grow; `_view` and `_longroad` now run there.
+* **The camp keep-out box was 3 studs for every critter.** The Jersey Devil's wings reach 6.1 studs: the box is now each
+  kind's `reach` (default 3; the devil 7).
+* **Two of the checks' own set-ups were wrong at first** (Traps 37 and 38): G25 asked for a cage the seed could not pay
+  for, and the board check cached the emulator's `User_709` for a user it looked up before he joined.
+
+### Gates (final tree)
+
+Run on the live tree after the last edit (bundle sha256 `29235c64b499...`): **37 suites, 4 100 assertions passed, 0
+failed, plus 7 PASS lines** (`_hud` 2, `_nighthud` 5). Specs, 16 files, 2 441: Board 66, CryptidModel 552, Economy 219,
+EnvBands 124, Hazards 111, Heist 79, Layout 202, Night 477, NightConfig 298, Offers 36, Pacing 17, Poacher 51,
+Responsive 70, Rest 55, Rng 32, Trace2D 52. Headless, 1 659: check 334, board 78, budget 46, budgetcap 12, card 13,
+compile 44 (22 sources), edge 42, fall 13, guards 200, hazards 69, keepout 28, latehit 12, lateroad 12, life 4,
+longroad 4, night 583, rest 75, view 44, walk 46. Stability on the final checks: guards 6 of 6 runs at 200 (after its last change), budget 4 of 4 at 46, keepout 7 of 7 at 28; and on this pass's night and board code, night 8 of 8 at 583, board 6 of 6 at 78, view 3 of 3, longroad 3 of 3.
+
+### Mutation sweep
+
+Driver `scratchpad/sac_p2/sweep.py` (not kept in the repo). Each mutation is an exact-string edit set applied ALONE to a
+scratch copy of the game and its checks (never the live tree); the file's sha256 is verified changed; all 37 gates run
+(`gates.sh` rebuilds the bundle first); the mutant is PROVEN in the bundle (its sha256 differs from that root's
+baseline and it contains the mutation's `--[[Mxx]]` marker); the source is restored and its sha256 verified identical;
+and at the end every live source is verified unchanged. A mutation is KILLED when any gate is not fully green (a
+count of failures, a missing PASS line or a crash); a CONTROL must survive. Both roots' baselines were green (37 of 37
+gates).
+
+Three rounds. **Round 1** (38 mutations, 5 controls): 34 killed, 4 survived (M23, M30, M31, M32), 5 of 5 controls
+survived. Each survivor was a gap in the TESTS, closed there (no mutation was weakened): M23, the load not putting its
+token on the record, survived the sweep's run and failed a separate run of the same mutant (195/2): G25b looked at the
+record only after the late write, a window in which a write of the new session's own can put its token there (G25b
+now also reads the record the moment the rejoin's load lands); M30 and M31, CLAUDE.md Traps 39 and 40 (each camp a critter
+of its own; `capEmitters` driven with an emitter budget of 0 over every weather kind); M32, Traps 40 (15 devils, the
+camera orbiting the camp). **Round 2** (the four, the mutants those tests also kill, the controls): M23, M30, M31 killed;
+M22 SURVIVED (killed in round 1): an autosave of the new session rewrote the record 1 s after the late write landed,
+1 run in 3 (Traps 41); G25b now judges every commit since the rejoin's load. M32 survived again (15 devils with the
+camera at the gate never fly with their wings toward the keep-out: Traps 40), closed with the orbiting camera.
+**Round 3**: M21, M22, M23, M32 killed; 5 of 5 controls survived. Repeats outside the sweep with the final tests: M22
+killed in 6 of 6 runs (it had survived 2 of 6 before the commit-history assertion), M32 in 3 of 3.
+**One unexplained red:** in round 1, M21's run also failed `check_stealacryptid_hazards` (68 / 1). M21 (the rejoin wait)
+cannot reach that check, its log was overwritten by the next rounds, and 60 reruns on the final tree were green
+(`_hazards` passed 134 of the 135 runs of this pass). It is recorded as a possible rare flake, not explained.
+
+**Final: 38 of 38 mutations KILLED, 5 of 5 controls SURVIVED in every round, every edit set proven in the bundle,
+every live source unchanged by the sweep (sha256).**
+
+| # | mutation | final result | bundle | red gates (the killing run) | rounds |
+|---|---|---|---|---|---|
+| M01 | the Mythic payback back to DESIGN.md's 14 400 s | KILLED | f5e11de1b1cf | Economy 214/5, Pacing 16/1, chk_night 591/39, chk_budget 39/5 | |
+| M02 | noteBest re-stamps an equal income (>= for >) | KILLED | 34a423352e6e | Economy 216/3, chk_board 74/4 | |
+| M03 | normalize: a best with no stamp is not stamped at the load | KILLED | ee8b12401fb1 | Economy 218/1 | |
+| M04 | normalize: a saved best is not capped at nine Bigfoots | KILLED | 4478383aef2c | Economy 218/1 | |
+| M05 | normalize: the loaded lair's income is not noted (legacy profiles best 0) | KILLED | bf745dea0174 | Economy 215/4, chk_board 74/4, chk_guards 195/2 | |
+| M06 | a purchase does not note the best | KILLED | 24510e2589fb | chk_board 70/8, chk_night 591/39, chk_budget 41/3 | |
+| M07 | a failed grant keeps the best it raised | KILLED | f6c19a632d2a | chk_guards 195/2 | |
+| M08 | a committed profile write never writes the board | KILLED | 248e6b2a01a8 | chk_board 64/14, chk_guards 196/1 | |
+| M09 | writeBoard writes even when the best has not risen | KILLED | 5b6db1146eb7 | chk_board 74/4 | |
+| M10 | writeBoard overwrites instead of keeping the higher value | KILLED | e2c89fef6896 | chk_board 76/2 | |
+| M11 | a session without its save's lock writes the board | KILLED | a1d1a03a571f | chk_board 77/1 | |
+| M12 | the public top 10 is read every second | KILLED | 923f40c665b5 | chk_board 75/3 | |
+| M13 | friends capped at 1 000 instead of 200 | KILLED | 8f12af6dd907 | chk_board 74/4 | |
+| M14 | the friends list is never taken from the cache | KILLED | 7fe9155675af | chk_board 77/1 | |
+| M15 | a friend in this server is read from the store, not memory | KILLED | 439a04b936da | chk_board 77/1 | |
+| M16 | a failed friends call reads as no friends | KILLED | ac74cf56e50b | chk_board 77/1 | |
+| M17 | the prompt never toggles back to public | KILLED | 583b7c7ea936 | chk_board 76/2 | |
+| M18 | the board prompt reaches 10 studs further | KILLED | 316193eac22b | chk_board 75/1 | |
+| M19 | the board stands out on the apron (z 12, not flush on the fence) | KILLED | f05dc1b95c31 | chk_board 76/2 | |
+| M20 | no RespawnLocation | KILLED | d13bdd541c86 | chk 332/2 | |
+| M21 | a rejoin does not wait for its own leave-write on this server | KILLED | 35d747c01837 | chk_guards 198/2 | round 1: KILLED (chk_guards 195/2, chk_hazards 68/1); round 2: KILLED (chk_guards 196/2); round 3: KILLED (chk_guards 198/2) |
+| M22 | a write ignores another session's token on this server | KILLED | efbe5fccf356 | chk_guards 197/3 | round 1: KILLED (chk_guards 195/2); round 2: SURVIVED; round 3: KILLED (chk_guards 197/3) |
+| M23 | the load does not put its token on the record | KILLED | 300ffd64dd97 | chk_guards 196/4 | round 1: SURVIVED; round 2: KILLED (chk_guards 197/1); round 3: KILLED (chk_guards 196/4) |
+| M24 | GatheringRate 900 (a lair without a Mythic could reach it) | KILLED | 54f5cfef0ff2 | NightConfig 293/1, chk_night 566/1, chk_budget 43/1 | |
+| M25 | Night.level ignores the rank (a big best alone is the gathering) | KILLED | c6c160186ee3 | Night 476/1 | |
+| M26 | Night.level needs a best ABOVE GatheringRate (> for >=) | KILLED | dabf81412786 | Night 475/2, chk_longroad 3/1 | |
+| M27 | the client blends the home sky on the rank, not the level | KILLED | bfe6cdbb6f40 | chk_longroad 3/1, chk_night 546/37, chk_budget 42/2 | |
+| M28 | the server's State carries no best | KILLED | 00e234539ef6 | chk_longroad 3/1, chk_night 591/39, chk_budget 41/3 | |
+| M29 | the Badlands camp has no weather | KILLED | 1a384a812e8f | NightConfig 293/1 | round 1: KILLED (NightConfig 289/1); round 2: KILLED (NightConfig 293/1) |
+| M30 | the Loch Shore's critters are bats again (the Barrens' set) | KILLED | 36f3cb9263a5 | NightConfig 297/1 | round 1: SURVIVED; round 2: KILLED (NightConfig 297/1) |
+| M31 | capEmitters leaves the Badlands sand out of its list | KILLED | ff0f9fb39570 | chk_budget 45/1 | round 1: SURVIVED; round 2: KILLED (chk_budget 45/1) |
+| M32 | the camp keep-out tests the Jersey Devil by the 3-stud box | KILLED | fdf69fc6aee7 | chk_keepout 27/1 | round 1: SURVIVED; round 2: SURVIVED; round 3: KILLED (chk_keepout 27/1) |
+| M33 | the legends stand in the ravine (14 studs short of its far rim) | KILLED | 463cedc1e5e2 | chk_longroad 2/2 | |
+| M34 | the gathering drops the UFOs | KILLED | 7c4fd2936ff5 | chk_longroad 3/1 | |
+| M35 | Board.client draws on the first board only | KILLED | 76368a77ad70 | chk_board 69/9 | |
+| M36 | Board.client draws views sent to other players | KILLED | 927c9fb2fa3e | chk_board 77/1 | |
+| M37 | Board.keepHigher replaces an equal metric (a later reach wins the tie) | KILLED | bb1ef950a0e7 | Board 64/2 | |
+| M38 | three legends a side (195 parts at the seam) | KILLED | eeb17fe24c94 | chk_budget 43/1 | |
+| C1 | CONTROL board hint text 14 -> 15 px | SURVIVED, correctly | bb03bf90445e | - | round 1: SURVIVED; round 2: SURVIVED; round 3: SURVIVED |
+| C2 | CONTROL board hint wording | SURVIVED, correctly | 4760e12baef2 | - | round 1: SURVIVED; round 2: SURVIVED; round 3: SURVIVED |
+| C3 | CONTROL legend silhouette colour 18,14,18 -> 20,16,20 | SURVIVED, correctly | 58ee653f9d80 | - | round 1: SURVIVED; round 2: SURVIVED; round 3: SURVIVED |
+| C4 | CONTROL board trim colour | SURVIVED, correctly | acebb114d604 | - | round 1: SURVIVED; round 2: SURVIVED; round 3: SURVIVED |
+| C5 | CONTROL the gathering's fog colour 92,38,54 -> 90,40,56 | SURVIVED, correctly | f0d4e84d3d1f | - | round 1: SURVIVED; round 2: SURVIVED; round 3: SURVIVED |
+
+### Files written in this pass
+
+`src/shared/Board.luau` (new, verbatim), `src/client/Board.client.luau` (new), `src/server/Main.server.luau` (the board,
+`State.best`, `RespawnLocation`, the session token and the rejoin wait), `src/shared/Economy.luau` (`bestRate`,
+`noteBest`, `maxLairRate`), `src/shared/Config.luau` (the Mythic payback, `Config.Board`, `Save.Board`, the fifth band,
+`GatheringRate`, the camps' weather and critters, `moth`, `devil`), `src/shared/Night.luau` (`Night.level`),
+`src/shared/NightArt.luau` (`bloodMoon`, `gathering`, `moth`, `devil`, `embers`, `sand`, `spores`, the per-kind reach,
+`WEATHER_KINDS`), `src/client/Night.client.luau` (the level, the reach, the moon fades like a sky piece);
+`tests/Board.spec.luau` and `tests/Pacing.spec.luau` (new), `tests/Economy.spec.luau`, `tests/Night.spec.luau`,
+`tests/NightConfig.spec.luau`; `robloxemu/check_stealacryptid_board.luau` (new), `check_stealacryptid.luau`,
+`_guards.luau`, `_night.luau`, `_budget.luau`, `_view.luau`, `_longroad.luau`; `robloxemu/build/steal-a-cryptid.luau`
+rebuilt; `MARKETING.md` (new), `README.md`, `CLAUDE.md` and this file. Not committed, not pushed, not published; Studio
+not opened. **Nobody has reviewed this pass.**

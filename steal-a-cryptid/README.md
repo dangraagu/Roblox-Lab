@@ -4,6 +4,7 @@ A Roblox steal-and-defend idle game about folklore monsters, built code-only (no
 repo's Rojo layout. **v1 is built and headless-tested. Nobody has opened it in Roblox Studio or
 played it, it is not published, and there is no experience or place ID.** DESIGN.md is the spec;
 CLAUDE.md is how to work on it, where v1 departs from the spec, and everything only Studio can answer.
+EYECANDY.md is the night (its bands, hazards, rest, the thumbnail shot list); MARKETING.md is the clip list.
 
 ## What the game is
 
@@ -26,18 +27,27 @@ before it comes: once a poacher is in the yard, no new trap can be placed. Ownin
 next camp tier, and harder camps hold better cryptids.
 
 **The night deepens with your Journal** (EYECANDY.md). The lairs stand on a bluff over a dark ravine, with the
-forest running on beyond it to the ridges. Pine Hollow starts at dusk; your first Rare brings
-moonrise and owls on the pines, a Legendary brings strange lights (an aurora, will-o'-wisps, red eyes in the
-treeline), and the Mythic brings Mythic Night: a gold aurora, UFOs over the ridge, meteors, and Bigfoot himself
-walking the horizon. Each camp tier is its own place (badlands, pine barrens, a loch shore where Nessie glides
-past a ruined castle, a redwood forest). Your own cages get a little habitat per species. Now and then a crow,
-bat, will-o'-wisp or meteorite dives at you at home, well telegraphed (a red ring: step out of it); a hit is only
-a stumble. A Rest button sits you by a campfire and the critters leave you alone; poachers, jars and raids do
-not stop for it.
+forest running on beyond it to the ridges (step off the bluff and you are simply put back at your lair). Pine
+Hollow starts at dusk; your first Rare brings moonrise and owls on the pines, a Legendary brings strange lights (an
+aurora, will-o'-wisps, red eyes in the treeline), and the Mythic brings Mythic Night: a gold aurora, UFOs over the
+ridge, meteors, and Bigfoot himself walking the horizon. Past it, a lair earning 1 350 Essence a second (three
+Bigfoots' worth) brings the Gathering: a crimson moon, embers, moths, and the legends of Pine Hollow (Mothman,
+Dogman, the Jersey Devil) standing on the far rim to look at your lair. Each camp tier is its own place, with its
+own weather and life: badlands (blowing sand, tumbleweeds), pine barrens (fireflies, the Jersey Devil circling over
+the pines), a loch shore where Nessie glides past a ruined castle (mist, moths at its lit window), and a redwood
+forest (drifting spores, wisps). Your own cages get a little habitat per species. Now and then a crow, bat,
+will-o'-wisp or meteorite dives at you at home, well telegraphed (a red ring: step out of it); a hit is only a
+stumble. A Rest button sits you by a campfire and the critters leave you alone; poachers, jars and raids do not
+stop for it.
+
+**The Top Lairs board** stands on every lair's front fence, behind the Collect Pad. It ranks the best lair income
+each player has ever had, measured by the server from their own cages, and a tie goes to whoever got there first.
+Press E at it to switch between everyone (the top 10) and your Roblox friends (once you own a cryptid, your own row
+is always on that list, with your real rank).
 
 - 8 cryptids in 4 tiers: Jackalope, Hodag, Chupacabra (Common); Dogman, Jersey Devil (Rare);
   Mothman, Nessie (Legendary); Bigfoot (Mythic).
-- 4 camp tiers, 1 map (Pine Hollow), 1 currency (Essence).
+- 4 camp tiers, 1 map (Pine Hollow), 1 currency (Essence), 5 home skies and 4 camp places.
 - No player ever fights or steals from another live player. Rival camps are generated.
 - **Nothing costs Robux.** No game passes, no developer products, no crates, eggs, wheels or paid
   re-rolls. Re-rolling the pedestals is free on a 30-second cooldown.
@@ -66,13 +76,30 @@ numbers move run to run.
 - leave and rejoin: cryptids, traps, Journal and 205 Essence are all still there, and the character
   lands on the arrival marker again.
 
+## How long it takes (measured in Luau by a model player, not by people)
+
+`tests/Pacing.spec.luau` plays 24 sessions per player model on the game's own rules: real generated camps solved by
+the game's raid solver, raid success judged by the server's own catch rule against a timing error, the real prices,
+pedestals, permits, alerts and poachers. Minutes of play, median (fastest-slowest):
+
+| player | first Rare | first Legendary | first Mythic (Mythic Night) | the Gathering | nine Mythics |
+|---|---|---|---|---|---|
+| normal raider (timing error 0.25 s, raids at 2x the solver's time) | 3.9 | 14.5 | **35.6** (31.8-76.3) | 97.3 | 190.9 |
+| casual raider (0.35 s, 3x) | 4.9 | 17.4 | 59.5 | 122.5 | 213.8 |
+| never raids | 10.8 | 61.2 | 180.5 | 222.0 | 325.0 |
+
+The first Mythic is the brag moment (the standard asks for one in about 30-45 minutes); nine Mythics is the
+long-term goal, and the Top Lairs board the way to compare. The Mythic's price was lowered to reach that (one hour
+of its own income instead of four: CLAUDE.md Deviations). These are a model's minutes, not playtests.
+
 ## What is not in v1
 
 Raiding other real players' lairs, teleports to reserved servers, rebirth and extra biomes,
-mutations, sounds and music, leaderboards, codes, badges, trading, and anything sold for Robux.
-DESIGN.md section 16 says why for each.
+mutations, sounds and music, codes, badges, trading, and anything sold for Robux.
+DESIGN.md section 16 says why for each. (DESIGN.md also cut leaderboards; the owner's complete-game standard asks
+for one, so v1 has the Top Lairs board.)
 
-## Proposed store copy (895 characters as pasted, measured; ASCII only, no emoji)
+## Store description (989 characters as pasted, measured; ASCII only, no emoji)
 
 > Build a lair of folklore monsters, then sneak into rival camps and steal theirs.
 >
@@ -89,27 +116,31 @@ DESIGN.md section 16 says why for each.
 > Defend your own lair. Place laser nets and snares, because while you play, poachers come sneaking
 > toward your fullest jar. Catch one for a bounty.
 >
-> 8 cryptids across Common, Rare, Legendary and Mythic, from the Jackalope to Bigfoot. 4 camp
-> tiers. You never fight or steal from other live players.
+> 8 cryptids, from the Jackalope to Bigfoot. The rarer your collection, the deeper the night over
+> Pine Hollow. Compare your best lair with everyone, or just your friends, on the Top Lairs board.
+> You never fight or steal from other live players.
 
-The copy promises only what v1 does: 8 cryptids, one map, poachers only while you play, no rewards
-for likes or favourites, no "new content weekly". It must be re-checked against the game before
-anything is published.
+The count is of the text as pasted into the store's form: the paragraphs above joined with one blank line between
+them, each paragraph on one line, without the quote marks. The copy promises only what v1 does: 8 cryptids, one
+map, poachers only while you play, the board, no rewards for likes or favourites, no "new content weekly". It must
+be re-checked against the game before anything is published.
 
 ## Status
 
+Final tree of 2026-10-01 (pass 2 toward the complete-game standard): **37 suites, 4 100 assertions passed, 0 failed,
+plus 7 PASS lines**.
+
 | | |
 |---|---|
-| Unit specs (luau CLI) | 14 files, 2 197 assertions, 0 failed (9 game specs 1 267; the night: Night 427, NightConfig 222, template EnvBands 124, Hazards 102, Rest 55) |
-| `robloxemu/check_stealacryptid.luau` | 332 passed, 0 failed (0 failing runs of 100) |
-| `robloxemu/check_stealacryptid_guards.luau` | 184 passed, 0 failed (0 failing runs of 60) |
-| `robloxemu/check_stealacryptid_hud.luau` | PASS: 10 viewports x 3 HUD modes, box fit and text legibility (0 failing runs of 10) |
-| `tests/walk.luau` | 46 passed, 0 failed (0 failing runs of 60) |
-| The night (EYECANDY.md): `check_stealacryptid_{night,hazards,rest,budget,compile,lateroad,keepout,life,longroad,edge,view}` | 386 + 69 + 63 + 28 + 40 + 12 + 24 + 4 + 4 + 25 + 44 passed, 0 failed; `_nighthud` 3 x PASS |
-| Night review (EYECANDY.md section 13) | one adversarial review: three findings (the world's edge, a knock near it, scenery in the camera's way), all reproduced and closed test-first |
-| Night mutation sweep | after the review: the resume session's 49 edits re-run plus 28 new: 70 of 70 mutations killed, 6 of 6 controls survived, every edit proven to reach the bundle (EYECANDY.md section 8) |
-| Mutation sweep | 56 of 56 mutations killed, 6 of 6 controls survived, every edit proven to reach the bundle |
-| Adversarial reviews | two rounds; the second's ten findings are in REVIEW-1.md, all reproduced and closed |
+| Unit specs (luau CLI) | 16 files, 2 441 assertions, 0 failed (the game: Economy 219, Offers 36, Layout 202, Heist 79, Trace2D 52, Poacher 51, CryptidModel 552, Pacing 17; the night: Night 477, NightConfig 298; templates: Rng 32, Responsive 70, EnvBands 124, Hazards 111, Rest 55, Board 66) |
+| `robloxemu/check_stealacryptid.luau` | 334 passed, 0 failed |
+| `robloxemu/check_stealacryptid_guards.luau` | 200 passed, 0 failed (6 of 6 runs after its last change) |
+| `robloxemu/check_stealacryptid_board.luau` | 78 passed, 0 failed: the Top Lairs board, public + friends |
+| `robloxemu/check_stealacryptid_hud.luau` | PASS x 2: 10 viewports x 3 HUD modes, box fit (overlap rule 4b on) and text legibility |
+| `tests/walk.luau` | 46 passed, 0 failed |
+| The night (EYECANDY.md): `check_stealacryptid_{night,hazards,rest,budget,budgetcap,card,compile,lateroad,keepout,life,longroad,edge,view,latehit,fall}` | 583 + 69 + 75 + 46 + 12 + 13 + 44 + 12 + 28 + 4 + 4 + 42 + 44 + 12 + 13 passed, 0 failed; `_nighthud` 5 x PASS |
+| Mutation sweeps | pass 2 (EYECANDY.md section 15): 38 of 38 mutations killed, 5 of 5 controls survived, every edit proven in the bundle; earlier: 56 of 56 (the v1 review fixes), 70 of 70 and 38 of 38 (the night) |
+| Adversarial reviews | two rounds on v1 (REVIEW-1.md), two on the night (EYECANDY.md sections 13, 14); **pass 2 is not reviewed** |
 | Opened in Roblox Studio | **never** |
 | Published | **no** |
 

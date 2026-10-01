@@ -22,6 +22,10 @@
 --           rank 4 (meteorite, wisp: the hardest knock): every hit's frictionless slide (push x
 --           KnockSeconds, the bound EYECANDY uses) ends at least PlayerRadius inside the Ground;
 --        K2 control: a hit far from every edge keeps the template's full knock (nothing cut needlessly).
+--   3. (second review of the night, 2026-09-30, finding 3) the rest campfire floated over the ravine for a
+--      player who sat at the cliff facing out:
+--        E4 rest at 0.5, 2 and 4 studs from all four edges facing out, and in two corners: every campfire part
+--           stands wholly on the Ground, and along an edge the fire keeps its distance from the player.
 -- Headless limits: no physics (the slide is the frictionless upper bound), nothing renders.
 
 local Harness = require("./emu/harness")
@@ -337,6 +341,73 @@ do
 	end
 	truthy(n >= 3, "K2: a player standing in the middle of the road was hit (" .. n .. " of 4)")
 	eq(cut, 0, "K2: far from every edge the knock is the template's full push (" .. full .. " full)")
+end
+
+--============================================================ E4: the rest campfire stays on the Ground
+
+-- Second review of the night, 2026-09-30, finding 3: the campfire went 4 studs ahead of the resting player
+-- with no look at the Ground, so a player who sat at the cliff facing the ravine had the logs and stone ring
+-- floating at walking height over the drop (4 of 4 parts past the edge at 0.5 and 2.0 studs). Now the fire goes
+-- to the first of ahead / behind / right / left whose whole ring is on the Ground (Night.campfireSpot).
+do
+	local restButton = plr.PlayerGui.CryptidHud.Root.Toggles:FindFirstChild("RestToggle")
+	local T = N.Text
+	local C = N.Campfire
+	local function campfire()
+		local out = {}
+		for _, d in folder:GetChildren() do
+			if d:IsA("BasePart") and string.sub(d.Name, 1, 9) == "Campfire_" then table.insert(out, d) end
+		end
+		return out
+	end
+	local spots = {}
+	for _, d in { 0.5, 2.0, 4.0 } do
+		table.insert(spots, { name = string.format("back edge, %.1f in, facing out", d), p = Vector3.new(GX, W.RootHeight, Z1 - d), out = Vector3.new(0, 0, 1), side = true })
+		table.insert(spots, { name = string.format("front edge, %.1f in, facing out", d), p = Vector3.new(GX + 40, W.RootHeight, Z0 + d), out = Vector3.new(0, 0, -1), side = true })
+		table.insert(spots, { name = string.format("-x end, %.1f in, facing out", d), p = Vector3.new(X0 + d, W.RootHeight, GZ + 20), out = Vector3.new(-1, 0, 0), side = true })
+		table.insert(spots, { name = string.format("+x end, %.1f in, facing out", d), p = Vector3.new(X1 - d, W.RootHeight, GZ - 20), out = Vector3.new(1, 0, 0), side = true })
+	end
+	table.insert(spots, { name = "corner, 0.5 in both ways, facing out diagonally", p = Vector3.new(X0 + 0.5, W.RootHeight, Z1 - 0.5), out = Vector3.new(-1, 0, 1).Unit })
+	table.insert(spots, { name = "corner, 0.5 in both ways, facing along the edge", p = Vector3.new(X1 - 0.5, W.RootHeight, Z0 + 0.5), out = Vector3.new(0, 0, -1) })
+	local sat, partsOut, notAtDistance, examples = 0, 0, 0, {}
+	for _, s in spots do
+		local k = 0
+		while inFlight() and k < 30 * 12 do frame(1 / 30); k += 1 end
+		hrp.CFrame = CFrame.lookAt(s.p, s.p + s.out)
+		hum.MoveDirection = Vector3.new(0, 0, 0)
+		run(0.2)
+		restButton.Activated:Fire()
+		k = 0
+		repeat frame(1 / 30); k += 1 until restButton.Text == T.RestingButton or k > 30 * 10
+		if restButton.Text == T.RestingButton then
+			sat += 1
+			run(0.2)
+			local parts = campfire()
+			local flame = nil
+			for _, d in parts do
+				local ex, _, ez = extents(d)
+				if d.Position.X - ex < X0 - 1e-6 or d.Position.X + ex > X1 + 1e-6 or d.Position.Z - ez < Z0 - 1e-6 or d.Position.Z + ez > Z1 + 1e-6 then
+					partsOut += 1
+					if #examples < 4 then
+						table.insert(examples, string.format("%s: %s reaches past the Ground (centre %.1f, %.1f)", s.name, d.Name, d.Position.X, d.Position.Z))
+					end
+				end
+				if d.Name == "Campfire_Flame" then flame = d end
+			end
+			if s.side then
+				local dist = if flame then (Vector3.new(flame.Position.X, 0, flame.Position.Z) - Vector3.new(s.p.X, 0, s.p.Z)).Magnitude else -1
+				if math.abs(dist - C.Distance) > 0.01 then notAtDistance += 1 end
+			end
+			truthy(#parts >= 3, "E4: " .. s.name .. ": a campfire burns (" .. #parts .. " parts)")
+			restButton.Activated:Fire()
+			run(0.2)
+		end
+	end
+	for _, e in examples do print("   e.g. " .. e) end
+	print(string.format("  E4: rested at %d spots at the edge; %d campfire parts reached past the Ground", sat, partsOut))
+	eq(sat, #spots, "E4: rested at every spot by the edge (" .. #spots .. ")")
+	eq(partsOut, 0, "E4: every campfire part stands wholly on the Ground (none over the ravine)")
+	eq(notAtDistance, 0, "E4: along an edge the fire keeps its distance from the player (it moves behind or aside, never under them)")
 end
 
 for _, e in h:errors() do truthy(false, "scheduler error: " .. tostring(e)) end

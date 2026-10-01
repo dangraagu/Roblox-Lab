@@ -8,11 +8,11 @@
 --
 -- Three anchors:
 --   "home"   world-fixed around the road (the far floor beyond its ravine, ridges, far pines, owls on the
---            server's pines, UFOs, Bigfoot);
+--            server's pines, UFOs, Bigfoot, the legends of the gathering);
 --   "pocket" relative to the camp pocket the player is in (badlands, barrens, loch, redwoods). Every
 --            part is checked against Night.keepOut when placed and on every animated frame: a part
 --            that would enter the camp or the camera corridor behind its gate is left out;
---   "sky"    travels with the camera, like a skybox with depth (the auroras).
+--   "sky"    travels with the camera, like a skybox with depth (the auroras, the gathering's crimson moon).
 -- Because Poppercam ignores non-collidable parts, the camera is never pulled in front of one: so every
 -- frame NightArt:occlude hides a home or pocket part that stands between the camera and the player (at
 -- home) or the camp (in a pocket), and fades it back when it is clear. Camp scenery can never hide a net,
@@ -59,6 +59,15 @@ local function addPart(item, props)
 	return p, entry
 end
 
+-- What an item can ever switch on, as the budget counts it (Night.admit): every part, beam, trail and light.
+local function costOf(item)
+	return { parts = #item.entries, beams = #item.beams, trails = #item.trails, lights = #item.lights }
+end
+
+-- An item with `item.gate` (scenery, critters, habitats) is drawn only if the budget admits it (second review
+-- of the night, 2026-09-30, finding 5: Config.Night.Budget is capped in code). A refused item stays hidden and
+-- is asked again the next time it is shown. Items without a gate (a hazard, its lane and ring, the campfire)
+-- are always drawn: Budget.Reserve keeps room for them.
 local function setWeight(item, w, folder)
 	w = math.clamp(w, 0, 1)
 	item.weight = w
@@ -73,10 +82,22 @@ local function setWeight(item, w, folder)
 			for _, l in item.lights do l.Enabled = false end
 			for _, pe in item.emitters do pe.Enabled = false end
 			item.shown = false
+			if item.gate and item.cost then
+				item.gate.Night.release(item.gate.state, item.cost)
+				item.cost = nil
+			end
 		end
 		return
 	end
 	if not item.shown then
+		if item.gate then
+			local cost = costOf(item)
+			if not item.gate.Night.admit(item.gate.state, cost) then
+				item.weight = 0
+				return
+			end
+			item.cost = cost
+		end
 		for _, e in item.entries do
 			-- an entry left out to keep a camp clear (Night.keepOut) stays out
 			if not e.hidden then e.part.Parent = folder end
@@ -446,6 +467,68 @@ PIECES.bigfoot = function(art)
 	return item
 end
 
+-- home, the gathering (the fifth band): a crimson moon low over the ridge, riding with the camera like the auroras
+PIECES.bloodMoon = function()
+	local item = newItem("BloodMoon")
+	item.anchor = "sky"
+	local at = CFrame.new(-280, 190, 660)
+	addPart(item, { name = "BloodMoon", shape = BALL, size = Vector3.new(120, 120, 120), color = rgb(196, 36, 40), material = Enum.Material.Neon, transparency = 0.05, offset = at })
+	addPart(item, { name = "BloodMoonHalo", shape = BALL, size = Vector3.new(200, 200, 200), color = rgb(255, 90, 70), material = Enum.Material.Neon, transparency = 0.86, offset = at })
+	return item
+end
+
+-- home, the gathering: the legends of Pine Hollow have come to look at your lair. On each side of the road two of
+-- them (a Mothman and a Dogman on one, a Jersey Devil and a Mothman on the other) stand on the far floor, 30 studs
+-- past the ravine's far rim, facing the road: dark silhouettes, 30 studs tall, with glowing eyes. Six parts each,
+-- static (their footprints are cached). Two a side, not three: three put the mythic -> gathering seam at 195 parts,
+-- over the 190 the budget leaves scenery (check_stealacryptid_budget).
+local LEGEND = 2.2
+local function legend(item, kind, base)
+	local s = LEGEND
+	local dark = rgb(18, 14, 18)
+	local function eyes(color, y, dz, w)
+		addPart(item, { name = "Legend_Eye", shape = BALL, size = Vector3.new(w, w * 0.7, w * 0.7) * s, color = color, material = Enum.Material.Neon, offset = base * CFrame.new(-0.8 * s, y * s, dz * s) })
+		addPart(item, { name = "Legend_Eye", shape = BALL, size = Vector3.new(w, w * 0.7, w * 0.7) * s, color = color, material = Enum.Material.Neon, offset = base * CFrame.new(0.8 * s, y * s, dz * s) })
+	end
+	if kind == "mothman" then
+		addPart(item, { name = "Legend_Body", size = Vector3.new(4, 14, 3) * s, color = dark, offset = base * CFrame.new(0, 7 * s, 0) })
+		addPart(item, { name = "Legend_Wing", size = Vector3.new(8, 11, 0.4) * s, color = dark, offset = base * CFrame.new(-5 * s, 9.5 * s, 0.8 * s) * CFrame.Angles(0, 0.3, 0.22) })
+		addPart(item, { name = "Legend_Wing", size = Vector3.new(8, 11, 0.4) * s, color = dark, offset = base * CFrame.new(5 * s, 9.5 * s, 0.8 * s) * CFrame.Angles(0, -0.3, -0.22) })
+		addPart(item, { name = "Legend_Head", shape = BALL, size = Vector3.new(3.4, 3.4, 3) * s, color = dark, offset = base * CFrame.new(0, 15.4 * s, 0) })
+		eyes(rgb(255, 30, 30), 15.6, -1.4, 1.2)
+	elseif kind == "dogman" then
+		addPart(item, { name = "Legend_Body", size = Vector3.new(5, 13, 3.4) * s, color = dark, offset = base * CFrame.new(0, 6.5 * s, 0) })
+		addPart(item, { name = "Legend_Head", size = Vector3.new(3.2, 3, 4.4) * s, color = dark, offset = base * CFrame.new(0, 14.4 * s, -0.8 * s) })
+		addPart(item, { name = "Legend_Ear", size = Vector3.new(0.9, 2.2, 0.6) * s, color = dark, offset = base * CFrame.new(-1.1 * s, 16.6 * s, 0) * CFrame.Angles(0, 0, 0.25) })
+		addPart(item, { name = "Legend_Ear", size = Vector3.new(0.9, 2.2, 0.6) * s, color = dark, offset = base * CFrame.new(1.1 * s, 16.6 * s, 0) * CFrame.Angles(0, 0, -0.25) })
+		eyes(rgb(255, 200, 60), 14.8, -2.4, 0.8)
+	else -- the Jersey Devil
+		addPart(item, { name = "Legend_Body", size = Vector3.new(3.6, 10, 3) * s, color = dark, offset = base * CFrame.new(0, 5 * s, 0) })
+		addPart(item, { name = "Legend_Wing", size = Vector3.new(7, 6, 0.4) * s, color = dark, offset = base * CFrame.new(-4.4 * s, 9 * s, 0.6 * s) * CFrame.Angles(0, 0.25, -0.5) })
+		addPart(item, { name = "Legend_Wing", size = Vector3.new(7, 6, 0.4) * s, color = dark, offset = base * CFrame.new(4.4 * s, 9 * s, 0.6 * s) * CFrame.Angles(0, -0.25, 0.5) })
+		addPart(item, { name = "Legend_Head", size = Vector3.new(2.6, 2.8, 3.6) * s, color = dark, offset = base * CFrame.new(0, 11.4 * s, -0.6 * s) })
+		eyes(rgb(255, 120, 40), 11.6, -2.3, 0.8)
+	end
+end
+
+PIECES.gathering = function(art)
+	local item = newItem("Gathering")
+	item.anchor = "home"
+	local rect = art.homeRect or { sx = 504, sz = 260 }
+	local R = art.cfg.Night.Ravine
+	local sides = { { 1, { "mothman", "dogman" } }, { -1, { "devil", "mothman" } } }
+	for _, sk in sides do
+		local side, kinds = sk[1], sk[2]
+		local z = side * (rect.sz / 2 + R.Width + 30)
+		for i, kind in kinds do
+			local x = (i - 1.5) * math.min(rect.sx / 3, 160) + side * 20
+			local pos = Vector3.new(x, -1.3, z)
+			legend(item, kind, CFrame.lookAt(pos, Vector3.new(x, -1.3, 0)))
+		end
+	end
+	return item
+end
+
 -- camps: the ground under and around the pocket (below the camp floor, so it hides nothing)
 local function campGround(name, color, material)
 	return function(art)
@@ -657,6 +740,46 @@ CRITTERS.tumbleweed = function(item)
 	end
 end
 
+-- a moth: pale, faintly glowing wings beating fast, jittering as moths do (Loch Shore's lit window; the gathering).
+-- Everything it draws stays within 2.6 studs of its centre (the 3-stud keep-out box in a camp)
+CRITTERS.moth = function(item, scale)
+	scale = scale or 1
+	local pale = rgb(236, 226, 196)
+	addPart(item, { name = "MothBody", shape = BALL, size = Vector3.new(0.5, 0.5, 1.1) * scale, color = rgb(150, 130, 100) })
+	addPart(item, { name = "MothWingL", size = Vector3.new(1.6, 0.08, 1.3) * scale, color = pale, material = Enum.Material.Neon, transparency = 0.35 })
+	addPart(item, { name = "MothWingR", size = Vector3.new(1.6, 0.08, 1.3) * scale, color = pale, material = Enum.Material.Neon, transparency = 0.35 })
+	item.animate = function(it, cf, now)
+		local ph = it.phase or 0
+		local flap = math.sin(now * 22 + ph) * 0.9
+		local jitter = cf * CFrame.new(math.sin(now * 5.3 + ph) * 0.8, math.sin(now * 7.1 + ph * 2) * 0.6, 0)
+		it.entries[1].part.CFrame = jitter
+		it.entries[2].part.CFrame = jitter * CFrame.Angles(0, 0, flap) * CFrame.new(-0.8 * scale, 0, 0)
+		it.entries[3].part.CFrame = jitter * CFrame.Angles(0, 0, -flap) * CFrame.new(0.8 * scale, 0, 0)
+	end
+end
+
+-- the Jersey Devil, circling high over the Pine Barrens: a dark winged body, slow wingbeats, two red-orange eyes.
+-- Its wings reach 6.1 studs from its centre: its spec's `reach` (7) is the box the camp keep-out tests it by
+CRITTERS.devil = function(item, scale)
+	scale = scale or 1
+	local dark = rgb(34, 22, 26)
+	addPart(item, { name = "DevilBody", shape = BALL, size = Vector3.new(1.6, 1.6, 3.2) * scale, color = dark })
+	addPart(item, { name = "DevilWingL", size = Vector3.new(5, 0.15, 2.6) * scale, color = dark })
+	addPart(item, { name = "DevilWingR", size = Vector3.new(5, 0.15, 2.6) * scale, color = dark })
+	addPart(item, { name = "DevilEye", shape = BALL, size = Vector3.new(0.4, 0.3, 0.3) * scale, color = rgb(255, 110, 40), material = Enum.Material.Neon })
+	addPart(item, { name = "DevilEye", shape = BALL, size = Vector3.new(0.4, 0.3, 0.3) * scale, color = rgb(255, 110, 40), material = Enum.Material.Neon })
+	item.animate = function(it, cf, now)
+		local ph = it.phase or 0
+		local flap = math.sin(now * 4 + ph) * 0.6
+		local body = cf * CFrame.new(0, math.sin(now * 1.2 + ph) * 0.8, 0)
+		it.entries[1].part.CFrame = body
+		it.entries[2].part.CFrame = body * CFrame.Angles(0, 0, flap) * CFrame.new(-2.8 * scale, 0, 0)
+		it.entries[3].part.CFrame = body * CFrame.Angles(0, 0, -flap) * CFrame.new(2.8 * scale, 0, 0)
+		it.entries[4].part.CFrame = body * CFrame.new(-0.35 * scale, 0.3 * scale, -1.6 * scale)
+		it.entries[5].part.CFrame = body * CFrame.new(0.35 * scale, 0.3 * scale, -1.6 * scale)
+	end
+end
+
 -- ─────────────────────────────────────────────────────────────── construction
 
 function NightArt.new(folder, rand, Config, EnvBands, Night)
@@ -674,6 +797,8 @@ function NightArt.new(folder, rand, Config, EnvBands, Night)
 	self.homeRect = nil
 	self.perches = {}
 	self.pocketX = nil
+	-- the budget, capped in code (Night.budgetGate): every gated item's cost is admitted before it is drawn
+	self.gate = { Night = Night, state = Night.budgetGate(Config) }
 	return self
 end
 
@@ -696,6 +821,7 @@ function NightArt:setHome(rect, perches)
 	-- centred on the origin with no perches: drop it, and it is rebuilt around the road when next shown
 	for id, item in self.pieces do
 		if item.anchor == "home" then
+			setWeight(item, 0, self.folder) -- gives its budget back
 			for _, e in item.entries do e.part:Destroy() end
 			self.pieces[id] = nil
 		end
@@ -822,6 +948,7 @@ function NightArt:updatePiece(id, w, cam, now)
 		if build == nil then return end
 		item = build(self)
 		for _, e in item.entries do e.owner = id end
+		item.gate = self.gate
 		self.pieces[id] = item
 	end
 	-- a pocket piece with no pocket to stand in has nowhere to be
@@ -860,7 +987,8 @@ local function buildCritter(kind, scale)
 	return item
 end
 
--- desired: { [kind] = count }. keepOut(pos: Vector3) -> true where no critter may be (a camp).
+-- desired: { [kind] = count }. keepOut(pos: Vector3, reach: number?) -> true where no critter may be (a camp); reach
+-- is how far the kind draws from its centre (Config.Night.Critters[kind].reach, else the keep-out's 3 studs).
 function NightArt:updateCritters(desired, cam, dt, now, keepOut)
 	local E = self.EnvBands
 	local specs = self.cfg.Night.Critters
@@ -877,7 +1005,7 @@ function NightArt:updateCritters(desired, cam, dt, now, keepOut)
 				c.pos = { x = c.pos.x + c.vel.x * dt, y = c.pos.y + c.vel.y * dt, z = c.pos.z + c.vel.z * dt }
 				if spec.ground then c.pos.y = spec.ground end
 				local p = Vector3.new(c.pos.x, c.pos.y, c.pos.z)
-				if E.ambientExpired(c.pos, camV, spec) or (keepOut and keepOut(p)) then
+				if E.ambientExpired(c.pos, camV, spec) or (keepOut and keepOut(p, spec.reach)) then
 					c.active = false
 					setWeight(c.item, 0, self.folder)
 				else
@@ -908,7 +1036,7 @@ function NightArt:updateCritters(desired, cam, dt, now, keepOut)
 			local base = E.ambientSpawn(camV, spec, self.rand)
 			if spec.ground then base.pos.y = spec.ground end
 			local basePos = Vector3.new(base.pos.x, base.pos.y, base.pos.z)
-			if not (keepOut and keepOut(basePos)) then
+			if not (keepOut and keepOut(basePos, spec.reach)) then
 				for g = 1, group do
 					local c = nil
 					for _, existing in list do
@@ -916,11 +1044,12 @@ function NightArt:updateCritters(desired, cam, dt, now, keepOut)
 					end
 					if c == nil then
 						c = { item = buildCritter(kind), active = false }
+						c.item.gate = self.gate
 						table.insert(list, c)
 					end
 					local ox, oz = (g - 1) % 3 * 4 - 4, -(g - 1) * 3
 					local pos = { x = base.pos.x + ox, y = base.pos.y + (g - 1) * 0.8, z = base.pos.z + oz }
-					if not (keepOut and keepOut(Vector3.new(pos.x, pos.y, pos.z))) then
+					if not (keepOut and keepOut(Vector3.new(pos.x, pos.y, pos.z), spec.reach)) then
 						c.active = true
 						c.leaving = false
 						c.w = 0
@@ -1022,13 +1151,14 @@ function NightArt:updateHabitats(habs, bases, w)
 					addEmitter(item, patch, fxDef, H.EmitterRate)
 				end
 				place(item, CFrame.new())
+				item.gate = self.gate
 				self.habitats[col] = { item = item, key = key }
 				have = self.habitats[col]
 			end
 		end
 		if have then
 			setWeight(have.item, w, self.folder)
-			local lit = want and want.lit and w > 0.3
+			local lit = want and want.lit and w > 0.3 and have.item.shown
 			for _, pe in have.item.emitters do
 				if pe.Enabled ~= lit then pe.Enabled = lit end
 			end
@@ -1046,7 +1176,8 @@ function NightArt:updateCampfire(on, groundCF, now)
 		local wood = rgb(84, 58, 40)
 		addPart(item, { name = "Campfire_Log", shape = CYL, size = Vector3.new(2.6, 0.5, 0.5), color = wood, material = Enum.Material.Wood, offset = CFrame.new(0, 0.25, 0) * CFrame.Angles(0, 0.4, 0) })
 		addPart(item, { name = "Campfire_Log", shape = CYL, size = Vector3.new(2.6, 0.5, 0.5), color = wood, material = Enum.Material.Wood, offset = CFrame.new(0, 0.25, 0) * CFrame.Angles(0, 2.5, 0) })
-		addPart(item, { name = "Campfire_Stones", shape = CYL, size = Vector3.new(0.3, 3.2, 3.2), color = rgb(80, 80, 84), material = Enum.Material.Slate, offset = CFrame.new(0, 0.1, 0) * UPRIGHT })
+		-- the stone ring is the widest part: Campfire.Radius is what Night.campfireSpot keeps on the Ground
+		addPart(item, { name = "Campfire_Stones", shape = CYL, size = Vector3.new(0.3, 2 * C.Radius, 2 * C.Radius), color = rgb(80, 80, 84), material = Enum.Material.Slate, offset = CFrame.new(0, 0.1, 0) * UPRIGHT })
 		local flame = addPart(item, { name = "Campfire_Flame", shape = BALL, size = Vector3.new(0.9, 1.3, 0.9), color = rgb(255, 150, 60), material = Enum.Material.Neon, transparency = 0.1, offset = CFrame.new(0, 0.9, 0) })
 		addEmitter(item, flame, { name = "CampfireFx", Color = { 255, 150, 60 }, Size = 0.5, Lifetime = { 0.6, 1.1 }, Speed = { 2, 4 }, LightEmission = 1, Acceleration = Vector3.new(0, 2, 0), Transparency = 0.2, Spread = 15 }, C.Rate)
 		local light = Instance.new("PointLight")
@@ -1154,12 +1285,24 @@ function NightArt:laneItem()
 	return item
 end
 
--- Draw the hazard this frame at `pos` (Night.drawPosition: the lane until arrival, then a swoop away, or
--- nothing once a meteorite has struck: `visible` false). `zone` is Hazards.zone(plan, PlayerRadius): the
--- ring IS the hit rule. `groundY` is the height of the floor under the player (the ring lies on it).
--- The "!" marker and the red blink are the WARNING: they run until arrival (or a hit) and are off after.
-function NightArt:showHazard(plan, pos, now, zone, groundY, visible)
+-- Draw the hazard this frame at `pos` (Night.drawPosition: the lane until arrival, its line while the ring
+-- lingers, then a swoop away, or nothing once a meteorite has struck: `visible` false). `zone` is
+-- Hazards.zone(plan, PlayerRadius) while Hazards.threatLive holds, else nil: the ring IS the hit rule, and it
+-- stays up past the arrival time for as long as a hit can still land (second review, 2026-09-30, finding 1).
+-- The lane line shows the way in, so it goes at the arrival time as before. `groundY` is the height of the
+-- floor under the player (the ring lies on it). `warning` (the "!" marker and the red blink) is true while
+-- the warning is up: the threat is live and nothing has hit yet.
+function NightArt:showHazard(plan, pos, now, zone, groundY, visible, warning)
 	local item = self:hazardModel(plan.kind)
+	-- Budget.MaxHazards (1): only the hazard in flight is ever drawn
+	if (self.cfg.Night.Budget.MaxHazards or 1) <= 1 then
+		for kind, other in self.hazardModels do
+			if kind ~= plan.kind and other.shown then
+				other.billboard.Enabled = false
+				setWeight(other, 0, self.folder)
+			end
+		end
+	end
 	if visible == false then
 		item.billboard.Enabled = false
 		setWeight(item, 0, self.folder)
@@ -1167,9 +1310,8 @@ function NightArt:showHazard(plan, pos, now, zone, groundY, visible)
 		return
 	end
 	setWeight(item, 1, self.folder)
-	local warning = plan.t <= plan.arriveAt and not plan.hit
-	item.billboard.Enabled = warning and (not plan.locked or (math.floor(now * 6) % 2 == 0))
-	item.lights[1].Enabled = warning and math.floor(now * 4) % 2 == 0
+	item.billboard.Enabled = warning == true and (not plan.locked or (math.floor(now * 6) % 2 == 0))
+	item.lights[1].Enabled = warning == true and math.floor(now * 4) % 2 == 0
 	local p = Vector3.new(pos.x, pos.y, pos.z)
 	local v = Vector3.new(plan.velocity.x, plan.velocity.y, plan.velocity.z)
 	local hv = Vector3.new(v.X, 0, v.Z)
@@ -1177,19 +1319,24 @@ function NightArt:showHazard(plan, pos, now, zone, groundY, visible)
 	if item.animate then item.animate(item, cf, now) else place(item, cf) end
 
 	local lane = self:laneItem()
-	local target = Vector3.new(plan.target.x, plan.target.y, plan.target.z)
-	local beyond = target + (if v.Magnitude > 0 then v.Unit * 20 else Vector3.zero)
-	local len = (beyond - p).Magnitude
-	if plan.t > plan.arriveAt or len < 1 then
+	if zone == nil then
 		setWeight(lane, 0, self.folder)
 		return
 	end
 	setWeight(lane, 1, self.folder)
 	local colour = if plan.locked then rgb(255, 60, 60) else rgb(255, 210, 60)
 	local laneE, ringE = lane.entries[1], lane.entries[2]
-	laneE.part.Color = colour
-	laneE.part.Size = Vector3.new(0.3, 0.3, len)
-	laneE.part.CFrame = CFrame.lookAt(p:Lerp(beyond, 0.5), beyond)
+	local target = Vector3.new(plan.target.x, plan.target.y, plan.target.z)
+	local beyond = target + (if v.Magnitude > 0 then v.Unit * 20 else Vector3.zero)
+	local len = (beyond - p).Magnitude
+	if plan.t > plan.arriveAt or len < 1 then
+		if laneE.part.Parent ~= nil then laneE.part.Parent = nil end
+	else
+		if laneE.part.Parent ~= self.folder then laneE.part.Parent = self.folder end
+		laneE.part.Color = colour
+		laneE.part.Size = Vector3.new(0.3, 0.3, len)
+		laneE.part.CFrame = CFrame.lookAt(p:Lerp(beyond, 0.5), beyond)
+	end
 	local d = 2 * zone.radius
 	ringE.part.Color = colour
 	ringE.part.Size = Vector3.new(0.2, d, d)
@@ -1205,6 +1352,38 @@ function NightArt:hideHazard(kind)
 	if self.lane then setWeight(self.lane, 0, self.folder) end
 end
 
+-- ─────────────────────────────────────────────── the emitter cap
+
+-- Budget.MaxEmitters and MaxEmitterRate, every frame, after everything else has switched its emitters: in
+-- every weather kind the art can draw, in the order capEmitters keeps them (WEATHER below defines each)
+local WEATHER_KINDS = { "fireflies", "mist", "wisplights", "stardust", "embers", "sand", "spores" }
+
+-- priority order (the campfire the player asked for, then the band's weather, then the lit habitat, then any
+-- other), each emitter that is on and drawn stays on while the count and the particles per second fit
+-- (Night.capEmitters); the rest are switched off for this frame. Their owners switch them on again next frame,
+-- and they are judged again. With the shipped numbers nothing is ever switched off (NightConfig.spec, Night.spec).
+function NightArt:capEmitters()
+	local B = self.cfg.Night.Budget
+	local list = {}
+	local function add(pe)
+		if pe and pe.Enabled and pe.Parent ~= nil and pe.Parent.Parent ~= nil then table.insert(list, pe) end
+	end
+	if self.campfire then for _, pe in self.campfire.emitters do add(pe) end end
+	if self.emitters then
+		for _, kind in WEATHER_KINDS do add(self.emitters[kind]) end
+	end
+	for col = 1, 9 do
+		local have = self.habitats[col]
+		if have then for _, pe in have.item.emitters do add(pe) end end
+	end
+	for _, item in self.pieces do for _, pe in item.emitters do add(pe) end end
+	local rates = {}
+	for i, pe in list do rates[i] = pe.Rate or 0 end
+	for i, keep in self.Night.capEmitters(rates, B.MaxEmitters, B.MaxEmitterRate) do
+		if not keep then list[i].Enabled = false end
+	end
+end
+
 -- ─────────────────────────────────────────────── weather
 
 local WEATHER = {
@@ -1212,6 +1391,12 @@ local WEATHER = {
 	wisplights = { Color = { 150, 255, 200 }, Size = 0.32, Lifetime = { 4, 7 }, Speed = { 0.3, 1 }, LightEmission = 1, Acceleration = Vector3.zero, Transparency = 0.1 },
 	mist = { Color = { 220, 228, 240 }, Size = 14, Lifetime = { 6, 9 }, Speed = { 0.5, 1.5 }, LightEmission = 0.1, Acceleration = Vector3.zero, Transparency = 0.9 },
 	stardust = { Color = { 255, 214, 150 }, Size = 0.26, Lifetime = { 5, 8 }, Speed = { 0.2, 0.8 }, LightEmission = 1, Acceleration = Vector3.new(0, -0.2, 0), Transparency = 0.15 },
+	-- the gathering: red-orange sparks rising slowly
+	embers = { Color = { 255, 120, 70 }, Size = 0.24, Lifetime = { 3, 6 }, Speed = { 0.4, 1.2 }, LightEmission = 1, Acceleration = Vector3.new(0, 0.7, 0), Transparency = 0.1 },
+	-- the Badlands: dust blown sideways along the ground behind the camp
+	sand = { Color = { 214, 172, 120 }, Size = 1.2, Lifetime = { 3, 5 }, Speed = { 2, 4 }, LightEmission = 0, Acceleration = Vector3.new(4, 0, 0), Transparency = 0.75 },
+	-- the Redwoods: pale spores drifting down between the trunks
+	spores = { Color = { 200, 255, 210 }, Size = 0.22, Lifetime = { 5, 8 }, Speed = { 0.1, 0.5 }, LightEmission = 0.6, Acceleration = Vector3.new(0, -0.15, 0), Transparency = 0.2 },
 }
 
 function NightArt.hasWeather(kind)

@@ -4,7 +4,8 @@
 --   * reads the Journal's rank the server reports in State (the game's own progress value: the highest
 --     tier ever owned, which already drives the pedestals and the camps) and blends the HOME bands in
 --     Config.Night.Home: the rarer your collection, the deeper the night (dusk -> moonrise -> strange
---     lights -> mythic night). In a camp pocket it blends that camp tier's own place instead;
+--     lights -> mythic night), and past the Mythic, once the best lair income ever (State.best) reaches
+--     GatheringRate, the gathering (Night.level). In a camp pocket it blends that camp tier's own place instead;
 --   * glides every written value (lighting, sky, scenery, critters, weather), so a new rank or a raid's
 --     teleport never hard-cuts, and keeps every frame above the readability floor (Night.readable);
 --   * dresses YOUR OWN occupied cages with a habitat per species (the rarest one lit);
@@ -15,7 +16,7 @@
 --     This script fires no remote and sets no attribute; the server does not know hazards or rest exist
 --     and trusts nothing from here. Rest pauses only the hazards below: poachers, jars, raids, heat and
 --     permits are the server's and do not change;
---   * it reads only the local character, the local camera, Config, this player's own State (rank, plot,
+--   * it reads only the local character, the local camera, Config, this player's own State (rank, best, plot,
 --     cages, raid, tutorial, build mode, poacher) and public workspace geometry (the road's Ground, its
 --     pine crowns, this player's own cage bases). No other player's state; nothing about a camp's
 --     traps or cages: camp scenery depends on the camp's TIER only and keeps out of the camp itself.
@@ -194,6 +195,10 @@ cardSub.Visible = false
 cardSub.Parent = root
 capText(cardSub, 20)
 
+-- the card's smallest legible heights (design px): the title stays >= 11 screen px at the phone scale 0.6, the
+-- subtitle >= 85 % of its 20-px cap (check_stealacryptid_nighthud's legibility rule)
+local CARD_MIN_TITLE, CARD_MIN_SUB = 22, 20
+local subFits = true
 local function applyLayout()
 	local v = camera.ViewportSize
 	local vx = if v.X > 0 then v.X else Responsive.REF_X
@@ -210,18 +215,65 @@ local function applyLayout()
 	local rootW, rootH = vx / layout.scale, vyDraw / layout.scale
 	local w = math.min(760, rootW - 2 * Responsive.MARGIN)
 	local cardH = math.min(64, rootH * 0.13)
-	card.Position = UDim2.fromOffset(rootW / 2, rootH * 0.46)
+	local subH = math.min(28, rootH * 0.06)
+	-- Centred at 46 % of the height where there is room; never over the HUD's top stack (its lines, the chip's
+	-- slot) and never into the touch-control band: the HUD says where that room is, in the same design px
+	-- (NightBus CardTop / CardBottom). Second review of the night, 2026-09-30, finding 4: at a fixed 46 % the card
+	-- crossed the chip (800x360) and the toast (640x300).
+	local top = rootH * 0.46 - cardH / 2
+	local pg = player:FindFirstChild("PlayerGui")
+	local hudGui = pg and pg:FindFirstChild("CryptidHud")
+	local nb = hudGui and hudGui:FindFirstChild("NightBus")
+	local ct = nb and nb:FindFirstChild("CardTop")
+	local cb = nb and nb:FindFirstChild("CardBottom")
+	subFits = true
+	if ct and (ct :: any).Value > 0 then
+		local stackBottom = (ct :: any).Value
+		top = math.max(top, stackBottom)
+		local bottom = if cb and (cb :: any).Value > 0 then (cb :: any).Value else rootH
+		if top + cardH + 4 + subH > bottom then
+			-- not enough room at full size: sit right under the stack; shrink the title first (to CARD_MIN_TITLE),
+			-- keep the subtitle legible (CARD_MIN_SUB), and on a very short screen show the title alone
+			top = stackBottom
+			local room = bottom - top
+			if cardH + 4 + subH > room then
+				local sub = math.min(subH, math.max(CARD_MIN_SUB, room - 4 - cardH))
+				local title = math.min(cardH, room - 4 - sub)
+				if title >= CARD_MIN_TITLE then
+					cardH, subH = title, sub
+				else
+					subFits = false
+					cardH = math.max(CARD_MIN_TITLE, math.min(cardH, room))
+				end
+			end
+		end
+	end
+	card.Position = UDim2.fromOffset(rootW / 2, top + cardH / 2)
 	card.Size = UDim2.fromOffset(w, cardH)
-	cardSub.Position = UDim2.fromOffset(rootW / 2, rootH * 0.46 + cardH / 2 + 4)
-	cardSub.Size = UDim2.fromOffset(w, math.min(28, rootH * 0.06))
+	cardSub.Position = UDim2.fromOffset(rootW / 2, top + cardH + 4)
+	cardSub.Size = UDim2.fromOffset(w, subH)
+	if card.Visible and not subFits then cardSub.Visible = false end
 end
 applyLayout()
 camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+-- the HUD moves its top stack (a banner, a chip) and says so on its NightBus: follow it
+task.spawn(function()
+	local pg = player:WaitForChild("PlayerGui")
+	local hudGui = pg:WaitForChild("CryptidHud", 30)
+	local nb = hudGui and hudGui:WaitForChild("NightBus", 30)
+	if not nb then return end
+	for _, name in { "CardTop", "CardBottom" } do
+		local v = nb:WaitForChild(name, 30)
+		if v then v:GetPropertyChangedSignal("Value"):Connect(applyLayout) end
+	end
+	applyLayout()
+end)
 pcall(function()
 	UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(applyLayout)
 end)
 
 local cardToken = 0
+local pendingCard: { string }? = nil -- a band reached while a panel was open: named once it closes
 local function showCard(title: string, sub: string)
 	cardToken += 1
 	local mine = cardToken
@@ -230,7 +282,7 @@ local function showCard(title: string, sub: string)
 	card.TextTransparency = 0
 	cardSub.TextTransparency = 0
 	card.Visible = true
-	cardSub.Visible = true
+	cardSub.Visible = subFits
 	task.delay(3.5, function()
 		if cardToken ~= mine then return end
 		local info = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -253,13 +305,15 @@ end
 --============================================================================ the player's State (own)
 
 local state: any = nil
-local rank = 0
+-- the home sky's level (Night.level): the Journal's rank, then the gathering past the Mythic once State.best (the
+-- best lair income ever, the Top Lairs board's metric) reaches Config.Night.GatheringRate
+local level = 0
 local lastRaidTier: number? = nil
 local remotes = ReplicatedStorage:WaitForChild("CryptidRemotes")
 remotes:WaitForChild("State").OnClientEvent:Connect(function(s)
 	if type(s) ~= "table" then return end
 	state = s
-	rank = Night.rank(Config, s, rank)
+	level = Night.level(Config, s, level)
 end)
 remotes:WaitForChild("Fx").OnClientEvent:Connect(function(kind, data)
 	if kind == "raidStart" and type(data) == "table" then
@@ -366,7 +420,7 @@ local frameError = false
 local homePieces, campPieces = {}, {}
 for _, b in Home do for _, id in b.pieces do homePieces[id] = true end end
 for _, b in Camp do for _, id in b.pieces do campPieces[id] = true end end
-local SKY = { auroraGreen = true, auroraGold = true }
+local SKY = { auroraGreen = true, auroraGold = true, bloodMoon = true }
 
 local function vec(v: Vector3)
 	return { x = v.X, y = v.Y, z = v.Z }
@@ -423,8 +477,12 @@ local function onRestPressed(scene: string)
 		unsit()
 		return
 	end
-	if scene ~= "home" or knockUntil ~= nil then return end -- no rest in a camp, none mid-stumble
-	local result = Rest.request(rest, RestCfg, { moving = false, grounded = grounded() or sat, threat = scheduler.active ~= nil })
+	if scene ~= "home" then return end -- no rest in a camp (the button is gone there)
+	-- Mid-stumble the press is QUEUED like any press with a hazard about ("Rest...", and the chip says rest
+	-- starts when the sky is clear): a stumbling player is not on their feet. It used to be dropped with no
+	-- word (second review of the night, 2026-09-30, finding 2: standard section 1, no silent no-ops).
+	local onFeet = (grounded() or sat) and knockUntil == nil
+	local result = Rest.request(rest, RestCfg, { moving = false, grounded = onFeet, threat = scheduler.active ~= nil })
 	if result == "resting" then
 		sat = true
 		restFocus.Enabled = true
@@ -461,7 +519,7 @@ local function frame(dt: number)
 	end
 
 	-- band weights: the scene you are in blends in, the other fades out; both glide (no cut)
-	local homeTarget = EnvBands.weights(Home, rank)
+	local homeTarget = EnvBands.weights(Home, level)
 	local campTarget = EnvBands.weights(Camp, (tier or 1) - 1)
 	-- (everything starts at 0 and fades in once my State has arrived: nothing pops in at join)
 	for i = 1, #Home do
@@ -473,14 +531,14 @@ local function frame(dt: number)
 		campW[j] = EnvBands.approach(campW[j] or 0, t, dt, N.HalfLife)
 	end
 
-	-- lighting at LightingHz, only once the State (my rank) is known: until then the server's stays
+	-- lighting at LightingHz, only once the State (my level) is known: until then the server's stays
 	lightAccum += dt
 	if loaded and (current == nil or lightAccum >= 1 / N.LightingHz) then
 		local step = if current == nil then 0 else lightAccum
 		lightAccum = 0
 		local target = {}
 		for _, g in Night.GROUPS do
-			target[g] = if scene == "camp" then EnvBands.sample(Camp, (tier :: number) - 1, g) else EnvBands.sample(Home, rank, g)
+			target[g] = if scene == "camp" then EnvBands.sample(Camp, (tier :: number) - 1, g) else EnvBands.sample(Home, level, g)
 		end
 		if current == nil then
 			-- start from the game as it shipped (the server's preset) and glide to where this player is
@@ -538,12 +596,13 @@ local function frame(dt: number)
 	if scene == "camp" and slot then
 		-- no critter in the camp or its corridor (Night.critterClear), nor between the camera and the camp
 		-- (Night.campViewHull: review 2026-09-24, finding 3). 3 studs along each axis covers what a critter DRAWS
-		-- round its centre: wings, bob and halo (a wisp: 2.9)
+		-- round its centre: wings, bob and halo (a wisp: 2.9); a bigger one names its own reach (the Jersey Devil: 7)
 		local ox = Night.pocketOriginX(Config, slot :: number)
 		local hull = Night.campViewHull(Config, camPos.X - ox, camPos.Z)
-		keepOut = function(p: Vector3): boolean
+		keepOut = function(p: Vector3, reach: number?): boolean
 			local lx = p.X - ox
-			return not Night.critterClear(Config, lx, p.Z, 3) or Night.boxOverlapsHull(hull, lx - 3, lx + 3, p.Z - 3, p.Z + 3)
+			local r = reach or 3
+			return not Night.critterClear(Config, lx, p.Z, r) or Night.boxOverlapsHull(hull, lx - r, lx + r, p.Z - r, p.Z + r)
 		end
 	end
 	art:updateCritters(critters, camPos, dt, now, keepOut)
@@ -612,11 +671,11 @@ local function frame(dt: number)
 	local resting = restOn and Rest.isResting(rest)
 	if resting and rest.source == "manual" and scene == "home" then
 		if campfireCF == nil then
+			-- ahead of the sitter, or behind / aside when ahead is over the ravine (Night.campfireSpot)
 			local look = rootPart.CFrame.LookVector
-			local flat = Vector3.new(look.X, 0, look.Z)
-			flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, 1)
-			local p = rootPart.Position + flat * 4
-			campfireCF = CFrame.new(p.X, rootPart.Position.Y - Config.World.RootHeight, p.Z)
+			local rp = rootPart.Position
+			local fx, fz = Night.campfireSpot(Config, groundRect, rp.X, rp.Z, look.X, look.Z)
+			campfireCF = CFrame.new(fx, rp.Y - Config.World.RootHeight, fz)
 		end
 		art:updateCampfire(true, campfireCF, now)
 	else
@@ -643,7 +702,7 @@ local function frame(dt: number)
 		-- a lane starts on screen and never out of the ground (Night.hazardPitch); a steep camera holds it
 		local viewOk, hzPitch = Night.hazardPitch(Config, math.asin(math.clamp(look.Y, -1, 1)))
 		local before = if scheduler.active then scheduler.active.t else nil
-		local bandIdx = EnvBands.indexAt(Home, rank)
+		local bandIdx = EnvBands.indexAt(Home, level)
 		local ev = Hazards.step(scheduler, Hz, dt, {
 			resting = resting or not run,
 			grounded = isGrounded and viewOk,
@@ -658,6 +717,13 @@ local function frame(dt: number)
 		local plan = scheduler.active
 		if plan then
 			local groundY = rootPart.Position.Y - Config.World.RootHeight
+			-- The ring and the warning stay up while the rest of this frame's flight can still hit someone in the
+			-- ring (Hazards.threatLive, from `before`, so the frame of a hit still shows them). They went at
+			-- arriveAt, but checkHit runs to the flight's end and the lane aims up to AimJitter off the ring's
+			-- centre: a player on the far side was knocked up to 0.2 s later with nothing on screen (second review,
+			-- 2026-09-30, finding 1). plan.liveUntil tells the drawing when to swoop away (Night.drawPosition).
+			local live = Hazards.threatLive(plan, Hz.PlayerRadius, before or 0)
+			if live then plan.liveUntil = plan.t end
 			if Hazards.checkHit(plan, before or 0, plan.t, pos, Hz.PlayerRadius) then
 				plan.hit = true
 				-- the push, cut so its frictionless slide stops PlayerRadius inside the Ground (Night.limitKnock:
@@ -672,12 +738,14 @@ local function frame(dt: number)
 				FxClient.flash(Color3.fromRGB(255, 255, 255), 0.25, 0.3)
 			end
 			-- the hit rule above is the LANE's (inside the ring); what is drawn is Night.drawPosition: the lane
-			-- until arrival, then a swoop away (a meteorite ends there), and over a player who has left the
-			-- ring instead of through them. The drawing can never hit or spare anyone.
+			-- until arrival, its line (level) while the ring lingers, then a swoop away (a meteorite ends
+			-- there), and over a player who has left the ring instead of through them. The drawing can never
+			-- hit or spare anyone.
 			local avoid = if not plan.hit and not Hazards.inZone(plan, pos, Hz.PlayerRadius) then pos else nil
-			local hp, visible = Night.drawPosition(Config, plan, plan.t, avoid)
-			art:showHazard(plan, hp, now, Hazards.zone(plan, Hz.PlayerRadius), groundY, visible)
-			if plan.t <= plan.arriveAt and not plan.hit then
+			local hp, visible = Night.drawPosition(Config, plan, plan.t, avoid, plan.liveUntil)
+			local warning = live and not plan.hit
+			art:showHazard(plan, hp, now, if live then Hazards.zone(plan, Hz.PlayerRadius) else nil, groundY, visible, warning)
+			if warning then
 				local bearing = Hazards.bearing(vec(camPos), vec(look), hp)
 				alert = Night.alertText(Config, plan.kind, bearing, plan.locked)
 			end
@@ -698,16 +766,28 @@ local function frame(dt: number)
 	restFocus.Enabled = sat and scene == "home"
 
 	-- title cards: once the State is known, quietly name where you are; later, each new band your
-	-- Journal reaches. Never over a camp (it would cover the nets).
+	-- Journal reaches. Never over a camp (it would cover the nets), and never over an open panel: a band
+	-- reached with the Hunt panel or the build sheet open waits until it closes, and a panel opened while a
+	-- card is up hides it (second review of the night, 2026-09-30, finding 4: MOONRISE lay over the open Hunt
+	-- panel for 129 of 150 frames on a phone).
 	if loaded and scene == "home" then
-		local bandIdx = EnvBands.indexAt(Home, rank)
+		local bandIdx = EnvBands.indexAt(Home, level)
+		local reached = false
 		if announcer.highest == 0 then
 			EnvBands.announce(announcer, bandIdx)
-			local band = Home[bandIdx]
-			showCard(string.upper(band.name), band.sub)
+			reached = true
 		elseif EnvBands.announce(announcer, bandIdx) then
+			reached = true
+		end
+		if reached then
 			local band = Home[bandIdx]
-			showCard(string.upper(band.name), band.sub)
+			pendingCard = { string.upper(band.name), band.sub }
+		end
+		if hudPanelOpen() then
+			if card.Visible then hideCard() end
+		elseif pendingCard then
+			showCard(pendingCard[1], pendingCard[2])
+			pendingCard = nil
 		end
 	elseif scene == "camp" and card.Visible then
 		hideCard()
@@ -716,6 +796,8 @@ end
 
 RunService.RenderStepped:Connect(function(dt)
 	local ok, err = pcall(frame, dt)
+	-- after every emitter's owner has had its say this frame: Budget.MaxEmitters / MaxEmitterRate (NightArt)
+	if ok then ok, err = pcall(art.capEmitters, art) end
 	if not ok and not frameError then
 		frameError = true -- once: a broken night must not flood the output
 		warn("[CryptidNight] frame error: " .. tostring(err))

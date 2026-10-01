@@ -9,7 +9,8 @@
 -- the place at 50). The night's far scenery (ridges up to 620 studs wide, three UFOs with drifting tractor
 -- beams, a 98-stud Bigfoot walking the horizon) is placed around the road's centre. The first build used
 -- a fixed ring (ridges 820-1 000 studs out, Bigfoot at 700): fine at 8 or 12 players, but at 50 it stood
--- hills and Bigfoot on the lairs themselves. This file runs a Mythic-rank player (every home piece shown)
+-- hills and Bigfoot on the lairs themselves. This file runs a player at the gathering (level 5: every home piece shown,
+-- the legends on the far floor too)
 -- at MaxPlayers 50 and checks, on every frame for 30 s (Bigfoot and the UFOs move), that no part of the
 -- horizon comes within 20 studs of the Ground. (One game per CLI process: the harness allows one. The
 -- other road lengths run in check_stealacryptid_night.luau (12) and in Studio (8), and the placement rule,
@@ -22,7 +23,7 @@ local bundle = require("./build/steal-a-cryptid")
 local passed, failed = 0, 0
 local function truthy(c, msg) if c then passed += 1 else failed += 1; print("FAIL: " .. msg) end end
 
-local HORIZON = { "Ridge", "FarPine", "Ufo", "Bigfoot_" }
+local HORIZON = { "Ridge", "FarPine", "Ufo", "Bigfoot_", "Legend_" }
 local function isHorizon(name)
 	for _, pre in HORIZON do
 		if string.sub(name, 1, #pre) == pre then return true end
@@ -40,7 +41,8 @@ local function runAt(maxPlayers)
 	cages[5] = { sp = "bigfoot", jar = 0 }
 	store:SetAsync("u_" .. ME, { data = { v = 1, essence = 100, savedAt = os.time(), cagesUnlocked = 3, tutorial = 4, cages = cages,
 		traps = {}, heat = { t1 = 0, t2 = 0, t3 = 0, t4 = 0 }, journal = { "jackalope", "dogman", "nessie", "bigfoot" },
-		stats = { steals = 0, caught = 0, poachersCaught = 0 } } })
+		stats = { steals = 0, caught = 0, poachersCaught = 0 },
+		bestRate = Config.Night.GatheringRate, bestRateAt = os.time() - 60 } })
 	assert(h:tryRun("server/Main.server"))
 	h:advance(1)
 	local GameHz = h:_require(h.ReplicatedStorage:FindFirstChild("Config")).Night.Hazards
@@ -87,7 +89,7 @@ local function runAt(maxPlayers)
 	table.sort(kinds)
 	print(string.format("  MaxPlayers %d: road %d x %d studs; horizon parts seen: %s; nearest to the road: %s, %.1f studs off it",
 		maxPlayers, ground.Size.X, ground.Size.Z, table.concat(kinds, ", "), worstName, worst))
-	truthy(seen.Ridge and seen.Ufo and seen.Bigfoot and seen.FarPine, "MaxPlayers " .. maxPlayers .. ": every horizon piece is shown at mythic night")
+	truthy(seen.Ridge and seen.Ufo and seen.Bigfoot and seen.FarPine and seen.Legend, "MaxPlayers " .. maxPlayers .. ": every horizon piece is shown at the gathering")
 	truthy(worst >= 20, string.format("MaxPlayers %d: no horizon part within 20 studs of the road's Ground in %d frames (nearest %s, %.1f)", maxPlayers, frames, worstName, worst))
 	-- the ravine round the long road (review 2026-09-24 finding 1; check_stealacryptid_edge.luau does the 12-player
 	-- road in full): nothing local at walking height just past any edge, and the far floor beyond the ravine

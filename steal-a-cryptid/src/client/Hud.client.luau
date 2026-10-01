@@ -73,6 +73,17 @@ local nightKind = Instance.new("StringValue")
 nightKind.Name = "StatusKind"
 nightKind.Value = ""
 nightKind.Parent = nightBus
+-- Where the night's band title card may go, in this HUD's design px (the night's ScreenGui uses the same
+-- Responsive scale): below the top stack with the chip's slot always kept, and above the touch-control band.
+-- Second review of the night, 2026-09-30, finding 4: at 46 % of the height it crossed the chip and the toast.
+local cardTop = Instance.new("NumberValue")
+cardTop.Name = "CardTop"
+cardTop.Value = 0
+cardTop.Parent = nightBus
+local cardBottom = Instance.new("NumberValue")
+cardBottom.Name = "CardBottom"
+cardBottom.Value = 0
+cardBottom.Parent = nightBus
 nightBus.Parent = gui
 
 local root = Instance.new("Frame")
@@ -514,6 +525,10 @@ function applyLayout()
 	y += 42
 	chip.Position = UDim2.new(0.5, 0, 0, y)
 	chip.Size = UDim2.new(0, math.min(rootW - 16, 420), 0, 30)
+	-- the night's title card starts under the chip's slot even while the chip is hidden (a warning can
+	-- appear under a card that is already up), and ends above the touch-control band
+	cardTop.Value = y + 34 + 4
+	cardBottom.Value = usable / layout.scale
 	if chip.Visible then y += 34 end
 
 	-- centre panels start under the top stack and stop above the touch-control band

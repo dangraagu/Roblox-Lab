@@ -176,6 +176,28 @@ eq(Night.rank(Config, { rank = "4" }, 0), 4, "a numeric string is read as a numb
 eq(Night.rank(Config, { rank = 2.7 }, 0), 2, "a fractional rank is floored")
 eq(Night.rank(Config, {}, 1), 1, "a State without rank keeps the rank already seen")
 
+--================================================================ the home sky's level: the rank, then the gathering
+
+-- docs/complete-game-standard.md section 2 asks for at least 5 bands. The Journal's rank names four (dusk .. mythic);
+-- the fifth, the gathering, is one step past the Mythic, once the best lair income the player has ever had (State.best,
+-- the Top Lairs board's metric) reaches Config.Night.GatheringRate. Never a timer, never backwards.
+do
+	local G = Config.Night.GatheringRate
+	local top = #Config.Tiers
+	eq(Night.level(Config, nil, nil), 0, "no State yet: level 0")
+	eq(Night.level(Config, { rank = 2, best = 30 }, nil), 2, "below the Mythic the level is the rank")
+	eq(Night.level(Config, { rank = top, best = G - 1 }, nil), top, "the Mythic with a lair below GatheringRate: level = rank")
+	eq(Night.level(Config, { rank = top, best = G }, nil), top + 1, "the Mythic and a best lair at GatheringRate: one step past it")
+	eq(Night.level(Config, { rank = top - 1, best = G * 10 }, nil), top - 1, "a big best without the Mythic in the Journal is not the gathering")
+	eq(Night.level(Config, { rank = top, best = 0 }, top + 1), top + 1, "never backwards (a later State with a lower best)")
+	eq(Night.level(Config, { rank = 1 }, 3), 3, "never below the level already seen")
+	eq(Night.level(Config, { rank = top, best = "lots" }, nil), top, "a best that is not a number counts as none")
+	eq(Night.level(Config, { rank = top, best = 0 / 0 }, nil), top, "a NaN best counts as none")
+	eq(Night.level(Config, { rank = top, best = tostring(G) }, nil), top + 1, "a numeric string best is read as a number")
+	eq(Night.level(Config, { rank = 99, best = 1e12 }, nil), top + 1, "clamped to the last band")
+	eq(Night.level(Config, {}, 2), 2, "a State without rank or best keeps the level already seen")
+end
+
 --================================================================ where: home or a camp pocket
 
 local W = Config.World
@@ -430,6 +452,113 @@ do
 	-- the hit rule is untouched: a player who stays put is still hit on the lane
 	local plan = Hazards.plan(H, "crow", root, 0, function() return 0.5 end, 0)
 	eq(Hazards.checkHit(plan, 0, plan.duration, root, H.PlayerRadius), true, "a player who stays put is still hit (the rule is the lane's, not the drawing's)")
+end
+
+--================================================================ the warning lasts as long as the hazard can hit
+
+-- Second review of the night, 2026-09-30 (finding 1): the ring and the chip went at arriveAt and the drawing
+-- swooped away (a meteorite vanished) at arriveAt, but Hazards.checkHit runs until `duration`, and the lane
+-- is aimed at a point up to AimJitter from the ring's centre: a player standing on the far side of the ring
+-- was knocked up to 0.2 s later with nothing on screen and nothing near them. The client now keeps the ring
+-- and the warning up while Hazards.threatLive(plan, PlayerRadius, before) holds (the +1 Jump template's rule),
+-- and Night.drawPosition's fifth argument `liveUntil` (the last flight time the warning was up) keeps the
+-- drawing honest: until then the hazard stays on its lane's line (level, never lower than where it arrived,
+-- so it never dives into the ground), and only then swoops away or, a meteorite, is gone.
+-- This block replays the client's per-frame rule purely (the reviewer's probe, the game's own kinds).
+do
+	local Hazards = require("../src/shared/Hazards")
+	local H = Config.Night.Hazards
+	local PR = H.PlayerRadius
+	local root = { x = 0, y = Config.World.RootHeight, z = 0 }
+	local s0 = 930
+	local function r01()
+		s0 = (1664525 * s0 + 1013904223) % 4294967296
+		return s0 / 4294967296
+	end
+	local function dist(a, b)
+		local dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
+		return math.sqrt(dx * dx + dy * dy + dz * dz)
+	end
+	local dt = 1 / 60
+	local out = {}
+	local lingerMax = 0
+	for kind, k in H.Kinds do
+		local o = { hits = 0, late = 0, notLive = 0, hidden = 0, far = 0, oldHidden = 0, oldFar = 0, offLine = 0, below = 0, afterVisible = 0, jumps = 0 }
+		out[kind] = o
+		for i = 1, 300 do
+			local pitch = if i % 3 == 0 then 0 else math.rad(-20 + 60 * r01())
+			local plan0 = Hazards.plan(H, kind, root, r01() * math.pi * 2, r01, pitch)
+			local zone = Hazards.zone(plan0, PR)
+			local arriveY = Hazards.positionAt(plan0, plan0.arriveAt).y
+			-- players who stand still inside the ring from the lock on (a polar grid, the far side included)
+			for ri = 1, 6 do
+				for ai = 0, 7 do
+					local rr = zone.radius * ri / 6 * 0.999
+					local a = ai / 8 * 2 * math.pi + r01() * 0.3
+					local me = { x = zone.x + rr * math.cos(a), y = root.y, z = zone.z + rr * math.sin(a) }
+					local plan = table.clone(plan0)
+					plan.t, plan.hit = 0, false
+					local liveUntil = 0
+					local prev = nil
+					while plan.t < plan.duration do
+						local before = plan.t
+						plan.t += dt
+						-- the client's order: is the warning up this frame (from `before`), then the hit test
+						local live = Hazards.threatLive(plan, PR, before)
+						if live then liveUntil = plan.t end
+						if Hazards.checkHit(plan, before, plan.t, me, PR) then
+							plan.hit = true
+							o.hits += 1
+							if plan.t > plan.arriveAt then o.late += 1 end
+							if not live then o.notLive += 1 end
+							local p, vis = Night.drawPosition(Config, plan, plan.t, nil, liveUntil)
+							if not vis then o.hidden += 1 elseif dist(p, me) > zone.radius + k.speed * dt + 1e-6 then o.far += 1 end
+							local q, qvis = Night.drawPosition(Config, plan, plan.t, nil)
+							if not qvis then o.oldHidden += 1 elseif dist(q, me) > zone.radius + k.speed * dt + 1e-6 then o.oldFar += 1 end
+						end
+						local p, vis = Night.drawPosition(Config, plan, plan.t, nil, liveUntil)
+						local lane = Hazards.positionAt(plan, plan.t)
+						if plan.t > plan.arriveAt and plan.t <= liveUntil then
+							-- lingering: on the lane's line, level, never lower than where it arrived
+							if not vis or math.abs(p.x - lane.x) > 1e-9 or math.abs(p.z - lane.z) > 1e-9 then o.offLine += 1 end
+							if vis and p.y < arriveY - 1e-9 then o.below += 1 end
+						end
+						if plan.t > math.max(plan.arriveAt, liveUntil) and k.impact and vis then o.afterVisible += 1 end
+						if prev and vis and prev.vis and dist(p, prev.p) > 1.3 * k.speed * dt + 1e-9 then o.jumps += 1 end
+						prev = { p = p, vis = vis }
+					end
+					lingerMax = math.max(lingerMax, liveUntil - plan.arriveAt)
+				end
+			end
+		end
+	end
+	local total = { hits = 0, late = 0, notLive = 0, hidden = 0, far = 0, oldHidden = 0, oldFar = 0, offLine = 0, below = 0, afterVisible = 0, jumps = 0 }
+	for kind, o in out do
+		print(string.format("  %-9s %6d hits, %4d after arrival; old rule: %4d with the model hidden, %4d drawn farther than the ring; new: %d, %d",
+			kind, o.hits, o.late, o.oldHidden, o.oldFar, o.hidden, o.far))
+		for key, v in o do total[key] += v end
+	end
+	truthy(total.late > 0, "(set-up) some standers inside the ring are hit AFTER arrival (" .. total.late .. " of " .. total.hits .. ")")
+	truthy(total.oldHidden + total.oldFar > 0, "(control) the old drawing had the model gone or away at some of those hits (" .. total.oldHidden .. " hidden, " .. total.oldFar .. " farther than the ring)")
+	eq(total.notLive, 0, "every hit lands on a frame where the ring and the warning are up (Hazards.threatLive)")
+	eq(total.hidden, 0, "at every hit the hazard is drawn (a meteorite has not vanished yet)")
+	eq(total.far, 0, "at every hit the drawn hazard is within the ring's radius of the player (plus one frame of flight)")
+	eq(total.offLine, 0, "while the ring lingers after arrival, the drawing stays on the lane's line")
+	eq(total.below, 0, "  level: never lower than where it arrived (it does not dive into the ground)")
+	eq(total.afterVisible, 0, "a meteorite is gone once the warning is (it struck)")
+	eq(total.jumps, 0, "no frame-to-frame jump in the drawing (<= 1.3 x speed per frame)")
+	print(string.format("  the ring lingers after arrival at most %.2f s (stationary players inside it)", lingerMax))
+	truthy(lingerMax > 0 and lingerMax < 1.5, string.format("the ring lingers after arrival, and never more than 1.5 s (%.2f s)", lingerMax))
+	-- liveUntil nil or at/before arrival is exactly the old drawing
+	local plan = Hazards.plan(H, "bat", root, 1, function() return 0.3 end, math.rad(20))
+	local same = 0
+	for i = 0, 200 do
+		local t = i / 50
+		local a, av = Night.drawPosition(Config, plan, t, nil)
+		local b, bv = Night.drawPosition(Config, plan, t, nil, plan.arriveAt - 0.5)
+		if av == bv and dist(a, b) < 1e-12 then same += 1 end
+	end
+	eq(same, 201, "liveUntil at or before arrival draws exactly as before")
 end
 
 --================================================================ the ground's edge
@@ -775,6 +904,72 @@ do
 	end
 end
 
+--================================================================ the rest campfire stays on the Ground
+-- Second review of the night, 2026-09-30, finding 3: the fire went Campfire.Distance ahead of the resting player
+-- with no look at the Ground, so at the cliff it floated over the ravine. Night.campfireSpot puts it at the
+-- first of ahead / behind / right / left whose whole ring (Campfire.Radius) is on the Ground; if none is (a
+-- corner nook), the one of those, pulled onto the Ground, that is farthest from the player.
+do
+	local C = Config.Night.Campfire
+	local PR = Config.Night.Hazards.PlayerRadius
+	local okFn = type(Night.campfireSpot) == "function" and type(C.Distance) == "number" and type(C.Radius) == "number"
+	truthy(okFn, "Night.campfireSpot, Campfire.Distance and Campfire.Radius exist")
+	if okFn then
+		truthy(C.Distance >= C.Radius + PR, "the fire's ring never reaches the sitter (Distance >= Radius + PlayerRadius)")
+		local rect = { cx = 252, cz = 0, sx = 696, sz = 260 }
+		local function inside(x, z)
+			return math.abs(x - rect.cx) <= rect.sx / 2 - C.Radius + 1e-9 and math.abs(z - rect.cz) <= rect.sz / 2 - C.Radius + 1e-9
+		end
+		-- far from every edge: exactly ahead, as before
+		local x, z = Night.campfireSpot(Config, rect, 100, 10, 0, 1)
+		near(x, 100, 1e-9, "mid-road: the fire is straight ahead (x)")
+		near(z, 10 + C.Distance, 1e-9, "mid-road: the fire is straight ahead (z)")
+		-- the reviewer's spots: 0.5 and 2.0 studs from the back edge, facing the ravine
+		for _, d in { 0.5, 2.0 } do
+			local fx, fz = Night.campfireSpot(Config, rect, 300, 130 - d, 0, 1)
+			truthy(inside(fx, fz), string.format("%.1f studs from the back edge facing out: the whole ring is on the Ground (%.2f, %.2f)", d, fx, fz))
+			near(math.sqrt((fx - 300) ^ 2 + (fz - (130 - d)) ^ 2), C.Distance, 1e-9, string.format("  and it keeps its distance (%.1f)", d))
+		end
+		-- no road known: straight ahead (the Ground cannot be judged)
+		local nx, nz = Night.campfireSpot(Config, nil, 5, 5, 1, 0)
+		near(nx, 5 + C.Distance, 1e-9, "no Ground known: straight ahead")
+		near(nz, 5, 1e-9, "no Ground known: straight ahead (z)")
+		-- a sweep: every point of the Ground (edges and corners included), 24 headings
+		local s0 = 3009
+		local function r01()
+			s0 = (1664525 * s0 + 1013904223) % 4294967296
+			return s0 / 4294967296
+		end
+		local out, notAhead, aheadFits, tooClose, n = 0, 0, 0, 0, 0
+		for i = 1, 20000 do
+			local px, pz
+			if i % 2 == 0 then
+				px, pz = rect.cx - rect.sx / 2 + rect.sx * r01(), rect.cz - rect.sz / 2 + rect.sz * r01()
+			else
+				-- hug an edge or a corner
+				local e = 8 * r01()
+				px = if r01() < 0.5 then rect.cx - rect.sx / 2 + e else rect.cx + rect.sx / 2 - e
+				pz = if r01() < 0.5 then rect.cz - rect.sz / 2 + 8 * r01() else rect.cz + rect.sz / 2 - 8 * r01()
+				if r01() < 0.5 then px = rect.cx - rect.sx / 2 + rect.sx * r01() else pz = rect.cz - rect.sz / 2 + rect.sz * r01() end
+			end
+			local a = (i % 24) / 24 * 2 * math.pi + r01() * 0.1
+			local lx, lz = math.sin(a), math.cos(a)
+			local fx, fz = Night.campfireSpot(Config, rect, px, pz, lx, lz)
+			n += 1
+			if not inside(fx, fz) then out += 1 end
+			local ax, az = px + lx * C.Distance, pz + lz * C.Distance
+			if inside(ax, az) then
+				aheadFits += 1
+				if math.abs(fx - ax) > 1e-9 or math.abs(fz - az) > 1e-9 then notAhead += 1 end
+			end
+			if math.sqrt((fx - px) ^ 2 + (fz - pz) ^ 2) < C.Radius + PR - 1e-9 then tooClose += 1 end
+		end
+		eq(out, 0, "sweep: the whole ring is on the Ground at every one of " .. n .. " spots")
+		eq(notAhead, 0, "sweep: wherever straight ahead fits (" .. aheadFits .. "), that is where it goes")
+		print(string.format("  campfire sweep: %d spots, ahead fits at %d; the ring reaches the sitter at %d (corner nooks only)", n, aheadFits, tooClose))
+	end
+end
+
 --================================================================ habitats: your own cages
 
 do
@@ -858,6 +1053,51 @@ do
 	eq(Night.restLabel(Config, true, false), T.RestingButton, "resting: the button says so")
 	eq(Night.restLabel(Config, false, true), T.QueuedButton, "queued: the button says so")
 	eq(Night.restLabel(Config, false, false), T.RestButton, "awake: Rest")
+end
+
+--================================================================ the budget is capped in code
+-- Second review of the night, 2026-09-30, finding 5: Config.Night.Budget was only asserted by the checks. Now
+-- every piece of scenery, critter and habitat is ADMITTED against Budget minus Budget.Reserve (what the
+-- always-shown pieces keep: a hazard, its lane and ring, the campfire, the weather host) before it is drawn,
+-- and the particle emitters are capped every frame in priority order (Night.capEmitters).
+do
+	local okFns = type(Night.budgetGate) == "function" and type(Night.admit) == "function" and type(Night.release) == "function"
+		and type(Night.capEmitters) == "function"
+	truthy(okFns, "Night.budgetGate, admit, release and capEmitters exist")
+	if okFns then
+		local B = Config.Night.Budget
+		local g = Night.budgetGate(Config)
+		eq(g.limit.parts, B.MaxLocalParts - B.Reserve.parts, "gated parts = MaxLocalParts - Reserve.parts")
+		eq(g.limit.beams, B.MaxBeams - B.Reserve.beams, "gated beams = MaxBeams - Reserve.beams")
+		eq(g.limit.trails, B.MaxTrails - B.Reserve.trails, "gated trails = MaxTrails - Reserve.trails")
+		eq(g.limit.lights, B.MaxLights - B.Reserve.lights, "gated lights = MaxLights - Reserve.lights")
+		-- admit until full; a refused item costs nothing; a release makes room again
+		local small = { parts = 10, beams = 1, trails = 0, lights = 0 }
+		local n = 0
+		while Night.admit(g, small) do n += 1 end
+		eq(n, math.min(math.floor(g.limit.parts / 10), g.limit.beams), "items are admitted until one budget would overflow")
+		eq(g.refused, 1, "the one that would overflow is refused and counted")
+		eq(g.used.beams, n, "  a refused item adds nothing")
+		truthy(g.used.parts <= g.limit.parts and g.used.beams <= g.limit.beams, "never past a limit")
+		Night.release(g, small)
+		eq(Night.admit(g, small), true, "a released item makes room for the next")
+		eq(Night.admit(g, { parts = 0, beams = 0, trails = 0, lights = 1 + g.limit.lights }), false, "a single item over a limit is never admitted")
+		-- emitters: in priority order, while both the count and the particles per second fit
+		local keep = Night.capEmitters({ 8, 12, 12, 4 }, 4, 40)
+		eq(table.concat({ tostring(keep[1]), tostring(keep[2]), tostring(keep[3]), tostring(keep[4]) }, ","), "true,true,true,true", "4 emitters, 36/s: all kept under 4 and 40/s")
+		keep = Night.capEmitters({ 8, 12, 12, 4 }, 2, 40)
+		eq(table.concat({ tostring(keep[1]), tostring(keep[2]), tostring(keep[3]), tostring(keep[4]) }, ","), "true,true,false,false", "a count of 2: the first two in priority order")
+		keep = Night.capEmitters({ 8, 12, 12, 4 }, 4, 12)
+		eq(table.concat({ tostring(keep[1]), tostring(keep[2]), tostring(keep[3]), tostring(keep[4]) }, ","), "true,false,false,true", "12/s: the first, then whatever still fits (the 4/s habitat)")
+		-- the shipped config: weather (<= MaxWeatherEmitters at <= MaxWeatherRate), the lit habitat and the
+		-- campfire all fit at once, so the cap never trims the shipped look
+		local want = { Config.Night.Campfire.Rate }
+		for _ = 1, B.MaxWeatherEmitters do table.insert(want, B.MaxWeatherRate / B.MaxWeatherEmitters) end
+		for _ = 1, B.MaxHabitatEmitters do table.insert(want, Config.Night.Habitats.EmitterRate) end
+		local all = true
+		for _, k in Night.capEmitters(want, B.MaxEmitters, B.MaxEmitterRate) do all = all and k end
+		truthy(all, "the shipped emitters (campfire, weather at its cap, the lit habitat) all fit the budget at once")
+	end
 end
 
 print(string.format("Night: %d passed, %d failed", passed, failed))

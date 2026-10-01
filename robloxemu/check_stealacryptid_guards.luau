@@ -881,6 +881,14 @@ block("G10. a grant whose write yields, then fails", function()
 		string.format("the Jackalope's jar kept filling through the rollback (%.1f at escape, %.1f after)", jarAtEscape or -1, s.cages[5].jar))
 	h:leave(p)
 	h:advance(1)
+	-- the Top Lairs board's metric (Economy.noteBest) rolls back with the rest: a steal that never saved is no best
+	local rec = store:GetAsync("u_" .. GRANT)
+	eq(rec and rec.data and rec.data.bestRate, Economy.rate(Config, "jackalope"),
+		"the saved best lair income is still the Jackalope's: the Rare that never saved did not raise it")
+	local lbStore = h.services.DataStoreService:GetOrderedDataStore(Config.Save.Board)
+	local v = lbStore.__data["u_" .. GRANT]
+	eq(if type(v) == "number" then math.floor(v / 2e9 + 0.5) else v, Economy.rate(Config, "jackalope"),
+		"...and so is the board's")
 end)
 
 block("G10b. a grant written while an older write is still in flight", function()
@@ -1913,6 +1921,102 @@ block("G24. a slide along a fence into a burning net is caught on that tick (REV
 	truthy(done, "found a tier-1 camp with open floor below-left of its net's gap")
 	if raidInfo(p) then leaveCamp(p) end
 	h:leave(p)
+	h:advance(1)
+end)
+
+--============================================================ a rejoin to the SAME server (the owner token)
+
+-- docs/complete-game-standard.md section 1: "an owner token on every write (fork-tower old.session)". The lock's token
+-- was game.JobId, one per SERVER, so two sessions of one player on one server could not tell their writes apart
+-- (CLAUDE.md Known gaps: a rejoin to the same server within a write window). Measured before the fix: the rejoin
+-- loaded the record while the leave's write was still in flight, played without the change that write carried, and
+-- the write then released the lock under the new session.
+local HOPPER, HOPPER2 = 6660025, 6660026
+seedProfile(HOPPER, { essence = 100000 })
+seedProfile(HOPPER2, { essence = 100000 })
+
+block("G25. a rejoin to the same server while the leave's write is in flight waits for it", function()
+	local key = "u_" .. HOPPER
+	local p = joinHome("Hopper", HOPPER)
+	R.Expand:simulateFireServer(p)
+	h:advance(0.05)
+	eq(stateOf(p).cagesUnlocked, 4, "set-up: a fourth cage, not saved yet")
+	-- the leave's write (the one that releases the lock) takes 3 s
+	SLOW[key] = { yield = 3.0, times = 1, when = function(rec) return rec.jobId == nil end }
+	leaveOnThread(p)
+	h:advance(0.5)
+	truthy(SLOW[key].started == 1 and (SLOW[key].finished or 0) == 0, "set-up: the leave's write is in flight")
+	local p2 = joinOnThread("Hopper", HOPPER)
+	h:advance(4)
+	h.Players:simulateSpawn(p2, h.workspace)
+	h:advance(1)
+	SLOW[key] = nil
+	local s2 = stateOf(p2)
+	eq(s2 and s2.cagesUnlocked, 4, "the rejoin plays the change the leave's write carried (4 cages, not the 3 read before it landed)")
+	eq(s2 and s2.canSave, true, "...and saves")
+	local rec = store:GetAsync(key)
+	eq(rec and rec.jobId, h.game.JobId, "after the old write landed the record is still locked, by this server's new session")
+	R.Expand:simulateFireServer(p2)
+	h:advance(Config.Save.FlushTickSeconds + 1)
+	eq(store:GetAsync(key).data.cagesUnlocked, 5, "the new session's own change reaches the store on top of it")
+	h:leave(p2)
+	h:advance(1)
+end)
+
+block("G25b. a leave's write that lands after the rejoin took the record writes nothing (the owner token)", function()
+	-- the leave's write outlasts the join's wait (Save.WriteQueueSeconds): the rejoin goes ahead and takes the record,
+	-- and the old write lands 2 s later, before the new session has written anything itself (so only the token its
+	-- LOAD put on the record can stop it). It must neither overwrite the record nor unlock it. Its own change is lost
+	-- (the fallback is consistent, not corrupt); the new session's load stands and it keeps saving.
+	local key = "u_" .. HOPPER2
+	local p = joinHome("Skipper", HOPPER2)
+	R.Expand:simulateFireServer(p)
+	h:advance(0.05)
+	SLOW[key] = { yield = Config.Save.WriteQueueSeconds + 3, times = 1, when = function(rec) return rec.jobId == nil end }
+	leaveOnThread(p)
+	h:advance(0.5)
+	local tokenBefore = store:GetAsync(key).session -- the leaving session's token
+	local p2 = joinOnThread("Skipper", HOPPER2)
+	-- the rejoin waits WriteQueueSeconds, then loads: read the record the moment its load lands (its first State), so
+	-- no later write (an autosave tick) can be what put a token on it (sweep round 1: M23 survived once that way)
+	h:advance(Config.Save.WriteQueueSeconds - 0.3)
+	local steps = 0
+	while stateOf(p2) == nil and steps < 40 do
+		h:advance(0.05)
+		steps += 1
+	end
+	local afterLoad = store:GetAsync(key)
+	local commitsAtLoad = #(COMMITS[key] or {})
+	truthy(afterLoad.session ~= nil and afterLoad.session ~= tokenBefore,
+		"the rejoin's load put its OWN token on the record (" .. tostring(afterLoad.session) .. ", the leaving session's was " .. tostring(tokenBefore) .. ")")
+	h:advance(1)
+	local s2 = stateOf(p2)
+	truthy(s2 ~= nil and s2.canSave == true, "the rejoin went ahead after waiting WriteQueueSeconds, and saves")
+	eq(s2 and s2.cagesUnlocked, 3, "set-up: it loaded the record as it was before the old write (3 cages)")
+	h:advance(3) -- the old write lands
+	truthy(SLOW[key].finished == 1, "set-up: the old session's write has run")
+	SLOW[key] = nil
+	-- judged on EVERY commit since the rejoin's load, not only on the record at the end: a later write of the new
+	-- session (an autosave tick) can paper over a late write that did land (sweep round 2: M22 survived 1 run in 3 so)
+	local bad = nil
+	for i = commitsAtLoad + 1, #(COMMITS[key] or {}) do
+		local c = COMMITS[key][i].rec
+		if c.jobId ~= h.game.JobId or c.session ~= afterLoad.session or (c.data and c.data.cagesUnlocked) ~= 3 then
+			bad = bad or string.format("commit %d: jobId %s, session %s, %s cages", i, tostring(c.jobId), tostring(c.session), tostring(c.data and c.data.cagesUnlocked))
+		end
+	end
+	truthy(bad == nil, "no write since the rejoin's load unlocked the record, changed its token or wrote the old session's data (" .. tostring(bad) .. ")")
+	local rec = store:GetAsync(key)
+	eq(rec.jobId, h.game.JobId, "the old session's late write did not unlock the record")
+	eq(rec.data.cagesUnlocked, 3, "...and did not overwrite it with its own data (4 cages)")
+	h.Players:simulateSpawn(p2, h.workspace)
+	h:advance(1)
+	R.Expand:simulateFireServer(p2)
+	h:advance(0.2)
+	R.Expand:simulateFireServer(p2)
+	h:advance(Config.Save.FlushTickSeconds + 1)
+	eq(store:GetAsync(key).data.cagesUnlocked, 5, "the new session keeps saving (two cages: 5)")
+	h:leave(p2)
 	h:advance(1)
 end)
 

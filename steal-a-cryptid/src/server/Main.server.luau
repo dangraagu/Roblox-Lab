@@ -9,6 +9,7 @@
 --   Trace2D       the trusted position a raid is judged on
 --   Poacher       the NPC that walks your yard
 --   CryptidModel  the eight procedural Part models
+--   Board         the Top Lairs highscore board's rules (the +1 Jump template, verbatim)
 -- DESIGN.md is the spec; the section numbers in comments below point into it.
 --
 -- Every require is an INSTANCE require. A bare `require("./X")` resolves in the luau CLI and is
@@ -19,6 +20,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Rng = require(ReplicatedStorage:WaitForChild("Rng"))
@@ -30,6 +32,7 @@ local Trace2D = require(ReplicatedStorage:WaitForChild("Trace2D"))
 local Poacher = require(ReplicatedStorage:WaitForChild("Poacher"))
 local CryptidModel = require(ReplicatedStorage:WaitForChild("CryptidModel"))
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
+local Board = require(ReplicatedStorage:WaitForChild("Board"))
 
 local W = Config.World
 local RAID = Config.Raid
@@ -81,6 +84,7 @@ local RerollEvent = mk("Reroll")
 local ExpandEvent = mk("Expand")
 local BuildEvent = mk("BuildMode")
 local TrapEvent = mk("TrapAction")
+local BoardEvent = mk("Board") -- server -> one player: THEIR view of the Top Lairs board (public or friends)
 remotes.Parent = ReplicatedStorage
 
 local function toast(plr: Player, text: string)
@@ -112,13 +116,33 @@ if Config.Save.Enabled then
 	end
 end
 
+-- The Top Lairs board's OrderedDataStore (Config.Board). Like the profile store it raises in an unpublished place;
+-- then the boards show the empty public note and nothing is ranked.
+local boardStore = nil
+if Config.Save.Enabled then
+	local ok, ds = pcall(function()
+		return DataStoreService:GetOrderedDataStore(Config.Save.Board)
+	end)
+	if ok then
+		boardStore = ds
+	else
+		warn("[Cryptid] the Top Lairs board's store is unavailable (" .. tostring(ds) .. ") - the boards stay empty this session.")
+	end
+end
+
 local NOT_SAVING = "Not saving this session"
 local LOCKED = "Not saving: your save is open on another server. Rejoin in 2 minutes"
 local LOAD_FAILED = "Your save could not be loaded, so nothing is saved this session. Rejoin to try again"
 local LOCK_WAITING = "Your save is still open on another server - waiting for it to close"
 local LOCK_CHANGED = "Not saving: your save changed on another server. Rejoin to load it"
 local LOCK_TAKEN = "Your save is free again - this session is saving now"
+local LAST_VISIT_SAVING = "Your last visit is still saving - one moment"
 
+-- docs/complete-game-standard.md section 1: an owner token on every write. The lock names the SERVER (game.JobId) and
+-- the SESSION (`session`, a GUID per join): two sessions of one player on one server (a quick rejoin) can tell their
+-- writes apart. A write or a release lands only while the record is this session's. And a rejoin on this server
+-- waits for that player's leave-write here (closingUsers) before it loads, so it reads what that write carried.
+local closingUsers: { [number]: number } = {}
 local sessions: { [Player]: any } = {}
 
 local function key(plr: Player): string
@@ -142,6 +166,7 @@ local function fingerprint(p: any): string
 		table.concat(p.traps, ","), string.format("%d,%d,%d,%d", p.heat.t1, p.heat.t2, p.heat.t3, p.heat.t4),
 		table.concat(p.journal, ","), tostring(p.tutorial),
 		string.format("%d,%d,%d", p.stats.steals, p.stats.caught, p.stats.poachersCaught),
+		string.format("%d@%d", p.bestRate, p.bestRateAt),
 	}, "|")
 end
 
@@ -159,7 +184,7 @@ end
 -- (603 s of play, 17 877 Essence, never saved). The load re-reads the record every LockRetrySeconds
 -- for up to LockWaitSeconds, telling the player once, before it plays unsaved. The fourth return is
 -- the saved data exactly as read (a deep copy), for the session's later re-check of the lock.
-local function loadProfile(plr: Player): (any, boolean, string?, any)
+local function loadProfile(plr: Player, token: string): (any, boolean, string?, any)
 	if not store then
 		return Economy.defaultProfile(Config), false, NOT_SAVING, nil
 	end
@@ -176,6 +201,7 @@ local function loadProfile(plr: Player): (any, boolean, string?, any)
 					return nil -- abort: somebody else owns the slot, and we write nothing
 				end
 				old.jobId = game.JobId
+				old.session = token
 				old.lockUntil = now + Config.Save.LockSeconds
 				return old
 			end)
@@ -219,14 +245,16 @@ local function sameValue(a: any, b: any): boolean
 	return true
 end
 
--- Hand back a lock this server took for a player who left before their load finished. Only OUR
--- lock is cleared; anything another server wrote meanwhile is left alone.
-local function releaseLock(userKey: string)
+-- Hand back a lock this session took for a player who left before their load finished. Only OUR
+-- lock is cleared; anything another server, or another session on this one, wrote meanwhile is left alone.
+local function releaseLock(userKey: string, token: string)
 	if not store then return end
 	local ok, err = pcall(function()
 		store:UpdateAsync(userKey, function(old)
 			if type(old) ~= "table" or old.jobId ~= game.JobId then return nil end
+			if old.session ~= nil and old.session ~= token then return nil end
 			old.jobId = nil
+			old.session = nil
 			old.lockUntil = 0
 			return old
 		end)
@@ -235,6 +263,30 @@ local function releaseLock(userKey: string)
 end
 
 local pushState -- forward: a flush that finds its lock taken tells the player at once
+
+-- The Top Lairs board (Config.Board, docs/complete-game-standard.md section 3). Its metric is the best lair income
+-- the player has ever had (Economy.noteBest, on this server's own profile). It is written only after a profile write
+-- that COMMITTED that best (so only by a session holding its save's lock), only when it is above what this session
+-- last put there, and never below what the board already holds: Board.keepHigher aborts the write, so a same best
+-- reached later never replaces the first reach. `boardRate` starts at 0 each session, so the first committed write
+-- of a session re-asserts its best once (a board write lost last session heals here). Spawned by the flush, so a
+-- grant or a leave never waits for it.
+local function writeBoard(S: any, rate: number, at: number)
+	if not boardStore or rate <= (S.boardRate or 0) or S.boardWriting then return end
+	S.boardWriting = true
+	local value = Board.encode(rate, at, Config.Board)
+	local ok, err = pcall(function()
+		boardStore:UpdateAsync(key(S.plr), function(old)
+			return Board.keepHigher(old, value)
+		end)
+	end)
+	S.boardWriting = false
+	if ok then
+		S.boardRate = rate -- also when keepHigher aborted: what the board holds is at least as high
+	else
+		warn("[Cryptid] the Top Lairs board write failed for " .. S.plr.Name .. ": " .. tostring(err))
+	end
+end
 
 -- One write. `force` writes even when nothing changed (the raid grant, the lock renewal);
 -- `releaseLock` hands the slot back on leave. Returns true only when a value was committed.
@@ -278,12 +330,18 @@ local function flush(S: any, releaseLock: boolean, force: boolean?, waitTurn: bo
 				lost = true
 				return nil
 			end
+			-- another session of this player on THIS server holds it (a rejoin): never write over it, never unlock it
+			if old.jobId == game.JobId and old.session ~= nil and old.session ~= S.token then
+				lost = true
+				return nil
+			end
 			-- A session that is closing never locks again, whichever of its queued writes lands last
 			-- (REVIEW-1.md A3: a grant queued behind a write landed after the leave's release and locked
 			-- the record for 120 s with the player gone). Read INSIDE the transform, at commit time.
 			local release = releaseLock or S.closing == true
 			-- if-then-else, never `release and nil or game.JobId`, which always yields the JobId
 			old.jobId = if release then nil else game.JobId
+			old.session = if release then nil else S.token
 			old.lockUntil = if release then 0 else os.time() + Config.Save.LockSeconds
 			old.data = data
 			wrote = true
@@ -298,10 +356,11 @@ local function flush(S: any, releaseLock: boolean, force: boolean?, waitTurn: bo
 	if ok and wrote then
 		S.savedFingerprint = fp
 		p.savedAt = data.savedAt
+		task.spawn(writeBoard, S, data.bestRate, data.bestRateAt)
 	elseif ok and lost then
 		-- another server took the record over mid-session. This session stops writing for good and
 		-- says so; it never goes back to saving (it would have to merge with what that server wrote)
-		warn("[Cryptid] " .. S.plr.Name .. "'s lock was taken by another server; this session stops saving.")
+		warn("[Cryptid] " .. S.plr.Name .. "'s lock was taken by another server or session; this session stops saving.")
 		S.canSave = false
 		S.banner = LOCKED
 		S.pending = false
@@ -344,6 +403,7 @@ local function recheckLock(S: any)
 				end
 				state = "taken"
 				old.jobId = game.JobId
+				old.session = S.token
 				old.lockUntil = now + Config.Save.LockSeconds
 				return old
 			end)
@@ -353,7 +413,7 @@ local function recheckLock(S: any)
 		elseif state == "taken" then
 			if sessions[S.plr] ~= S or S.closing then
 				-- left while the write was in flight: hand the lock straight back
-				releaseLock(key(S.plr))
+				releaseLock(key(S.plr), S.token)
 				return
 			end
 			S.canSave = true
@@ -521,7 +581,9 @@ local columns = math.ceil(plotCount / 2)
 local roadLength = columns * W.PlotPitch + 120
 local roadCentreX = (columns * W.PlotPitch) / 2 - W.PlotWidth / 2
 
-newPart("Ground", Vector3.new(roadLength, 1, 260), CFrame.new(roadCentreX, -0.7, 0), Color3.fromRGB(34, 46, 32), Enum.Material.Grass, roadFolder)
+local groundPart = newPart("Ground", Vector3.new(roadLength, 1, 260), CFrame.new(roadCentreX, -0.7, 0), Color3.fromRGB(34, 46, 32), Enum.Material.Grass, roadFolder)
+-- below this a character at home has walked off the bluff: the fall rescue in the 10 Hz loop catches it
+local fallRescueY = groundPart.Position.Y + groundPart.Size.Y / 2 - W.FallRescueStuds
 newPart("RoadSurface", Vector3.new(roadLength, 1, W.RoadWidth), CFrame.new(roadCentreX, -0.5, 0), Color3.fromRGB(70, 58, 46), Enum.Material.Ground, roadFolder)
 
 -- [9] THE ONE ENABLED SPAWNLOCATION. The engine parents a character and places it here one frame
@@ -677,6 +739,8 @@ function pushState(S: any)
 		-- lair whose sign carries the owner's name. Neither is anything the owner cannot already see.
 		rank = Economy.rank(Config, p.journal),
 		plot = S.plotIndex,
+		-- the best lair income the owner has ever had (the Top Lairs board's metric): the night's fifth band follows it
+		best = p.bestRate,
 		cages = cages,
 		maxJar = maxJar,
 		cagesUnlocked = p.cagesUnlocked,
@@ -727,6 +791,228 @@ local function allowWho(who: Player, name: string): boolean
 	local WS = sessions[who]
 	return WS ~= nil and allow(WS, name)
 end
+
+--============================================================================ the Top Lairs board
+
+-- docs/complete-game-standard.md section 3, after +1 Jump's board (plus1-jump/src/server/Main.server.luau). One board
+-- on every plot's front fence, beside the gate and behind the Collect Pad: every player spawns on their own arrival
+-- marker, so "near spawn" means near every one. The server builds the boards and their prompts, owns every number on
+-- them and sends each player THEIR view (CryptidRemotes.Board); Board.client draws it on every board, locally, so
+-- each player sees Public or Friends as they chose. The public top 10 is read at most once per PublicCacheSeconds.
+-- Friends are read only when a player asks, capped, cached and throttled (Board.newLimiter and Roblox's own
+-- budget). Names are looked up and kept in memory, never stored.
+local BC = Config.Board
+
+local boardMode: { [Player]: string } = {} -- "public" | "friends", per player
+local publicView: any = { rows = {}, note = BC.Text.Loading }
+
+-- names: from players in this server, the friend list, or GetNameFromUserIdAsync; remembered here, never saved
+local nameCache: { [number]: string } = {}
+local function nameOf(userId: number): string
+	local cached = nameCache[userId]
+	if cached then return cached end
+	local here = Players:GetPlayerByUserId(userId)
+	if here then
+		nameCache[userId] = here.Name
+		return here.Name
+	end
+	local ok, res = pcall(function()
+		return Players:GetNameFromUserIdAsync(userId)
+	end)
+	if ok and type(res) == "string" then
+		nameCache[userId] = res
+		return res
+	end
+	return "#" .. tostring(userId) -- not remembered: the next view tries again
+end
+local function withNames(rows: { any }): { any }
+	local out = {}
+	for i, r in rows do
+		out[i] = { rank = r.rank, userId = r.userId, tier = r.tier, you = r.you, name = nameOf(r.userId) }
+	end
+	return out
+end
+
+-- a player's own value, from this server's memory (fresher than the store)
+local function liveValue(S: any): number
+	if not S or not S.loaded or (S.profile.bestRate or 0) <= 0 then return 0 end
+	return Board.encode(S.profile.bestRate, S.profile.bestRateAt, BC)
+end
+
+local function sendBoard(plr: Player, mode: string, view: any)
+	-- `viewer`: FireClient reaches only this player in Roblox; the field lets a client ignore anything else
+	BoardEvent:FireClient(plr, { viewer = plr.UserId, mode = mode, rows = view.rows, note = view.note })
+end
+
+local function refreshPublic()
+	if not boardStore then
+		publicView = Board.publicView({}, BC)
+		return
+	end
+	local ok, page = pcall(function()
+		return boardStore:GetSortedAsync(false, BC.PublicRows)
+	end)
+	if not ok or not page then return end -- keep the last list
+	local okPage, items = pcall(function()
+		return page:GetCurrentPage()
+	end)
+	if not okPage or type(items) ~= "table" then return end
+	local entries = {}
+	for _, e in ipairs(items) do
+		local uid = Board.userIdOf(tostring(e.key))
+		if uid and type(e.value) == "number" then
+			table.insert(entries, { userId = uid, value = e.value })
+		end
+	end
+	local view = Board.publicView(entries, BC)
+	publicView = { rows = withNames(view.rows), note = view.note }
+end
+
+-- friends: only on request, capped at FriendsCap, cached per player. A failed fetch is retried after a minute, not
+-- on every press.
+local friendsCache = Board.newCache(BC.FriendsCacheSeconds)
+local friendsFailed = Board.newCache(60)
+local scoreCache = Board.newCache(BC.ScoreCacheSeconds)
+local readLimiter = Board.newLimiter(BC.ReadsBurst, BC.ReadsPerSecond, tick())
+local fetching: { [Player]: boolean } = {}
+
+local function friendIdsOf(plr: Player): ({ number }, boolean)
+	local now = tick()
+	local hit = Board.cacheGet(friendsCache, plr.UserId, now)
+	if hit then return hit, false end
+	if Board.cacheHas(friendsFailed, plr.UserId, now) then return {}, true end
+	local ok, pages = pcall(function()
+		return (Players :: any):GetFriendsAsync(plr.UserId)
+	end)
+	local ids = {}
+	local broken = not ok or pages == nil
+	while not broken and #ids < BC.FriendsCap do
+		local okPage, items = pcall(function()
+			return pages:GetCurrentPage()
+		end)
+		if not okPage or type(items) ~= "table" then
+			broken = #ids == 0
+			break
+		end
+		for _, item in ipairs(items) do
+			local id = tonumber(item.Id)
+			if id and #ids < BC.FriendsCap then
+				table.insert(ids, id)
+				if type(item.Username) == "string" then nameCache[id] = item.Username end
+			end
+		end
+		if pages.IsFinished or #ids >= BC.FriendsCap then break end
+		if not pcall(function() pages:AdvanceToNextPageAsync() end) then break end
+	end
+	if broken then
+		Board.cachePut(friendsFailed, plr.UserId, true, now)
+		return {}, true
+	end
+	Board.cachePut(friendsCache, plr.UserId, ids, now)
+	return ids, false
+end
+
+-- always leave BudgetReserve GetAsync calls in Roblox's budget (when it cannot be read, only the limiter applies)
+local function budgetLeft(): boolean
+	local ok, budget = pcall(function()
+		return DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetAsync)
+	end)
+	return not (ok and type(budget) == "number" and budget < BC.BudgetReserve)
+end
+
+-- a friend's stored value (0 = no best yet), or nil while reads are throttled (try again later). A failed read
+-- counts as 0 without being cached, so one bad key never stops the list.
+local function friendValue(userId: number): number?
+	local here = Players:GetPlayerByUserId(userId)
+	if here and sessions[here] and sessions[here].loaded then return liveValue(sessions[here]) end
+	local now = tick()
+	if Board.cacheHas(scoreCache, userId, now) then return Board.cacheGet(scoreCache, userId, now) end
+	if not boardStore then return 0 end
+	if not budgetLeft() or not Board.take(readLimiter, now) then return nil end
+	local ok, v = pcall(function()
+		return boardStore:GetAsync(Board.key(userId))
+	end)
+	if not ok then return 0 end
+	local value = if type(v) == "number" then v else 0
+	Board.cachePut(scoreCache, userId, value, now)
+	return value
+end
+
+local function showFriends(plr: Player)
+	if fetching[plr] then
+		sendBoard(plr, "friends", { rows = {}, note = BC.Text.Loading }) -- the fetch already running sends soon
+		return
+	end
+	fetching[plr] = true
+	task.spawn(function()
+		sendBoard(plr, "friends", { rows = {}, note = BC.Text.Loading })
+		local ids, failedList = friendIdsOf(plr)
+		local values: { [number]: number } = {}
+		local status = { friendCount = #ids, checked = 0, failed = failedList }
+		local function push()
+			values[plr.UserId] = liveValue(sessions[plr])
+			local view = Board.friendsView(plr.UserId, values, status, BC)
+			sendBoard(plr, "friends", { rows = withNames(view.rows), note = view.note })
+		end
+		local i, lastPush = 1, -math.huge
+		while i <= #ids and plr.Parent == Players and boardMode[plr] == "friends" do
+			local v = friendValue(ids[i])
+			if v == nil then
+				status.checked = i - 1
+				if tick() - lastPush >= 0.5 then
+					push()
+					lastPush = tick()
+				end
+				task.wait(1) -- throttled: wait for the limiter
+			else
+				values[ids[i]] = v
+				i += 1
+			end
+		end
+		status.checked = i - 1
+		if plr.Parent == Players and boardMode[plr] == "friends" then push() end
+		fetching[plr] = nil
+	end)
+end
+
+-- the prompt toggles the view of whoever pressed it, at any plot's board
+local function toggleBoard(who: Player)
+	if not allowWho(who, "Prompt") then return end
+	boardMode[who] = if boardMode[who] == "friends" then "public" else "friends"
+	if boardMode[who] == "friends" then
+		showFriends(who)
+	else
+		sendBoard(who, "public", publicView)
+	end
+end
+
+for i = 0, plotCount - 1 do
+	local frame = plotFrame(i)
+	local bp, bs = BC.Position, BC.Size
+	-- the drawn face is the part's Front (-Z), which a plot's frame turns toward the road: it looks over the apron
+	local board = newPart("TopLairsBoard", Vector3.new(bs.x, bs.y, bs.z), at(frame, bp.x, bp.y, bp.z),
+		Color3.fromRGB(22, 26, 36), Enum.Material.SmoothPlastic, plotFolders[i])
+	-- a neon gold rim set into the fence behind it: something to use reads as something to use (checklist section 2)
+	local trim = newPart("TopLairsTrim", Vector3.new(bs.x + 0.8, bs.y + 0.8, 0.1), at(frame, bp.x, bp.y, W.ApronDepth - 0.05),
+		rgb(Config.Hud.Gold), Enum.Material.Neon, plotFolders[i])
+	trim.CanCollide = false
+	trim.CanQuery = false
+	trim.CanTouch = false
+	trim.CastShadow = false
+	local pp = prompt(board, "Board", BC.Text.Prompt, BC.Text.Title, 0, BC.PromptDistance)
+	pp.Triggered:Connect(toggleBoard)
+end
+
+-- the public list, at most once per PublicCacheSeconds, pushed to everyone looking at it
+task.spawn(function()
+	while true do
+		refreshPublic()
+		for plr, mode in boardMode do
+			if mode == "public" and plr.Parent == Players then sendBoard(plr, "public", publicView) end
+		end
+		task.wait(BC.PublicCacheSeconds)
+	end
+end)
 
 --============================================================================ laser visuals
 
@@ -1130,6 +1416,7 @@ function handleBuy(S: any, slot: number, who: Player)
 	local oldRank = Economy.rank(Config, p.journal)
 	p.essence -= price
 	p.cages[col] = { sp = sp, jar = 0 }
+	Economy.noteBest(Config, p, os.time())
 	if not Economy.journalHas(p.journal, sp) then table.insert(p.journal, sp) end
 	if p.tutorial == 0 then p.tutorial = 1 end
 	S.offers[slot] = ""
@@ -1568,7 +1855,9 @@ local function grant(S: any, R: any): boolean
 	local tierKey = "t" .. R.tier
 	local heatBefore = p.heat[tierKey]
 	local newInJournal = not Economy.journalHas(p.journal, sp)
+	local bestBefore, bestAtBefore = p.bestRate, p.bestRateAt
 	p.cages[col] = { sp = sp, jar = 0 }
+	Economy.noteBest(Config, p, os.time())
 	if newInJournal then table.insert(p.journal, sp) end
 	p.heat[tierKey] = os.time() + Economy.heatSeconds(Config, R.tier)
 	p.stats.steals += 1
@@ -1579,6 +1868,7 @@ local function grant(S: any, R: any): boolean
 			if i then table.remove(p.journal, i) end
 		end
 		p.heat[tierKey] = heatBefore
+		p.bestRate, p.bestRateAt = bestBefore, bestAtBefore -- a steal that never saved is no best
 		p.stats.steals = math.max(0, p.stats.steals - 1)
 		p.essence += R.permit
 		if sessions[S.plr] == S then
@@ -2076,6 +2366,11 @@ end
 
 local function onPlayerAdded(plr: Player)
 	if sessions[plr] then return end
+	-- robloxemu/SPAWN-ORDER.md and docs/complete-game-standard.md section 1: the engine places every character on
+	-- the one enabled SpawnLocation it is told about; onCharacter then moves it home
+	plr.RespawnLocation = trailhead
+	boardMode[plr] = "public"
+	sendBoard(plr, "public", publicView)
 	-- [9] the plot is claimed synchronously, BEFORE any yield, so a character that spawns during
 	-- the DataStore load already has a home to be moved to
 	local index = claimPlot(plr)
@@ -2086,6 +2381,7 @@ local function onPlayerAdded(plr: Player)
 	local S: any = {
 		plr = plr, plotIndex = index, loaded = false, buckets = {}, releaseBegan = {}, visitorToast = {},
 		lastCollect = -math.huge, buildMode = false, pending = false, offers = { "", "", "" },
+		token = HttpService:GenerateGUID(false),
 	}
 	sessions[plr] = S
 	plotSigns[index].Text = plr.Name .. "'s Lair (loading)"
@@ -2104,11 +2400,20 @@ local function onPlayerAdded(plr: Player)
 		task.spawn(onCharacter, plr, plr.Character)
 	end
 
-	local profile, canSave, banner, loadedData = loadProfile(plr) -- yields in Roblox
+	-- a rejoin to THIS server while this player's leave-write is still in flight here: wait for it (bounded), so the
+	-- load reads what it carried (guards G25). Past WriteQueueSeconds the load goes ahead; the late write then finds
+	-- the record taken by this session's token and writes nothing (G25b).
+	local waited = 0
+	while (closingUsers[plr.UserId] or 0) > 0 and waited < Config.Save.WriteQueueSeconds do
+		if waited == 0 then toast(plr, LAST_VISIT_SAVING) end
+		task.wait(0.1)
+		waited += 0.1
+	end
+	local profile, canSave, banner, loadedData = loadProfile(plr, S.token) -- yields in Roblox
 	if sessions[plr] ~= S or plr.Parent ~= Players then
 		-- left during the load; PlayerRemoving already freed the plot. The lock the load just took is
 		-- handed back, or the player's next server would play them unsaved for LockSeconds (REVIEW-1)
-		if canSave then releaseLock(key(plr)) end
+		if canSave then releaseLock(key(plr), S.token) end
 		return
 	end
 	S.profile = profile
@@ -2164,11 +2469,18 @@ Players.PlayerRemoving:Connect(function(plr)
 	S.closing = true -- no write of this session locks the record again (REVIEW-1.md A3)
 	if S.raid then endRaid(S, "left") end -- leaving mid-raid grants nothing
 	removePoacher(S)
+	local uid = plr.UserId
+	closingUsers[uid] = (closingUsers[uid] or 0) + 1
 	if S.loaded then flush(S, true, nil, true) end
+	closingUsers[uid] = if (closingUsers[uid] or 1) <= 1 then nil else closingUsers[uid] - 1
 	if S.lair then S.lair.folder:Destroy() end
 	plotSigns[S.plotIndex].Text = "Empty lair"
 	plotOwner[S.plotIndex] = nil
 	sessions[plr] = nil
+end)
+Players.PlayerRemoving:Connect(function(plr)
+	boardMode[plr] = nil
+	fetching[plr] = nil
 end)
 
 game:BindToClose(function()
@@ -2203,7 +2515,23 @@ task.spawn(function()
 	end
 end)
 
--- lair nets and poachers, ten times a second
+-- Owner decision (d), DECIDED 2026-09-30 (EYECANDY.md section 11): no invisible walls round the Ground. A
+-- character AT HOME (never raiding: a camp pocket belongs to the raid) whose root has fallen FallRescueStuds
+-- below the Ground's top is put back on its own arrival marker, at rest, and told. Walking off the bluff used to
+-- mean a fall to the kill height and a respawn: nothing lost, but a death. It returns a player only to their
+-- own lair, which Reset already does, so it hands nobody anything (check_stealacryptid_fall.luau).
+local function fallRescue(S: any)
+	if S.raid or S.granting then return end
+	local char = S.plr.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not (hrp and char.Parent) then return end
+	if (hrp :: BasePart).Position.Y >= fallRescueY then return end
+	sendHome(S)
+	pcall(function() (hrp :: BasePart).AssemblyLinearVelocity = Vector3.zero end)
+	toast(S.plr, W.FallRescueText)
+end
+
+-- lair nets and poachers, ten times a second (and the fall rescue)
 task.spawn(function()
 	while true do
 		task.wait(Config.Poacher.TickSeconds)
@@ -2215,6 +2543,7 @@ task.spawn(function()
 				end
 				tickPoacher(S, now)
 			end
+			if S.plotIndex then fallRescue(S) end
 		end
 	end
 end)

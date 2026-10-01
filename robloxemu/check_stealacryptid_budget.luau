@@ -9,8 +9,11 @@
 --   * a full lair (nine occupied cages: nine habitats), hazards made rapid (Config.Night.Hazards
 --     IntervalMin/Max 0.05, in memory) so one is almost always flying, a player walking so it never rests;
 --   * a purchase that raises the rank strange -> mythic with a hazard in the air (the seam with the most
---     beams), nine habitats for 20 s, one released (a hunt needs a free cage), then a rest by the
---     campfire, then all four camps and home again, three times over;
+--     beams), nine habitats for 20 s; then two cages freed and two more Bigfoots bought, the second with a
+--     hazard in the air: the mythic -> gathering seam (the most parts: the gathering's legends and moths join
+--     while mythic night's set fades), nine habitats at the gathering for 20 s with every one of its pieces
+--     drawn (the budget is capped in code, so a refused piece would hide here, not overflow); one released (a
+--     hunt needs a free cage), then a rest by the campfire, then all four camps and home again, three times over;
 --   * and the pools: after the first cycle, the next two must build (almost) nothing new. A client that
 --     rebuilt a piece, a habitat or a hazard model on every visit would grow here without bound.
 -- The same budget numbers are printed for EYECANDY.md.
@@ -173,6 +176,61 @@ local nine = 0
 for col = 1, 9 do if st().cages[col].sp ~= "" then nine += 1 end end
 eq(nine, 9, "2: nine occupied cages")
 
+local function release(col)
+	walker = nil
+	hrp.CFrame = CFrame.new(apron(36, 80))
+	hum.MoveDirection = Vector3.new(0, 0, 0)
+	local rel = lair.Cages:FindFirstChild("Cage_" .. col):FindFirstChild("Release")
+	rel.PromptButtonHoldBegan:Fire(plr)
+	h:advance(Config.Economy.ReleaseHoldSeconds + 0.05)
+	rel.Triggered:Fire(plr)
+	run(1.5)
+	return st().cages[col].sp == ""
+end
+
+-- 2b. past the Mythic: the gathering (Night.level), reached when the best lair income ever passes GatheringRate.
+-- Free the Jackalope's and the Hodag's cages, then two Bigfoots from P3, the second (the crossing) with a hazard flying.
+do
+	truthy(release(1) and release(2), "2b: cages 1 and 2 released through their prompts")
+	where = "seam mythic>gathering, hazards"
+	hrp.CFrame = CFrame.new(apron(W.Apron.P3.x, W.Apron.P3.z - 4))
+	for k = 1, 2 do
+		run(12, flying)
+		if k == 2 then truthy(flying(), "2b: a hazard is flying when the best lair income crosses GatheringRate") end
+		lair.Pedestals.Pedestal_3.Buy.Triggered:Fire(plr)
+		run(0.1)
+		if k == 1 then
+			truthy((st().best or 0) < N.GatheringRate, string.format("2b: one more Bigfoot (%s/s) is not yet the gathering", tostring(st().best)))
+			run(2.5) -- the pedestal refills
+		end
+	end
+	truthy((st().best or 0) >= N.GatheringRate, string.format("2b: the second took the best lair income to %s/s (>= %d)", tostring(st().best), N.GatheringRate))
+	walkAt(W.Apron.P3.x, W.Apron.P3.z - 6)
+	run(6)
+	where = "gathering, nine habitats, hazards"
+	walkAt(36, 4)
+	run(20)
+	nine = 0
+	for col = 1, 9 do if st().cages[col].sp ~= "" then nine += 1 end end
+	eq(nine, 9, "2b: nine occupied cages again")
+	-- every piece the band shows is drawn: the budget's cap refused nothing at the heaviest home band
+	local FIRST = { farGround = "FarGround", ridges = "Ridge", farPines = "FarPine", owls = "Owl", auroraGreen = "AuroraGreenHost",
+		auroraGold = "AuroraGoldHost", ufos = "Ufo", bigfoot = "Bigfoot_", bloodMoon = "BloodMoon", gathering = "Legend_" }
+	local band = N.Home[#N.Home]
+	for _, id in band.pieces do
+		local n = 0
+		for _, d in folder:GetDescendants() do
+			if (d.ClassName == "Part" or d.ClassName == "WedgePart") and FIRST[id] and string.sub(d.Name, 1, #FIRST[id]) == FIRST[id] then n += 1 end
+		end
+		truthy(FIRST[id] ~= nil and n > 0, "2b: at the gathering with nine habitats and hazards flying, piece " .. id .. " is drawn (nothing refused)")
+	end
+	local habitats = 0
+	for _, d in folder:GetDescendants() do
+		if (d.ClassName == "Part" or d.ClassName == "WedgePart") and string.match(d.Name, "^Habitat_%d+_Patch$") then habitats += 1 end
+	end
+	eq(habitats, 9, "2b: and all nine habitats are drawn")
+end
+
 -- A hunt needs a free cage for the prize ("Free a cage first"): release one through the real prompt
 -- (the server's hold), as a player would. Eight habitats stay for the camp cycles below.
 do
@@ -235,7 +293,7 @@ for cycle = 1, 3 do
 	cycleSeen[cycle] = seenCount
 end
 
-print("\n  budget peaks, every frame (a full lair, hazards flying, the campfire, four camps, three cycles):")
+print("\n  budget peaks, every frame (a full lair, hazards flying, the gathering, the campfire, four camps, three cycles):")
 local limits = { parts = B.MaxLocalParts, emitters = B.MaxEmitters, rate = B.MaxEmitterRate, beams = B.MaxBeams,
 	trails = B.MaxTrails, lights = B.MaxLights, hazards = B.MaxHazards }
 for _, k in { "parts", "emitters", "rate", "beams", "trails", "lights", "hazards" } do
@@ -245,6 +303,10 @@ print(string.format("  unique instances ever built: %d after cycle 1, %d after c
 print(string.format("  frames with a hazard flying: %d; frames with the campfire: %d", flyingFrames, campfireFrames))
 for k, v in over do truthy(false, "over budget: " .. v) end
 truthy(next(over) == nil, "every frame of the worst case is within Config.Night.Budget")
+-- and the shipped art never NEEDS the cap: scenery, critters and habitats are admitted against the budget minus the
+-- Reserve, so a worst case at or under that line means no item was ever refused (none popped in late)
+truthy(peak.parts <= B.MaxLocalParts - B.Reserve.parts, string.format("the worst case's %d parts fit under the budget minus its Reserve (%d): the cap never had to refuse a part",
+	peak.parts, B.MaxLocalParts - B.Reserve.parts))
 truthy(flyingFrames > 30 * 30, "hazards were flying for more than 30 s of it")
 truthy(campfireFrames > 30 * 20, "the campfire burned for more than 20 s of it")
 truthy(cycleSeen[3] - cycleSeen[2] <= 12, string.format("the pools are bounded: the third cycle built %d new instances (<= 12: critters of a flock not yet all out at once)", cycleSeen[3] - cycleSeen[2]))
@@ -262,7 +324,7 @@ do
 	local k = 0
 	local art = NightArt.new(scratch, function() k += 1; return (k % 97) / 97 end, GameConfig,
 		h:_require(RS:FindFirstChild("EnvBands")), h:_require(RS:FindFirstChild("Night")))
-	local ask = { fireflies = 30, mist = 30, wisplights = 30, stardust = 30 }
+	local ask = { fireflies = 30, mist = 30, wisplights = 30, stardust = 30, embers = 30, sand = 30, spores = 30 }
 	local function count()
 		local on, rate = 0, 0
 		for _, d in scratch:GetDescendants() do
@@ -272,8 +334,8 @@ do
 	end
 	art:updateWeather(ask, Vector3.new(0, 20, 0), "camera")
 	local on, rate = count()
-	print(string.format("  weather cap probe: 4 kinds asked at 30/s each -> %d emitters on, %.1f particles/s", on, rate))
-	truthy(on >= 1 and on <= B.MaxWeatherEmitters, string.format("weather cap: %d emitters on for 4 kinds asked (<= %d)", on, B.MaxWeatherEmitters))
+	print(string.format("  weather cap probe: 7 kinds asked at 30/s each -> %d emitters on, %.1f particles/s", on, rate))
+	truthy(on >= 1 and on <= B.MaxWeatherEmitters, string.format("weather cap: %d emitters on for 7 kinds asked (<= %d)", on, B.MaxWeatherEmitters))
 	truthy(rate <= B.MaxWeatherRate + 1e-6, string.format("weather cap: %.1f particles/s (<= %d)", rate, B.MaxWeatherRate))
 	-- in a camp, the weather hangs behind the back fence, never over the yard
 	local ox = Night.pocketOriginX(Config, 3)
@@ -286,6 +348,33 @@ do
 			host and (host.Position.Z - host.Size.Z / 2 - zBack) or -1, N.CampMargin))
 	truthy(host ~= nil and Night.boxClearOfCamp(Config, host.Position.X - ox - host.Size.X / 2, host.Position.X - ox + host.Size.X / 2,
 		host.Position.Z - host.Size.Z / 2, host.Position.Z + host.Size.Z / 2), "camp weather: its whole volume is clear of the camp and the camera corridor")
+	-- capEmitters (the per-frame emitter cap) knows every weather kind Config names: build one emitter of each, switch
+	-- them all on, and with an emitter budget of 0 every one must be switched off (sweep round 1: the Badlands' sand left
+	-- out of its list survived, because with the shipped numbers nothing is ever capped)
+	local kinds, seen = {}, {}
+	for _, list in { N.Home, N.Camp } do
+		for _, b in list do
+			if b.weather and not seen[b.weather.kind] then seen[b.weather.kind] = true; table.insert(kinds, b.weather.kind) end
+		end
+	end
+	table.sort(kinds)
+	for i = 1, #kinds, 2 do
+		art:updateWeather({ [kinds[i]] = 5, [kinds[i + 1] or kinds[1]] = 5 }, Vector3.new(0, 20, 0), "camera")
+	end
+	local made = 0
+	for _, d in scratch:GetDescendants() do
+		if d.ClassName == "ParticleEmitter" then made += 1; d.Enabled = true; d.Rate = 5 end
+	end
+	eq(made, #kinds, "the probe built one emitter for each of the " .. #kinds .. " weather kinds Config names")
+	local maxBefore = GameConfig.Night.Budget.MaxEmitters
+	GameConfig.Night.Budget.MaxEmitters = 0
+	art:capEmitters()
+	GameConfig.Night.Budget.MaxEmitters = maxBefore
+	local still = {}
+	for _, d in scratch:GetDescendants() do
+		if d.ClassName == "ParticleEmitter" and d.Enabled then table.insert(still, d.Name) end
+	end
+	eq(#still, 0, "with an emitter budget of 0 the cap switches every weather kind off (" .. table.concat(still, ",") .. ")")
 	scratch:Destroy()
 end
 

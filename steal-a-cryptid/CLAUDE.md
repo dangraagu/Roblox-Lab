@@ -5,10 +5,11 @@ same stack: Rojo layout, every tunable in `Config.luau`, pure rules in `src/shar
 luau CLI, a pcall'd DataStore with a soft session lock, a phone-first HUD, `robloxemu` headless
 gates. **DESIGN.md is the spec** (section numbers in source comments point into it); where v1 does
 something else, the "Deviations" table below says what and why. README.md is the player-facing
-description and the proposed store copy. **REVIEW-1.md** is the second adversarial review round and
-how each of its ten findings was reproduced, tested and closed.
+description and the store copy. **REVIEW-1.md** is the second adversarial review round and
+how each of its ten findings was reproduced, tested and closed. **MARKETING.md** is the clip list (10 vertical clips
+for `tools/film_game.py`, each with its staging). `docs/complete-game-standard.md` is the finish line.
 
-## State (2026-09-17; the night 2026-09-24)
+## State (2026-09-17; the night 2026-09-24; second night review and owner decisions 2026-09-30; pass 2 2026-10-01)
 
 - **v1 built and headless-tested. NEVER OPENED IN ROBLOX STUDIO. NOT PUBLISHED.** No experience, no
   place ID, no publish script. Nothing committed or pushed by the build or fix sessions.
@@ -37,7 +38,44 @@ how each of its ten findings was reproduced, tested and closed.
   and the camp, and at home the player). Verification also closed two rare flakes: a keep-out gap in the game
   (`Night.critterClear`) and a float-noise edge in `_hazards`' telegraph timing (a test-arithmetic bug). Final
   sweep: the resume session's 49 edits re-run plus 28 new, 70 of 70 mutations killed, 6 of 6 controls survived
-  (EYECANDY.md section 8). Nobody has reviewed the fixes.
+  (EYECANDY.md section 8).
+- **2026-09-30 (pass 1 of 2 toward the owner's complete-game standard, `docs/complete-game-standard.md`):** a second
+  review of the night found five low defects; all five reproduced with the reviewer's own probes and were closed
+  test-first (EYECANDY.md section 14): a hazard could still land after its ring and chip had gone (the template's
+  `Hazards.threatLive` now keeps them up, and the drawing keeps the lane's line until then); a Rest press during a
+  stumble was dropped silently (now queued); the rest campfire could float over the ravine (`Night.campfireSpot`);
+  the band title card overlapped the HUD on phones and the open Hunt panel (placed from the HUD's NightBus room,
+  deferred while a panel is open); the budget was only asserted (now admitted in code against Budget minus a
+  Reserve kept for the telegraph, emitters capped per frame). The owner's four open decisions were DECIDED
+  ("take the recommended option for all", EYECANDY.md section 11): (a) keep the hazard interval, (b) keep the eight
+  species, (c) no clock cycle, (d) no invisible walls but a SERVER fall rescue (`Config.World.FallRescueStuds`):
+  the only server change of the night besides `rank` and `plot`. Four new checks (latehit, card, budgetcap,
+  fall). Final gates: 34 suites, 3 594 assertions passed, 0 failed, 6 PASS lines. Sweep: 31 of 31 mutations killed,
+  3 of 3 controls survived, every edit proven in the bundle (two round-1 survivors closed in the tests: rest 2d,
+  budgetcap B6). Nobody has reviewed this pass's fixes. Still open against the standard: a highscore board
+  (public + friends), a Luau pacing model for the brag moment, MARKETING.md's clip list, the Studio night.
+- **2026-10-01 (pass 1 re-run):** every claim above re-measured (the five findings reproduced again on the reviewed
+  tree with the reviewer's probes, the tests failing there, the probes clean on the fixed tree). No game change. One
+  test gap closed: mutant X1 (the HUD never publishes `CardBottom`) survived, and the card then reached 10/28 screen px
+  into the touch-control band on 640x300; `_nighthud` now has a fifth PASS line (the card stays above the touch band,
+  the subtitle shows on every screen 600 px or taller), and its card mode lets the game lay the card out instead of
+  forcing the subtitle visible (Traps 34). Sweep: 38 of 38 mutations killed, 4 of 4 controls survived (EYECANDY.md
+  section 14, last subsection).
+- **2026-10-01 (pass 2 of 2 toward the complete-game standard; EYECANDY.md section 15 has the details and the sweep):**
+  every item of `docs/complete-game-standard.md` checked, and what was missing built test-first. (1) **The Top Lairs
+  board** (section 3): `src/shared/Board.luau` is +1 Jump's template verbatim; the metric is the best lair income a
+  player has ever had (`Economy.noteBest`, server-side, rolled back with a failed grant); a board on every plot's front
+  fence behind the Collect Pad, its prompt toggling Public / Friends for whoever presses it; `check_stealacryptid_board`.
+  (2) **A measured brag moment** (section 2): `tests/Pacing.spec.luau` plays the game's own rules; the first Mythic came
+  at a median 81.6 minutes of normal play, so the Mythic payback went from 14 400 s to 3 600 s: now 35.6 minutes, nine
+  Mythics 190.9 (Deviations). (3) **A fifth home band**, the Gathering, past Mythic Night (`Night.level`, `State.best`),
+  and every camp with its own weather and critters. (4) `plr.RespawnLocation` = the Trailhead (section 1). (5) **An
+  owner token on every write** (section 1): a per-session `session` GUID on the record beside `jobId`, and a rejoin to
+  the same server waits for that player's leave-write (guards G25, G25b; it closes the old known gap). (6) MARKETING.md,
+  the README store text (989 characters), the 1920x1080 shot list, the needs-Studio lists. Final gates: 37 suites,
+  4 100 assertions passed, 0 failed, plus 7 PASS lines (bundle sha256 29235c64b499...). Sweep: 38 of 38 mutations
+  killed, 5 of 5 controls survived, in three rounds; the round-1 and round-2 survivors were test gaps, closed in the
+  tests (Traps 39-41). Nobody has reviewed pass 2.
 
 ## Gates - run all of them, in this order
 
@@ -47,7 +85,7 @@ The luau CLI writes to stderr: always append `2>&1`. Substitute your own `luau.e
 cd D:/Claude/Roblox/steal-a-cryptid
 luau tests/Rng.spec.luau 2>&1           # 32 passed, 0 failed   (copied verbatim from fork-tower)
 luau tests/Responsive.spec.luau 2>&1    # 70 passed, 0 failed   (copied verbatim from deep-vein)
-luau tests/Economy.spec.luau 2>&1       # 193 passed, 0 failed
+luau tests/Economy.spec.luau 2>&1       # 219 passed, 0 failed  (+ the best lair: noteBest, normalize; the retuned Mythic)
 luau tests/Offers.spec.luau 2>&1        # 36 passed, 0 failed
 luau tests/Layout.spec.luau 2>&1        # 202 passed, 0 failed  (2 000 lairs, 2 000 camps per tier)
 luau tests/Heist.spec.luau 2>&1         # 79 passed, 0 failed   (solver over 300 camps per tier)
@@ -55,34 +93,39 @@ luau tests/Trace2D.spec.luau 2>&1       # 52 passed, 0 failed
 luau tests/Poacher.spec.luau 2>&1       # 51 passed, 0 failed   (4 000 lairs x 4 defenses)
 luau tests/CryptidModel.spec.luau 2>&1  # 552 passed, 0 failed
 luau tests/EnvBands.spec.luau 2>&1      # 124 passed, 0 failed   (verbatim from plus1-jump: the night's template)
-luau tests/Hazards.spec.luau 2>&1       # 102 passed, 0 failed   (verbatim from plus1-jump)
+luau tests/Hazards.spec.luau 2>&1       # 111 passed, 0 failed   (verbatim from plus1-jump's working tree, 2026-09-30: + threatLive)
 luau tests/Rest.spec.luau 2>&1          # 55 passed, 0 failed    (verbatim from plus1-jump)
-luau tests/Night.spec.luau 2>&1         # 427 passed, 0 failed   (the night's rules)
-luau tests/NightConfig.spec.luau 2>&1   # 222 passed, 0 failed   (Config.Night + measured hazard rarity)
+luau tests/Night.spec.luau 2>&1         # 477 passed, 0 failed   (the night's rules; + Night.level)
+luau tests/NightConfig.spec.luau 2>&1   # 298 passed, 0 failed   (Config.Night, five bands, own weather/critters, measured hazard rarity)
+luau tests/Board.spec.luau 2>&1         # 66 passed, 0 failed    (verbatim from plus1-jump: the board's template)
+luau tests/Pacing.spec.luau 2>&1        # 17 passed, 0 failed    (~15 s; the brag moment and the long-term goal, measured)
 
-for f in src/shared/*.luau src/server/*.luau src/client/*.luau tests/*.luau ../robloxemu/check_stealacryptid*.luau; do luau-compile --binary $f > /dev/null; done
-luau-analyze src/shared/*.luau src/server/*.luau src/client/*.luau tests/*.spec.luau 2>&1 | grep -v "Unknown global\|Unknown type"
-                                        # empty. NOTE 2026-09-24: luau-compile.exe and luau-analyze.exe are gone from
-                                        # this machine (scratchpad wiped 2026-09-23); check_stealacryptid_compile below
-                                        # is the compile half; luau-analyze was not run on the night's code.
+# luau-compile and luau-analyze CANNOT RUN on this machine: both binaries were in a scratchpad wiped on 2026-09-23 and
+# only luau.exe is left. check_stealacryptid_compile (below) is the compile half: it compiles every bundled source
+# with loadstring and fails a string require. luau-analyze has never been run on the night's or pass 2's code.
 
 cd ../robloxemu                         # ALWAYS rebuild the bundle before a headless run
 py -3 wrap.py --game ../steal-a-cryptid --out build/steal-a-cryptid.luau
-luau check_stealacryptid.luau 2>&1         # 332 passed, 0 failed
-luau check_stealacryptid_guards.luau 2>&1  # 184 passed, 0 failed
+luau check_stealacryptid.luau 2>&1         # 334 passed, 0 failed
+luau check_stealacryptid_guards.luau 2>&1  # 200 passed, 0 failed   (+ G25, G25b: a rejoin to the same server)
+luau check_stealacryptid_board.luau 2>&1   # 78 passed, 0 failed    (the Top Lairs board, public + friends)
 luau check_stealacryptid_hud.luau 2>&1     # two PASS lines: box fit (hudcheck) and text legibility
-luau check_stealacryptid_compile.luau 2>&1  # 20 sources, 40 passed, 0 failed (loadstring + no string require)
-luau check_stealacryptid_night.luau 2>&1    # 386 passed, 0 failed   (the night, EYECANDY.md)
+luau check_stealacryptid_compile.luau 2>&1  # 22 sources, 44 passed, 0 failed (loadstring + no string require)
+luau check_stealacryptid_night.luau 2>&1    # 583 passed, 0 failed   (the night, EYECANDY.md; five bands, four camps)
 luau check_stealacryptid_hazards.luau 2>&1  # 69 passed, 0 failed
-luau check_stealacryptid_rest.luau 2>&1     # 63 passed, 0 failed
-luau check_stealacryptid_nighthud.luau 2>&1 # three PASS lines: fit, legibility, the toggle row, with the night
-luau check_stealacryptid_budget.luau 2>&1   # 28 passed, 0 failed
+luau check_stealacryptid_rest.luau 2>&1     # 75 passed, 0 failed   (2c/2d: a press during a stumble is queued)
+luau check_stealacryptid_nighthud.luau 2>&1 # five PASS lines: fit, legibility, the toggle row, the title card overlaps nothing, it stays above the touch band
+luau check_stealacryptid_budget.luau 2>&1   # 46 passed, 0 failed   (+ the mythic -> gathering seam, nothing refused; every weather kind capped)
 luau check_stealacryptid_lateroad.luau 2>&1 # 12 passed, 0 failed
-luau check_stealacryptid_keepout.luau 2>&1  # 24 passed, 0 failed
+luau check_stealacryptid_keepout.luau 2>&1  # 28 passed, 0 failed   (+ 15 Jersey Devils, the camera orbiting the camp)
 luau check_stealacryptid_life.luau 2>&1     # 4 passed, 0 failed
-luau check_stealacryptid_longroad.luau 2>&1 # 4 passed, 0 failed
-luau check_stealacryptid_edge.luau 2>&1     # 25 passed, 0 failed   (the ravine; knocks near the edge)
-luau check_stealacryptid_view.luau 2>&1     # 44 passed, 0 failed   (nothing local between camera and camp / player)
+luau check_stealacryptid_longroad.luau 2>&1 # 4 passed, 0 failed    (at the Gathering: every home piece, the legends too)
+luau check_stealacryptid_edge.luau 2>&1     # 42 passed, 0 failed   (the ravine; knocks near the edge; E4 the campfire)
+luau check_stealacryptid_view.luau 2>&1     # 44 passed, 0 failed   (nothing local between camera and camp / player; home at the Gathering)
+luau check_stealacryptid_latehit.luau 2>&1  # 12 passed, 0 failed   (no knock after the ring or the chip has gone)
+luau check_stealacryptid_card.luau 2>&1     # 13 passed, 0 failed   (the band card waits for an open panel; no overlap)
+luau check_stealacryptid_budgetcap.luau 2>&1 # 12 passed, 0 failed  (a lowered budget held on every frame; B6 the gate's books)
+luau check_stealacryptid_fall.luau 2>&1     # 13 passed, 0 failed   (owner decision (d): the server's fall rescue)
 cd ../steal-a-cryptid
 luau tests/walk.luau 2>&1                  # 46 passed, 0 failed, and prints the loop in numbers
 ```
@@ -112,6 +155,18 @@ A failure prints the camp seed.
   rate limiter; **zero attributes on any Instance under workspace or ReplicatedStorage**; leaving frees
   the plot and releases the lock; every toast and banner the run sent fits the HUD's text proof
   (longest toast 83-89 characters, banner 68).
+- `robloxemu/check_stealacryptid_board.luau` (2026-10-01) is the standard's section 3 through the real server and the
+  real Board.client: a board on every plot near its arrival marker, facing the apron, flush on the front fence, clear
+  of the gate, with one tap prompt in reach on the Collect Pad and not on the arrival marker; the stored value
+  (`metric * 2e9 + (2e9 - reachedAt)`), ties to the earlier reach, a board value never lowered by a profile, a legacy
+  profile stamped at its session; written only when the best rises (a purchase, then a Rare; a release writes
+  nothing); the public top 10 read once a minute however often the prompt is pressed; friends only on demand, the
+  three not in the server read from the store, cached, capped at 200 of 450 and throttled (41 reads in the first
+  second, 200 in all, 3 pages); the four empty-friends notes; a session without its save's lock writes nothing; no
+  remote carries a number to it; no name stored.
+- `tests/Pacing.spec.luau` (2026-10-01) is the standard's brag-moment measurement (README.md and EYECANDY.md section 2
+  have the tables): first Mythic at a median 30-45 minutes of normal play, the Gathering well between it and nine
+  Mythics, nine Mythics at least 4x the brag.
 - `robloxemu/check_stealacryptid_guards.luau` is one block per review finding, each written before its
   fix and watched fail. First round: G1 trap-key alias mint, G1b duplicate saved strings, G2 banked
   jump through an ON net, G3 escaping through the fence away from the gate, G4 collecting mid-raid, G5
@@ -126,13 +181,18 @@ A failure prints the camp seed.
   in-flight write, and a failed write retried (A4), G20 a lock released after the join, lapsing after
   the wait, overwritten by the other server, and a take-over landing after the player left (A1), G21 a
   trap set under a walking poacher (A5), G22 camp seeds not computable from earlier ones (A2), G23 a
-  slow load never yanks a walking player (B4), G24 a slide into a burning net judged leg by leg (B1).
+  slow load never yanks a walking player (B4), G24 a slide into a burning net judged leg by leg (B1). 2026-10-01: G10
+  also checks a failed grant leaves no best behind; G25 a rejoin to the same server while the leave's write yields 3 s
+  waits for it (plays the change it carried, keeps the lock, saves on top); G25b a leave's write that outlasts that wait
+  lands after the rejoin took the record and writes nothing (the owner token).
   It joins players on their own thread and can make UpdateAsync yield (see Traps 7 and 8).
 - `robloxemu/check_stealacryptid_hud.luau` runs `emu/hudcheck` over 10 viewports in three HUD modes
   (Hunt panel, build sheet, raiding with the banner) and ALSO estimates every shown string's rendered
   size with a 100-character toast and a 90-character banner on screen (rule in Traps 11).
 - **The night's checks** (EYECANDY.md sections 3-7 say what each measures): `_night` the take-over glide,
-  rank -> band through real purchases, every camp's place, habitats on your own cage bases, budgets, leaks;
+  rank -> band through real purchases and (2026-10-01) the fifth band through two more Bigfoots, each band's weather
+  falling and its critters out, every piece, critter and weather Config names built by the art, every camp's place,
+  habitats on your own cage bases, budgets, leaks;
   `_hazards` the gate (tutorial, camp, build mode, Hunt panel, poacher, edge), hit/dodge, the ring, the drawn
   path after arrival and over a dodger, rarity at the shipped interval (R, R2 reacting, R3 ignoring);
   `_rest` rest's rules and that it protects no income and never pauses a raid; `_nighthud` the HUD with the
@@ -143,6 +203,14 @@ A failure prints the camp seed.
   edges whose knocks all stop 1.5 studs inside; `_view` the real camera at 11 520 camp spots (zoom 20-400) and
   3 456 home spots with nothing local in the way, a pine beside the line to the player's root (H4), and Nessie's
   whole lap past a fixed camera (V4).
+- **2026-09-30 checks** (EYECANDY.md section 14): `_latehit` the reviewer's far-side set-up at rank 2 and 4 (no
+  knock after the ring or the chip went, the hazard drawn at the knock, nothing underground while the ring
+  lingers); `_card` on an 800x360 phone: a band reached with the Hunt panel open is named only once it closes, a
+  panel opened over the card hides it, and the card overlaps nothing the HUD draws; `_budgetcap` lowers
+  `Config.Night.Budget` in memory and holds every frame to it with the telegraph and the campfire never culled;
+  `_fall` the server's fall rescue at home (every side, the threshold, never above it, never in a raid). `_rest`
+  gained 2c, `_edge` E4 (the campfire at the cliff), `_nighthud` the card overlap rule and (2026-10-01) the touch-band
+  rule: the card and its subtitle end above Roblox's touch controls, measured on the card the game itself lays out.
 - `tests/walk.luau` is a player held to what a player can do: it runs the real HUD client and presses
   its buttons, presses an in-world prompt only inside its reach (a press out of reach is a FAIL),
   clicks tiles only inside ClickDetector reach, and checks every apron step and every raid route
@@ -202,6 +270,17 @@ A failure prints the camp seed.
 - **Plots** are claimed synchronously in PlayerAdded before the DataStore yield; a character that
   already exists when PlayerAdded runs is sent home before the load, one that spawns during it by
   CharacterAdded. Pockets sit at x = 4000 + 128 s; a raid START is allowed once per 3 s per player.
+- **The Top Lairs board** (2026-10-01): `profile.bestRate` / `bestRateAt` (Economy) is the best lair income ever and
+  when it was first reached; `Economy.noteBest` after a purchase or a grant (undone with a failed grant); a legacy
+  profile takes its loaded lair's income, stamped at the load. A committed profile write spawns `writeBoard`, which
+  writes `Board.encode(bestRate, bestRateAt)` to `Config.Save.Board` with `Board.keepHigher` only when it rose past
+  `S.boardRate` (0 at join: the first write of a session re-asserts). Names are looked up and kept in memory only.
+- **The owner token** (2026-10-01): the record's lock is `jobId` (the server) AND `session` (a GUID per join). A write
+  or a release lands only while the record is this session's; a rejoin on this server waits up to `WriteQueueSeconds`
+  for that player's leave-write here (`closingUsers`) before loading.
+- **The fall rescue** (owner decision (d), 2026-09-30): the 10 Hz lair loop sends a character at home whose root is
+  `World.FallRescueStuds` (12) below the Ground's top back to its own arrival marker, at rest, with a toast. Never
+  while raiding or during a grant (`fallRescue` in Main.server). There are no invisible walls round the Ground.
 
 ## Traps (each one cost a red run or a shipped defect somewhere)
 
@@ -321,6 +400,47 @@ A failure prints the camp seed.
 28. **A span taken from a running sum of dt is not exact.** `_hazards` bounded each warning by 3.0 s less one
     frame; a warning of exactly 89 frames, measured as the difference of two running sums of 1/30, came out 1e-15
     short (86 % of such spans do, once the clock is large). Compare with a tolerance (1e-6).
+29. **A hit rule that runs past the warning is a hit with no warning.** checkHit ran to the flight's end; the ring
+    and chip stopped at arrival (24 of 120 far-side knocks landed after them). Keep the warning up while
+    `Hazards.threatLive` holds, and draw the hazard where it can still hit (`Night.drawPosition`, `liveUntil`).
+30. **A refusal inside a condition is still a silent no-op.** `if ... or knockUntil ~= nil then return end`
+    swallowed a Rest press mid-stumble (5 of 5). Queue it or say why.
+31. **A local prop placed "ahead of the player" needs the ground rule too.** The campfire floated over the ravine
+    at the cliff (4 of 4 parts); `Night.campfireSpot` keeps its whole ring on the Ground.
+32. **An overlap rule that looks at one ScreenGui misses the other.** hudcheck 4b compares the HUD's depth-2
+    frames; the night's card is in its own gui and sat on the chip, the toast and the open Hunt panel. Measure
+    across guis with the busiest HUD, and defer a card while a panel is open.
+33. **A budget asserted only by a check is a promise, not a cap.** Admit costs where things are shown
+    (`setWeight`), keep a Reserve for what must always show (the telegraph, the campfire), cap emitters per frame,
+    and prove it with a check that lowers the budget in memory (`_budgetcap`).
+34. **A check that sets a widget Visible by hand measures what the game may never draw.** `_nighthud` forced the card's
+    subtitle on and measured at once; the game hides it where it has no room, so the check saw a subtitle "in the
+    touch band" that is never shown. Stage it, then let the game lay it out (a re-layout), and measure what it shows.
+35. **A budget that is capped in code passes every "within budget" assertion by construction.** The cap (Traps 33)
+    refuses a piece once scenery passes the budget minus its Reserve, so the frame never exceeds the budget: the
+    fifth band's first build peaked at 194-195 parts and passed. Assert the worst case stays under the admit line
+    (190), or a refused piece just pops in late (`check_stealacryptid_budget`; two legends a side: 176-180).
+36. **A lock token per server is not a token per session.** `jobId` cannot tell two sessions of one player on one
+    server apart: a quick rejoin loaded the record before the leave's write landed (3 cages instead of 4), and that
+    write then unlocked the record under the new session (guards G25, G25b, measured before the fix).
+37. **A follow-up the player cannot afford tests the refusal, not the rule.** G25's first draft checked the new
+    session's save with a fifth cage (1 500 Essence) the seed (1 000) could not pay for: it failed for the wrong
+    reason, and in G25b both records held 4 cages, so an overwrite was invisible. Seed enough, and make the records differ.
+38. **The emulator names an absent user `User_<id>`, and a name cache keeps it.** The board's first public refresh at
+    boot looked up a user who joined later and cached the placeholder (Roblox would answer the real name): write
+    board-only entries after the boot in a check, or the check fails on the emulator, not the game.
+39. **A rule on whole sets lets two places share their only kind.** "No two camps have the same set of critters" passed
+    with the Loch back to bats alone beside the Barrens' bats and Jersey Devil (sweep M30). Places need a critter of
+    their own: each camp has a kind no other camp has (`NightConfig.spec`).
+40. **A guard the shipped numbers never exercise survives every gate.** `capEmitters` leaving the Badlands' sand out of
+    its list (M31) and the Jersey Devil judged by the 3-stud box (M32) changed nothing anyone measured: nothing is ever
+    capped with the shipped numbers, and critters fly tangent to a ring round the CAMERA, so from the gate a devil's
+    wings point at the keep-out only near its far corners. Drive the rule: an emitter budget of 0 over one emitter of
+    every weather kind (`_budget`), 15 devils with the camera orbiting the camp (`_keepout`; the 3-stud box let wings
+    in 23-27 times in 60 s).
+41. **A final-state read can be papered over by a later periodic write.** G25b read the record 1.5 s after the late
+    write landed; in 1 run of 3 an autosave of the new session rewrote it in between and the mutant without the token
+    check (M22) passed. Judge every commit in the window (the guards' `COMMITS`), not only the end state.
 
 ## Deviations from DESIGN.md, and why
 
@@ -351,6 +471,10 @@ A failure prints the camp seed.
 | poacher steals half "the fullest jar at grab time" | half the jar of the cage it walked to (the fullest when it appeared) | it is standing at that cage |
 | Release prompts on occupied cages | a Release prompt on every unlocked cage; an empty one says so | no prompt appears or vanishes as cages change |
 | top-edge toggles: Build, Leave camp | Hunt, Build, Leave camp; Add cage and Re-roll in the Hunt panel | the design names Reroll and Expand remotes but no control for them |
+| `Economy.Payback` Mythic 14 400 s (Bigfoot 6 480 000, permit 648 000, alert 4 h) | 3 600 s (1 620 000, 162 000, 1 h) (2026-10-01) | docs/complete-game-standard.md section 2 wants the brag moment in about 30-45 minutes; `tests/Pacing.spec.luau` measured the first Mythic at a median 81.6 minutes of normal play; 3 600 s puts it at 35.6, nine Mythics at 190.9 (4 200 s: 38.7; 4 800 s: 42.3; 7 200 s: 53.9). Cage 9 stays 6 000 000, now the long goal's wall |
+| leaderboards cut (section 16) | the Top Lairs board, public + friends (2026-10-01) | the owner's complete-game standard section 3; the metric is the best lair income, which only the server's own rules move |
+| (not in the design: the night's four home bands, named by rank, EYECANDY.md) | five: the Gathering past the Mythic, when the best lair income reaches 1 350/s (`Night.level`) | the standard asks for at least 5 bands, and rank 0 lasts 2 s |
+| the session lock is the server's JobId | JobId plus a per-session GUID (`session`); a same-server rejoin waits for the leave-write | the standard's "owner token on every write"; Traps 36 |
 | generator order ends with phases | ...phases, then cage species | the species draw was unplaced; last keeps earlier draws replayable |
 | Timeout and Leave camp | not counted in `stats.caught` | only a laser or a snare is a catch |
 
@@ -383,8 +507,15 @@ A failure prints the camp seed.
   walked, every apron step and route sample standable, 3 prompt presses all in reach, 0 pull-backs.
   Across this pass's walks tier-1 raids took 13.6-14.8 s and tier-2 16.4-21.4 s, each within 0.25 s of
   its plan.
-- **Not re-measured:** DESIGN.md's success-rate table (`success.py`) and pacing table (`econ.py`,
-  `tune.py`). They remain Python-model numbers and must not be quoted as the game's.
+- **Pacing and raid success** (`tests/Pacing.spec.luau`, 2026-10-01; it replaces `econ.py`, `tune.py` and `success.py`):
+  raid success measured on 100 real camps per tier, each crossing aimed at the middle of its safe window as the
+  server's catch rule draws it: timing error 0.25 s 100.0 / 99.7 / 97.3 / 88.0 % per tier, 0.35 s 99.9 / 95.1 / 80.3 /
+  53.4 % (DESIGN.md's Python: 100 / 99.3 / 91.8 / 70.7 and 100 / 92.6 / 66.1 / 32.4; the server's 0.2 s latency grace
+  is the difference). Minutes of play, normal raider (0.25 s, 2x the solver's time), median (fastest-slowest): first
+  Rare 3.9, first Legendary 14.5, first Mythic 35.6 (31.8-76.3), the Gathering 97.3, nine Mythics 190.9; casual
+  (0.35 s, 3x) 4.9 / 17.4 / 59.5 / 122.5 / 213.8; never raids 10.8 / 61.2 / 180.5 / 222.0 / 325.0. On the old
+  payback the same model gave 3.9 / 15.7 / 112.2 / - / 565.4 (perturbing the earliest departure) and 3.9 / 14.5 / 81.6 /
+  - / 542.0 (aiming at the middle), against DESIGN.md's 3.1-5.1 / 14.2-16.8 / 107-140.5 / - / 541.5-571.0.
 
 ## Mutation sweep (2026-09-17, second pass)
 
@@ -472,7 +603,7 @@ disagreements in 1 440 000 random ticks) and M37 (four corners did not hit the r
 
 ## Needs Studio (nothing here is verified; do not report any of it as verified)
 
-The night's own list (22 items: band looks, atmosphere vs fog, beams, dark critters on a dark sky, the stumble,
+The night's own list (26 items: band looks, atmosphere vs fog, beams, dark critters on a dark sky, the stumble,
 Rest's sit, habitats, frame time, the ravine, the view guard's pop, a server boundary, non-uniform Ball parts...)
 is EYECANDY.md section 9; its thumbnail shot list is section 10.
 
@@ -520,6 +651,14 @@ is EYECANDY.md section 9; its thumbnail shot list is section 10.
 18. **Streaming.** `default.project.json` does not set `Workspace.StreamingEnabled`, and pockets sit at
     x >= 4000. If the published place streams, a server teleport into a pocket (or home) may land before
     the floor streams in. Both second-round reviewers flagged it; the emulator does not model streaming.
+19. **The Top Lairs board** (2026-10-01): the SurfaceGui's text (18-30 px on a 12 x 8-stud board, 40 px per stud) read
+    from the Collect Pad at night; the neon trim; its prompt and the Hunt Board's both in reach between them (Roblox
+    shows the nearer one per key); a real `GetSortedAsync` / `GetFriendsAsync` / `GetNameFromUserIdAsync` against a
+    published place and its request budget; the boards on a 50-player road (one per plot).
+20. **The retuned Mythic** (2026-10-01): whether a first Bigfoot in about 36 minutes feels earned, and whether nine
+    Mythics in about 3 hours (the model's) is a long enough goal. These are model minutes.
+21. **A same-server rejoin**: whether Roblox ever routes a quick rejoin to the server the player just left (the wait,
+    "Your last visit is still saving - one moment", only shows then).
 
 ## Known gaps (not defects fixed, not Studio questions)
 
@@ -528,8 +667,9 @@ is EYECANDY.md section 9; its thumbnail shot list is section 10.
   and 50 plots. Set the place's MaxPlayers to 8 before publishing.
 - **No player-to-player collision groups** in pockets (a teleporting exploiter could body-block a gap).
 - **Carry speed**: the trusted cap while carrying is 16.2 studs/s, above the walk speed of 16.
-- **A rejoin to the SAME server within a load window** could have the first join's late lock release
-  clear the new session's lock until that session's next write.
+- **A rejoin to the same server whose leave-write takes longer than `WriteQueueSeconds` (60 s)** loses that write's
+  last changes: the rejoin loads without them, and the late write then finds the record taken by the new session's
+  token and writes nothing (consistent, not corrupt; guards G25b). Up to 60 s the rejoin waits and loses nothing (G25).
 - **Freezes of a second or more** can still stop the slide (a raider straight behind a rock); the
   pull-back then costs the player a walk round. Measured: 329 of 33 482 phases at 1.0 s, 4 708 at 1.5 s.
 - **`Random` is not a cryptographic generator.** Recovering the camp stream's state from brute-forced
@@ -537,7 +677,10 @@ is EYECANDY.md section 9; its thumbnail shot list is section 10.
   recoverable from its layout; that shows nothing the camp does not.
 - **A LOAD_FAILED session never retries in the background**, and a locked session whose old server
   writes a final save after the 15 s wait stays unsaved until the player rejoins.
-- **No reviewer has seen the second pass's changes** (see State).
+- **A possible rare `_hazards` flake** (2026-10-01): one failure (68 / 1) in 135 runs, during a mutation run whose
+  mutation could not reach it; the log was lost and 60 reruns were green. If it shows again, keep the log.
+- **No reviewer has seen the second pass's changes** (see State), nor pass 2's (the board, the retune, the fifth
+  band, the camps' weather and critters, the owner token).
 
 ## Files
 
@@ -549,36 +692,43 @@ src/shared/Rng.luau             verbatim fork-tower
 src/shared/Fx.luau              verbatim fork-tower
 src/shared/FxClient.luau        verbatim
 src/shared/Responsive.luau      verbatim
-src/shared/Economy.luau         prices, jars, cages, heat, permits, bounty, the profile's shape
+src/shared/Economy.luau         prices, jars, cages, heat, permits, bounty, the profile's shape, the best lair (noteBest)
 src/shared/Offers.luau          the three pedestals
 src/shared/Layout.luau          grid, lair + camp generation, reachability, placement, cell validation, escape, danger rects, free rects + barriers, grab reach
 src/shared/Heist.luau           laser timing, the catch test (per segment and per path), the raid solver (timed route)
 src/shared/Trace2D.luau         the trusted position: step (slide, stuck time), settle
 src/shared/Poacher.luau         the NPC's route, caution and stepping
 src/shared/CryptidModel.luau    the eight procedural models
-src/server/Main.server.luau     everything that touches the engine
+src/server/Main.server.luau     everything that touches the engine (+ the Top Lairs board, the session token)
 src/client/Hud.client.luau      the HUD (+ the Rest toggle and the NightBus the night writes to)
 src/client/Night.client.luau    the night: bands, lighting, scenery, critters, weather, habitats, hazards, rest (client only)
-src/shared/Night.luau           the night's pure rules (floor, night hours, rank, keep-out, hazard gate, drawn path, the ravine, the knock cut, the camera's view hull, habitats)
+src/shared/Night.luau           the night's pure rules (floor, night hours, rank and level, keep-out, hazard gate, drawn path, the ravine, the knock cut, the camera's view hull, habitats)
 src/shared/NightArt.luau        the night's art, code-only, client-only
 src/shared/EnvBands.luau        verbatim plus1-jump template (bands, glides, critter ring, capRates)
 src/shared/Hazards.luau         verbatim plus1-jump template (rare telegraphed hazards, the ring rule)
 src/shared/Rest.luau            verbatim plus1-jump template (rest rules)
+src/shared/Board.luau           verbatim plus1-jump template (the highscore board's rules: encode, keepHigher, views, caches, limiter)
+src/client/Board.client.luau    draws this player's Top Lairs view on every plot's board (a SurfaceGui per board, not in PlayerGui)
+MARKETING.md                    the clip list: 10 vertical clips for tools/film_game.py, each with its staging
 EYECANDY.md                     the night: bands, hazards + rarity, rest, budgets, gates, sweep, Needs Studio, shot list
 tests/*.spec.luau               one per shared module (+ Rng, Responsive)
 tests/walk.luau                 the player's path through the real HUD, join to a second loop
+tests/Pacing.spec.luau          the pacing model on the game's own rules (the brag moment, the Gathering, nine Mythics)
 ../robloxemu/check_stealacryptid.luau         world / spawn / reach / raid / security gate
 ../robloxemu/check_stealacryptid_guards.luau  one block per review finding (G1-G24)
 ../robloxemu/check_stealacryptid_hud.luau     HUD fit (hudcheck) + text legibility
 ../robloxemu/check_stealacryptid_{night,hazards,rest,nighthud,budget,compile,lateroad,keepout,life,longroad,edge,view}.luau  the night
+../robloxemu/check_stealacryptid_{latehit,card,budgetcap,fall}.luau   the second night review (2026-09-30) and owner decision (d)
+../robloxemu/check_stealacryptid_board.luau   the Top Lairs board (2026-10-01)
 ```
 
 ## Next
 
 1. Open it in Studio (00:00-06:00 night job) and work through Needs Studio, starting with 1, 3, 4, 6,
    8, 13 and 18, then EYECANDY.md section 9, and shoot the thumbnails in EYECANDY.md section 10.
-2. An adversarial review by a separate reviewer of the second pass's changes (REVIEW-1.md) and of the night's
-   review fixes (EYECANDY.md sections 11 and 13).
-3. Port `econ.py` pacing and `success.py` into a Luau measure.
+2. An adversarial review by a separate reviewer of the second pass's changes (REVIEW-1.md), of the night's
+   review fixes (EYECANDY.md sections 11, 13 and 14, the fall rescue included) and of pass 2 (EYECANDY.md section 15:
+   the board, the retune, the fifth band, the owner token).
+3. ~~Port `econ.py` pacing and `success.py` into a Luau measure.~~ Done 2026-10-01 (`tests/Pacing.spec.luau`).
 4. Only then: create the experience (MaxPlayers 8), the maturity questionnaire, a git-ignored publish
-   script.
+   script; then the night shift's thumbnails (EYECANDY.md section 10) and clips (MARKETING.md).

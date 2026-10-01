@@ -19,7 +19,9 @@ local PRICES = {
 	jackalope = 30, hodag = 60, chupacabra = 90,
 	dogman = 3600, jerseydevil = 5400,
 	mothman = 168000, nessie = 240000,
-	bigfoot = 6480000,
+	-- 2026-10-01: the Mythic payback is 3 600 s (was DESIGN.md's 14 400), so the first Mythic lands in 30-45 minutes
+	-- of normal play (tests/Pacing.spec.luau measures it; CLAUDE.md Deviations)
+	bigfoot = 1620000,
 }
 local TIER = { jackalope = 1, hodag = 1, chupacabra = 1, dogman = 2, jerseydevil = 2, mothman = 3, nessie = 3, bigfoot = 4 }
 local count = 0
@@ -87,12 +89,12 @@ eq(Economy.expansionPrice(Config, 9), nil, "nothing past nine cages")
 eq(Economy.heatSeconds(Config, 1), 30, "tier 1 heat")
 eq(Economy.heatSeconds(Config, 2), 300, "tier 2 heat")
 eq(Economy.heatSeconds(Config, 3), 2400, "tier 3 heat")
-eq(Economy.heatSeconds(Config, 4), 14400, "tier 4 heat")
+eq(Economy.heatSeconds(Config, 4), 3600, "tier 4 heat (one hour)")
 
 eq(Economy.permit(Config, 1), 0, "tier 1 permit is free")
 eq(Economy.permit(Config, 2), 360, "tier 2 permit 360")
 eq(Economy.permit(Config, 3), 16800, "tier 3 permit 16 800")
-eq(Economy.permit(Config, 4), 648000, "tier 4 permit 648 000")
+eq(Economy.permit(Config, 4), 162000, "tier 4 permit 162 000")
 
 -- the anti-farm bound: stealing then releasing earns less than half the species' own rate,
 -- even with a 1-second raid (far below any camp's measured optimum)
@@ -211,6 +213,59 @@ do
 	-- cage 1 is column 1, the EIGHTH in centre-out order: locked while only three are unlocked
 	eq(locked.cages[1].sp, "", "a cryptid saved in a locked cage is not kept there")
 	eq(locked.essence, 30 + 30, "...it is released for half its price instead of vanishing")
+end
+
+--============================================================================ the best lair (the Top Lairs board's metric)
+-- docs/complete-game-standard.md section 3: rank on a server-measured metric, ties to whoever reached it FIRST. The
+-- metric is the best lair income the player has ever had (Essence/s), measured from the server's own profile.
+
+do
+	local p = Economy.defaultProfile(Config)
+	eq(p.bestRate, 0, "a new profile's best lair income is 0")
+	eq(p.bestRateAt, 0, "...reached at no time")
+	p.cages[5] = { sp = "hodag", jar = 0 }
+	eq(Economy.noteBest(Config, p, 1790000000), true, "a lair earning 2/s beats a best of 0")
+	eq(p.bestRate, 2, "the best is now 2")
+	eq(p.bestRateAt, 1790000000, "stamped when it was reached")
+	eq(Economy.noteBest(Config, p, 1790000100), false, "the same income later is not a new best")
+	eq(p.bestRateAt, 1790000000, "...and the first stamp stands (a tie goes to whoever was first)")
+	p.cages[5] = { sp = "jackalope", jar = 0 }
+	eq(Economy.noteBest(Config, p, 1790000200), false, "a lower income (a cryptid released) is not a new best")
+	eq(p.bestRate, 2, "...and never lowers it")
+	p.cages[4] = { sp = "bigfoot", jar = 0 }
+	eq(Economy.noteBest(Config, p, 1790000300), true, "a Bigfoot moving in is a new best")
+	eq(p.bestRate, 451, "1 + 450")
+	eq(p.bestRateAt, 1790000300, "stamped at the Bigfoot")
+end
+
+do
+	local function cagesWith(fill)
+		local out = {}
+		for i = 1, 9 do out[i] = { sp = "", jar = 0 } end
+		for col, sp in fill do out[col] = { sp = sp, jar = 0 } end
+		return out
+	end
+	local saved = Economy.normalizeProfile(Config, { cagesUnlocked = 3, cages = cagesWith({ [5] = "hodag" }),
+		bestRate = 30, bestRateAt = 1780000000 }, NOW)
+	eq(saved.bestRate, 30, "a saved best survives, even above the income the lair loads with (it released some)")
+	eq(saved.bestRateAt, 1780000000, "...with its own stamp")
+	local legacy = Economy.normalizeProfile(Config, { cagesUnlocked = 3, cages = cagesWith({ [5] = "hodag", [4] = "dogman" }) }, NOW)
+	eq(legacy.bestRate, 14, "a profile saved before the board existed: the best is the income it loads with")
+	eq(legacy.bestRateAt, NOW, "...stamped at this load (it ranks behind everyone who reached it earlier)")
+	local behind = Economy.normalizeProfile(Config, { cagesUnlocked = 3, cages = cagesWith({ [5] = "dogman" }),
+		bestRate = 3, bestRateAt = 1780000000 }, NOW)
+	eq(behind.bestRate, 12, "a saved best below the loaded lair's income is raised to it")
+	eq(behind.bestRateAt, NOW, "...and stamped now, not with the old stamp")
+	local junk = Economy.normalizeProfile(Config, { cagesUnlocked = 3, cages = cagesWith({}), bestRate = "lots", bestRateAt = {} }, NOW)
+	eq(junk.bestRate, 0, "a garbage best is 0")
+	eq(junk.bestRateAt, 0, "...with no stamp")
+	local frac = Economy.normalizeProfile(Config, { cagesUnlocked = 3, cages = cagesWith({}), bestRate = 12.7, bestRateAt = 1780000000.9 }, NOW)
+	eq(frac.bestRate, 12, "a fractional best is floored")
+	eq(frac.bestRateAt, 1780000000, "...and so is its stamp")
+	local noStamp = Economy.normalizeProfile(Config, { cagesUnlocked = 3, cages = cagesWith({}), bestRate = 12 }, NOW)
+	eq(noStamp.bestRateAt, NOW, "a best with no stamp is stamped at this load")
+	local huge = Economy.normalizeProfile(Config, { cagesUnlocked = 3, cages = cagesWith({}), bestRate = 1e12, bestRateAt = 1780000000 }, NOW)
+	eq(huge.bestRate, 9 * 450, "a best above any reachable lair (nine Bigfoots, 4 050/s) is capped there")
 end
 
 --============================================================================ cages in play

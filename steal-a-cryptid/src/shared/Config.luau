@@ -42,6 +42,11 @@ Config.World = {
 	TrailheadPosition = { x = 0, y = 0.5, z = 0 },
 	-- where an R15 root sits over the floor it stands on (vault-runners' RunnerRootHeight)
 	RootHeight = 3,
+	-- Owner decision (d), DECIDED 2026-09-30: no invisible walls round the Ground (they can hide a cage's prompt
+	-- from a camera behind them). A character at home whose root falls this far below the Ground's top (off the
+	-- bluff, into the ravine) is put back on its own arrival marker, at rest, with this toast. Never in a raid.
+	FallRescueStuds = 12,
+	FallRescueText = "That is a long way down - back to your lair",
 	-- apron positions, plot-local studs (x, z)
 	Apron = {
 		P1 = { x = 26, z = 8 },
@@ -117,7 +122,11 @@ Config.Tiers = {
 
 --============================================================================ [4] economy
 Config.Economy = {
-	Payback = { 30, 300, 2400, 14400 },
+	-- seconds a cryptid takes to earn its own price, per tier. The Mythic's was DESIGN.md's 14 400; 3 600 (2026-10-01)
+	-- puts the first Mythic (Mythic Night, the brag moment) at a median 35.6 min of normal play instead of 81.6, with
+	-- nine Mythics at 190.9 min (tests/Pacing.spec.luau; docs/complete-game-standard.md section 2). It also sets the
+	-- tier-4 permit (162 000) and alert (one hour).
+	Payback = { 30, 300, 2400, 3600 },
 	StartEssence = 30,
 	StartCages = 3,
 	MaxCages = 9,
@@ -240,6 +249,43 @@ Config.Save = {
 	-- a write that must go after the one in flight (the grant, a leave) waits at most this long;
 	-- after that the in-flight write is treated as lost and this one reports failure
 	WriteQueueSeconds = 60,
+	-- the Top Lairs board's OrderedDataStore (Config.Board): key u_<userId>, value Board.encode(bestRate, bestRateAt)
+	Board = "StealACryptid_TopLairs_v1",
+}
+
+--============================================================================ the Top Lairs board
+-- docs/complete-game-standard.md section 3 (owner, 2026-09-16), the +1 Jump template (src/shared/Board.luau,
+-- verbatim). The metric is the BEST LAIR INCOME a player has ever had, Essence/s, measured by the server from its
+-- own profile (Economy.noteBest after a purchase or a granted steal); ties go to whoever reached it first. A board
+-- stands on every plot's front fence beside the gate, behind the Collect Pad: every player spawns on their own
+-- arrival marker, so every plot needs one near it. The prompt toggles Public / Friends for whoever presses it.
+Config.Board = {
+	PublicRows = 10,            -- GetSortedAsync(false, 10)
+	PublicCacheSeconds = 60,    -- the server asks the store for the top 10 at most once a minute
+	FriendsRows = 10,
+	FriendsCap = 200,           -- Players:GetFriendsAsync is never read past this many friends
+	FriendsCacheSeconds = 300,  -- a player's friend list, cached per player
+	ScoreCacheSeconds = 120,    -- a friend's best, cached per server (also "has none")
+	ReadsBurst = 40,            -- GetAsync on the board for friends: 40 at once ...
+	ReadsPerSecond = 1,         -- ... then 1 a second (Roblox allows 60 + 10 per player a minute)
+	BudgetReserve = 10,         -- always leave this many GetAsync in Roblox's request budget
+	MaxMetric = 4000000,        -- the stored value is exact in a double up to here (4e6 * 2e9 < 2^53); a lair tops out at 4 050
+	PromptDistance = 10,        -- World.PromptDistance: in reach on the Collect Pad, out of reach on the arrival marker
+	-- plot-local (Config.World): on the front fence's apron face (z 16), right of the gate (x 32..40), behind the pad
+	Size = { x = 12, y = 8, z = 0.6 },
+	Position = { x = 52, y = 5, z = 15.6 },
+	Text = {
+		Title = "TOP LAIRS",
+		Unit = "/s",
+		EmptyPublic = "No lairs on the board yet. Buy a cryptid and be the first!",
+		FriendsFailed = "Couldn't load your Roblox friends right now. Try again in a minute.",
+		NoFriends = "No Roblox friends yet. Friends you add show up here, ranked against you.",
+		FriendsNoScores = "None of your %d friends has a lair yet. Invite one and race them to Bigfoot!",
+		FriendsChecking = "Checking your friends: %d of %d so far...",
+		Loading = "Loading...",
+		Prompt = "Public / Friends",
+		Hint = "Best lair income ever. Press E here: Public / Friends",
+	},
 }
 
 Config.Remotes = {
@@ -309,6 +355,12 @@ Config.Night = {
 	CampMargin = 8,          -- camp scenery and critters keep this far outside the camp's fences
 	CameraCorridorHalfWidth = 30, -- and out of the corridor behind the gate, where the raider's camera is
 	CameraCorridorDepth = 70,
+	-- The fifth home band, past Mythic Night (docs/complete-game-standard.md section 2: at least 5 bands): the
+	-- gathering comes once the best lair income the player has ever had (State.best, the Top Lairs board's metric)
+	-- reaches this, with the Mythic in the Journal (Night.level). 1 350/s is three Bigfoots' worth, above the 900/s of
+	-- the best lair without a Mythic, so it always follows Mythic Night. tests/Pacing.spec.luau measures it at a
+	-- median 97 minutes of normal play: a step on the way from the brag moment (36) to nine Mythics (191).
+	GatheringRate = 1350,
 
 	Home = {
 		{
@@ -371,6 +423,26 @@ Config.Night = {
 			weather = { kind = "stardust", rate = 6 },
 			hazards = { "meteorite", "wisp" },
 		},
+		{
+			-- the long-term goal's own sky: a crimson moon low over the ridge, the legends of Pine Hollow standing on
+			-- the far rim to look at your lair (Bigfoot still walking behind them, the UFOs still watching), moths and
+			-- embers, 4:36 am. Every piece of Mythic Night stays: at the seam nothing more is drawn than the union
+			-- already was, and the checks that need every home piece shown run here
+			id = "gathering", from = 5, fade = 0, name = "The Gathering", sub = "Every legend comes to look",
+			lighting = { ClockTime = 28.6, Brightness = 1.4, ExposureCompensation = 0.1, Ambient = { 84, 54, 66 },
+				OutdoorAmbient = { 122, 80, 96 }, FogStart = 60, FogEnd = 600, FogColor = { 92, 38, 54 },
+				EnvironmentDiffuseScale = 0.5, EnvironmentSpecularScale = 0.5 },
+			atmosphere = { Density = 0.3, Offset = 0.1, Color = { 220, 130, 120 }, Decay = { 130, 44, 80 }, Glare = 0.6, Haze = 1.2 },
+			-- the sky's own moon shrinks away: the crimson moon (the bloodMoon piece) takes its place
+			sky = { StarCount = 5000, MoonAngularSize = 6, SunAngularSize = 21 },
+			bloom = { Intensity = 1.3, Size = 34, Threshold = 0.78 },
+			colorCorrection = { Brightness = 0.04, Contrast = 0.2, Saturation = 0.14, TintColor = { 255, 224, 216 } },
+			sunRays = { Intensity = 0, Spread = 0.3 },
+			pieces = { "farGround", "ridges", "farPines", "owls", "auroraGold", "ufos", "bigfoot", "bloodMoon", "gathering" },
+			ambient = { { kind = "moth", count = 5 }, { kind = "redEyes", count = 6 }, { kind = "meteor", count = 2 } },
+			weather = { kind = "embers", rate = 6 },
+			hazards = { "meteorite", "bat" },
+		},
 	},
 
 	-- One place per camp tier (progress = tier - 1). No hazards here, ever: a knock in a camp would
@@ -388,6 +460,7 @@ Config.Night = {
 			sunRays = { Intensity = 0, Spread = 0.3 },
 			pieces = { "campSand", "mesas", "cacti" },
 			ambient = { { kind = "tumbleweed", count = 3 }, { kind = "bat", count = 2 } },
+			weather = { kind = "sand", rate = 4, at = "campBack" },
 			hazards = {},
 		},
 		{
@@ -401,7 +474,8 @@ Config.Night = {
 			colorCorrection = { Brightness = 0.01, Contrast = 0.18, Saturation = 0, TintColor = { 215, 230, 240 } },
 			sunRays = { Intensity = 0, Spread = 0.3 },
 			pieces = { "campNeedles", "pineRing" },
-			ambient = { { kind = "bat", count = 4 } },
+			-- the Jersey Devil's own woods: one circles high over the pines (the Rare camp's prize may be one)
+			ambient = { { kind = "devil", count = 1 }, { kind = "bat", count = 3 } },
 			weather = { kind = "fireflies", rate = 3, at = "campBack" },
 			hazards = {},
 		},
@@ -416,7 +490,8 @@ Config.Night = {
 			colorCorrection = { Brightness = 0.02, Contrast = 0.18, Saturation = 0.02, TintColor = { 220, 232, 255 } },
 			sunRays = { Intensity = 0, Spread = 0.3 },
 			pieces = { "campShore", "loch", "castle", "nessie" },
-			ambient = { { kind = "bat", count = 2 } },
+			-- moths, drawn to the castle's lit window (Mothman, a Legendary, is this camp's kind of prize)
+			ambient = { { kind = "moth", count = 5 } },
 			weather = { kind = "mist", rate = 3, at = "campBack" },
 			hazards = {},
 		},
@@ -432,7 +507,7 @@ Config.Night = {
 			sunRays = { Intensity = 0, Spread = 0.3 },
 			pieces = { "campFerns", "redwoods", "bigfootGlimpse" },
 			ambient = { { kind = "wisp", count = 3 } },
-			weather = { kind = "mist", rate = 4, at = "campBack" },
+			weather = { kind = "spores", rate = 4, at = "campBack" },
 			hazards = {},
 		},
 	},
@@ -447,6 +522,9 @@ Config.Night = {
 		redEyes = { rMin = 70, rMax = 150, yMin = -6, yMax = 0, speedMin = 0.5, speedMax = 1.2 },
 		meteor = { rMin = 500, rMax = 1200, yMin = 250, yMax = 600, speedMin = 260, speedMax = 380 },
 		tumbleweed = { rMin = 70, rMax = 200, yMin = 0, yMax = 0, ground = 0.3, speedMin = 6, speedMax = 11 },
+		moth = { rMin = 40, rMax = 120, yMin = 4, yMax = 20, speedMin = 3, speedMax = 6, flock = 2 },
+		-- reach: how far a critter draws from its centre, for the camp keep-out box (default 3: wings, bob, halo)
+		devil = { rMin = 110, rMax = 220, yMin = 40, yMax = 90, speedMin = 12, speedMax = 18, reach = 7 },
 	},
 
 	-- Hazards: RARE, telegraphed, one at a time, and only at HOME (never in a camp, never before the
@@ -513,6 +591,12 @@ Config.Night = {
 		MaxTrails = 6,
 		MaxLights = 3,
 		MaxHazards = 1,
+		-- Capped IN CODE (second review, 2026-09-30, finding 5): every piece of scenery, critter and habitat is
+		-- admitted against the budget above minus this Reserve before it is drawn (Night.admit in NightArt), and
+		-- the particle emitters are capped every frame in priority order (Night.capEmitters). The Reserve is what
+		-- the always-shown pieces may use, never refused: a hazard (at most 3 parts, 1 trail, 1 blink light), its
+		-- lane and ring (2 parts), the rest campfire (4 parts, 1 light) and the weather host (1 part).
+		Reserve = { parts = 10, beams = 0, trails = 1, lights = 2 },
 	},
 
 	-- Your own cages get a habitat patch per species (other lairs keep the plain cage: budget).
@@ -526,7 +610,9 @@ Config.Night = {
 	},
 
 	-- The campfire that appears beside a resting player (local; others see you sit, not the fire).
-	Campfire = { Rate = 8, LightRange = 14, LightBrightness = 1.6 },
+	-- Distance: from the sitter's root to the fire's centre; Radius: the stone ring's (the widest part). The fire
+	-- goes where its whole ring is on the road's Ground (Night.campfireSpot): at the cliff it moves behind or aside.
+	Campfire = { Rate = 8, LightRange = 14, LightBrightness = 1.6, Distance = 4, Radius = 1.6 },
 
 	-- The HUD chip (Hud.client's RaidChip slot, via its NightBus) and the Rest toggle. ASCII only.
 	Text = {

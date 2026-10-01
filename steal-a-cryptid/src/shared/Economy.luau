@@ -211,7 +211,30 @@ function Economy.defaultProfile(cfg: any): any
 		journal = {},
 		tutorial = 0,
 		stats = { steals = 0, caught = 0, poachersCaught = 0 },
+		-- the Top Lairs board's metric (docs/complete-game-standard.md section 3): the best lair income this player
+		-- has ever had, in Essence/s, and the os.time() it was first reached (a tie goes to whoever was first)
+		bestRate = 0,
+		bestRateAt = 0,
 	}
+end
+
+-- The best lair income anyone can reach: every cage holding the fastest species.
+function Economy.maxLairRate(cfg: any): number
+	local fastest = 0
+	for _, s in cfg.Species do fastest = math.max(fastest, s.rate) end
+	return fastest * cfg.Economy.MaxCages
+end
+
+-- After the server changes a cage: a lair earning more than the best ever is the new best, stamped `now`. The same
+-- income reached again is not (the first reach stands), and a lower one never lowers it. -> true when it rose.
+function Economy.noteBest(cfg: any, profile: any, now: number): boolean
+	local r = Economy.lairRate(cfg, profile)
+	if r > (profile.bestRate or 0) then
+		profile.bestRate = r
+		profile.bestRateAt = math.floor(now)
+		return true
+	end
+	return false
 end
 
 local function num(v: any, default: number): number
@@ -279,6 +302,15 @@ function Economy.normalizeProfile(cfg: any, raw: any, now: number): any
 			p.stats[k] = math.floor(math.max(0, num(raw.stats[k], 0)))
 		end
 	end
+
+	-- the best lair: a saved best survives (the player may have released cryptids since), capped at what nine of the
+	-- fastest species earn. A profile saved before the board existed, or one whose best is below the lair it loads
+	-- with, takes that lair's income, stamped at this load: it ranks behind everyone who reached it earlier.
+	p.bestRate = math.clamp(math.floor(math.max(0, num(raw.bestRate, 0))), 0, Economy.maxLairRate(cfg))
+	p.bestRateAt = math.floor(math.max(0, num(raw.bestRateAt, 0)))
+	if p.bestRate == 0 then p.bestRateAt = 0 end
+	if p.bestRate > 0 and p.bestRateAt <= 0 then p.bestRateAt = math.floor(now) end
+	Economy.noteBest(cfg, p, now)
 
 	return p
 end

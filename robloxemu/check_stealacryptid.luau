@@ -317,6 +317,12 @@ h.Players:simulateSpawn(pB, h.workspace)
 h:advance(0.5)
 assertHome("simulateSpawn", pB)
 eq((plotOf(pB)), 1, "the second joiner is seated on Plot_1")
+-- docs/complete-game-standard.md section 1 and robloxemu/SPAWN-ORDER.md: the engine is told where to put a character
+for _, plr in { pA, pB } do
+	local rl = plr.RespawnLocation
+	truthy(rl ~= nil and rl == trailhead and rl.Enabled ~= false and rl:IsDescendantOf(h.workspace),
+		plr.Name .. "'s RespawnLocation is the one enabled SpawnLocation, the Trailhead (" .. tostring(rl and rl:GetFullName()) .. ")")
+end
 do
 	local a, b = hrpOf(pA), hrpOf(pB)
 	truthy((a.Position - b.Position).Magnitude > 20, "two players do not land on each other")

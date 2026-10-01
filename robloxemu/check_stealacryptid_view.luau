@@ -26,7 +26,7 @@
 --   V2 not vacuous: from the side at far zoom the guard really hid scenery, and never most of it;
 --   V3 the usual raid view (the follow camera behind the gate) and a camera over the camp hide nothing;
 --      after the far spots every hidden part comes back.
--- At home (rank 4: every home piece):
+-- At home (level 5, the gathering: every home piece but the strange lights' aurora, which rides with the camera):
 --   H1 6 spots (apron, behind the cage row, the back and front strips, the road's centre and its -x end) x
 --      the same zooms, yaws and pitches: no shown local SCENERY part crosses the line from the camera to the
 --      player (root, head, 1.5 studs to each side) (critters at home are small moving life and are not hidden: see EYECANDY.md);
@@ -62,7 +62,9 @@ do
 	cages[5] = { sp = "jackalope", jar = 0 }
 	store:SetAsync("u_" .. ME, { data = { v = 1, essence = 1e9, savedAt = NOW, cagesUnlocked = 9, tutorial = 4, cages = cages,
 		traps = {}, heat = { t1 = 0, t2 = 0, t3 = 0, t4 = 0 }, journal = { "jackalope", "dogman", "nessie", "bigfoot" },
-		stats = { steals = 0, caught = 0, poachersCaught = 0 } } })
+		stats = { steals = 0, caught = 0, poachersCaught = 0 },
+		-- a best lair income at GatheringRate: the home sky is the gathering, the band with every home piece
+		bestRate = Config.Night.GatheringRate, bestRateAt = NOW - 60 } })
 end
 assert(h:tryRun("server/Main.server"))
 h:advance(1)
@@ -285,7 +287,7 @@ end
 --============================================================ home (H1-H3)
 
 -- home scenery: the horizon pieces (the floor pieces lie under the Ground; the auroras ride with the camera)
-local HOME_SCENERY = { "Ridge", "FarPine", "Ufo", "Bigfoot_" }
+local HOME_SCENERY = { "Ridge", "FarPine", "Ufo", "Bigfoot_", "Legend_" }
 local function isHomeScenery(name)
 	if name == "Owl" then return true end -- (not "OwlEye": the eyes blink, which is not the guard)
 	for _, pre in HOME_SCENERY do

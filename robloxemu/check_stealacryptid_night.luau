@@ -9,7 +9,8 @@
 --   1. the take-over at join glides from the server's v1 lighting to the player's band, never through
 --      daylight and never below the readability floor;
 --   2. the home sky follows the Journal's rank as the REAL server reports it after REAL purchases at the
---      pedestals (Common -> Rare -> Legendary -> Mythic), gliding, with a title card per new band;
+--      pedestals (Common -> Rare -> Legendary -> Mythic), gliding, with a title card per new band; and past the
+--      Mythic, two more Bigfoots take the best lair income (State.best) to GatheringRate: the gathering (2b);
 --   3. each camp tier, entered with the real Hunt remote from the real board, gets its own place: its
 --      lighting on every frame is readable, no depth of field, and no local part (scenery, critter,
 --      weather host) ever enters the camp or the camera's corridor behind the gate; leaving glides home;
@@ -255,7 +256,35 @@ local PIECE_PART = {
 	auroraGold = "AuroraGoldHost", ufos = "Ufo", bigfoot = "Bigfoot_", campSand = "CampSand", mesas = "Mesa",
 	cacti = "Cactus", campNeedles = "CampNeedles", pineRing = "RingPine", campShore = "CampShore", loch = "LochWater",
 	castle = "Castle", nessie = "Nessie", campFerns = "CampFerns", redwoods = "Redwood", bigfootGlimpse = "Glimpse",
+	bloodMoon = "BloodMoon", gathering = "Legend_",
 }
+-- the first part name each critter builds, and the name of each weather emitter (NightArt)
+local CRITTER_PART = {
+	crow = "CrowBody", bat = "BatBody", wisp = "WispCore", redEyes = "RedEye", meteor = "Meteor", tumbleweed = "Tumbleweed",
+	moth = "MothBody", devil = "DevilBody",
+}
+for _, list in { N.Home, N.Camp } do
+	for _, b in list do
+		for _, a in b.ambient do truthy(CRITTER_PART[a.kind] ~= nil, "this check knows critter " .. a.kind) end
+	end
+end
+-- every piece, critter and weather Config.Night names is one the game's own NightArt can build
+do
+	local NightArt = h:_require(h.ReplicatedStorage:FindFirstChild("NightArt"))
+	for _, list in { N.Home, N.Camp } do
+		for _, b in list do
+			for _, id in b.pieces do truthy(NightArt.hasPiece(id), b.id .. ": NightArt builds piece " .. id) end
+			for _, a in b.ambient do truthy(NightArt.hasCritter(a.kind), b.id .. ": NightArt builds critter " .. a.kind) end
+			if b.weather then truthy(NightArt.hasWeather(b.weather.kind), b.id .. ": NightArt draws weather " .. b.weather.kind) end
+		end
+	end
+end
+local function weatherOn(kind)
+	for _, d in folder:GetDescendants() do
+		if d.ClassName == "ParticleEmitter" and d.Name == "Weather_" .. kind and d.Enabled and (d.Rate or 0) > 0 then return true end
+	end
+	return false
+end
 for _, list in { N.Home, N.Camp } do
 	for _, b in list do
 		for _, id in b.pieces do truthy(PIECE_PART[id] ~= nil, "this check knows piece " .. id) end
@@ -273,6 +302,13 @@ local function atBand(b, where)
 	near(sky and sky.StarCount, b.sky.StarCount, 2, where .. ": CryptidSky.StarCount reached the band's")
 	for _, id in b.pieces do
 		truthy(shown(PIECE_PART[id]) > 0, where .. ": piece " .. id .. " is shown")
+	end
+	-- docs/complete-game-standard.md section 2: each band its own weather and critters, drawn
+	if b.weather then
+		truthy(weatherOn(b.weather.kind), where .. ": its weather (" .. b.weather.kind .. ") is falling")
+	end
+	for _, a in b.ambient do
+		truthy(shown(CRITTER_PART[a.kind]) > 0, where .. ": its critters (" .. a.kind .. ") are out")
 	end
 end
 local function notShown(ids, where)
@@ -337,7 +373,7 @@ end
 
 --============================================================ 2. rank -> band, through real purchases
 
-for i = 2, #N.Home do
+for i = 2, #Config.Tiers do
 	local b = N.Home[i]
 	local before = buyP3("rank " .. i)
 	local cardsBefore = #cards
@@ -359,7 +395,7 @@ for i = 2, #N.Home do
 	truthy(sawCard, b.id .. ": a title card announced " .. string.upper(b.name))
 	run(2.5, b.id) -- the pedestal refills (BuyTweenSeconds) before the next purchase
 end
-eq(daylight, 0, "no daylight frame through all four home bands")
+eq(daylight, 0, "no daylight frame through the four bands the Journal's rank names")
 
 --============================================================ 4. habitats (before the camps: all four tiers now in my cages)
 
@@ -425,6 +461,45 @@ do
 	eq(shown("Habitat_" .. col .. "_"), 0, "and its habitat is gone")
 end
 
+--============================================================ 2b. the fifth band: the gathering, past the Mythic
+
+-- Night.level: one step past the Mythic once the best lair income ever (State.best, the Top Lairs board's metric)
+-- reaches GatheringRate. At rank 4 P3 always offers the Mythic; this lair (a Rare, a Legendary, a Bigfoot: the
+-- Jackalope was released above) needs two more Bigfoots to pass 1 350/s.
+do
+	local g, prev = N.Home[#N.Home], N.Home[#N.Home - 1]
+	eq(g.id, "gathering", "the last home band is the gathering")
+	eq(#N.Home, #Config.Tiers + 1, "one home band past the Journal's last rank")
+	local cardsBefore, bought = #cards, 0
+	for _ = 1, 4 do
+		cardsBefore = #cards
+		buyP3("the gathering, Bigfoot " .. (bought + 1))
+		bought += 1
+		if (st().best or 0) >= N.GatheringRate then break end
+		run(2.5, prev.id) -- the pedestal refills (BuyTweenSeconds); the best is still under the line: still mythic night
+		atBand(prev, "best " .. tostring(st().best) .. "/s, still " .. prev.id)
+	end
+	eq(bought, 2, "two more Bigfoots took the best lair income past GatheringRate")
+	truthy((st().best or 0) >= N.GatheringRate, string.format("the server reports best %s/s (>= %d)", tostring(st().best), N.GatheringRate))
+	eq(st().rank, #Config.Tiers, "the Journal's rank is still the Mythic's: the fifth band is not a rank")
+	run(0.3, "seam " .. prev.id .. ">" .. g.id)
+	local cNow = Lighting.ClockTime
+	local hNow = if cNow < 12 then cNow + 24 else cNow
+	truthy(hNow > prev.lighting.ClockTime + 0.05 and hNow < g.lighting.ClockTime - 0.05,
+		string.format("%s: 0.3 s after the best rose the night is gliding (%.2f between %.2f and %.2f)", g.id, cNow,
+			Night.clockTime(prev.lighting.ClockTime), Night.clockTime(g.lighting.ClockTime)))
+	run(8, g.id)
+	atBand(g, "level 5 " .. g.id)
+	notShown(piecesOf(N.Home, g), "level 5 " .. g.id)
+	local sawCard = false
+	for k = cardsBefore + 1, #cards do
+		if string.find(cards[k], string.upper(g.name), 1, true) then sawCard = true end
+	end
+	truthy(sawCard, g.id .. ": a title card announced " .. string.upper(g.name))
+	run(2.5, g.id)
+end
+eq(daylight, 0, "no daylight frame through all five home bands")
+
 --============================================================ 3. every camp tier, through the real board
 
 local function enterCamp(tier)
@@ -481,7 +556,7 @@ truthy(budget.rate <= B.MaxEmitterRate + 1e-6, "particles/s peak " .. budget.rat
 truthy(budget.beams <= B.MaxBeams, "beams peak " .. budget.beams .. " <= " .. B.MaxBeams)
 truthy(budget.trails <= B.MaxTrails, "trails peak " .. budget.trails .. " <= " .. B.MaxTrails)
 truthy(budget.lights <= B.MaxLights, "lights peak " .. budget.lights .. " <= " .. B.MaxLights)
-eq(#unreadable, 0, "every frame written (join, 4 bands, 4 camps, every seam) met the readability floor" .. (if #unreadable > 0 then ": " .. table.concat(unreadable, " | ") else ""))
+eq(#unreadable, 0, "every frame written (join, 5 bands, 4 camps, every seam) met the readability floor" .. (if #unreadable > 0 then ": " .. table.concat(unreadable, " | ") else ""))
 eq(daylight, 0, "no frame of the whole run showed daylight")
 
 --============================================================ 6. leaks

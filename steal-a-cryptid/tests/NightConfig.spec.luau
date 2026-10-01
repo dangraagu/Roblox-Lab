@@ -2,8 +2,9 @@
 -- hazards. Run from the game directory: luau tests/NightConfig.spec.luau
 --
 -- The rules the eye candy must keep (EYECANDY.md), checked against the real numbers:
---   * the home sky is named by the Journal's rank and deepens with it (dusk -> 3 am); each camp tier
---     has its own place; every band clears the readability floor, and so does every blend of two;
+--   * the home sky is named by the Journal's rank and deepens with it (dusk -> 3 am), and past the Mythic the
+--     best lair income brings a fifth band (the Gathering, 4:36 am); each camp tier has its own place; every band
+--     has its own weather and critters; every band clears the readability floor, and so does every blend of two;
 --   * hazards are rare (one every IntervalMin..IntervalMax seconds of hazard time, never two at once),
 --     telegraphed for at least MinTelegraphSeconds, and a player who steps out of the red ring when
 --     it locks is never hit, from any direction; a player who stays put always is;
@@ -35,17 +36,29 @@ do
 	truthy((EnvBands.validate(N.Camp)), "Config.Night.Camp is a valid EnvBands list")
 end
 
--- home: named by rank (0 = no cryptid yet, then Common .. Mythic)
+-- home: named by the home LEVEL (Night.level): the Journal's rank (0 = no cryptid yet, then Common .. Mythic), then
+-- one step past the Mythic once the best lair income ever reaches Config.Night.GatheringRate
 local homeIds = {}
-for rank = 0, #Config.Tiers do
-	homeIds[rank] = N.Home[EnvBands.indexAt(N.Home, rank)].id
+for level = 0, #Config.Tiers + 1 do
+	homeIds[level] = N.Home[EnvBands.indexAt(N.Home, level)].id
 end
 eq(homeIds[0], homeIds[1], "rank 0 (the first 2 s of a new player) and rank 1 (Common) share the first band")
 eq(homeIds[1], "dusk", "rank 1 (Common): dusk")
 eq(homeIds[2], "moonrise", "rank 2 (a Rare in the Journal): moonrise")
 eq(homeIds[3], "strange", "rank 3 (a Legendary): strange lights")
 eq(homeIds[4], "mythic", "rank 4 (the Mythic): mythic night")
-eq(#N.Home, 4, "four home bands")
+eq(homeIds[5], "gathering", "level 5 (the Mythic, and a best lair at GatheringRate): the gathering")
+eq(#N.Home, 5, "five home bands (docs/complete-game-standard.md section 2: at least 5)")
+-- the gathering always comes after Mythic Night: no lair without a Mythic can earn GatheringRate
+do
+	local maxNonMythic = 0
+	for _, s in Config.Species do
+		if s.tier < #Config.Tiers then maxNonMythic = math.max(maxNonMythic, s.rate) end
+	end
+	local ceiling = maxNonMythic * Config.Economy.MaxCages
+	truthy(type(N.GatheringRate) == "number" and N.GatheringRate > ceiling,
+		string.format("GatheringRate (%s/s) is above the best lair without a Mythic (%d/s): the fifth band follows Mythic Night", tostring(N.GatheringRate), ceiling))
+end
 -- camps: one place per camp tier, progress = tier - 1
 eq(#N.Camp, #Config.Camps, "one camp band per camp tier")
 for tier = 1, #Config.Camps do
@@ -124,6 +137,44 @@ for _, list in { N.Home, N.Camp } do
 		truthy(#b.pieces >= 1, b.id .. ": shows at least one piece of scenery")
 	end
 end
+-- every band has its OWN weather and its OWN critters (docs/complete-game-standard.md section 2): each home and each
+-- camp band has weather and critters, and among the home bands, and among the camps, no two share a weather kind or
+-- the same set of critter kinds
+for _, list in { { name = "home", bands = N.Home }, { name = "camp", bands = N.Camp } } do
+	local weatherOf, critterSetOf = {}, {}
+	for _, b in list.bands do
+		truthy(b.weather ~= nil, b.id .. ": has weather")
+		truthy(#b.ambient >= 1, b.id .. ": has critters")
+		if b.weather then
+			truthy(weatherOf[b.weather.kind] == nil, string.format("%s: its weather (%s) is no other %s band's (%s)", b.id, b.weather.kind, list.name, tostring(weatherOf[b.weather.kind])))
+			weatherOf[b.weather.kind] = b.id
+		end
+		local kinds = {}
+		for _, a in b.ambient do table.insert(kinds, a.kind) end
+		table.sort(kinds)
+		local key = table.concat(kinds, "+")
+		truthy(critterSetOf[key] == nil, string.format("%s: its critters (%s) are no other %s band's (%s)", b.id, key, list.name, tostring(critterSetOf[key])))
+		critterSetOf[key] = b.id
+	end
+end
+-- a camp is a separate place, not a step in a progression: each has a critter no other camp has (its signature life).
+-- A rule on the whole set lets two camps share their only kind while one adds another (sweep round 1: the Loch back to
+-- bats alone, beside the Barrens' bats and Jersey Devil, survived it)
+for _, b in N.Camp do
+	local own = nil
+	for _, a in b.ambient do
+		local elsewhere = false
+		for _, o in N.Camp do
+			if o ~= b then
+				for _, oa in o.ambient do
+					if oa.kind == a.kind then elsewhere = true end
+				end
+			end
+		end
+		if not elsewhere then own = own or a.kind end
+	end
+	truthy(own ~= nil, b.id .. ": has a critter no other camp has (" .. tostring(own) .. ")")
+end
 for _, b in N.Home do
 	truthy(#b.hazards >= 1, b.id .. ": has at least one hazard kind")
 	for _, k in b.hazards do
@@ -149,6 +200,11 @@ do
 	local ok, why = Hazards.validate(H)
 	truthy(ok, "Config.Night.Hazards validates (" .. tostring(why) .. ")")
 	truthy(H.IntervalMin >= 120 and H.IntervalMax <= 180, "one hazard every 2-3 minutes of hazard time (owner's brief)")
+	-- owner decision (a), DECIDED 2026-09-30 (owner: take recommended): the knock rate for a player who ignores
+	-- every warning (one per 2.9-6.7 min of home time) stays; a knock costs nothing. Changing the interval is
+	-- changing that decision.
+	eq(H.IntervalMin, 120, "decision (a): IntervalMin stays 120 s")
+	eq(H.IntervalMax, 180, "decision (a): IntervalMax stays 180 s")
 	truthy(H.MinTelegraphSeconds >= 3, "every hazard is telegraphed for at least 3 s")
 	truthy(H.KnockLift <= Hazards.MAX_KNOCK_LIFT, "the knock's lift is capped")
 	truthy(H.AfterTutorial >= 4, "no hazard before the tutorial is done")
@@ -279,6 +335,20 @@ do
 	truthy(B.MaxLocalParts <= 220, "local parts budget stays at or under +1 Jump's 220 (mobile)")
 	truthy(B.MaxLights <= 3, "at most 3 local lights")
 	truthy(B.MaxEmitterRate <= 60, "at most 60 particles/s")
+	-- (second review, 2026-09-30, finding 5) the budget is capped in code: scenery, critters and habitats are
+	-- admitted against Budget minus Reserve; Reserve is what the always-shown pieces may use (a hazard, its lane
+	-- and ring, the campfire, the weather host: check_stealacryptid_budgetcap measures them against it)
+	local R = B.Reserve
+	truthy(type(R) == "table", "Budget.Reserve exists")
+	if type(R) == "table" then
+		for _, k in { "parts", "beams", "trails", "lights" } do
+			truthy(type(R[k]) == "number" and R[k] >= 0, "Budget.Reserve." .. k .. " is a number >= 0")
+		end
+		truthy(R.parts < B.MaxLocalParts and R.beams <= B.MaxBeams and R.trails < B.MaxTrails and R.lights <= B.MaxLights,
+			"the reserve leaves room for scenery under every budget")
+		truthy(R.lights >= 2, "the reserve keeps a light for the hazard's blink and one for the campfire")
+		truthy(R.trails >= 1, "the reserve keeps a trail for the meteorite")
+	end
 end
 
 --================================================================ strings: ASCII only, no emoji

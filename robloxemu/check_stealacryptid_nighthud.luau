@@ -11,7 +11,10 @@
 --   resting     - the chip carrying the rest line (Night's "Resting - poachers still come");
 --   hazard      - the chip carrying the LONGEST hazard warning Night can write, the button "Rest...";
 --   raiding     - the raid chip, Leave camp, and no Rest toggle;
---   title card  - Night's own card with the longest band name and subtitle, over a hazard warning.
+--   title card  - Night's own card with the longest band name and subtitle, over a hazard warning, with the
+--                 not-saving banner, the first hint and a 100-character toast up: the card overlaps nothing the
+--                 HUD draws (second review, 2026-09-30, finding 4; check_stealacryptid_card.luau has the flow),
+--                 and it stays above the touch-control band (2026-10-01: mutant X1 survived without this rule).
 -- The night's lines reach the HUD through its NightBus (client-local values); each hook writes them the
 -- way Night.client does. The text rule is check_stealacryptid_hud.luau's, copied: >= 11 screen px, or
 -- >= 8 px and >= 85 % of the text's own cap (0.55 em per character, 1.2 em per line: assumptions).
@@ -191,17 +194,93 @@ local function raidMode(h, player)
 	assert(not r.Toggles.RestToggle.Visible, "raid: the Rest toggle is showing in a camp")
 	checkLegibility(h, player, "raiding")
 end
+-- The card sits in its own ScreenGui, so hudcheck's overlap rule 4b (depth-2 Frames of one gui) cannot see it.
+-- Second review of the night, 2026-09-30, finding 4: at 46 % of the screen's height the card crossed the chip
+-- (252 x 14 px on 800x360) and the toast (360 x 21 on 640x300). Rule: the card and its subtitle overlap no HUD
+-- element that draws (a frame with a background, or a text with something in it), with the whole top stack
+-- filled: the not-saving banner, the first hint, a 100-character toast and the longest hazard warning.
+-- Rule 2 (re-run of the 2026-09-30 pass, 2026-10-01): the card and its subtitle never reach into the touch-control
+-- band at the bottom of the PHYSICAL screen (Roblox's thumbstick and jump button; Responsive.layout's controlPad,
+-- measured the way the HUD measures it). The HUD publishes the band's top as NightBus.CardBottom; a mutant that
+-- never publishes it (X1) put the subtitle 5 screen px into the band on 640x300, and no gate noticed.
+local Responsive = require("../steal-a-cryptid/src/shared/Responsive")
+local cardOverlaps, cardInBand, subShown, subMissing, cardViewports = 0, 0, 0, 0, {}
+local function checkCardOverlap(h, player, modeName)
+	local cam = h.workspace.CurrentCamera
+	local w, hh = cam.ViewportSize.X, cam.ViewportSize.Y
+	local cards = {}
+	local sawCard = false
+	for _, r in h:guiRects(player.PlayerGui.CryptidNight, w, hh) do
+		if r.shown and (r.name == "Card" or r.name == "CardSub") and tostring(r.obj.Text or "") ~= "" then
+			table.insert(cards, r)
+			if r.name == "Card" then sawCard = true else subShown += 1 end
+		end
+	end
+	assert(sawCard, modeName .. ": the card was not on screen to be measured")
+	local touch = h.game:GetService("UserInputService").TouchEnabled
+	local pad = Responsive.layout(w, hh, touch, hh).controlPad
+	if pad > 0 then
+		local bandTop = hh - pad
+		for _, c in cards do
+			if c.sy + c.sh > bandTop + 1 then
+				cardInBand += 1
+				print(string.format("   CARD %s %dx%d: %s reaches %.0f screen px into the touch-control band (it starts at y %.0f)", modeName, w, hh, c.name, c.sy + c.sh - bandTop, bandTop))
+			end
+		end
+	end
+	for _, r in h:guiRects(player.PlayerGui.CryptidHud, w, hh) do
+		local cls = r.class
+		local draws = false
+		if r.shown and r.sw > 0 and r.sh > 0 then
+			if cls == "TextLabel" or cls == "TextButton" then
+				draws = tostring(r.obj.Text or "") ~= "" or (r.obj.BackgroundTransparency or 1) < 1
+			elseif cls == "Frame" or cls == "ScrollingFrame" then
+				draws = (r.obj.BackgroundTransparency or 1) < 1
+			end
+		end
+		if draws then
+			for _, c in cards do
+				local ox = math.min(c.sx + c.sw, r.sx + r.sw) - math.max(c.sx, r.sx)
+				local oy = math.min(c.sy + c.sh, r.sy + r.sh) - math.max(c.sy, r.sy)
+				if ox > 1 and oy > 1 then
+					cardOverlaps += 1
+					print(string.format("   CARD %s %dx%d: %s overlaps the HUD's %s by %.0f x %.0f screen px", modeName, w, hh, c.name, r.name, ox, oy))
+				end
+			end
+		end
+	end
+end
+
 local function cardMode(h, player)
-	home(h, player)
+	home(h, player, { tutorial = 0, canSave = false, saveBanner = "Your progress is not being saved right now - we keep trying" })
 	nightSays(player, T.RestButton, longestAlert, "danger")
+	local hud = hudRoot(player)
+	hud.Toast.Text = string.rep("A long toast ", 8) .. "end" -- 100 characters: the longest the server may send
 	local root = player.PlayerGui.CryptidNight.Root
 	root.Card.Text = longestTitle
 	root.CardSub.Text = longestSub
 	root.Card.Visible = true
 	root.CardSub.Visible = true
-	checkLegibility(h, player, "title card", { longestTitle, longestSub, longestAlert })
+	-- The card is up and the screen re-lays-out (as on a rotation), so the GAME decides what of the card it shows
+	-- here: Night.client's layout hides a subtitle that has no room (title alone on a very short screen), as its
+	-- showCard does. Setting both Visible by hand and measuring at once measured a subtitle the game never draws
+	-- (2026-10-01: 7 screen px "into the touch band" on 640x300 with the whole top stack up).
+	local cam = h.workspace.CurrentCamera
+	local vw, vh = cam.ViewportSize.X, cam.ViewportSize.Y
+	h:setViewport(vw, vh + 1)
+	h:setViewport(vw, vh)
+	assert(root.Card.Visible, "title card: the re-layout hid the card itself")
+	table.insert(cardViewports, string.format("%dx%d%s", vw, vh, if root.CardSub.Visible then "" else " (title alone)"))
+	-- the title alone is for very short screens only: on one 600 px or taller the subtitle must show
+	if vh >= 600 and not root.CardSub.Visible then
+		subMissing += 1
+		print(string.format("   CARD title card %dx%d: the subtitle was hidden on a screen 600 px or taller", vw, vh))
+	end
+	checkLegibility(h, player, "title card", if root.CardSub.Visible then { longestTitle, longestSub, longestAlert } else { longestTitle, longestAlert })
+	checkCardOverlap(h, player, "title card")
 	root.Card.Visible = false
 	root.CardSub.Visible = false
+	hud.Toast.Text = ""
 end
 
 local viewports = {}
@@ -238,6 +317,19 @@ if rowFailures > 0 then
 else
 	print("PASS - the top-right row holds every visible toggle (Rest, Hunt, Build; Leave camp) in every mode")
 end
+if cardOverlaps > 0 then
+	print(string.format("FAIL - %d time(s) the band title card overlapped a HUD element that draws (see CARD lines)", cardOverlaps))
+else
+	print("PASS - the band title card overlaps nothing the HUD draws (banner, hint, 100-character toast, chip) in every viewport")
+end
+print(string.format("   the card's subtitle shown in %d of %d card viewports: %s", subShown, #cardViewports, table.concat(cardViewports, ", ")))
+if cardInBand > 0 or subMissing > 0 then
+	print(string.format("FAIL - %d time(s) the band title card reached into the touch-control band, %d time(s) its subtitle was hidden on a screen 600 px or taller (see CARD lines)", cardInBand, subMissing))
+else
+	print("PASS - the band title card and its subtitle stay above the touch-control band in every touch viewport, and the subtitle shows on every screen 600 px or taller")
+end
 if not okGate then error(gateErr, 0) end
 if legibilityFailures > 0 then error("steal-a-cryptid night HUD legibility failed", 0) end
 if rowFailures > 0 then error("steal-a-cryptid toggle row too narrow", 0) end
+if cardOverlaps > 0 then error("steal-a-cryptid title card overlaps the HUD", 0) end
+if cardInBand > 0 or subMissing > 0 then error("steal-a-cryptid title card reaches into the touch-control band, or its subtitle is hidden with room to show it", 0) end
