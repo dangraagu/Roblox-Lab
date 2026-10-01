@@ -1,0 +1,13 @@
+# Publish scripts hold the Open Cloud API key inline. NEVER commit one.
+publish_*.bat
+publish_*.sh
+publish_response.json
+*.secret
+
+# Rojo build output
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+*.rbxl.lock
+*.rbxlx.lock
