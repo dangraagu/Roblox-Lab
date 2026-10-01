@@ -2,6 +2,27 @@
 
 Newest night first. Each job: done / in progress (with exact resume point) / blocked (why).
 
+## Daytime run 2026-09-30 / 2026-10-01 (not a night; recorded here so the next night starts right)
+
+Every game was finished against `docs/complete-game-standard.md` and committed (all gates re-run green
+before each commit). The night shift was paused by the owner from 2026-10-01 until 2026-10-07 18:00.
+
+- **Done, skip at night:** job A (Anomaly Field Guide board, 3c67595), job E (Vault Runners review,
+  REVIEW-5.md, 3c45502), job I (Fork Tower teleport-to-exit, d6ff323), and the plus1-jump night review's
+  LOW findings 1-3 (42bc0a6). The plus1-jump branch from 2026-09-27 is merged (810376f).
+- **Owner decisions:** taken as "recommended" in every game and recorded in each EYECANDY.md.
+- **Completion commits (review these in job H step 2 together with the eye-candy commit):**
+  plus1-jump 42bc0a6, labyrint-spill abe3216, grow-a-crystal ad8a823, anomaly-observatory 3c67595,
+  fork-tower d6ff323, nightwatch-manor 95ca6c5, deep-vein 6c96b11, vault-runners 3c45502,
+  lost-found-depot b30625d, steal-a-cryptid f181968, facility-nightmare 607b079.
+- **New games (wave 1), not in Studio, no universe yet:** same-door 54923f2, signal-lost 6db0da4,
+  meteor-drop-tycoon 6f91998, stormgrow b3a1d08, escape-room-lab fd4bfa2. `tools/studio_open.ps1` knows them.
+- **Still open for job C:** `tools/film_game.py` has scenarios only for plus1, crystal and laby. Each
+  game's `MARKETING.md` now lists 5-10 clips with staging; add a scenario table per game before filming.
+- **Still open after publishing:** `docs/marketing/store-text.json` holds the old store texts; the new
+  ones are in each README ("Store description"), to be pushed with `tools/store_text.py`.
+- **Owner's go needed:** downloading luau-analyze / luau-compile (no binary on the machine).
+
 ## Night of 2026-10-01 (run started 00:18, stopped at about 00:55, nothing done)
 
 Clock: Bash `date` and PowerShell `Get-Date` both read 00:18 at start.
