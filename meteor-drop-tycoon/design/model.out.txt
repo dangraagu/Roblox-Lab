@@ -1,0 +1,124 @@
+== M1 geometry ==
+mean distance between two landing points: 29.90 studs = 1.87 s at WalkSpeed
+mean distance arrival marker -> a landing point: 34.79 studs
+arrival marker -> Falling Star showcase: 4.0 studs
+collector 0: radius 0, share of landings 0.000, price to next 60
+collector 1: radius 10, share of landings 0.037, price to next 132
+collector 2: radius 12, share of landings 0.083, price to next 290
+collector 3: radius 14, share of landings 0.138, price to next 639
+collector 4: radius 16, share of landings 0.200, price to next 1406
+collector 5: radius 18, share of landings 0.271, price to next 3092
+collector 6: radius 20, share of landings 0.350, price to next 6803
+collector 7: radius 22, share of landings 0.438, price to next 14966
+collector 8: radius 24, share of landings 0.533, price to next nil
+
+== M2 per-band economy ==
+band 1 dusk      from L0   avg mult 1.290  interval 3.00 s  base ore 1.00  inflow 0.43 ore/s  beacon price 12  legendary every never meteors
+band 2 twilight  from L5   avg mult 1.668  interval 2.58 s  base ore 1.93  inflow 1.25 ore/s  beacon price 38  legendary every never meteors
+band 3 aurora    from L12  avg mult 2.290  interval 2.08 s  base ore 4.82  inflow 5.30 ore/s  beacon price 192  legendary every 1000.0 meteors
+band 4 starfall  from L22  avg mult 3.340  interval 1.53 s  base ore 17.86  inflow 38.86 ore/s  beacon price 1938  legendary every 200.0 meteors
+band 5 nebula    from L32  avg mult 4.465  interval 1.20 s  base ore 66.21  inflow 246.37 ore/s  beacon price 19545  legendary every 100.0 meteors
+band 6 core      from L44  avg mult 6.100  interval 1.20 s  base ore 319.02  inflow 1621.67 ore/s  beacon price 312957  legendary every 50.0 meteors
+spawn interval reaches its floor 1.2 s at L31
+
+== M3 pacing (20 seeds, 240 min, HUD follower) ==
+-- fast
+  band 1 dusk      reached at min: p10 0.0  median 0.0  p90 0.0
+  band 2 twilight  reached at min: p10 3.9  median 4.2  p90 4.4
+  band 3 aurora    reached at min: p10 12.9  median 13.4  p90 13.7
+  band 4 starfall  reached at min: p10 33.5  median 34.9  p90 36.4
+  band 5 nebula    reached at min: p10 62.0  median 63.7  p90 68.4
+  band 6 core      reached at min: p10 123.6  median 128.9  p90 131.6
+  FALLING STAR caught at min: p10 33.6  median 35.0  p90 36.5
+  build at 35 min (median): beacon 22 collector 5 smelter 15
+  stardust per minute (median): at 10 min 153.1, at 35 min 1850.8, at 90 min 27919.5
+  over 240 min (median): dish share of income 0.357, burned+bounced share of spawned ore 0.000, hand-caught legendaries 0.326 of income
+  hazards in 240 min (median) 95, hits 10
+-- normal
+  band 1 dusk      reached at min: p10 0.0  median 0.0  p90 0.0
+  band 2 twilight  reached at min: p10 4.0  median 4.3  p90 4.7
+  band 3 aurora    reached at min: p10 13.4  median 13.4  p90 14.0
+  band 4 starfall  reached at min: p10 34.1  median 35.5  p90 36.4
+  band 5 nebula    reached at min: p10 61.9  median 64.6  p90 68.3
+  band 6 core      reached at min: p10 124.0  median 128.6  p90 133.0
+  FALLING STAR caught at min: p10 34.2  median 35.6  p90 36.5
+  build at 35 min (median): beacon 21 collector 5 smelter 15
+  stardust per minute (median): at 10 min 143.1, at 35 min 2042.6, at 90 min 28101.3
+  over 240 min (median): dish share of income 0.361, burned+bounced share of spawned ore 0.000, hand-caught legendaries 0.319 of income
+  hazards in 240 min (median) 95, hits 25
+-- slow
+  band 1 dusk      reached at min: p10 0.0  median 0.0  p90 0.0
+  band 2 twilight  reached at min: p10 4.5  median 4.5  p90 5.3
+  band 3 aurora    reached at min: p10 13.5  median 14.3  p90 15.0
+  band 4 starfall  reached at min: p10 35.3  median 36.8  p90 38.3
+  band 5 nebula    reached at min: p10 63.1  median 66.9  p90 69.9
+  band 6 core      reached at min: p10 125.4  median 131.4  p90 134.4
+  FALLING STAR caught at min: p10 35.4  median 36.9  p90 38.4
+  build at 35 min (median): beacon 21 collector 5 smelter 14
+  stardust per minute (median): at 10 min 137.4, at 35 min 1140.9, at 90 min 29366.6
+  over 240 min (median): dish share of income 0.365, burned+bounced share of spawned ore 0.000, hand-caught legendaries 0.311 of income
+  hazards in 240 min (median) 95, hits 40
+-- bot
+  band 1 dusk      reached at min: p10 0.0  median 0.0  p90 0.0
+  band 2 twilight  reached at min: p10 3.7  median 4.0  p90 4.3
+  band 3 aurora    reached at min: p10 12.6  median 13.0  p90 13.6
+  band 4 starfall  reached at min: p10 32.8  median 34.4  p90 35.6
+  band 5 nebula    reached at min: p10 60.9  median 64.0  p90 66.2
+  band 6 core      reached at min: p10 122.5  median 128.2  p90 132.5
+  FALLING STAR caught at min: p10 32.8  median 34.5  p90 35.7
+  build at 35 min (median): beacon 22 collector 5 smelter 16
+  stardust per minute (median): at 10 min 154.7, at 35 min 2109.1, at 90 min 22643.3
+  over 240 min (median): dish share of income 0.360, burned+bounced share of spawned ore 0.000, hand-caught legendaries 0.321 of income
+  hazards in 240 min (median) 95, hits 0
+-- cheapest
+  band 1 dusk      reached at min: p10 0.0  median 0.0  p90 0.0
+  band 2 twilight  reached at min: p10 4.0  median 4.3  p90 4.7
+  band 3 aurora    reached at min: p10 14.4  median 14.7  p90 15.0
+  band 4 starfall  reached at min: p10 35.4  median 37.1  p90 37.5
+  band 5 nebula    reached at min: p10 62.6  median 66.6  p90 68.0
+  band 6 core      reached at min: p10 121.0  median 124.3  p90 129.3
+  FALLING STAR caught at min: p10 35.5  median 37.2  p90 37.6
+  build at 35 min (median): beacon 21 collector 4 smelter 14
+  stardust per minute (median): at 10 min 123.7, at 35 min 1140.9, at 90 min 22067.9
+  over 240 min (median): dish share of income 0.354, burned+bounced share of spawned ore 0.012, hand-caught legendaries 0.318 of income
+  hazards in 240 min (median) 95, hits 23
+
+== M4 band durations, normal (median minutes) ==
+  dusk      lasts: min 4.0 median 4.3
+  twilight  lasts: min 8.7 median 9.3
+  aurora    lasts: min 20.1 median 22.1
+  starfall  lasts: min 25.5 median 29.2
+  nebula    lasts: min 58.7 median 64.3
+
+== M5 script bound: collection per minute at a FROZEN build (30 seeds x 30 min) ==
+  build L21 c5 s15 (normal's median at 35 min): normal 1291.9, bot 1286.5 stardust/min, bot/normal 0.996; AFK while the Collector is awake (first 10 min) 379.2/min = 0.293 of normal; AFK over 30 min 126.4/min = 0.098 of normal; smelter cap 1460.3/min, inflow 1360.4/min
+  build L37 c8 s27 (normal's median at 90 min): normal 28093.4, bot 28117.6 stardust/min, bot/normal 1.001; AFK while the Collector is awake (first 10 min) 11874.1/min = 0.423 of normal; AFK over 30 min 3990.5/min = 0.142 of normal; smelter cap 28247.0/min, inflow 28462.4/min
+
+== M6 AFK macros vs an active normal player, from the normal player's 35-minute state (the Collector sleeps 600 s after its owner's last hand pickup) ==
+  +1 h: anti-AFK jiggle + buying macro reaches beacon 22 (median); a bot that also grabs one meteor every 9 min 26; an active normal player 38; start beacon 21
+  +8 h: anti-AFK jiggle + buying macro reaches beacon 22 (median); a bot that also grabs one meteor every 9 min 52; an active normal player 66; start beacon 21
+
+== M7 hopper headroom ==
+  band 1: largest hopper item (epic) 25.0 ore; the smallest smelter that keeps up (s0) holds 12.0 ore -> 2.08 hoppers (legendaries bypass the hopper)
+  band 2: largest hopper item (epic) 48.1 ore; the smallest smelter that keeps up (s3) holds 25.2 ore -> 1.91 hoppers (legendaries bypass the hopper)
+  band 3: largest hopper item (epic) 120.4 ore; the smallest smelter that keeps up (s9) holds 110.7 ore -> 1.09 hoppers (legendaries bypass the hopper)
+  band 4: largest hopper item (epic) 446.5 ore; the smallest smelter that keeps up (s17) holds 797.5 ore -> 0.56 hoppers (legendaries bypass the hopper)
+  band 5: largest hopper item (epic) 1655.4 ore; the smallest smelter that keeps up (s25) holds 5746.9 ore -> 0.29 hoppers (legendaries bypass the hopper)
+  band 6: largest hopper item (epic) 7975.4 ore; the smallest smelter that keeps up (s33) holds 41410.5 ore -> 0.19 hoppers (legendaries bypass the hopper)
+== M8 first 60 seconds (normal, 20 seeds) ==
+  first pickup at s: p10 2.0 median 2.0 p90 2.0
+  first purchase at s: p10 40.0 median 40.0 p90 40.0
+  first purchase kind: beacon x20
+  Stardust smelted by 60 s: median 24.3; purchases by 60 s: median 1
+== M9 hazards ==
+  normal, first 36 min: hazards median 13 (min 12, max 14), hits median 3
+  hazard-free until band 2 (Beacon 5)
+== M10 first purchase of each upgrade (normal, 20 seeds, median minutes) ==
+  beacon 0.67, smelter 2.34, collector 11.02
+== M11 sensitivity: normal player's Falling Star / Galactic Core minute (8 seeds) ==
+  BeaconPriceGrowth 1.26 SmelterPriceGrowth 1.38: star 35.9 min, core 131.9 min, burned+bounced 0.001
+  BeaconPriceGrowth 1.25 SmelterPriceGrowth 1.38: star 31.8 min, core 116.3 min, burned+bounced 0.000
+  BeaconPriceGrowth 1.27 SmelterPriceGrowth 1.38: star 37.5 min, core 146.9 min, burned+bounced 0.000
+  BeaconPriceGrowth 1.26 SmelterPriceGrowth 1.36: star 34.2 min, core 113.3 min, burned+bounced 0.000
+  BeaconPriceGrowth 1.26 SmelterPriceGrowth 1.40: star 37.9 min, core 152.6 min, burned+bounced 0.001
+  BeaconPriceGrowth 1.26 SmelterPriceGrowth 1.45: star 43.9 min, core inf min, burned+bounced 0.005
