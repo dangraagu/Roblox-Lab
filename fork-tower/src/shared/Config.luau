@@ -335,6 +335,7 @@ Config.Board = {
 	Text = {
 		Title = "TOPPLISTE · BESTE BUILDS",
 		EmptyPublic = "Ingen på lista ennå. Nå toppen av tårnet og bli den første!",
+		EmptyHud = "Ingen ennå. Bli den første!", -- HUD-panelet (Board.hudNote)
 		FriendsFailed = "Fikk ikke hentet Roblox-vennene dine akkurat nå. Prøv igjen om et minutt.",
 		NoFriends = "Ingen Roblox-venner ennå. Venner du legger til, dukker opp her, rangert mot deg.",
 		FriendsNoScores = "Ingen av dine %d venner har nådd toppen ennå. Inviter én og slå dem!",

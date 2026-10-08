@@ -39,6 +39,7 @@ local LeaderboardEvent = remotes:WaitForChild("Leaderboard")
 local RedeemFunc = remotes:WaitForChild("Redeem")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
+local Board = require(ReplicatedStorage:WaitForChild("Board"))
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 local FxClient = require(ReplicatedStorage:WaitForChild("FxClient"))
 
@@ -527,6 +528,13 @@ end
 local function renderLeaderboard(entries)
 	for _, c in ipairs(lbList:GetChildren()) do
 		if c:IsA("TextLabel") then c:Destroy() end
+	end
+	local note = Board.hudNote(entries, Config.Board)
+	if note then -- an empty board is a short line, not a blank box (Studio 2026-10-09)
+		local l = row(lbList, 0, note, nil)
+		l.Name = "EmptyNote"
+		l.TextWrapped = true
+		l.Size = UDim2.new(1, 0, 0, 40)
 	end
 	for i, entry in ipairs(entries) do
 		local name = if type(entry.name) == "string" then entry.name else "Spiller"

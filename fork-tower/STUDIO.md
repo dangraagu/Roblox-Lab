@@ -391,3 +391,19 @@ not 2.2, and the number in the design is right.
 
 REVIEW-3's open item 1 is **closed for floors 1–2 and open above them**: somebody has now opened it,
 played it, and photographed it, but no human has summited and no phone has seen it.
+
+## Eye-candy, first look (night shift, 2026-10-09)
+
+The place was built from `src/` and played solo, with quality pinned to Level21. The console showed the two
+expected datastore warnings and the load line, and no errors. Screenshots are in
+`marketing/studio-2026-10-09/`.
+
+- **Real defect, fixed:** with nobody stored, the HUD's 🏆 BESTE BUILDS panel was an empty box (`01`). It now
+  says "Ingen ennå. Bli den første!" (`Board.hudNote`, `EmptyHud`, `Board.spec` +3; red first; the mutation
+  was KILLED; the control survived). It was seen in Studio after the fix (`02`).
+- **From the spawn**, the HUD's inscription card and band chip cover the world board behind them, so its text
+  cannot be read from there.
+- **Outside the shaft**, the sides of the frame are blown-out white-pink.
+- **The spawn ForceField bubble** covers the whole avatar for the first seconds.
+- **Not measured tonight:** the EYECANDY needs-Studio list (bands, hazards, rest), the teleport-guard fix in
+  real physics, and the 16:9 thumbnails. Fork Tower is not live, so nothing is published.

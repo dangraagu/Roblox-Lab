@@ -224,5 +224,15 @@ do
 	truthy(bc.ReadsPerSecond * 60 <= 60, "and the sustained rate stays inside Roblox's base GetAsync budget of 60 per minute")
 end
 
+--======================================================================= the HUD panel (Studio 2026-10-09)
+-- Real Studio, night shift 2026-10-09: with nobody stored, the HUD's 🏆 BESTE BUILDS panel was an empty dark box (the
+-- same defect +1 Jump and Grow a Crystal had).
+do
+	local note = Board.hudNote({}, bc)
+	truthy(type(note) == "string" and #note > 5, "an empty HUD panel says something (" .. tostring(note) .. ")")
+	truthy(type(note) == "string" and utf8.len(note) <= 40, "and short enough for the narrow panel")
+	eq(Board.hudNote({ { userId = 7, score = 3 } }, bc), nil, "a HUD panel with builds needs no note")
+end
+
 print(string.format("Board: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Board tests failed")
