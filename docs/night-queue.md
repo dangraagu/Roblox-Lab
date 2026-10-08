@@ -2,6 +2,41 @@
 
 Newest night first. Each job: done / in progress (with exact resume point) / blocked (why).
 
+## Night of 2026-10-09 (run started 00:17)
+
+Clock: Bash `date` and PowerShell `Get-Date` both read 00:17 at start. Skip rule (7.-8.10) no longer applies.
+Untracked daytime-run folders (disaster-rounds, find-it-chapters, gnome-garden-defense, outpost-zero,
+scrapline-tycoon + 64 robloxemu checks, last written 2026-10-07 23:46) were left untouched.
+
+**No luau CLI on the machine** (searched Temp, D:\Claude, PATH; downloading needs the owner's go). Pure specs
+were run INSIDE Studio with the new `tools/studio_spec.py`; the robloxemu checks could not run at all. So the
+publish gate is NOT met for any game: **nothing was published tonight.** Owner: put `luau.exe` back (or approve
+the download) and the next night can run the emu gates and publish.
+
+### H. Eye-candy: the 4 live games, steps 1-2 DONE, steps 3-4 BLOCKED
+- **plus1-jump** (e442405, d35112e, 47233d0): Studio check (STUDIO.md). Fixed: Treetops/Cloud Sea washed white
+  (lighting cap in EnvConfig.spec), blank HUD board (`Board.hudNote`), Redeem freeze, tofu glyphs. Second review
+  of 42bc0a6: 1 MEDIUM (guard bound = ideal jump, a fly script climbs ~8x faster), 6 LOW, none fixed.
+- **anomaly-observatory** (4fcced1): Studio check; no code change. Review: 2 MEDIUM (client can read the
+  hidden spares; no Studio gate on live stores), 4 LOW. Weak visuals: aurora planks, black storm, caption over
+  The Other Sky.
+- **grow-a-crystal** (237a671, d35112e): blank HUD board fixed; **Redeem server freeze CONFIRMED and fixed**
+  (30 000 spaces = 3.1 s of server time; same in plus1-jump). Review: 1 MEDIUM left (no Studio gate), LOWs.
+- **labyrint-spill** (47233d0): close-button tofu fixed (✕ U+2715 is not in Gotham; new `tools/check_glyphs.py`,
+  also fixed in fork-tower, meteor-drop-tycoon, stormgrow). Review: **1 HIGH** (walk guard is only a time
+  floor; wait, then teleport to the exit = an unbeatable record and a board climb), 2 MEDIUM, LOWs.
+- Step 3 (thumbnails) blocked: the Studio viewport captures at 1920 x 795, not 16:9. Working screenshots are in
+  each game's `marketing/studio-2026-10-09/`. Resume: resize Studio to a 16:9 viewport first.
+- Step 4 (publish) blocked: no robloxemu gates; and for labyrint/anomaly the review asks for fixes first.
+- **Cross-game, not fixed:** no `RunService:IsStudio()` gate on DataStores in any of the 4 (a Studio session
+  with API access on writes to the live boards). A fix is server code that only the emu checks can gate.
+
+### G (Reddit): blocked again
+The Chrome extension refuses old.reddit.com ("not allowed due to safety restrictions"). No post.
+
+### Shorts plan
+schedule.json has 12 null posts on each of 10-09..10-12 (3 days ahead): no extension needed tonight.
+
 ## Daytime run 2026-09-30 / 2026-10-01 (not a night; recorded here so the next night starts right)
 
 Every game was finished against `docs/complete-game-standard.md` and committed (all gates re-run green
