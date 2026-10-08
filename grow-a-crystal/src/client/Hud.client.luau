@@ -13,6 +13,7 @@ local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 -- State has ONE client connection, shared with Grotto.client: Roblox hands the join push to the first
 -- connection only, so two would race for it (StateFeed.luau).
 local StateFeed = require(ReplicatedStorage:WaitForChild("StateFeed"))
+local Board = require(ReplicatedStorage:WaitForChild("Board"))
 local remotes = ReplicatedStorage:WaitForChild("CrystalRemotes")
 local StateEvent = remotes:WaitForChild("State")
 local BuyEvent = remotes:WaitForChild("Buy")
@@ -305,6 +306,15 @@ end)
 -- names once for the whole server); this panel used to look every name up again on every refresh.
 LeaderboardEvent.OnClientEvent:Connect(function(top)
 	for _, c in ipairs(lbList:GetChildren()) do if c:IsA("TextLabel") then c:Destroy() end end
+	local note = Board.hudNote(top, Config.Board)
+	if note then -- an empty board is a short line, not a blank box (Studio 2026-10-09)
+		local l = Instance.new("TextLabel")
+		l.Name = "EmptyNote"; l.BackgroundTransparency = 1; l.Size = UDim2.new(1, 0, 0, 44)
+		l.Font = Enum.Font.GothamMedium; l.TextScaled = true; l.TextWrapped = true
+		l.TextXAlignment = Enum.TextXAlignment.Left; l.TextColor3 = Color3.fromRGB(190, 198, 220)
+		l.Text = note; l.Parent = lbList
+		local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 14; cc.Parent = l
+	end
 	for i, e in ipairs(top) do
 		local l = Instance.new("TextLabel")
 		l.BackgroundTransparency = 1; l.Size = UDim2.new(1, 0, 0, 22); l.LayoutOrder = i

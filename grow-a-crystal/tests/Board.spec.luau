@@ -264,5 +264,15 @@ truthy(bc.FriendsCacheSeconds >= 60, "a player's friends list is cached")
 truthy(bc.FriendsRetrySeconds >= 30, "a failed friends fetch is not retried at once")
 truthy(bc.MaxMetric * 2e9 + 2e9 < 2 ^ 53, "MaxMetric keeps every value exact in a double")
 
+--======================================================================= the HUD panel (Studio 2026-10-09)
+-- Real Studio, night shift 2026-10-09: with nobody stored, the HUD's 🏆 TOP MINERS panel on the right was an empty
+-- dark box (the same defect +1 Jump had). The board store starts empty on the live game for every new board version.
+do
+	local note = Board.hudNote({}, bc)
+	truthy(type(note) == "string" and #note > 5, "an empty HUD panel says something (" .. tostring(note) .. ")")
+	truthy(type(note) == "string" and #note <= 40, "and short enough for the narrow panel (" .. tostring(note and #note) .. " <= 40)")
+	eq(Board.hudNote({ { rank = 1, userId = 7, name = "a", score = "1" } }, bc), nil, "a HUD panel with miners needs no note")
+end
+
 print(string.format("Board: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Board tests failed")

@@ -343,6 +343,7 @@ Config.Board = {
 		Everyone = "EVERYONE",
 		Friends = "FRIENDS",
 		EmptyPublic = "No miners on the board yet. Harvest a crystal and be the first!",
+		EmptyHud = "No miners yet. Be the first!", -- the HUD panel (Board.hudNote)
 		FriendsFailed = "Couldn't load your Roblox friends right now. Try again in a minute.",
 		NoFriends = "No Roblox friends yet. Friends you add show up here, ranked against you.",
 		FriendsNoScores = "None of your %d friends has harvested yet. Invite one and race them to Mythic!",
