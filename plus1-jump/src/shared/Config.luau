@@ -118,6 +118,7 @@ Config.Board = {
 	Text = {
 		Title = "TOP CLIMBERS",
 		EmptyPublic = "No climbers on the board yet. Step on a tile and be the first!",
+		EmptyHud = "No climbers yet. Be the first!", -- the HUD panel (Board.hudNote)
 		FriendsFailed = "Couldn't load your Roblox friends right now. Try again in a minute.",
 		NoFriends = "No Roblox friends yet. Friends you add show up here, ranked against you.",
 		FriendsNoScores = "None of your %d friends has climbed yet. Invite one and race them to space!",
@@ -192,12 +193,12 @@ Config.Env = {
 		},
 		{
 			id = "treetops", from = 7, fade = 3, name = "Treetops", emoji = "🌳",
-			lighting = { ClockTime = 15.6, Brightness = 3.2, ExposureCompensation = 0.2,
+			lighting = { ClockTime = 15.6, Brightness = 2.6, ExposureCompensation = -0.1, -- Studio 2026-10-09: 3.2/+0.2 blew out (EnvConfig.spec)
 				Ambient = rgb(125, 135, 140), OutdoorAmbient = rgb(150, 170, 170),
 				FogStart = 150, FogEnd = 1400, FogColor = rgb(190, 225, 240) },
 			atmosphere = { Density = 0.28, Offset = 0.2, Color = rgb(190, 225, 240), Decay = rgb(120, 170, 160), Glare = 0.5, Haze = 1.6 },
 			sky = { StarCount = 0, SunAngularSize = 22, MoonAngularSize = 11 },
-			bloom = { Intensity = 1.0, Size = 26, Threshold = 0.9 },
+			bloom = { Intensity = 0.8, Size = 26, Threshold = 1.0 },
 			colorCorrection = { Brightness = 0.03, Contrast = 0.1, Saturation = 0.22, TintColor = rgb(245, 255, 240) },
 			sunRays = { Intensity = 0.15, Spread = 0.8 },
 			pieces = { "canopy", "templeIsland" },
@@ -207,12 +208,12 @@ Config.Env = {
 		},
 		{
 			id = "cloudsea", from = 15, fade = 4, name = "Cloud Sea", emoji = "☁️",
-			lighting = { ClockTime = 16.4, Brightness = 3.4, ExposureCompensation = 0.25,
+			lighting = { ClockTime = 16.4, Brightness = 2.6, ExposureCompensation = -0.15, -- Studio 2026-10-09: 3.4/+0.25 turned the deck white
 				Ambient = rgb(140, 135, 135), OutdoorAmbient = rgb(185, 175, 170),
 				FogStart = 300, FogEnd = 2400, FogColor = rgb(255, 240, 220) },
 			atmosphere = { Density = 0.22, Offset = 0.1, Color = rgb(255, 236, 210), Decay = rgb(230, 170, 130), Glare = 0.9, Haze = 1.2 },
 			sky = { StarCount = 0, SunAngularSize = 24, MoonAngularSize = 11 },
-			bloom = { Intensity = 1.2, Size = 30, Threshold = 0.85 },
+			bloom = { Intensity = 0.8, Size = 30, Threshold = 1.0 },
 			colorCorrection = { Brightness = 0.04, Contrast = 0.08, Saturation = 0.2, TintColor = rgb(255, 244, 228) },
 			sunRays = { Intensity = 0.25, Spread = 0.7 },
 			pieces = { "cloudDeck" },

@@ -345,6 +345,32 @@ for _, layer in ipairs(Env.Layers or {}) do
 	truthy(listed, "layer " .. tostring(layer.id) .. " sits inside a band that shows its scenery (" .. b.id .. ")")
 end
 
+--================================================================ white scenery is not blown out (Studio 2026-10-09)
+-- Real Studio, night shift 2026-10-09: in the Treetops and Cloud Sea bands the white cloud puffs and the
+-- tiles turned to a flat white sheet. The deck read as nothing, the player as a speck in a glare. The
+-- lighting was Brightness 3.2-3.4 at ExposureCompensation +0.2/+0.25 with bloom Threshold 0.85-0.9. Lowering
+-- it in the running session to Brightness 2.6, Exposure -0.1/-0.15, bloom Threshold 1.0 at Intensity 0.8
+-- brought the puffs back as shaded balls and the sunset haze behind them (STUDIO.md, "Eye-candy"). The rule
+-- below is that measurement: effective light = Brightness * 2^Exposure, and a bloom that starts only
+-- above pure white.
+do
+	local MAX_EFFECTIVE, MIN_THRESHOLD = 2.5, 1.0
+	for _, id in { "treetops", "cloudsea" } do
+		local b
+		for _, x in ipairs(bands) do
+			if x.id == id then b = x end
+		end
+		truthy(b ~= nil, "band " .. id .. " exists")
+		if b then
+			local eff = b.lighting.Brightness * 2 ^ b.lighting.ExposureCompensation
+			truthy(eff <= MAX_EFFECTIVE, string.format("%s: Brightness * 2^Exposure %.2f <= %.2f (white puffs blew out above it in Studio)",
+				id, eff, MAX_EFFECTIVE))
+			truthy(b.bloom.Threshold >= MIN_THRESHOLD, string.format("%s: bloom Threshold %.2f >= %.2f, so white scenery does not bloom",
+				id, b.bloom.Threshold, MIN_THRESHOLD))
+		end
+	end
+end
+
 local B = Config.Budget
 truthy(type(B) == "table", "Config.Budget exists (measured by robloxemu/check_plus1_sky.luau)")
 if B then

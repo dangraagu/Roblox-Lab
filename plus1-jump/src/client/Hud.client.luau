@@ -32,6 +32,7 @@ local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local EnvBands = require(ReplicatedStorage:WaitForChild("EnvBands"))
 local Progression = require(ReplicatedStorage:WaitForChild("Progression"))
+local Board = require(ReplicatedStorage:WaitForChild("Board"))
 
 -- The sky band a tier belongs to, as an emoji: "85 🚀" on the board is the brag that you made it to
 -- space. Public information only — the tier is already on the board and in leaderstats.
@@ -359,6 +360,21 @@ lbLayout.Parent = lbList
 local function renderLeaderboard(entries)
 	for _, c in ipairs(lbList:GetChildren()) do
 		if c:IsA("TextLabel") then c:Destroy() end
+	end
+	local note = Board.hudNote(entries, Config.Board)
+	if note then -- an empty board is a short line, not a blank box (Studio 2026-10-09)
+		local l = Instance.new("TextLabel")
+		l.Name = "EmptyNote"
+		l.BackgroundTransparency = 1
+		l.Size = UDim2.new(1, 0, 0, 44)
+		l.Font = Enum.Font.GothamMedium
+		l.TextScaled = true
+		l.TextWrapped = true
+		l.TextXAlignment = Enum.TextXAlignment.Left
+		l.TextColor3 = Color3.fromRGB(190, 198, 220)
+		l.Text = note
+		l.Parent = lbList
+		local cc = Instance.new("UITextSizeConstraint"); cc.MaxTextSize = 15; cc.Parent = l
 	end
 	for i, entry in ipairs(entries) do
 		local l = Instance.new("TextLabel")

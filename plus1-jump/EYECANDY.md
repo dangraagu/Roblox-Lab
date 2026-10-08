@@ -1212,3 +1212,76 @@ New: `robloxemu/check_plus1jump_paywin.luau`. Changed: `src/server/Main.server.l
 `robloxemu/build/plus1-jump.luau` (rebuilt). Scratch evidence: `scratchpad/p1j_pass2b/` (`sha_start.txt`,
 `gates_start.txt`, `paywin_red.txt`, `probe/staging.luau`, `probe/staging_out.txt`, `gates_fix.txt`, `sweep.py`,
 `sweep.log`, `sweep_results.json`, `gates_final.txt`, `sha_final.txt`).
+
+---
+
+## 18. Night shift 2026-10-09: Studio check, second review of the completion pass, two fixes
+
+### Studio (job H step 1)
+
+See `STUDIO.md` ("Eye-candy"). Two defects were found and fixed, test-first:
+1. **Treetops and Cloud Sea washed out.** White scenery became a white sheet. `EnvConfig.spec` now caps
+   `Brightness * 2^Exposure` at 2.5 and requires bloom `Threshold >= 1.0` for those two bands. Config is now
+   2.6 / -0.1 / 0.8 / 1.0 (Treetops) and 2.6 / -0.15 / 0.8 / 1.0 (Cloud Sea).
+2. **The HUD's TOP CLIMBERS panel was a blank box when the board is empty.** The fix adds `Board.hudNote`,
+   `Config.Board.Text.EmptyHud` and an `EmptyNote` label in `Hud.client`. `Board.spec` gets 4 new assertions.
+
+Mutation sweep (every run went through the real spec files):
+- Cloud Exposure 0.1: KILLED (1 fail).
+- Treetops Threshold 0.95: KILLED (1 fail).
+- hudNote `#rows < 0`: KILLED (3 fails).
+- hudNote `#rows <= 1`: KILLED (1 fail).
+- Comment-only controls on Config and Board: survived (0 fails).
+
+The rebuilt bundle `robloxemu/build/plus1-jump.luau` contains `EmptyHud`, `hudNote` and the new exposure.
+
+**How the specs were run.** No luau CLI exists on this machine: a search of Temp, D:\Claude and PATH found
+nothing, and downloading one needs the owner's go. So every `tests/*.spec.luau` was run **inside Roblox Studio**:
+- The modules were loaded as ModuleScripts in ServerStorage.
+- String requires were rewritten.
+- Each spec was wrapped as a ModuleScript under `pcall(require)`.
+
+All 12 specs passed: Altitude 21, Board 70, Codes 12, EnvBands 124, EnvConfig 76, Hazards 111, Pacing 31,
+Progression 59, Rest 55, Rng 56, TowerGen 21, responsive 70, with 0 failures. **The robloxemu checks
+(`robloxemu/check_plus1*`) were NOT run.** They need the CLI's file-based emulator. So the publish gate is not
+met, and nothing was published.
+
+### Second review (job H step 2) of the completion commit 42bc0a6
+
+One independent read-only reviewer was asked to refute the commit. Its verdicts per claim:
+- **Night-review fixes: not refuted.**
+- **Board and climb guard: partly refuted.**
+- **No pay-to-win: not refuted.**
+
+No tie or timestamp forging was found, the over-cap is clamped (8e15 + 2e9 < 2^53), every friends path is in a
+pcall and capped, and the guard state is consistent across respawn, rescue, rebirth and rejoin.
+
+Findings, none fixed tonight (listed for the next pass; MEDIUM 1 is a design call):
+1. **MEDIUM. The guard bound is an ideal jump.** The bank refills at sqrt(g·h/2), about 77 studs/s at h=60, so a
+   teleport or fly script can still climb about 8-9x faster than a normal player and hold the public board.
+   "Faster than physics" holds only against that ideal bound. A tighter bound needs measuring against the
+   `fast` climb profile so that no honest climber is refused.
+2. **LOW-MEDIUM. A refusal silently and permanently loses that tile's +1.** Touched does not refire, and the
+   next tile moves the frontier past it. The trigger would be root-position replication lag at jump speed. The
+   tests model honest timing only. Studio tonight: 6/6 tier-1 tiles credited, 0 refusals, no network
+   simulation (STUDIO.md). This is not closed.
+3. **LOW. Studio playtests with API access ON write to the live `Plus1Jump_LB_v2`.** There is no
+   `RunService:IsStudio()` gate.
+4. **LOW. BindToClose saves serially, and each save is now 2 writes** (profile + board).
+5. **LOW. The server caches** (`scoreCache`, `friendsCache`, `friendsFailed`, `nameCache`) **are never evicted.**
+6. **LOW. One viewer with 200 uncached friends uses the shared read limiter for about 160 s.** During that time
+   the other viewers wait.
+7. **LOW (UI). The friends note overlaps the hint when 10 rows are shown** (`Board.client.luau:103`).
+
+### Also seen, not changed (taste or owner)
+- The spawn faces the board, and the tower is behind (§8 item 25 measured). If the tower should be the first
+  view, rotate `TempleSpawn` 180°.
+- The HUD band chip covers the board title from the spawn view.
+- The board's gold trim blows out under bloom from the tower side.
+- No stars were seen in the captures.
+- The Storm band reads as flat pink haze.
+- The §9 shot-5 recipe is stale since the guard: a teleported avatar that is knocked off is rescued to the pad.
+
+### Not done
+- Thumbnails (§9): the Studio viewport is 1920 x 795, not 16:9.
+- Upload and publish: blocked on the robloxemu gates.

@@ -219,5 +219,19 @@ do
 	truthy(bc.ReadsPerSecond * 60 <= 60, "and the sustained rate stays inside Roblox's base GetAsync budget of 60 per minute")
 end
 
+--======================================================================= the HUD panel (Studio 2026-10-09)
+-- Real Studio, night shift 2026-10-09: with no climbers stored, the HUD's 🏆 TOP CLIMBERS panel on the right was
+-- an empty dark box, while the board on the pad said "No climbers on the board yet...". A new store
+-- (Plus1Jump_LB_v2) starts empty on the live game too, so every early player would see the blank box.
+do
+	local t0 = 1790000000
+	local note = Board.hudNote({}, bc)
+	truthy(type(note) == "string" and #note > 5, "an empty HUD panel says something (" .. tostring(note) .. ")")
+	truthy(type(note) == "string" and #note <= 40, "and short enough for the narrow panel (" .. tostring(note and #note) .. " <= 40)")
+	eq(Board.hudNote({ { userId = 7, tier = 3 } }, bc), nil, "a HUD panel with climbers needs no note")
+	local rows = Board.publicView({ { userId = 9, value = Board.encode(0, t0, bc) } }, bc).rows
+	truthy(Board.hudNote(rows, bc) ~= nil, "a board holding only tier 0 is empty on the HUD too")
+end
+
 print(string.format("Board: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Board tests failed")
