@@ -319,7 +319,7 @@ end
 
 toggleBtn.Activated:Connect(function()
 	expanded = not expanded
-	toggleBtn.Text = expanded and "✕" or "🏆"
+	toggleBtn.Text = expanded and "X" or "🏆"
 	applyLayout()
 end)
 

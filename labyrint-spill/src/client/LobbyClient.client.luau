@@ -128,7 +128,7 @@ closeBtn.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
 closeBtn.TextColor3 = Color3.new(1, 1, 1)
 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.TextScaled = true
-closeBtn.Text = "✕"
+closeBtn.Text = "X"
 closeBtn.Parent = panel
 corner(closeBtn, 8)
 closeBtn.Activated:Connect(function() gui.Enabled = false end)

@@ -179,7 +179,7 @@ hideBtn.BackgroundColor3 = Color3.fromRGB(64, 68, 86)
 hideBtn.TextColor3 = Color3.new(1, 1, 1)
 hideBtn.Font = Enum.Font.GothamBold
 hideBtn.TextScaled = true
-hideBtn.Text = "✕"
+hideBtn.Text = "X"
 hideBtn.Parent = card
 corner(hideBtn, 10)
 local hbtc = Instance.new("UITextSizeConstraint"); hbtc.MaxTextSize = 18; hbtc.Parent = hideBtn

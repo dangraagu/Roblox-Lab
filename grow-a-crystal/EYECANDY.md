@@ -1443,3 +1443,42 @@ silk emitter, `hasCritter`), `tests/EnvConfig.spec.luau`, `robloxemu/check_growa
 this file (§2, §6, §7, §8 items 32-35, §9 shot 1, §11, §17), `MARKETING.md`, `README.md` and `CLAUDE.md`. Nothing was
 committed, pushed or published, and Studio was not opened. The probes and sweeps ran on scratch copies and through
 `scratchpad/gac_p2c/sweep.py`.
+
+---
+
+## Night shift 2026-10-09: Studio check and second review of 7e691f3 + ad8a823
+
+**Studio** (job H step 1): see `STUDIO.md`. The blank HUD board was fixed (`Board.hudNote`).
+
+**Second review** (job H step 2). One independent read-only reviewer was asked to refute both commits. It
+confirmed these hold:
+- the server-only refraction salt;
+- the owner token on writes;
+- the locked/retry handling;
+- harvest-only board points with a server-side tie time;
+- client-only eye-candy;
+- checks that drive the real bundle.
+
+Its verdicts:
+- **7e691f3: SHIP.**
+- **ad8a823: SHIP-WITH-DEFERRED.**
+
+Findings:
+1. **MEDIUM. No `RunService:IsStudio()` gate.** A Studio session run with §9's cheat config while API access is
+   on would write that cheat dust and the board score to the live stores. **Not fixed.**
+2. **MEDIUM, now CONFIRMED and FIXED: server freeze through Redeem.** `Codes.normalize`'s
+   `"^%s*(.-)%s*$"` is quadratic on the raw RemoteFunction string. Measured in Studio:
+   - 20 000 spaces: 1.37 s of server time;
+   - 30 000 spaces: 3.1 s.
+
+   Fixed in d35112e: `Codes.MaxInput = 64`, and the input is cut before the trim. The test went red first,
+   the mutations were killed, and the control survived. +1 Jump had the same module and is fixed in the same
+   commit. **It is not live until the next publish.**
+3. **LOW-MEDIUM. A failed leave-save is not retried** (up to 20 s of progress lost). Not fixed.
+4. **LOW-MEDIUM, suspected. BindToClose saves serially.** Not fixed.
+5. **LOW. Spamming the board prompt queues unbounded friends reads.**
+6. **LOW. A rollback after a failed save can leave a seed count at -1** (one free seed).
+7. **LOW. The "locked" toast does not warn that the play on this server may be discarded.**
+8. **LOW, suspected. A two-Studio-server test cannot show the lock**, because the JobId is empty.
+9. **LOW. The commit message overstates the emitter cap.**
+10. **LOW. A player who leaves during the load keeps the lock** (it recovers through "resume").

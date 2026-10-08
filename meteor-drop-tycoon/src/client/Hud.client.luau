@@ -387,7 +387,7 @@ local function render(st: any)
 		awakeText.Text = ""
 	end
 	-- the Upgrades button pulses a star when the best upgrade is affordable
-	upgradeBtn.Text = if open then "✕ Close" elseif bestAffordable(st) then "⬆ Upgrades ★" else "⬆ Upgrades"
+	upgradeBtn.Text = if open then "X Close" elseif bestAffordable(st) then "⬆ Upgrades ★" else "⬆ Upgrades"
 	-- the rows
 	for _, def in ROWS do
 		local ui = rowUi[def.kind]

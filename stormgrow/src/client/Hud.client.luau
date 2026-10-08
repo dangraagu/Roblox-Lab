@@ -198,7 +198,7 @@ end
 local almanac = frame("Almanac", root, 0.08)
 almanac.Visible = false
 local almanacTitle = label("AlmanacTitle", almanac, 20, true)
-local almanacClose = button("AlmanacClose", almanac, "✕", Color3.fromRGB(150, 60, 60))
+local almanacClose = button("AlmanacClose", almanac, "X", Color3.fromRGB(150, 60, 60))
 local almanacGrid = Instance.new("ScrollingFrame")
 almanacGrid.Name = "AlmanacGrid"
 almanacGrid.BackgroundTransparency = 1
@@ -779,7 +779,7 @@ local function refresh(dt: number)
 		almanacTitle.Text = string.format("📖 Almanac  %d / 56", count)
 		for i, cell in almanacCells do
 			local found = string.sub(bitsStr, i, i) == "1"
-			cell.Text = if found then "✔" else "·"
+			cell.Text = if found then "✓" else "·"
 			cell.BackgroundColor3 = if found then Color3.fromRGB(70, 140, 90) else Color3.fromRGB(40, 48, 70)
 		end
 	end

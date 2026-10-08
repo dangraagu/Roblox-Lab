@@ -1285,3 +1285,12 @@ Findings, none fixed tonight (listed for the next pass; MEDIUM 1 is a design cal
 ### Not done
 - Thumbnails (§9): the Studio viewport is 1920 x 795, not 16:9.
 - Upload and publish: blocked on the robloxemu gates.
+
+### Added later the same night
+- **Redeem freeze, fixed (d35112e).** The second review of grow-a-crystal found that `Codes.normalize` was
+  quadratic on the player's raw string, and this game has the same module. Measured in Studio: 30 000 spaces
+  cost 3.1 s of server time. The input is now cut to `Codes.MaxInput = 64` before the trim, and
+  `Codes.spec` is 17/0.
+- **Glyphs.** `☰ Menu`, `✕ Menu`/`✕ Top` and the multiplier's `✖️` rendered as empty boxes or near-black emoji in
+  real Studio. They are now `≡ Menu`, `X Menu`/`X Top` and `✨ Multiplier`. The new `tools/check_glyphs.py`
+  gives 0.

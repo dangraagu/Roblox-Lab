@@ -176,7 +176,7 @@ local function toggleButton(name, text, anchorX)
 	return b
 end
 
-local menuToggle = toggleButton("MenuToggle", "☰ Menu", 0)
+local menuToggle = toggleButton("MenuToggle", "≡ Menu", 0)
 menuToggle.Position = UDim2.new(0, MARGIN, 0, MARGIN)
 local lbToggle = toggleButton("TopToggle", "🏆 Top", 1)
 lbToggle.Position = UDim2.new(1, -MARGIN, 0, MARGIN)
@@ -227,7 +227,7 @@ end
 
 local tierLabel = statLabel(1, "🏛️ Tier: 0")
 local bestLabel = statLabel(2, "⭐ Best: 0")
-local multLabel = statLabel(3, "✖️ Multiplier: 1x")
+local multLabel = statLabel(3, "✨ Multiplier: 1x")
 local heightLabel = statLabel(4, "📏 Jump: 7.2")
 
 local rebirthBtn = Instance.new("TextButton")
@@ -451,8 +451,8 @@ local function refreshDrawers()
 	left.Visible = showMenu
 	codeFrame.Visible = showMenu
 	lbFrame.Visible = showLb
-	menuToggle.Text = if menuOpen then "✕ Menu" else "☰ Menu"
-	lbToggle.Text = if lbOpen then "✕ Top" else "🏆 Top"
+	menuToggle.Text = if menuOpen then "X Menu" else "≡ Menu"
+	lbToggle.Text = if lbOpen then "X Top" else "🏆 Top"
 end
 
 menuToggle.Activated:Connect(function()
@@ -641,7 +641,7 @@ StateEvent.OnClientEvent:Connect(function(s)
 	jumpLabel.Text = "🔼 " .. tostring(s.jumpPower)
 	tierLabel.Text = "🏛️ Tier: " .. tostring(s.tier)
 	bestLabel.Text = "⭐ Best: " .. tostring(s.bestTier) .. " " .. bandEmoji(s.bestTier)
-	multLabel.Text = "✖️ Multiplier: " .. tostring(s.multiplier) .. "x"
+	multLabel.Text = "✨ Multiplier: " .. tostring(s.multiplier) .. "x"
 	heightLabel.Text = string.format("📏 Jump: %.1f", s.jumpHeight)
 	if rebirthNotice == 0 then renderRebirth(s) end
 end)

@@ -293,7 +293,7 @@ local function toggleButton(name, text, anchorX)
 	return b
 end
 
-local menuToggle = toggleButton("MenuToggle", "☰ Meny", 0)
+local menuToggle = toggleButton("MenuToggle", "≡ Meny", 0)
 menuToggle.Position = UDim2.new(0, MARGIN, 0, MARGIN)
 local lbToggle = toggleButton("TopToggle", "🏆 Topp", 1)
 lbToggle.Position = UDim2.new(1, -MARGIN, 0, MARGIN)
@@ -671,11 +671,11 @@ local function refreshDrawers()
 	codeFrame.Visible = showMenu
 	lbFrame.Visible = showLb
 	if glyphToggles then
-		menuToggle.Text = if menuOpen then "✕" else "☰"
-		lbToggle.Text = if lbOpen then "✕" else "🏆"
+		menuToggle.Text = if menuOpen then "X" else "≡"
+		lbToggle.Text = if lbOpen then "X" else "🏆"
 	else
-		menuToggle.Text = if menuOpen then "✕ Meny" else "☰ Meny"
-		lbToggle.Text = if lbOpen then "✕ Topp" else "🏆 Topp"
+		menuToggle.Text = if menuOpen then "X Meny" else "≡ Meny"
+		lbToggle.Text = if lbOpen then "X Topp" else "🏆 Topp"
 	end
 end
 

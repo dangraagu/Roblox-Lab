@@ -1297,3 +1297,38 @@ The lint for writes to undeclared globals is clean on the three changed source f
 * The live store text (`docs/marketing/store-text.json`) is replaced with `tools/store_text.py` after the next publish,
   not before.
 * Nothing is committed, pushed or published, and Studio was not opened.
+
+---
+
+## Night shift 2026-10-09: Studio check and second review of a983d11 + abe3216
+
+**Studio** (job H step 1): see `STUDIO.md`. The close-button tofu (`✕`) was fixed across the game; the new
+`tools/check_glyphs.py labyrint-spill` gives 0.
+
+**Second review** (job H step 2). One independent read-only reviewer was asked to refute both commits. It
+confirmed the harness drives the real `MazeGame.server` from the wrapped bundle. Its verdicts:
+- **a983d11: SHIP-WITH-DEFERRED**, because the Studio check was still owed.
+- **abe3216: SHIP-WITH-DEFERRED.** It improves on the live game: the live game has no lock, and an instant
+  teleport counts there.
+
+Findings, none fixed tonight:
+1. **HIGH. The walk guard limits only how fast a run can finish, not how the player got to the exit**
+   (`Progression.luau:33-36`, `MazeGame.server.luau:2833-2844`). A script can wait `minClear + ε` at the spawn
+   and then teleport onto the exit pad. That writes a record about half of any human time into
+   `LabyrintRekord_v1` (never beatable), and it can climb `accepted` on `LabyrintTopp_v3` around the clock.
+   The docs overclaim: `Progression.luau:27`, `CLAUDE.md` L333-335 and §15 say a teleport to the exit "does
+   not count". The fix needs path evidence, for example server-side samples of the root position through
+   checkpoint cells.
+2. **MEDIUM. Every participant in a group or friends run gets the clear, even one who never moved**
+   (`MazeGame.server.luau:2890-2906`). An idle main account in an alt's run climbs the board.
+3. **MEDIUM. A session that starts read-only stays read-only for its whole life**, so all its progress is lost
+   (`loadPlayer` `:852-882`). The lock is never retried.
+4. **LOW. No `RunService:IsStudio()` gate on DataStore writes.** Local Server test players have negative ids,
+   and their `u_-1` keys take top-10 slots that cannot be parsed back.
+5. **LOW.** A kept guide sets `inst.assist` for the whole group run.
+6. **LOW.** `StartRun` accepts NaN and leaks an empty `Maze_<id>` folder on every call (this predates both
+   commits).
+7. **LOW, suspected.** The legacy v2 carry skips the GodUsers filter.
+8. **LOW, suspected.** The per-server caches never shrink.
+
+**Publish:** held. The HIGH has to be fixed or the docs corrected first, and the robloxemu gates need to run.

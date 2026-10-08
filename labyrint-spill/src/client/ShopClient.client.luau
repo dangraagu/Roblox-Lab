@@ -348,7 +348,7 @@ closeBtn.BackgroundColor3 = Color3.fromRGB(70, 50, 58)
 closeBtn.TextColor3 = Color3.new(1, 1, 1)
 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.TextSize = 24
-closeBtn.Text = "✕"
+closeBtn.Text = "X"
 closeBtn.Parent = panel
 corner(closeBtn, 6)
 
