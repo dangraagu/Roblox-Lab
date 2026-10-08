@@ -1031,3 +1031,23 @@ zero reading time needs 33 s of server clock per counted Perfect Shift, the desi
 **Every gate, 2026-10-01 after pass 2** (the current tree, bundle rebuilt; 33 suites): specs + walk **1 669 / 0**
 (EnvConfig.spec 299, the rest as in §14's table); the 13 counting checks **1 017 / 0** (`_wings` 231, the rest as in
 §14's table); `_hud` PASS; `_hud_wings` PASS + PASS.
+
+---
+
+## Night shift 2026-10-09: second review of 62550b2 + b30625d (job H step 2)
+
+One independent read-only reviewer. Verdicts: **62550b2 SHIP; b30625d SHIP-WITH-DEFERRED.**
+- Fixed tonight (1b318d9): `Codes.normalize` caps its input. This is defence in depth, because Main already
+  refuses codes over 20 characters.
+- **MEDIUM, not fixed. No Studio gate** (`Main.server.luau:180-204`). A Studio playtest writes live profiles and
+  Perfect counts to the board.
+- **LOW.** Spamming the board prompt starts duplicate friends fetches (no in-flight guard), which can starve the
+  other owners' friends boards.
+- **LOW.** `drawRows` yields (`nameOf`) while drawing, so rows from two modes can mix. Failed names are not
+  cached.
+- **LOW, design.** The Perfect-count metric rewards an auto-sort bot that moves at legal speed.
+- **LOW.** The caches are unbounded. An unowned bay's board shows only the title.
+
+Checked and clean: the board is written after the profile save; the merge is clamped; `boardAt` comes from the
+server; the session lock, the merge-on-stale-lock, the leave-during-load return and the BindToClose wait all
+hold; rest and hazards are cosmetic or affect only the player.

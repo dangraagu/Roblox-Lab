@@ -1374,3 +1374,21 @@ checked against the expected build; every scratch source sha256-identical afterw
 | `check_store_text.py` (new) | — | 10 / 0 (and 5 of 5 bad store texts caught, a reworded control passes) |
 
 Bundle `robloxemu/build/vault-runners.luau` sha256 5c761d72... at the final run.
+
+---
+
+## Night shift 2026-10-09: second review of 511793d + 3c45502 (job H step 2)
+
+One independent read-only reviewer. Verdicts: **511793d SHIP; 3c45502 SHIP-WITH-DEFERRED.** Nothing fixed yet.
+1. **HIGH, owner call. Fliers can top the DEEPEST ESCAPES board.** `Trace` limits speed only, not geometry
+   (Finding 8's residual in REVIEW-3/4). A noclip client goes straight to the exit, escapes at close to 100% at
+   every depth, and fills the public top 10. Before the board existed it only cost the cheater's own economy.
+   The owner must accept this or gate it.
+2. **MEDIUM. No Studio gate** (`tryStore`, `:69-87`). The board is written on join and on every flush.
+3. **MEDIUM. A leave during `loadProfile` leaks a lock that lasts 120 s** (`:1380-1381`, no `plr.Parent` check),
+   and the profile itself leaks for the life of the server.
+4. **MEDIUM. A read-only session never recovers, and a failed load is never retried** (`:150-198`). A normal
+   server hop can make a whole session unsaved.
+5. **LOW.** An escape followed by a leave reaches the board only at the next join.
+6. **LOW.** The caches never evict.
+7. **LOW, suspected.** "Loading..." can stay forever if every GetSortedAsync fails.

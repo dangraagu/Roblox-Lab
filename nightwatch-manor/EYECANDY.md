@@ -1307,3 +1307,26 @@ switches the server to `PublicLayouts`, without which none of its coordinates me
 **Open.** Everything on §11 (item 16 is this pass's). No independent review of pass 2 yet. luau-analyze was not run (57
 files compiled through `loadstring`, 0 errors). The near-miss rates were re-measured only on the public manors. The
 genre gaps stay (CLAUDE.md "NOT built": no audio, no jumpscare, no puzzles, traps that do not fire).
+
+---
+
+## Night shift 2026-10-09: second review of 0ed378f + 95ca6c5 (job H step 2)
+
+One independent read-only reviewer. Verdicts: **0ed378f SHIP-WITH-DEFERRED; 95ca6c5 BLOCK.** Nothing fixed yet.
+1. **HIGH. A script can still climb the board.** The exit guard (`Main.server.luau:1263-1292`) checks only that
+   `minSeconds` has passed on the night clock and that the character is in the exit room when E is pressed.
+   Detection (`:1472-1506`) works on x/z, so a character standing outside every room is never spotted.
+   - The exploit: teleport out of the manor, wait about 9 s, teleport into the exit room, press E. That is one
+     safe night per ~12 s, and MaxNight 500 in under 2 hours.
+   - The claim in CLAUDE.md and Crossing.luau ("gains nothing a person could not") is false.
+   - Fix: check the position every tick. Treat outside the footprint, or a jump larger than WalkSpeed·dt plus
+     slack, as a forfeit.
+2. **MEDIUM. No Studio gate on the live stores** (`:64-76`).
+3. **MEDIUM. A session can go unsaved for its whole length.** A leave during `claimProfile` never releases the
+   lock (`:1895-1897`), and a pcall failure counts as "lock held" (`:519-521`). A read-only session never
+   retries. The notice at `:1934` promises that saving resumes, which it does not.
+4. **LOW.** The board is written before `saveProfile` (`:1655`).
+5. **LOW.** `nameCache` and `scoreCache` never evict.
+
+Checked and clean: there are no client→server remotes; rest earns nothing; the save token and `keepHigher` are
+correct; the precision holds; the empty public board has text.

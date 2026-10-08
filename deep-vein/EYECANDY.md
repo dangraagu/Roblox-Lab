@@ -1499,3 +1499,21 @@ Every suite ran on the real tree after the last source edit, the bundle rebuilt 
   `build/deep-vein.luau`.
 * Nothing else: not robloxemu/emu, tools, docs or any other game (+1 Jump was read for the template). Nothing was
   committed, pushed or published, and Studio was not opened.
+
+---
+
+## Night shift 2026-10-09: second review of 654ad07 + 6c96b11 (job H step 2)
+
+One independent read-only reviewer. Verdicts: **654ad07 SHIP-WITH-DEFERRED; 6c96b11 SHIP-WITH-DEFERRED.**
+- **Fixed tonight (5afef06):** the blank HUD DEEPEST panel (its finding 9), and the tofu emoji.
+- **MEDIUM, not fixed. `ElevatorEvent` has no cooldown** (`Main.server.luau:1313-1347`). Each up or down
+  rebuilds a band, and "up" also sells. An exploiter alternating up and down from a deep shaft can lag the
+  server. Fix: a per-player cooldown.
+- **MEDIUM, not fixed. No Studio gate** (`tryStore`, `:76-88`).
+- **MEDIUM, not fixed. A leave during the load leaves `lockUntil` set** (`:1706-1709`). A crash plus a fast
+  rejoin, or a failed load, gives a read-only session, and a read-only session never retries.
+- **LOW, suspected.** BindToClose loops over `Players:GetPlayers()` and does not wait for in-flight leave saves.
+  A same-JobId rejoin can roll back one autosave.
+
+Checked and clean: Buy and Rebirth with any arguments; swing rate limits; rebirth inside the save; exact board
+encoding; rest and knocks are client-only; nothing is pay-to-win.
