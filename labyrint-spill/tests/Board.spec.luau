@@ -221,5 +221,10 @@ do
 	truthy(bc.ReadsPerSecond * 60 <= 60, "and the sustained rate stays inside Roblox's base GetAsync budget of 60 per minute")
 end
 
+-- Night shift 2026-10-09 (second review): nothing in code stopped a Studio playtest with API access on from writing
+-- to the LIVE stores (profiles, level records, the board). MazeGame now skips them in Studio unless
+-- BoardConfig.AllowStudio, which may only be set in an open place, never in src/.
+eq(Config.Board.AllowStudio, false, "BoardConfig.AllowStudio is false in src (set it only in a Studio place)")
+
 print(string.format("Board: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Board tests failed")

@@ -18,6 +18,17 @@ local TABLE = { SORTED = { cash = 250 }, SPRING = { cash = 100 } }
 eq(Codes.normalize("  sorted "), "SORTED", "normalize uppercases and trims")
 eq(Codes.normalize("SoRtEd"), "SORTED", "normalize is case-blind")
 
+-- Night shift 2026-10-09: "%s+$" backtracks quadratically, and the server passes the player's raw Redeem string in
+-- (anomaly-observatory, same module shape: 20 000 spaces cost 1.38 s of server time in Studio). Codes are short.
+do
+	local evil = "a" .. string.rep(" ", 30000) .. "b"
+	local t0 = os.clock()
+	local n = Codes.normalize(evil)
+	local dt = os.clock() - t0
+	eq(dt < 0.05, true, string.format("a 30 000-space input normalizes in under 0.05 s (took %.3f s)", dt))
+	eq(#n <= (Codes.MaxInput or 0), true, "and comes back no longer than Codes.MaxInput")
+end
+
 eq(Codes.redeem(Config, "   ", {}, TABLE).reason, "empty", "a blank code is empty")
 eq(Codes.redeem(Config, nil, {}, TABLE).reason, "empty", "a nil code is empty")
 eq(Codes.redeem(Config, 42, {}, TABLE).reason, "empty", "a number is not a code")

@@ -115,6 +115,9 @@ Config.Milestones = { 10, 25, 50, 100, 250 }
 
 -- ------------------------------------------------------------------ Persistence
 Config.Save = {
+	-- false in src, always: a Studio playtest must not write to the LIVE stores (2026-10-09 review). Set it true
+	-- only in an open Studio place's Config when a save test needs the real stores (Highscore.spec checks).
+	AllowStudio = false,
 	Store = "AnomalyObs_v1", -- per-player profile
 	LeaderStore = "AnomalyObsBest_v1", -- OrderedDataStore for best-day leaderboard
 	-- OrderedDataStore for the Field Guide board (queued job A, owner design 2026-09-16): key u_<userId>,

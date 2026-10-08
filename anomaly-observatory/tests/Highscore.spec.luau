@@ -8,6 +8,7 @@
 -- store can hand back is clamped: a fabricated or corrupted value can never show more than the catalog's
 -- size, and the board's query range leaves anything above it out altogether.
 local Highscore = require("../src/shared/Highscore")
+local Config = require("../src/shared/Config")
 
 local passed, failed = 0, 0
 local function eq(a, b, msg)
@@ -98,6 +99,11 @@ do
 	eq(Highscore.userIdFromKey("u_abc"), nil, "a malformed one too")
 	eq(Highscore.userIdFromKey(42), nil, "and a non-string")
 end
+
+-- Night shift 2026-10-09 (second review): nothing in code stopped a Studio playtest with API access on from writing
+-- to the LIVE stores (profiles, best-day board, Field Guide board). Main now refuses in Studio unless
+-- Config.Save.AllowStudio, which may only be set in an open place's Config, never in src/.
+eq(Config.Save.AllowStudio, false, "Config.Save.AllowStudio is false in src (set it only in a Studio place)")
 
 print(string.format("Highscore: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Highscore tests failed")

@@ -14,6 +14,20 @@ local function truthy(c, msg) if c then passed += 1 else failed += 1; print("FAI
 eq(Codes.normalize("  welcome "), "WELCOME", "normalize upper + trim")
 eq(Codes.normalize("Eclipse"), "ECLIPSE", "normalize case")
 
+-- Night shift 2026-10-09: "%s+$" backtracks quadratically, and the server passes the player's raw Redeem string in.
+-- Measured in Studio: 20 000 spaces between two letters cost 1.38 s of server time (8 000: 0.22 s). Codes are short.
+do
+	local evil = "a" .. string.rep(" ", 30000) .. "b"
+	local t0 = os.clock()
+	local n = Codes.normalize(evil)
+	local dt = os.clock() - t0
+	eq(dt < 0.05, true, string.format("a 30 000-space input normalizes in under 0.05 s (took %.3f s)", dt))
+	eq(#n <= (Codes.MaxInput or 0), true, "and comes back no longer than Codes.MaxInput")
+	local r = Codes.redeem(evil, {}, Config)
+	eq(r.ok, false, "a huge input redeems nothing")
+	eq(Codes.normalize("   welcome   "), "WELCOME", "a normal code with spaces still trims after the cap")
+end
+
 -- empty
 eq(Codes.redeem("   ", {}, Config).reason, "empty", "blank code -> empty")
 

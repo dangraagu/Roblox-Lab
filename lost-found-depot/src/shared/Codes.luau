@@ -13,7 +13,12 @@ local Codes = {}
 
 export type Result = { ok: boolean, reason: string?, code: string?, cash: number? }
 
+-- Cut the raw input first: "%s+$" backtracks quadratically, and the server hands it the player's Redeem string
+-- unchecked (2026-10-09: 20 000 spaces cost 1.38 s of server time in the same module). Codes are short.
+Codes.MaxInput = 64
+
 function Codes.normalize(code: string): string
+	code = string.sub(code, 1, Codes.MaxInput)
 	return (string.upper(code):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 

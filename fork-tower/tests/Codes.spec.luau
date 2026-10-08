@@ -13,6 +13,17 @@ local function truthy(c, msg) if c then passed += 1 else failed += 1; print("FAI
 eq(Codes.normalize("  ForK  "), "FORK", "normalize trims and uppercases")
 eq(Codes.normalize("welcome"), "WELCOME", "normalize uppercases")
 
+-- Night shift 2026-10-09: "%s+$" backtracks quadratically, and the server passes the player's raw Redeem string in
+-- (anomaly-observatory, same module shape: 20 000 spaces cost 1.38 s of server time in Studio). Codes are short.
+do
+	local evil = "a" .. string.rep(" ", 30000) .. "b"
+	local t0 = os.clock()
+	local n = Codes.normalize(evil)
+	local dt = os.clock() - t0
+	eq(dt < 0.05, true, string.format("a 30 000-space input normalizes in under 0.05 s (took %.3f s)", dt))
+	eq(#n <= (Codes.MaxInput or 0), true, "and comes back no longer than Codes.MaxInput")
+end
+
 local ok, reward, reason = Codes.redeem("welcome", {}, Config.Codes)
 eq(ok, true, "a valid code is accepted")
 eq(reason, "ok", "...with reason ok")

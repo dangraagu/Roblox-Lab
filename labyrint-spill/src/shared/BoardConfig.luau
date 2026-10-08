@@ -8,6 +8,9 @@
 -- whoever reached that level first.
 
 return {
+	-- false in src, always: a Studio playtest must not write to the LIVE stores (profiles, records, board; review
+	-- 2026-10-09). Set it true only in an open Studio place when a save test needs the real stores (Board.spec checks).
+	AllowStudio = false,
 	Store = "LabyrintTopp_v3",   -- OrderedDataStore: key u_<userId>, value level * 2e9 + (2e9 - reachedAtUnix)
 	LegacyStore = "LabyrintTopp_v2", -- the old board (key tostring(userId), raw level): its top entries are copied once per server start
 	LegacyReachedAt = 1790812800, -- 2026-10-01 00:00 UTC: when a legacy entry was reached is unknown, but it was before this

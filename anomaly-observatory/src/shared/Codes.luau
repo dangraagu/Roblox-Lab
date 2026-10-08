@@ -10,8 +10,13 @@ export type RedeemedSet = { [string]: boolean }
 export type Reward = { hintTokens: number?, tint: string? }
 export type Result = { ok: boolean, reason: string?, reward: Reward? }
 
+-- Cut the raw input first: "%s+$" backtracks quadratically, and the server hands it the player's Redeem string
+-- unchecked (2026-10-09: 20 000 spaces cost 1.38 s of server time). Codes are short.
+Codes.MaxInput = 64
+
 -- Uppercase + trim surrounding whitespace so "  welcome " matches "WELCOME".
 function Codes.normalize(code: string): string
+	code = string.sub(code, 1, Codes.MaxInput)
 	return (string.upper(code):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 

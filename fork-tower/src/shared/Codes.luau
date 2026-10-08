@@ -14,7 +14,12 @@ export type RedeemedSet = { [string]: boolean }
 export type Reward = { skips: number? }
 
 -- Uppercase + trim surrounding whitespace, so "  fork " matches "FORK".
+-- Cut the raw input first: "%s+$" backtracks quadratically, and the server hands it the player's Redeem string
+-- unchecked (2026-10-09: 20 000 spaces cost 1.38 s of server time in the same module). Codes are short.
+Codes.MaxInput = 64
+
 function Codes.normalize(code: string): string
+	code = string.sub(code, 1, Codes.MaxInput)
 	return (string.upper(code):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 

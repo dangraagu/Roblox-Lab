@@ -217,8 +217,14 @@ local RobuxConfig = {
 	RobuxGemProducts = {},  -- [developerProductId] = gems å gi
 }
 
+-- No Studio playtest writes to the live stores unless the open place says so (second review 2026-10-09).
+local studioBlocked = game:GetService("RunService"):IsStudio() and not BoardConfig.AllowStudio
+if studioBlocked and CONFIG.SaveData then
+	warn("[Labyrint] Studio: the live stores are OFF (BoardConfig.AllowStudio) - nothing is saved.")
+end
+
 local dataStore = nil
-if CONFIG.SaveData then
+if CONFIG.SaveData and not studioBlocked then
 	local ok, ds = pcall(function()
 		return DataStoreService:GetDataStore("LabyrintSpill_v1")
 	end)
@@ -227,7 +233,7 @@ end
 
 -- Globale nivå-rekorder (én delt rekord pr nivå, på tvers av alle servere).
 local recordStore = nil
-if CONFIG.SaveData then
+if CONFIG.SaveData and not studioBlocked then
 	local ok, ds = pcall(function()
 		return DataStoreService:GetDataStore("LabyrintRekord_v1")
 	end)
@@ -240,7 +246,7 @@ local recordCache = {}  -- [level] = { time = number?, name = string? }
 -- nøkkel u_<userId>, verdi nivå * 2e9 + (2e9 - nåddUnix), så uavgjort går til den som nådde nivået FØRST.
 -- v2 (nøkkel tostring(userId), rått nivå) leses bare for å bære over topp-10 én gang per serverstart.
 local boardStore, legacyBoardStore = nil, nil
-if CONFIG.SaveData then
+if CONFIG.SaveData and not studioBlocked then
 	local ok, ds = pcall(function() return DataStoreService:GetOrderedDataStore(BoardConfig.Store) end)
 	if ok then boardStore = ds end
 	local ok2, ds2 = pcall(function() return DataStoreService:GetOrderedDataStore(BoardConfig.LegacyStore) end)

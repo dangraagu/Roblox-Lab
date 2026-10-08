@@ -47,7 +47,13 @@ local HintRemote = makeRemote("UseHint") -- client -> server: spend a hint
 local TintRemote = makeRemote("SetTint") -- client -> server: pick a flashlight tint
 
 -- ------------------------------------------------------------------ DataStore
+-- No Studio playtest writes to the live stores unless the open place says so (second review 2026-10-09).
+local studioBlocked = game:GetService("RunService"):IsStudio() and not Config.Save.AllowStudio
+if studioBlocked then
+	warn("[Anomaly] Studio: the live stores are OFF (Config.Save.AllowStudio) - nothing is saved.")
+end
 local ok, profileStore = pcall(function()
+	if studioBlocked then error("Studio") end
 	return DataStoreService:GetDataStore(Config.Save.Store)
 end)
 if not ok then
@@ -55,6 +61,7 @@ if not ok then
 	warn("[Anomaly] DataStore unavailable — running without saves (Studio API access off?)")
 end
 local orderedOk, bestBoard = pcall(function()
+	if studioBlocked then error("Studio") end
 	return DataStoreService:GetOrderedDataStore(Config.Save.LeaderStore)
 end)
 if not orderedOk then
@@ -63,6 +70,7 @@ end
 -- The Field Guide board's own ordered store (queued job A). Not the Best-Day store: that one ranks a
 -- Day streak and is left exactly as it was.
 local guideOk, guideStore = pcall(function()
+	if studioBlocked then error("Studio") end
 	return DataStoreService:GetOrderedDataStore(Config.Save.GuideStore)
 end)
 if not guideOk then
