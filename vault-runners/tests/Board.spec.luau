@@ -198,5 +198,9 @@ do
 	eq(Board.take(l2, 1), true, "then refills at the rate")
 end
 
+-- Night shift 2026-10-09 (second reviews): nothing stopped a Studio playtest with API access on from writing to the
+-- LIVE stores. Main now refuses them in Studio unless Config.Save.AllowStudio, which is false in src, always.
+eq(Config.Save.AllowStudio, false, "Config.Save.AllowStudio is false in src (set it only in a Studio place)")
+
 print(string.format("Board.spec: %d passed, %d failed", passed, failed))
 if failed > 0 then error("Board.spec failed", 0) end

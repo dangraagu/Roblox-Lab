@@ -23,6 +23,9 @@ local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
+-- No Studio playtest writes to the live stores unless the open place says so (second review 2026-10-09).
+local STUDIO_BLOCKED = game:GetService("RunService"):IsStudio() and not Config.Save.AllowStudio
+if STUDIO_BLOCKED then warn("[Cryptid] Studio: the live stores are OFF (Config.Save.AllowStudio) - nothing is saved.") end
 local Rng = require(ReplicatedStorage:WaitForChild("Rng"))
 local Economy = require(ReplicatedStorage:WaitForChild("Economy"))
 local Offers = require(ReplicatedStorage:WaitForChild("Offers"))
@@ -107,7 +110,7 @@ local campRandom = Random.new()
 local store = nil
 if Config.Save.Enabled then
 	local ok, ds = pcall(function()
-		return DataStoreService:GetDataStore(Config.Save.Store)
+		if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetDataStore(Config.Save.Store)
 	end)
 	if ok then
 		store = ds
@@ -121,7 +124,7 @@ end
 local boardStore = nil
 if Config.Save.Enabled then
 	local ok, ds = pcall(function()
-		return DataStoreService:GetOrderedDataStore(Config.Save.Board)
+		if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetOrderedDataStore(Config.Save.Board)
 	end)
 	if ok then
 		boardStore = ds

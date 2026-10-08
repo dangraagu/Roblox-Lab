@@ -306,6 +306,9 @@ Config.Exit = {
 
 -- ── Lagring ─────────────────────────────────────────────────────────────────
 Config.Save = {
+	-- false in src, always: a Studio playtest must not write to the LIVE stores (2026-10-09 review). Set it true
+	-- only in an open Studio place's Config when a save test needs the real stores (Board.spec checks).
+	AllowStudio = false,
 	Enabled = true,
 	Store = "ForkTower_v1",
 	-- OrderedDataStore på beste build-score, KODET (Board.encode: score * 2e9 + (2e9 - nåddUnix), uavgjort til den

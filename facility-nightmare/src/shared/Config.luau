@@ -163,6 +163,9 @@ Config.Hub = {
 }
 
 Config.Data = {
+	-- false in src, always: a Studio playtest must not write to the LIVE stores (2026-10-09 review). Set it true
+	-- only in an open Studio place's Config when a save test needs the real stores (Board.spec checks).
+	AllowStudio = false,
 	Store = "FacilityNightmare_v1",
 	Version = 1,
 	AutosaveSeconds = 20,

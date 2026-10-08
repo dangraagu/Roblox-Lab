@@ -1527,3 +1527,25 @@ check_facilitynightmare 205 / 0, _board 104 / 0, _boardoff 16 / 0, _desktop 47 -
 more. Five earlier full runs, before F's retry, were green in all 26 suites too. Every file compiles (`luau.exe` +
 `loadstring`, 51 of 51; a broken control fails); Rojo 7.7.0 builds the place. `luau-analyze` NOT run (still not in the
 shared scratchpad). Densest local parts this pass: 229 of 264 (bio-lab, 16 rooms built).
+
+---
+
+## Night shift 2026-10-09: second review of b347f56 + 607b079 (job H step 2)
+
+One independent read-only reviewer. Verdicts: **b347f56 SHIP-WITH-DEFERRED; 607b079 SHIP-WITH-DEFERRED.**
+- **MEDIUM, fixed tonight: no Studio gate.** `Config.Data.AllowStudio`; MARKETING.md:91-92 says to film the
+  board with API access on.
+- **LOW, suspected, not fixed. Saves can overlap on one key** (no per-session write serialisation in
+  `saveProfile`). An autosave can overwrite the leave payload and re-lock the key for 45 s.
+- **LOW, not fixed.** `boardBest` is persisted, so a board reset or rename is never re-written.
+- **LOW, not fixed.** The board prompt has no rate limit (self-DoS only).
+- **LOW, not fixed, predates these commits.** Progress made while read-only is discarded when the lock clears.
+
+Checked and clean:
+- the remotes are type- or whitelist-checked, and Choose needs the trusted exit cell;
+- the metric and tie time are server-side;
+- nothing is pay-to-win;
+- rest pays nothing;
+- hazards are telegraphed and called off at the lift;
+- no board is empty;
+- no banned glyphs.

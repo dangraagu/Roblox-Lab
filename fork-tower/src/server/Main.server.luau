@@ -38,6 +38,9 @@ local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService") -- GenerateGUID only (session tokens); no HTTP
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
+-- No Studio playtest writes to the live stores unless the open place says so (second review 2026-10-09).
+local STUDIO_BLOCKED = game:GetService("RunService"):IsStudio() and not Config.Save.AllowStudio
+if STUDIO_BLOCKED then warn("[ForkTower] Studio: the live stores are OFF (Config.Save.AllowStudio) - nothing is saved.") end
 local Rng = require(ReplicatedStorage:WaitForChild("Rng"))
 local Fork = require(ReplicatedStorage:WaitForChild("Fork"))
 local Section = require(ReplicatedStorage:WaitForChild("Section"))
@@ -210,10 +213,10 @@ local function tryStore(fn, what: string)
 end
 
 local store = tryStore(function()
-	return DataStoreService:GetDataStore(Config.Save.Store)
+	if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetDataStore(Config.Save.Store)
 end, "profiles")
 local orderedLB = tryStore(function()
-	return DataStoreService:GetOrderedDataStore(Config.Save.Leaderboard)
+	if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetOrderedDataStore(Config.Save.Leaderboard)
 end, "leaderboard")
 
 type Profile = {

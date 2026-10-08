@@ -224,5 +224,9 @@ do
 	truthy(bc.ReadsPerSecond * 60 <= 60, "and the sustained rate stays inside Roblox's base GetAsync budget of 60 per minute")
 end
 
+-- Night shift 2026-10-09 (second reviews): nothing stopped a Studio playtest with API access on from writing to the
+-- LIVE stores. Main now refuses them in Studio unless Config.Save.AllowStudio, which is false in src, always.
+eq(Config.Save.AllowStudio, false, "Config.Save.AllowStudio is false in src (set it only in a Studio place)")
+
 print(string.format("Board: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Board tests failed")

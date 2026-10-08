@@ -219,6 +219,9 @@ Config.ZoneSpacing = 3000
 
 -- ------------------------------------------------------------------ Persistence
 Config.Save = {
+	-- false in src, always: a Studio playtest must not write to the LIVE stores (2026-10-09 review). Set it true
+	-- only in an open Studio place's Config when a save test needs the real stores (Board.spec checks).
+	AllowStudio = false,
 	Store = "NightwatchManor_v1",
 	-- OrderedDataStore of the highscore board (Config.Board, Board.luau): the best night survived, ENCODED
 	-- (night * 2e9 + (2e9 - reachedAt)). The old "NightwatchManorBest_v1" held the raw night; the game was never

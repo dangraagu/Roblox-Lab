@@ -32,6 +32,9 @@ local Shared = ReplicatedStorage
 -- resolves in the luau CLI and is invalid here, which makes the whole server fail to load
 -- while every unit test stays green.
 local Config = require(Shared:WaitForChild("Config"))
+-- No Studio playtest writes to the live stores unless the open place says so (second review 2026-10-09).
+local STUDIO_BLOCKED = game:GetService("RunService"):IsStudio() and not Config.Save.AllowStudio
+if STUDIO_BLOCKED then warn("[Nightwatch] Studio: the live stores are OFF (Config.Save.AllowStudio) - nothing is saved.") end
 local Rng = require(Shared:WaitForChild("Rng"))
 local Manor = require(Shared:WaitForChild("Manor"))
 local Watcher = require(Shared:WaitForChild("Watcher"))
@@ -62,14 +65,14 @@ local NoticeRemote = makeRemote("Notice") -- transient events: took a relic, spo
 
 -- ------------------------------------------------------------------ DataStore
 local okStore, profileStore = pcall(function()
-	return DataStoreService:GetDataStore(Config.Save.Store)
+	if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetDataStore(Config.Save.Store)
 end)
 if not okStore then
 	profileStore = nil
 	warn("[Nightwatch] DataStore unavailable — running without saves (Studio API access off?)")
 end
 local okBoard, bestBoard = pcall(function()
-	return DataStoreService:GetOrderedDataStore(Config.Save.LeaderStore)
+	if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetOrderedDataStore(Config.Save.LeaderStore)
 end)
 if not okBoard then
 	bestBoard = nil

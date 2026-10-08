@@ -1318,3 +1318,23 @@ every live source unchanged by the sweep (sha256).**
 `_guards.luau`, `_night.luau`, `_budget.luau`, `_view.luau`, `_longroad.luau`; `robloxemu/build/steal-a-cryptid.luau`
 rebuilt; `MARKETING.md` (new), `README.md`, `CLAUDE.md` and this file. Not committed, not pushed, not published; Studio
 not opened. **Nobody has reviewed this pass.**
+
+---
+
+## Night shift 2026-10-09: second review of c51b97c + f181968 (job H step 2)
+
+One independent read-only reviewer. Verdicts: **c51b97c SHIP-WITH-DEFERRED; f181968 SHIP-WITH-DEFERRED.**
+- **MEDIUM, fixed tonight: no Studio gate.** `Config.Save.AllowStudio`; this matters for MARKETING.md's 50M-Essence
+  shots place.
+- **LOW, not fixed. A higher Top Lairs best can be dropped** (`writeBoard` returns early while `S.boardWriting`
+  is set). A leave during an in-flight write skips the final value. BindToClose does not await it.
+- **LOW, not fixed.** The public board can say "Loading..." forever if `GetSortedAsync` keeps failing.
+
+Checked and clean:
+- every remote is rate-limited (8/s), and there are no player strings;
+- the metric and tie-break time are server-side, and the encoding is exact;
+- there is no PvP stealing and nothing is pay-to-win;
+- rest and hazards are client-only and telegraphed;
+- the fall rescue only sends a player to their own lair;
+- the session token is consistent;
+- every board view carries a note.

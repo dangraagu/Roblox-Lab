@@ -31,6 +31,23 @@ the download) and the next night can run the emu gates and publish.
 - **Cross-game, not fixed:** no `RunService:IsStudio()` gate on DataStores in any of the 4 (a Studio session
   with API access on writes to the live boards). A fix is server code that only the emu checks can gate.
 
+### Later the same night (01:20-02:00)
+- **Redeem server freeze in FIVE games** (plus1-jump, grow-a-crystal, fork-tower: real exposure; anomaly,
+  lost-found: defence in depth): quadratic trim on the raw remote string, 30 000 spaces = 3.1 s of server time.
+  Fixed (`Codes.MaxInput = 64`), measured through the real remote: 200 000 chars now 0.08 s. **Live games are
+  still exposed until the next publish.**
+- **Studio store gate in all 11 games** (`AllowStudio = false` in src; spec asserts it; each verified in real
+  Studio by its console line).
+- **Tofu glyphs**: `tools/check_glyphs.py` (✕ ☰ ✔ ✖ 🛗 🪙 🪨, measured in Studio from a grid of every symbol and
+  emoji the games use); 0 left in the 16 committed games.
+- **Blank HUD top-10 panel** fixed in plus1-jump, grow-a-crystal, fork-tower, deep-vein.
+- Second reviews done for ALL 11 games (EYECANDY files). Open HIGHs, none fixed: labyrint (delayed teleport to
+  the exit), nightwatch (teleport out, wait, back in: completion commit BLOCK), vault-runners (fliers top the
+  board, owner call). MEDIUMs open: plus1 guard bound, anomaly readable spares, deep-vein elevator cooldown,
+  lock leaks in deep-vein / vault-runners / nightwatch.
+- Resume: (1) get a luau CLI and run every robloxemu check; (2) fix the HIGHs; (3) 16:9 thumbnails;
+  (4) publish the 4 live games (the Redeem fix is the urgent part).
+
 ### G (Reddit): blocked again
 The Chrome extension refuses old.reddit.com ("not allowed due to safety restrictions"). No post.
 

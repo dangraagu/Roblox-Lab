@@ -23,6 +23,9 @@ local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService") -- GenerateGUID only (cave keys, session tokens); no HTTP
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
+-- No Studio playtest writes to the live stores unless the open place says so (second review 2026-10-09).
+local STUDIO_BLOCKED = game:GetService("RunService"):IsStudio() and not Config.Save.AllowStudio
+if STUDIO_BLOCKED then warn("[DeepVein] Studio: the live stores are OFF (Config.Save.AllowStudio) - nothing is saved.") end
 local Mine = require(ReplicatedStorage:WaitForChild("Mine"))
 local Ore = require(ReplicatedStorage:WaitForChild("Ore"))
 local Economy = require(ReplicatedStorage:WaitForChild("Economy"))
@@ -82,9 +85,9 @@ local function tryStore(fn, what: string)
 	return nil
 end
 
-local store = tryStore(function() return DataStoreService:GetDataStore(Config.Save.Store) end, "profiles")
+local store = tryStore(function() if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetDataStore(Config.Save.Store) end, "profiles")
 local orderedLB = tryStore(function()
-	return DataStoreService:GetOrderedDataStore(Config.Save.Leaderboard)
+	if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetOrderedDataStore(Config.Save.Leaderboard)
 end, "leaderboard")
 
 local profiles = {} -- [player] = profile

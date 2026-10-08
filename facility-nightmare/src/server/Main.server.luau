@@ -31,6 +31,9 @@ local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage
 local Config = require(Shared:WaitForChild("Config"))
+-- No Studio playtest writes to the live stores unless the open place says so (second review 2026-10-09).
+local STUDIO_BLOCKED = game:GetService("RunService"):IsStudio() and not Config.Data.AllowStudio
+if STUDIO_BLOCKED then warn("[Facility] Studio: the live stores are OFF (Config.Data.AllowStudio) - nothing is saved.") end
 local Rng = require(Shared:WaitForChild("Rng"))
 local MazeGen = require(Shared:WaitForChild("MazeGen"))
 local Facility = require(Shared:WaitForChild("Facility"))
@@ -84,7 +87,7 @@ end
 --============================================================================ DataStore
 
 local okStore, profileStore = pcall(function()
-	return DataStoreService:GetDataStore(Config.Data.Store)
+	if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetDataStore(Config.Data.Store)
 end)
 if not okStore then
 	profileStore = nil
@@ -92,7 +95,7 @@ end
 -- The TOP DIVERS board's OrderedDataStore (docs/complete-game-standard.md §3). Its own pcall: without it the game
 -- runs and the board says it cannot be reached.
 local okBoardStore, boardStore = pcall(function()
-	return DataStoreService:GetOrderedDataStore(Config.Board.Store)
+	if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetOrderedDataStore(Config.Board.Store)
 end)
 if not okBoardStore then
 	boardStore = nil

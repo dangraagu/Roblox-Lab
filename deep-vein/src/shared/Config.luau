@@ -209,6 +209,9 @@ Config.Prestige = {
 
 -- ── Save ─────────────────────────────────────────────────────────────────────
 Config.Save = {
+	-- false in src, always: a Studio playtest must not write to the LIVE stores (2026-10-09 review). Set it true
+	-- only in an open Studio place's Config when a save test needs the real stores (Board.spec checks).
+	AllowStudio = false,
 	Enabled = true,
 	Store = "DeepVein_v1",
 	-- OrderedDataStore for the board (Config.Board). v2 (2026-10-01): the value is Board.encode(bestLayer,

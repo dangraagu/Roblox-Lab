@@ -25,6 +25,9 @@ Config.Seed = {
 --============================================================================ save
 
 Config.Save = {
+	-- false in src, always: a Studio playtest must not write to the LIVE stores (2026-10-09 review). Set it true
+	-- only in an open Studio place's Config when a save test needs the real stores (Board.spec checks).
+	AllowStudio = false,
 	Enabled = true,
 	Store = "VaultRunners_v1",
 	-- Remote-driven saves are COALESCED onto this tick instead of writing per tap. Roblox

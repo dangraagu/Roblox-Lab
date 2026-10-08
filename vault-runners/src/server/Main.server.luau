@@ -20,6 +20,9 @@ local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")   -- GenerateGUID only (the session's owner token); no HTTP
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
+-- No Studio playtest writes to the live stores unless the open place says so (second review 2026-10-09).
+local STUDIO_BLOCKED = game:GetService("RunService"):IsStudio() and not Config.Save.AllowStudio
+if STUDIO_BLOCKED then warn("[VaultRunners] Studio: the live stores are OFF (Config.Save.AllowStudio) - nothing is saved.") end
 local Rng = require(ReplicatedStorage:WaitForChild("Rng"))
 local MazeGen = require(ReplicatedStorage:WaitForChild("MazeGen"))
 local VaultFloor = require(ReplicatedStorage:WaitForChild("VaultFloor"))
@@ -79,13 +82,13 @@ local function tryStore(fn, what)
 end
 
 local store = tryStore(function()
-	return DataStoreService:GetDataStore(Config.Save.Store)
+	if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetDataStore(Config.Save.Store)
 end, "profiles")
 
 -- The highscore board (Config.Board). Nil when the place has no DataStore access, and then the sign
 -- says it is offline rather than showing an empty board as if nobody had ever escaped.
 local boardStore = tryStore(function()
-	return DataStoreService:GetOrderedDataStore(Config.Save.Board)
+	if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetOrderedDataStore(Config.Save.Board)
 end, "board")
 
 -- ONE clock for the board's caches and read limiter. os.clock() is CPU time in Roblox (a quiet

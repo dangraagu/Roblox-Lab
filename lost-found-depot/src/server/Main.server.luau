@@ -33,6 +33,9 @@ local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
+-- No Studio playtest writes to the live stores unless the open place says so (second review 2026-10-09).
+local STUDIO_BLOCKED = game:GetService("RunService"):IsStudio() and not Config.Save.AllowStudio
+if STUDIO_BLOCKED then warn("[LostFound] Studio: the live stores are OFF (Config.Save.AllowStudio) - nothing is saved.") end
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
 local Rng = require(ReplicatedStorage:WaitForChild("Rng"))
 local Seed = require(ReplicatedStorage:WaitForChild("Seed"))
@@ -180,7 +183,7 @@ local releasesInFlight = 0
 local store = nil
 if Config.Save.Enabled then
 	local ok, ds = pcall(function()
-		return DataStoreService:GetDataStore(Config.Save.Store)
+		if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetDataStore(Config.Save.Store)
 	end)
 	if ok then
 		store = ds
@@ -194,7 +197,7 @@ end
 local boardStore = nil
 if Config.Save.Enabled then
 	local ok, ds = pcall(function()
-		return DataStoreService:GetOrderedDataStore(BC.Store)
+		if STUDIO_BLOCKED then error("Studio") end return DataStoreService:GetOrderedDataStore(BC.Store)
 	end)
 	if ok then
 		boardStore = ds
