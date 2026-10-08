@@ -360,7 +360,7 @@ balance.TextXAlignment = Enum.TextXAlignment.Left
 balance.TextColor3 = Color3.fromRGB(235, 220, 150)
 balance.Font = Enum.Font.GothamMedium
 balance.TextScaled = true
-balance.Text = "🪙 0 coins    💎 0 gems"
+balance.Text = "💰 0 coins    💎 0 gems"
 balance.Parent = panel
 local balanceTsc = Instance.new("UITextSizeConstraint")
 balanceTsc.MaxTextSize = 16
@@ -421,7 +421,7 @@ listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncCanvas)
 
 --==========================  UI-OPPFRISK  ========================--
 function refreshHeader()
-	balance.Text = string.format("🪙 %d coins    💎 %d gems", state.coins, state.gems)
+	balance.Text = string.format("💰 %d coins    💎 %d gems", state.coins, state.gems)
 end
 
 -- Vis en kort beskjed (grunn/kvittering) som forsvinner av seg selv.

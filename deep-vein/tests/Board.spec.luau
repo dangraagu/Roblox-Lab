@@ -251,5 +251,15 @@ do
 	truthy(Config.Save.Leaderboard ~= "DeepVein_LB_v1", "the board's store is not v1's, which held raw studs (" .. tostring(Config.Save.Leaderboard) .. ")")
 end
 
+--======================================================================= the HUD panel (Studio 2026-10-09)
+-- Real Studio, night shift 2026-10-09: with nobody stored, the HUD's 🏆 DEEPEST panel was an empty dark box (the same
+-- defect +1 Jump, Grow a Crystal and Fork Tower had).
+do
+	local note = Board.hudNote({}, bc)
+	truthy(type(note) == "string" and #note > 5, "an empty HUD panel says something (" .. tostring(note) .. ")")
+	truthy(type(note) == "string" and utf8.len(note) <= 40, "and short enough for the narrow panel")
+	eq(Board.hudNote({ { userId = 7, depth = 3 } }, bc), nil, "a HUD panel with miners needs no note")
+end
+
 print(string.format("Board: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Board tests failed")

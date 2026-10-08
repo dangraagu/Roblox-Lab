@@ -15,6 +15,7 @@ local GuiService = game:GetService("GuiService")
 
 local player = Players.LocalPlayer
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
+local Board = require(ReplicatedStorage:WaitForChild("Board"))
 local Responsive = require(ReplicatedStorage:WaitForChild("Responsive"))
 local Ore = require(ReplicatedStorage:WaitForChild("Ore"))
 local FxClient = require(ReplicatedStorage:WaitForChild("FxClient"))
@@ -151,7 +152,7 @@ hint.BackgroundTransparency = 1
 hint.Font = Enum.Font.GothamMedium
 hint.TextScaled = true
 hint.TextColor3 = Color3.fromRGB(210, 214, 230)
-hint.Text = "👆 Click the rock under you to DIG · fill your bag · then hit 🛗 SURFACE to sell"
+hint.Text = "👆 Click the rock under you to DIG · fill your bag · then hit ⬆ SURFACE to sell"
 hint.Parent = root
 cap(hint, 14)
 do
@@ -380,7 +381,7 @@ local function elevatorBtn(order, text, color, cb)
 	table.insert(elevatorButtons, b)
 	return b
 end
-elevatorBtn(1, "🛗 SURFACE + SELL", Color3.fromRGB(60, 140, 90), function() ElevatorEvent:FireServer("up") end)
+elevatorBtn(1, "⬆ SURFACE + SELL", Color3.fromRGB(60, 140, 90), function() ElevatorEvent:FireServer("up") end)
 elevatorBtn(2, "⬇️ DESCEND", Color3.fromRGB(70, 90, 160), function() ElevatorEvent:FireServer("down") end)
 
 --============================================================================ leaderboard
@@ -427,6 +428,15 @@ end)
 LeaderboardEvent.OnClientEvent:Connect(function(topList)
 	for _, c in ipairs(boardList:GetChildren()) do
 		if c:IsA("TextLabel") then c:Destroy() end
+	end
+	local note = Board.hudNote(topList, Config.Board)
+	if note then -- an empty board is a short line, not a blank box (Studio 2026-10-09)
+		local l = Instance.new("TextLabel")
+		l.Name = "EmptyNote"; l.BackgroundTransparency = 1; l.Size = UDim2.new(1, 0, 0, 40)
+		l.Font = Enum.Font.GothamMedium; l.TextScaled = true; l.TextWrapped = true
+		l.TextXAlignment = Enum.TextXAlignment.Left; l.TextColor3 = Color3.fromRGB(190, 198, 220)
+		l.Text = note; l.Parent = boardList
+		cap(l, 14)
 	end
 	for i, e in ipairs(topList) do
 		local l = Instance.new("TextLabel")

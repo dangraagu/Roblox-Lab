@@ -247,7 +247,7 @@ balance.TextXAlignment = Enum.TextXAlignment.Left
 balance.TextColor3 = Color3.fromRGB(235, 220, 150)
 balance.Font = Enum.Font.GothamMedium
 balance.TextScaled = true
-balance.Text = "🪙 0 coins"
+balance.Text = "💰 0 coins"
 balance.Parent = panel
 local balanceTsc = Instance.new("UITextSizeConstraint")
 balanceTsc.MaxTextSize = 17
@@ -295,7 +295,7 @@ listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncCanvas)
 
 --==========================  UI-OPPFRISK  ========================--
 local function refreshHeader()
-	balance.Text = string.format("🪙 %d coins", state.coins)
+	balance.Text = string.format("💰 %d coins", state.coins)
 end
 
 local refreshRows -- fylles ut like nedenfor

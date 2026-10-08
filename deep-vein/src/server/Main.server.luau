@@ -1004,7 +1004,7 @@ local function buildShell(plr: Player)
 				local last = lastSwing[plr]
 				if last and (now - last) < Config.Mine.SwingCooldown then return end
 				lastSwing[plr] = now
-				toast(plr, "🪨 Bedrock. This is as deep as this cave goes — REBIRTH to open a deeper one!")
+				toast(plr, "🧱 Bedrock. This is as deep as this cave goes — REBIRTH to open a deeper one!")
 			end)
 		else
 			-- …AND SO DO THE WALLS (2026-10-01, complete-game-standard §1: no silent no-ops). A click on one did
@@ -1019,7 +1019,7 @@ local function buildShell(plr: Player)
 				local last = lastWallToast[plr]
 				if last and (now - last) < Config.Mine.WallToastSeconds then return end
 				lastWallToast[plr] = now
-				toast(plr, "🪨 Bedrock: the edge of your claim. Dig down or across, inside the walls.")
+				toast(plr, "🧱 Bedrock: the edge of your claim. Dig down or across, inside the walls.")
 			end)
 		end
 		part.Parent = folder
@@ -1242,7 +1242,7 @@ swing = function(plr: Player, cellKey: string)
 	SwingEvent:FireClient(plr, plr.UserId)
 
 	if not cell.breakable then
-		toast(plr, "🪨 Bedrock. This is as deep as this cave goes — REBIRTH to open a deeper one!")
+		toast(plr, "🧱 Bedrock. This is as deep as this cave goes — REBIRTH to open a deeper one!")
 		return
 	end
 
@@ -1342,7 +1342,7 @@ ElevatorEvent.OnServerEvent:Connect(function(plr, dir)
 		local at = worldPos(plr, d.x, d.y, d.z)
 		at = Vector3.new(at.X, standY(d.y), at.Z)
 		;(hrp :: BasePart).CFrame = CFrame.new(at)
-		toast(plr, "🛗 Down to " .. math.floor(Mine.depthStuds(Config, d.y)) .. " studs.")
+		toast(plr, "⬇ Down to " .. math.floor(Mine.depthStuds(Config, d.y)) .. " studs.")
 	end
 end)
 

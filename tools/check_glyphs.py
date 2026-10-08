@@ -5,7 +5,9 @@
 Measured in real Studio on 2026-10-09 (labyrint-spill, GothamBold / GothamBlack / SourceSansBold, TextSize 40-48):
   U+2715 ✕  and  U+2630 ☰   render as an empty rectangle (tofu)
   U+2714 ✔  and  U+2716 ✖   render as a near-black emoji, invisible on the dark HUD panels
-Every other symbol the games use (→ ▶ ◀ ▲ ▼ ★ ✓ ⬆ ⬇ … — ⚠ ❄ ☕ ⚡ ⭐ ♻ ⛏) rendered. Use "X", "≡" and "✓" instead.
+  U+1F6D7 🛗, U+1FA99 🪙, U+1FAA8 🪨   (newer emoji) render as an empty rectangle (deep-vein, same night)
+Every other symbol the games use rendered: → ▶ ◀ ▲ ▼ ★ ✓ ⬆ ⬇ … — ⚠ ❄ ☕ ⚡ ⭐ ♻ ⛏ ≡ × X, and all other 92 emoji found in
+the games' strings (🪐 and 🩸 included; grid screenshot deep-vein/marketing/studio-2026-10-09/02-emoji-grid.jpg).
 
 Only string literals in code are checked; comments may name the characters.
 """
@@ -18,6 +20,9 @@ BANNED = {
     0x2630: 'use "≡"',
     0x2714: 'use "✓"',
     0x2716: 'use "X"',
+    0x1F6D7: 'use "⬆"',
+    0x1FA99: 'use "💰"',
+    0x1FAA8: 'use "🧱"',
 }
 STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\'')
 

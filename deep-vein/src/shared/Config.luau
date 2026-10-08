@@ -243,6 +243,7 @@ Config.Board = {
 	Text = {
 		Title = "DEEPEST MINERS",
 		EmptyPublic = "Nobody is on the board yet. Break the floor and be the first!",
+		EmptyHud = "Nobody yet. Be the first!", -- the HUD panel (Board.hudNote)
 		FriendsFailed = "Couldn't load your Roblox friends right now. Try again in a minute.",
 		NoFriends = "No Roblox friends yet. Friends you add show up here, ranked against you.",
 		FriendsNoScores = "None of your %d friends has dug yet. Invite one and race them to the core!",
@@ -361,7 +362,7 @@ Config.Env = {
 			hazards = {},
 		},
 		{
-			id = "stone", name = "Grey Stone", emoji = "🪨", from = 4, fade = 2,
+			id = "stone", name = "Grey Stone", emoji = "🧱", from = 4, fade = 2,
 			lighting = { Ambient = { 25, 26, 32 }, OutdoorAmbient = { 19, 21, 28 }, Brightness = 1,
 				ExposureCompensation = -0.2, ClockTime = 23.6, FogStart = 12, FogEnd = 140, FogColor = { 26, 28, 36 } },
 			atmosphere = { Density = 0.4, Offset = 0.1, Color = { 92, 98, 114 }, Decay = { 32, 34, 44 }, Glare = 0.05, Haze = 1.4 },

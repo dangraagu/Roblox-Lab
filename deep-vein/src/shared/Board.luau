@@ -81,6 +81,11 @@ function Board.publicView(sorted: { any }, cfg: any): any
 	return { rows = rows, note = if #rows == 0 then cfg.Text.EmptyPublic else nil }
 end
 
+-- The HUD's small top-10 panel: a short note when there are no rows (Studio 2026-10-09: it was a blank box).
+function Board.hudNote(rows: { any }, cfg: any): string?
+	return if #rows == 0 then cfg.Text.EmptyHud else nil
+end
+
 -- Friends view. `values` maps userId -> stored value (the viewer's own included); `status` = { friendCount,
 -- checked, failed }. The viewer always sees their own row: when they rank below the shown rows, the last row
 -- is theirs, with their real rank.

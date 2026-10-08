@@ -685,7 +685,7 @@ local function refresh(dt: number)
 	local fields = player:GetAttribute("Fields") or 1
 	local selected = player:GetAttribute("Selected") or Config.Crops[1].id
 	local bitsStr = player:GetAttribute("AlmanacBits") or ""
-	coinsLabel.Text = "🪙 " .. Text.int(coins)
+	coinsLabel.Text = "💰 " .. Text.int(coins)
 	harvestLabel.Text = "🌾 " .. Text.short(harvested) .. " harvested"
 	almanacLabel.Text = string.format("📖 %d / 56 Almanac", count)
 	saveBanner.Visible = loaded and player:GetAttribute("CanSave") == false and not almanacOpen
