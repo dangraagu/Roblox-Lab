@@ -5,7 +5,12 @@
 local Codes = {}
 
 -- Normaliser brukerens input: trim + store bokstaver, så "skyhigh" == " SkyHigh ".
+-- Cut the raw input first: the trim pattern backtracks quadratically, and the server hands it the player's
+-- RemoteFunction string unchecked (2026-10-09: 20 000 spaces cost 1.37 s of server time). Codes are short.
+Codes.MaxInput = 64
+
 function Codes.normalize(input: string): string
+	input = string.sub(input, 1, Codes.MaxInput)
 	return (string.upper((string.gsub(input, "^%s*(.-)%s*$", "%1"))))
 end
 

@@ -11,6 +11,23 @@ end
 
 eq(Codes.normalize("  Crystal  "), "CRYSTAL", "normalize trims + uppercases")
 
+-- Night shift 2026-10-09 (second review): the trim pattern "^%s*(.-)%s*$" backtracks quadratically, and the server
+-- passes the player's raw RemoteFunction string straight in. Measured in Studio: 20 000 spaces between two letters
+-- took 1.37 s of server time (8 000: 0.22 s), so one call with a long string froze every player's server. A code is
+-- short; anything this long is refused quickly and stays unknown.
+do
+	local evil = "a" .. string.rep(" ", 30000) .. "b"
+	local t0 = os.clock()
+	local n = Codes.normalize(evil)
+	local dt = os.clock() - t0
+	eq(dt < 0.05, true, string.format("a 30 000-space input normalizes in under 0.05 s (took %.3f s)", dt))
+	eq(#n <= (Codes.MaxInput or 0), true, "and comes back no longer than Codes.MaxInput")
+	local ok2, _, why = Codes.redeem(evil, {}, Config.Codes)
+	eq(ok2, false, "a huge input redeems nothing")
+	eq(why, "unknown", "and is simply an unknown code")
+	eq(Codes.normalize("   welcome   "), "WELCOME", "a normal code with spaces still trims after the cap")
+end
+
 local ok, reward, reason = Codes.redeem("welcome", {}, Config.Codes)
 eq(ok, true, "valid code ok"); eq(reason, "ok", "ok reason")
 eq(reward.dust, 100, "welcome dust reward")
