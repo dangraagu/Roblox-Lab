@@ -20,6 +20,51 @@ of the standard (§0h). **Nothing seen in Studio yet** (§8). Nothing was commit
 
 ---
 
+## 0i. Night shift 2026-10-09: Studio check and the second review of db6d889 + 3c67595
+
+**Studio** (job H step 1): see `STUDIO.md`. The doorway sky, the single moon, the break (B) and the Field Guide
+sign all work. Three things are weak and **none is fixed yet**:
+- the aurora reads as flat planks;
+- the storm is near-black;
+- The Other Sky's ring runs behind the unbacked caption text.
+
+**Second review** (job H step 2). One independent read-only reviewer was asked to refute both commits. It
+found no HIGH. Its verdicts:
+- **db6d889: SHIP.** One doc nit: the client writes `CelestialBodiesShown` at startup, outside a break.
+- **3c67595: SHIP-WITH-DEFERRED.**
+
+It confirmed these hold:
+- the 0..24 clamp in encode and decode;
+- only the server writes;
+- a catch is only the server's own roll answered correctly;
+- `UpdateAsync` only raises the value;
+- writes only on an increase, at most once per 6 s;
+- the friends fetch is capped at 200, cached, in a pcall, and stops at budget 10;
+- names are never stored;
+- read-only sessions merge as a union;
+- the break is free (client camera and Lighting only, restored);
+- the checks drive the real bundled Main.server.
+
+Findings, none fixed tonight:
+1. **MEDIUM. The 11 spare-based anomalies can be read from the client.** `hide()` and `show()` toggle
+   `Transparency`, `CanCollide`, `CanTouch` and `CanQuery` (and the figure's PointLight), and those values
+   replicate (`Main.server.luau:586-601, 737-751`). A script can read the answer without a clean reference.
+   The board cap of 24 still holds; the cost is the tie-break. A bot at `MIN_PASS_SECONDS = 0.75` could take
+   the earliest 24/24 slots. The R12 note (`Main.server.luau:997-1000`) and the commit message overstate the
+   protection.
+2. **MEDIUM. No `RunService:IsStudio()` gate on any DataStore**, including `AnomalyObsGuide_v1`.
+   - A Studio playtest with API access on (as §8 items 20-21 ask) writes the developer's catches to the live
+     public board.
+   - Suspected: a Local Server test with negative UserIds writes `u_-1` keys. Those take top-10 slots that
+     `userIdFromKey` then drops.
+3. **LOW.** If both saves of a wrong call's reset fail, the next join restores the already-answered run.
+4. **LOW.** A friends fetch keeps running after its player leaves.
+5. **LOW.** The player's own row is trimmed off a friends board when they rank 11th or lower
+   (`Main.server.luau:1386-1389, 1419-1421`).
+6. **LOW, suspected.** `publishGuide` can yield ahead of `saveProfile` on leave and in BindToClose.
+
+**Publish** is held until findings 1-2 are fixed or decided and the robloxemu gates run (no luau CLI tonight).
+
 ## 0h. 2026-10-01, pass 2: every band's own weather and its own light (standard §2)
 
 `docs/complete-game-standard.md` §2 asks every band for its own light, colour, scenery, critters **and weather**.
