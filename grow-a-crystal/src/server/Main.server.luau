@@ -65,6 +65,10 @@ end
 -- Saving is what should degrade, not the game. Every write path already checks `store`.
 local function tryStore(fn, what)
 	if not Config.Save.Enabled then return nil end
+	if game:GetService("RunService"):IsStudio() and not Config.Save.AllowStudio then
+		warn("[Crystal] Studio: the live " .. what .. " store is OFF (Config.Save.AllowStudio) - nothing is saved.")
+		return nil
+	end
 	local ok, ds = pcall(fn)
 	if ok then return ds end
 	warn("[Crystal] " .. what .. " datastore unavailable (" .. tostring(ds)

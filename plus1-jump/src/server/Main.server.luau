@@ -89,6 +89,10 @@ local BoardEvent = mkRemote("RemoteEvent", "Board") -- server -> klient: den fys
 -- write path already checks `store`.
 local function tryStore(fn, what)
 	if not Config.Save.Enabled then return nil end
+	if game:GetService("RunService"):IsStudio() and not Config.Save.AllowStudio then
+		warn("[Plus1] Studio: the live " .. what .. " store is OFF (Config.Save.AllowStudio) - nothing is saved.")
+		return nil
+	end
 	local ok, ds = pcall(fn)
 	if ok then return ds end
 	warn("[Plus1] " .. what .. " datastore unavailable (" .. tostring(ds)

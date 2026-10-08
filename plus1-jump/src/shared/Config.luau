@@ -89,6 +89,9 @@ Config.Codes = {
 -- ── Lagring ─────────────────────────────────────────────────────────────────
 Config.Save = {
 	Enabled = true,
+	-- false in src, always: a Studio playtest must not write to the LIVE stores (2026-10-09 review). Set it true
+	-- only in an open Studio place's Config when a save test needs the real stores (Board.spec checks).
+	AllowStudio = false,
 	Store = "Plus1Jump_v1",       -- per-spiller data
 	-- OrderedDataStore for topplista. v2 (2026-09-30): verdien er Board.encode(beste, nåddUnix), ikke rå
 	-- etasje. v1 holdt rå etasjer, som ville sortert under hver kodet verdi; en spiller fra v1 kommer

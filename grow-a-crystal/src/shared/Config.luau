@@ -360,6 +360,9 @@ Config.Board = {
 -- ── Save ─────────────────────────────────────────────────────────────────────
 Config.Save = {
 	Enabled = true,
+	-- false in src, always: a Studio playtest must not write to the LIVE stores (2026-10-09 review). Set it true
+	-- only in an open Studio place's Config when a save test needs the real stores (Board.spec checks).
+	AllowStudio = false,
 	Store = "GrowCrystal_v1",
 	-- OrderedDataStore for the highscore board. v2 (2026-09-30): the value is Board.encode(points, reachedAt), not
 	-- raw totalDust. v1 held raw totalDust, which would sort below every encoded value; a v1 player comes back on

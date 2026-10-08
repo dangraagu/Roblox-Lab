@@ -274,5 +274,12 @@ do
 	eq(Board.hudNote({ { rank = 1, userId = 7, name = "a", score = "1" } }, bc), nil, "a HUD panel with miners needs no note")
 end
 
+--======================================================================= no Studio writes to the live stores
+-- Night shift 2026-10-09 (second reviews of every live game): nothing in code stopped a Studio playtest with "Studio
+-- Access to API Services" on from writing to the LIVE profile store and board, including the night shift's own
+-- shot sessions with cheat config. Main's tryStore now refuses in Studio unless Config.Save.AllowStudio is true,
+-- and that may only ever be set in an open place's Config, never in src/.
+eq(Config.Save.AllowStudio, false, "Config.Save.AllowStudio is false in src (set it only in a Studio place)")
+
 print(string.format("Board: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Board tests failed")
