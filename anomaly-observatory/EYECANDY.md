@@ -63,6 +63,19 @@ Findings, none fixed tonight:
    (`Main.server.luau:1386-1389, 1419-1421`).
 6. **LOW, suspected.** `publishGuide` can yield ahead of `saveProfile` on leave and in BindToClose.
 
+**Thumbnail candidates (§9), shot 2026-10-09**, in `marketing/thumbnails/candidates-2026-10-09/`.
+- How they were made: all 6 set-ups from `ShotList.luau`, at a 16:9 viewport (`tools/studio_window.py`). The
+  capture came back as 1919x1080, was resized to 1920x1080 and saved as quality-92 JPEG. Each shot waited 45 s
+  after its Day change.
+- Honest verdict: **none is good enough yet.**
+  - Shot 1's hall is murky.
+  - Shot 3 (storm) is nearly black.
+  - In shots 4 and 5, the Milky Way and the comet tail are flat translucent planks, and the nebulae are flat
+    blobs.
+  - Shot 6 is the strongest.
+- The same art issues as STUDIO.md, so the art needs work before any of these is worth uploading.
+- Not uploaded.
+
 **Publish** is held until findings 1-2 are fixed or decided and the robloxemu gates run (no luau CLI tonight).
 
 ## 0h. 2026-10-01, pass 2: every band's own weather and its own light (standard §2)
