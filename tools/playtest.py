@@ -15,15 +15,17 @@ Assertions are made against the HUD the player actually sees, not a server-local
 label says DAY 2, the player is on day 2; if a server variable says so and the label does not,
 the player is the one who is right.
 
-NOT A GATE YET. It reliably proves the loop RUNS - it has walked the hall, pressed the key, and
-watched the day go 1 -> 2 -> 3 with the field guide counting catches, which is the first time any
-of these games was played end to end by anything. But a run still flakes: roughly one press in
-three does not register, and while the largest cause was found and fixed (walking to the pad
-while the player was still being teleported back to the start, then pressing from 75 studs away),
-what remains is not isolated. Do not put this in front of a publish until a run is repeatably
-green; do read what it prints, because a real failure looks different from a flake - a flake
-moves the counter on the next pass, a broken loop never moves it at all. Proven against a mutant:
-with resolveChoice made a no-op the run went 4 of 7 red and the counter never left day one.
+THE "ONE PRESS IN THREE" IS EXPLAINED (night shift 2026-10-09, by measurement). An input probe now counts, per
+press, whether the key reached the game, whether a prompt began a hold, whether it triggered, and whether the
+pass ended in a wrong call (the Death remote). Results:
+  * Anomaly: in 8 runs every one of 24 presses arrived and triggered its prompt. The "lost presses" were wrong
+    calls at Day 1: a wrong answer resets to Day 1, so on Day 1 the counter does not move, and the old check
+    read that as a dropped key. The checks now accept a move OR a Death, per pass and for the run.
+  * Labyrint's door (HoldDuration 0.20): a keyPress triggered 0/8 and a 200 ms hold 0/8, while a 400 ms hold
+    triggered 8/8; the key arrived 24/24. Presses are now held 400 ms.
+  * Control: with both prompt handlers made no-ops in the open place, the run went 4 of 7 red while the probe
+    showed every key arriving and triggering, so a broken loop cannot hide behind the probe.
+Runs 6-8 after the last change: 7/7 each. Treat it as a gate for anomaly; other games need a recipe first.
 """
 
 from __future__ import annotations
@@ -54,6 +56,49 @@ WHERE = """
 local plr = game:GetService("Players").LocalPlayer
 local hrp = plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
 return hrp and string.format("%.0f,%.0f,%.0f", hrp.Position.X, hrp.Position.Y, hrp.Position.Z) or "?"
+"""
+
+# The input probe (night shift 2026-10-09). Counts, on the client, what each press actually did: did the key
+# reach the game (InputBegan), did a ProximityPrompt start its hold (PromptButtonHoldBegan), did it fire
+# (PromptTriggered), and which enabled prompt was nearest just before the press. A miss is then classified
+# instead of guessed at.
+PROBE_INSTALL = """
+local plr = game:GetService("Players").LocalPlayer
+if plr:FindFirstChild("InputProbe") then return "already" end
+local UIS = game:GetService("UserInputService")
+local PPS = game:GetService("ProximityPromptService")
+local f = Instance.new("Folder"); f.Name = "InputProbe"; f.Parent = plr
+for _, k in {"began", "holdBegan", "triggered", "death"} do f:SetAttribute(k, 0) end
+-- A wrong call is a resolved pass too, even when the counter does not move (Day 1 -> wrong -> Day 1).
+for _, r in game:GetService("ReplicatedStorage"):GetDescendants() do
+    if r:IsA("RemoteEvent") and r.Name == "Death" then
+        r.OnClientEvent:Connect(function() f:SetAttribute("death", f:GetAttribute("death") + 1) end)
+    end
+end
+UIS.InputBegan:Connect(function(i) if i.KeyCode ~= Enum.KeyCode.Unknown then f:SetAttribute("began", f:GetAttribute("began") + 1) end end)
+PPS.PromptButtonHoldBegan:Connect(function() f:SetAttribute("holdBegan", f:GetAttribute("holdBegan") + 1) end)
+PPS.PromptTriggered:Connect(function() f:SetAttribute("triggered", f:GetAttribute("triggered") + 1) end)
+return "installed"
+"""
+
+PROBE_READ = """
+local plr = game:GetService("Players").LocalPlayer
+local f = plr:FindFirstChild("InputProbe")
+if not f then return "0|0|0|0|none" end
+local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+local best, bestD = "none", math.huge
+if hrp then
+    for _, d in workspace:GetDescendants() do
+        if d:IsA("ProximityPrompt") and d.Enabled and d.Parent and d.Parent:IsA("BasePart") then
+            local dist = (d.Parent.Position - hrp.Position).Magnitude
+            if dist < bestD then
+                bestD = dist
+                best = string.format("%s@%.1f/%.0f hold%.2f", d.KeyboardKeyCode.Name, dist, d.MaxActivationDistance, d.HoldDuration)
+            end
+        end
+    end
+end
+return string.format("%d|%d|%d|%d|%s", f:GetAttribute("began"), f:GetAttribute("holdBegan"), f:GetAttribute("triggered"), f:GetAttribute("death"), best)
 """
 
 # Find the far end of the per-player hall rather than hardcoding it: the zone is built at an
@@ -131,6 +176,15 @@ def main():
         # Long enough for the server to build the world and the client HUD to exist. Raising it
         # from 6 to 12 did NOT reduce the lost presses, so startup time is not the cause of those.
         time.sleep(10)
+        print("input probe:", text_of(st.call("execute_luau", {"code": PROBE_INSTALL, "datamodel_type": "Client"})))
+
+        def probe():
+            raw = text_of(st.call("execute_luau", {"code": PROBE_READ, "datamodel_type": "Client"})).strip()
+            parts = raw.split("|")
+            try:
+                return [int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])], parts[4]
+            except (ValueError, IndexError):
+                return [0, 0, 0, 0], raw
 
         loc = text_of(st.call("execute_luau",
                               {"code": spec["target"], "datamodel_type": "Server"})).strip()
@@ -147,6 +201,7 @@ def main():
               % (spec["what"], start))
 
         seen = [start]
+        resolved = 0
         for i, key in enumerate(spec["presses"], 1):
             wx, wy, wz = spots[key]
             # Walk, then CHECK you arrived, and walk again if not.
@@ -176,15 +231,24 @@ def main():
             # in the same instant, and Roblox's ProximityPrompt misses roughly one in three of
             # them: the run before this change failed a different pass each time with no HUD lag
             # and no second press taking either. Holding it for 200ms is what a person does.
+            # Held for 400 ms, not 200 (measured 2026-10-09 on labyrint-spill's door, HoldDuration 0.20:
+            # keyPress 0/8 and a 200 ms hold 0/8 triggered, a 400 ms hold 8/8; the key itself arrived
+            # 24/24). A hold must outlast the prompt's HoldDuration with margin.
+            before_p, near = probe()
             st.call("user_keyboard_input", {"datamodel_type": "Client", "actions": [
                 {"action": "wait", "wait_time_ms": 700},
                 {"action": "keyDown", "key_code": key},
-                {"action": "wait", "wait_time_ms": 200},
+                {"action": "wait", "wait_time_ms": 400},
                 {"action": "keyUp", "key_code": key},
                 {"action": "wait", "wait_time_ms": 3000},
             ]})
+            after_p, _ = probe()
+            d = [x - y for x, y in zip(after_p, before_p)]
             now = counter(hud(), spec["counter"])
-            print("  pass %d: walked to %s, pressed %s" % (i, pos, key))
+            print("  pass %d: walked to %s, pressed %s   [probe: key arrived %d, hold began %d, "
+                  "triggered %d, wrong-call (Death) %d; nearest prompt before the press: %s]"
+                  % (i, pos, key, d[0], d[1], d[2], d[3], near))
+            died = d[3] > 0
 
             # A press that appears to do nothing has two very different causes, and lumping them
             # together would hide the one that matters. Wait and re-read FIRST: if the number
@@ -193,7 +257,7 @@ def main():
             # and a key pressed while the new prompts are being created can be swallowed. That is
             # a real thing a player can hit, so it is reported rather than retried away silently.
             lagged = False
-            if now == seen[-1]:
+            if now == seen[-1] and not died:
                 time.sleep(3)
                 again = counter(hud(), spec["counter"])
                 if again != seen[-1]:
@@ -202,7 +266,7 @@ def main():
             if now == seen[-1]:
                 st.call("user_keyboard_input", {"datamodel_type": "Client", "actions": [
                     {"action": "keyDown", "key_code": key},
-                    {"action": "wait", "wait_time_ms": 200},
+                    {"action": "wait", "wait_time_ms": 400},
                     {"action": "keyUp", "key_code": key},
                     {"action": "wait", "wait_time_ms": 3500},
                 ]})
@@ -214,8 +278,14 @@ def main():
             elif lagged:
                 print("   NOTE  the HUD was behind the server by a beat; it caught up.")
 
-            check(now is not None and now != seen[-1],
-                  "%s moved (%s -> %s)" % (spec["what"], seen[-1], now))
+            # A wrong call at Day 1 resolves the pass and leaves the counter on 1: the old check called that
+            # a lost press, and it was most of the "one in three" (2026-10-09: the probe saw every key arrive
+            # and every prompt trigger in 6 of 6 presses while the counter stood still).
+            check(now is not None and (now != seen[-1] or died),
+                  "%s moved or the pass resolved as a wrong call (%s -> %s%s)"
+                  % (spec["what"], seen[-1], now, ", Death" if died else ""))
+            if now is not None and (now != seen[-1] or died):
+                resolved += 1
             seen.append(now)
 
         final = hud()
@@ -223,9 +293,11 @@ def main():
             v = counter(final, pattern)
             check(v is not None, "%s is on screen (%s)" % (what, v))
 
-        # A run that never left day one, or never came back to it, is a loop that is not looping.
-        check(len(set(seen)) > 1, "the counter took more than one value across the run: %s"
-              % ",".join(str(s) for s in seen))
+        # A run that never left day one, or never came back to it, is a loop that is not looping - unless every
+        # pass was a wrong call at Day 1 (2026-10-09: three in a row happens, about one run in eight). So the
+        # run-level check is that EVERY pass resolved (a move or a Death), with the values printed.
+        check(resolved == len(spec["presses"]), "every pass resolved (%d of %d; counter %s)"
+              % (resolved, len(spec["presses"]), ",".join(str(s) for s in seen)))
 
         errs = text_of(st.call("get_console_output", {}))
         bad = [l for l in errs.split("\n")

@@ -48,6 +48,12 @@ the download) and the next night can run the emu gates and publish.
 - Resume: (1) get a luau CLI and run every robloxemu check; (2) fix the HIGHs; (3) 16:9 thumbnails;
   (4) publish the 4 live games (the Redeem fix is the urgent part).
 
+### F. Playtest rig: DONE (02:10)
+The "one press in three" is explained by measurement (tools/playtest.py docstring): anomaly's misses were wrong
+calls at Day 1 (counter stays 1), and labyrint's 0.20 s hold prompts need a hold longer than 200 ms. Input
+probe added, holds 400 ms, checks accept a move or a Death. 3 consecutive clean runs 7/7 after the last change
+(24/24 presses delivered and resolved across 8 runs); a no-op mutant goes 4/7 red. Gate for anomaly.
+
 ### G (Reddit): blocked again
 The Chrome extension refuses old.reddit.com ("not allowed due to safety restrictions"). No post.
 
