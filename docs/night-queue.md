@@ -54,6 +54,29 @@ calls at Day 1 (counter stays 1), and labyrint's 0.20 s hold prompts need a hold
 probe added, holds 400 ms, checks accept a move or a Death. 3 consecutive clean runs 7/7 after the last change
 (24/24 presses delivered and resolved across 8 runs); a no-op mutant goes 4/7 red. Gate for anomaly.
 
+### End of night status (02:25; stopped early: everything left needs a luau CLI or the owner)
+- **H, all 11 games:**
+  - Step 1 (Studio): done as a first look. A full look was done for the 4 live games, plus fork-tower and
+    deep-vein; every game has a STUDIO.md.
+  - Step 2 (second review): done for all 11 and recorded in each EYECANDY.md.
+  - Step 3 (thumbnails): +1 Jump and Anomaly candidates were shot at a true 1920x1080
+    (`tools/studio_window.py`, docs/thumbnails.md). The Anomaly candidates are too weak to upload; Crystal and
+    Labyrinth were not shot.
+  - Step 4 (publish): **BLOCKED.** There is no luau CLI, so no robloxemu gate ran.
+- **Owner, please:**
+  1. Restore `luau.exe`, or approve its download. Then the next night can run every emu check and publish.
+     **The Redeem server freeze is LIVE on +1 Jump and Grow a Crystal until then.**
+  2. Decide whether fliers may top the Vault Runners board.
+- **Next night, in this order:**
+  1. Run the emu checks.
+  2. Publish plus1-jump and grow-a-crystal (the Redeem fix).
+  3. Fix the HIGHs: labyrint (delayed teleport), nightwatch (teleport out and back).
+  4. Fix the deep-vein elevator cooldown. walk.luau:827-833 fires down and up in one frame, so adapt that
+     check with it.
+  5. Fix the lock leaks.
+- **Cross-game, seen in every game:** Roblox's chat notice covers the top-left HUD panel for its first seconds
+  after join.
+
 ### G (Reddit): blocked again
 The Chrome extension refuses old.reddit.com ("not allowed due to safety restrictions"). No post.
 
