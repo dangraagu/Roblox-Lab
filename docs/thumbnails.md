@@ -73,3 +73,13 @@ A 200 is not proof. `apis.roblox.com/thumbnail-personalization-api/v1/universe/{
 is the **Home Page** personalization set and is empty for a game that has a perfectly good
 thumbnail — reading that endpoint says nothing about this upload. Check the dashboard's
 **Experience Detail Page** tab, or `games.roblox.com/v1/games/{id}/media`.
+
+## Shooting them at 1920x1080 (night shift 2026-10-09)
+
+Studio's viewport on this machine is about 2.4:1 at full size, so a plain `screen_capture` came back
+1920x795. To get 16:9, resize the Studio window with `py -3 tools/studio_window.py 2630 1460`. That gives a
+1622x913 logical viewport, which is about 2028x1140 physical, and `screen_capture` then returns 1919x1080.
+Resize that to 1920x1080 and save it as a quality-92 JPEG. This was used for the +1 Jump candidates in
+`plus1-jump/marketing/thumbnails/candidates-2026-10-09/`.
+
+Afterwards, put the window back with `py -3 tools/studio_window.py restore`.
