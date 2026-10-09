@@ -1294,3 +1294,14 @@ Findings, none fixed tonight (listed for the next pass; MEDIUM 1 is a design cal
 - **Glyphs.** `☰ Menu`, `✕ Menu`/`✕ Top` and the multiplier's `✖️` rendered as empty boxes or near-black emoji in
   real Studio. They are now `≡ Menu`, `X Menu`/`X Top` and `✨ Multiplier`. The new `tools/check_glyphs.py`
   gives 0.
+- **Thumbnail candidates (§9), shot 2026-10-09 02:11.** They are in `marketing/thumbnails/candidates-2026-10-09/`.
+  - How they were made: the Studio window was set to 2630x1460, which gives a 16:9 viewport of 1622x913
+    logical, about 2028x1140 physical. The capture came back as 1919x1080 and was resized to 1920x1080, then
+    saved as quality-92 JPEG.
+  - Session A config was set in the place only, with the HUD hidden.
+  - Shot 2 (cloud sea) works.
+  - Shots 4 (space) and 6 (galaxy) are weak. The Earth reads as a flat cyan disc, no stars show, and the avatar
+    is a speck.
+  - Shot 5 cannot be shot with a teleport any more: since the climb guard, a teleported avatar that is knocked
+    off is rescued to the pad.
+  - Not uploaded: the game is not republished, and a thumbnail must not show visuals that are not live.
