@@ -75,6 +75,16 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `anomaly-observatory/marketing/pairs/door_extra/spot.mp4` | The far end of this hall is wrong | 2026-10-10 06:00 | https://youtube.com/shorts/YOw_qQp9wX0 | Planlagt (verified in Studio 2026-10-09) |
 | `plus1-jump/marketing/clips/climb_tier1.mp4` | Every step you take gives +1 jump | 2026-10-10 08:00 | https://youtube.com/shorts/JsfBAcKTVJw | Planlagt (verified in Studio 2026-10-09) |
 | `grow-a-crystal/marketing/clips/harvest.mp4` | Clicking a grown crystal for Gem Dust | 2026-10-10 10:00 | https://youtube.com/shorts/LYvJ-zxBMaw | Planlagt (verified in Studio 2026-10-09) |
+| `plus1-jump/marketing/clips/code_launch.mp4` | What +100 jump power does to one jump | 2026-10-10 16:00 | https://youtube.com/shorts/F0ir3EaAoUQ | Planlagt (verified in Studio 2026-10-10) |
+| `grow-a-crystal/marketing/clips/cavern_climb.mp4` | Eight terraces of crystal sockets | 2026-10-10 18:00 | https://youtube.com/shorts/rayC8kQVxBU | Planlagt (verified in Studio 2026-10-10) |
+| `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Clearing level 1 of the maze | 2026-10-10 20:00 | https://youtube.com/shorts/o69D58U0vXs | Planlagt (verified in Studio 2026-10-10) |
+| `anomaly-observatory/marketing/pairs/twin_scope/spot.mp4` | Clean hall or not? Look twice | 2026-10-10 22:00 | https://youtube.com/shorts/vnI9pqzfhv8 | Planlagt (verified in Studio 2026-10-10) |
+| `grow-a-crystal/marketing/clips/plant_seed.mp4` | Planting the first seed | 2026-10-11 00:00 | https://youtube.com/shorts/dUpnDivvKMg | Planlagt (verified in Studio 2026-10-10) |
+| `labyrint-spill/marketing/clips/level2_run.mp4` | Level 2, start to exit | 2026-10-11 02:00 | https://youtube.com/shorts/-p3fxu3KxU8 | Planlagt (verified in Studio 2026-10-10) |
+| `anomaly-observatory/marketing/pairs/lights_out/spot.mp4` | This hall looks wrong. Why? | 2026-10-11 04:00 | https://youtube.com/shorts/oDd4ZR_TuR8 | Planlagt (verified in Studio 2026-10-10) |
+| `plus1-jump/marketing/clips/tower_path.mp4` | The whole sky tower in 12 seconds | 2026-10-11 06:00 | https://youtube.com/shorts/D_-COZjxF0I | Planlagt (verified in Studio 2026-10-10) |
+| `grow-a-crystal/marketing/clips/cavern_descend.mp4` | From the basin to the first socket | 2026-10-11 08:00 | https://youtube.com/shorts/_Ss_nwAHtsY | Planlagt (verified in Studio 2026-10-10) |
+| `labyrint-spill/marketing/clips/lobby_enter.mp4` | Pick a door: solo, group or friends | 2026-10-11 10:00 | https://youtube.com/shorts/jI9Bbyn7_T8 | Planlagt (verified in Studio 2026-10-10) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
