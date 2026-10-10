@@ -2,6 +2,35 @@
 
 Newest night first. Each job: done / in progress (with exact resume point) / blocked (why).
 
+## Night of 2026-10-11 (run started 00:17, stopped at 00:35 on purpose: weekly budget)
+
+Clock: Bash `date` and PowerShell `Get-Date` both read 00:17 at start. FPL gate: open (next deadline
+17.10 12:00 is after the weekly reset 14.10 17:00).
+
+**Why the night stopped early:** `get_usage` reported the plan's weekly window ("Weekly · all models")
+at **99 % used**, reset 2026-10-14 17:00. A Studio session (screen captures, play traces) would spend
+the last percent and the daily `roblox-daily-shorts` task (11:30, every day until the reset) would die
+on the limit, three days of Shorts lost. The only unblocked work tonight was Studio work, so nothing
+was worth that trade. Nothing was published, no game folder was touched.
+
+- **luau CLI: still missing.** Searched PATH, `%LOCALAPPDATA%\Temp\claude`, the whole user profile
+  (depth 6), D:\ (depth 5), `~/.rokit/bin`, `~/.aftman/bin` and WSL. No `luau*.exe` anywhere. rojo is
+  present (`~/.cargo/bin/rojo`). Every robloxemu gate is therefore still un-runnable, and the publish
+  gate is not met for any game. **The Redeem server freeze is still LIVE on +1 Jump and Grow a Crystal.**
+- Untracked daytime-run folders (disaster-rounds, find-it-chapters, gnome-garden-defense, outpost-zero,
+  scrapline-tycoon, 64 robloxemu checks) are unchanged since 2026-10-07 and were left untouched.
+- Shorts plan: 12 unpublished posts per day on 2026-10-12 .. 2026-10-19 (8 days ahead), no extension.
+- G (Reddit): not attempted (budget).
+
+**Owner, please (unchanged from 2026-10-09):**
+1. Restore `luau.exe`, or approve its download (github.com/luau-lang/luau releases). Then the next night
+   can run every emu check and publish the Redeem fix.
+2. Decide whether fliers may top the Vault Runners board.
+
+**Next night (resume order unchanged):** 1. emu checks; 2. publish plus1-jump and grow-a-crystal;
+3. fix the HIGHs (labyrint delayed teleport, nightwatch teleport out and back); 4. deep-vein elevator
+cooldown; 5. lock leaks. If the weekly window is still above about 95 % at start, stop again and say so.
+
 ## Night of 2026-10-09 (run started 00:17)
 
 Clock: Bash `date` and PowerShell `Get-Date` both read 00:17 at start. Skip rule (7.-8.10) no longer applies.
