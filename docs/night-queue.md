@@ -2,6 +2,17 @@
 
 Newest night first. Each job: done / in progress (with exact resume point) / blocked (why).
 
+## Owner decisions 2026-10-11 (daytime, in chat)
+
+- **luau CLI restored.** The owner approved the download. Official release `0.742` from
+  github.com/luau-lang/luau (`luau-windows.zip`, sha256 `1114966c...69278c75`) is unpacked to
+  `C:/Users/bahs_admin/bin/` (on PATH): `luau.exe`, `luau-analyze.exe`, `luau-compile.exe`, `luau-ast.exe`.
+  Smoke test: `robloxemu/check_plus1jump_sitdrop.luau` 9 passed, 0 failed. The version is still not pinned
+  by a manifest; the other emu checks have NOT been re-run on 0.742 yet (first job next night).
+- **Vault Runners: fliers must NOT top the board** (owner: "Nei, blokker flygere"). Fix it server-side,
+  test first and mutation-tested; an honest fast runner must still pass. This closes the open HIGH from the
+  second review.
+
 ## Night of 2026-10-11 (run started 00:17, stopped at 00:35 on purpose: weekly budget)
 
 Clock: Bash `date` and PowerShell `Get-Date` both read 00:17 at start. FPL gate: open (next deadline
