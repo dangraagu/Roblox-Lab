@@ -52,6 +52,10 @@ store:SetAsync("u_" .. ME, {
 })
 
 assert(h:tryRun("server/Main.server"))
+-- This check places the character by writing its CFrame (onto pedestals, the Nightwatcher, the exit), which the
+-- position guard (PosGuard.luau, 2026-10-11) voids a night for: off in memory here. The guard's own gates are
+-- check_nightwatchmanor_posguard (the real server, as shipped) and tests/PosGuard.spec.luau.
+Kit.posGuard(h, false)
 -- This check was written for the PUBLIC manor of night 1 (its pedestals and the patrol's timing), so it flips the
 -- server's ServerStorage switch for public layouts. The game itself salts every manor (check_nightwatchmanor_guard).
 h.game:GetService("ServerStorage"):FindFirstChild("NightwatchSecrets"):SetAttribute("PublicLayouts", true)

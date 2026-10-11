@@ -10,8 +10,10 @@
 --           player, night and session, sized by the night: see the secrets block), fills it with relics,
 --           starts the Nightwatcher on its patrol, and teleports you into the foyer. Take relics,
 --           reach the servants' exit before dread fills. Getting caught or running out of night
---           costs you the haul but never the night you are on. The exit opens only to a walk a
---           person could have made (Crossing.luau): the best night is the highscore board's metric.
+--           costs you the haul but never the night you are on. The exit opens only at the door, in
+--           the exit room, after the shortest walk there (Crossing.luau), and a night in which the
+--           character was outside the manor or covered more ground than a walk does is VOID
+--           (PosGuard.luau): the best night is the highscore board's metric.
 --
 -- Everything the player can do is an in-world ProximityPrompt whose `.Triggered` handler checks
 -- `who == plr`; the only remotes are server -> client (State, Notice). No chase AI, no
@@ -43,6 +45,7 @@ local Night = require(Shared:WaitForChild("Night"))
 local Fx = require(Shared:WaitForChild("Fx"))
 local Board = require(Shared:WaitForChild("Board"))
 local Crossing = require(Shared:WaitForChild("Crossing"))
+local PosGuard = require(Shared:WaitForChild("PosGuard"))
 local Salt = require(Shared:WaitForChild("Salt"))
 local ServerStorage = game:GetService("ServerStorage")
 
@@ -109,6 +112,7 @@ type Run = {
 	near: boolean, -- the Alarm Bell heard it (independent of sight)
 	ending: boolean, -- a resolution is already in flight; ignore further triggers
 	crossSeconds: number, -- Crossing.minSeconds for this night's plan: the exit stays barred until the clock passes it
+	footing: any?, -- PosGuard's state for this night: where the server last measured the character, and its bank
 }
 
 local profiles: { [Player]: Profile } = {}
@@ -1154,7 +1158,9 @@ local function relicOffset(slot: number): Vector3
 	return ring[((slot - 1) % #ring) + 1]
 end
 
-local resolveNight: (Player, string) -> ()
+local resolveNight: (Player, string, string?) -> ()
+-- The position guard's sample (PosGuard.luau), defined with the night loop: false when it voided the night.
+local checkFooting: (Player, number, boolean?) -> boolean
 
 local function buildManor(plr: Player, zone: Model, plan: any, index: number)
 	local M = Config.Manor
@@ -1275,9 +1281,19 @@ local function buildManor(plr: Player, zone: Model, plan: any, index: number)
 			-- moves its own character, so a script could stand here a second into the night. The server measures both
 			-- halves itself: the root within the prompt's reach (+ slack), and the night clock past the shortest walk
 			-- here at WalkSpeed. A player walking the perfect line is never refused (Crossing.spec); a refusal says why.
+			-- FIRST, how the character got here (PosGuard.luau): the press is a sample like every tick's, judged at once,
+			-- so a teleport to the door and E inside the same tick is seen. A void ends the night; nothing is banked.
+			if not checkFooting(plr, 0, true) then
+				return
+			end
 			local char = plr.Character
 			local hrp = char and char:FindFirstChild("HumanoidRootPart")
 			local dist = if hrp and hrp:IsA("BasePart") then (hrp.Position - door.Position).Magnitude else math.huge
+			-- a dead character is not judged by the position guard (its root drifts), so it is never at the door
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			if hum and type((hum :: any).Health) == "number" and (hum :: any).Health <= 0 then
+				dist = math.huge
+			end
 			-- and in the exit room: the prompt needs no line of sight, so it reaches through a wall into the next room
 			local inRoom = hrp ~= nil and hrp:IsA("BasePart")
 				and Manor.roomAtWorld(plan, Config, hrp.Position.X - origin.X, hrp.Position.Z - origin.Z) == plan.exitId
@@ -1448,6 +1464,54 @@ end
 -- ------------------------------------------------------------------ the night loop
 local beginNight: (Player) -> ()
 
+-- THE POSITION GUARD (PosGuard.luau, Config.Guard). One sample of where the character is: every tick of a night
+-- (stepNight) and at the exit's press. Evidence that the character did not WALK the night (it stood outside every
+-- room, where the Nightwatcher cannot see it, or covered more ground than a walk does) VOIDS the night: it ends at
+-- once, the haul is gone, the night does not advance, and so nothing reaches the board. Returns false when it did.
+-- Why a void and not a barred exit: a player who really is outside the walls has no way back in and would otherwise
+-- stand there until the dread clock threw them out; and a script must not keep the relics it took on the way.
+local function characterAlive(plr: Player): boolean
+	local char = plr.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then
+		return true -- no Humanoid to ask: judged like any other character
+	end
+	local health = (hum :: any).Health
+	return type(health) ~= "number" or health > 0
+end
+
+local VOID_TEXT = {
+	outside = "NIGHT VOID: you were outside the manor's halls",
+	jump = "NIGHT VOID: you moved faster than anyone can walk",
+}
+checkFooting = function(plr: Player, dt: number, final: boolean?): boolean
+	local run = runs[plr]
+	if not run or run.phase ~= "NIGHT" or run.ending or not run.plan or not run.footing then
+		return true
+	end
+	if Config.Guard.PositionChecks == false then
+		return true -- only an explicit false (the headless kit's switch, in memory; PosGuard.spec asserts it ships on)
+	end
+	local pos = playerPos(plr)
+	if not pos then
+		return true -- no character: nothing to measure, and nothing that can press the exit
+	end
+	if not characterAlive(plr) then
+		-- A dead character's root is not walking: it does not collide, so it drops through the floor and drifts
+		-- with whatever speed it died at, through walls and out of the manor. Not judged (and the bank does not
+		-- refill); the exit refuses a dead character; the respawn re-seeds the guard at the foyer.
+		return true
+	end
+	local index = tonumber(zones[plr] and zones[plr]:GetAttribute("Index")) or 0
+	local origin = manorOrigin(index)
+	local ok, why = PosGuard.step(Config, run.plan, Manor, Crossing, run.footing, pos.X - origin.X, pos.Z - origin.Z, dt, final)
+	if ok then
+		return true
+	end
+	resolveNight(plr, Night.EVICTED, why or "jump")
+	return false
+end
+
 local function stepNight(plr: Player, dt: number)
 	local run = runs[plr]
 	local prof = profiles[plr]
@@ -1462,6 +1526,9 @@ local function stepNight(plr: Player, dt: number)
 
 	-- The manor wakes up whether or not the player's character has loaded.
 	run.elapsed += dt
+	if not checkFooting(plr, dt) then
+		return -- the night is void (PosGuard.luau): it has just ended
+	end
 	local dread = Watcher.dread(run.elapsed, run.dreadTotal)
 
 	local pos = playerPos(plr)
@@ -1598,6 +1665,7 @@ local function goToSafehouse(plr: Player)
 	run.watcher = nil
 	run.watcherModel = nil
 	run.elapsed = 0
+	run.footing = nil
 	run.relicsLeft = 0
 	run.relicsTotal = 0
 	clearManor(zone)
@@ -1606,7 +1674,10 @@ local function goToSafehouse(plr: Player)
 	pushState(plr)
 end
 
-resolveNight = function(plr: Player, outcome: string)
+-- `void` ("outside" | "jump", from checkFooting) marks a night the position guard threw out: resolved as an
+-- eviction (the night does not advance, so the best night and the board cannot move), with an EMPTY bag, and the
+-- notice says why.
+resolveNight = function(plr: Player, outcome: string, void: string?)
 	local run = runs[plr]
 	local prof = profiles[plr]
 	if not run or not prof or run.phase ~= "NIGHT" or run.ending then
@@ -1614,6 +1685,10 @@ resolveNight = function(plr: Player, outcome: string)
 	end
 	run.ending = true
 	run.token += 1 -- kills the stepping loop immediately
+	if void ~= nil then
+		outcome = Night.EVICTED -- never a survival, whatever the caller passed
+		run.carried = {}
+	end
 
 	local state = { night = prof.night, stash = prof.stash, best = prof.best, carried = run.carried }
 	local newState, res = Night.resolve(state, outcome, Config, run.effects)
@@ -1642,7 +1717,11 @@ resolveNight = function(plr: Player, outcome: string)
 		held.fails += 1
 	end
 
-	if outcome == Night.EXTRACTED then
+	if void ~= nil then
+		-- the reason is the notice's TEXT (the HUD drops the detail of some kinds)
+		notice(plr, "EVICTED", VOID_TEXT[void] or VOID_TEXT.jump,
+			string.format("Nothing from this night is kept. Night %d is still waiting.", res.night))
+	elseif outcome == Night.EXTRACTED then
 		notice(plr, "EXTRACTED", string.format("YOU GOT OUT — night %d survived", res.night),
 			string.format("Banked %d relics. Night %d is waiting.", res.gained, newState.night))
 	elseif outcome == Night.CAUGHT then
@@ -1725,6 +1804,11 @@ beginNight = function(plr: Player)
 	run.relicsLeft = #plan.relics
 	-- the Servants' Exit stays barred until the clock passes the shortest walk to it (Crossing.luau)
 	run.crossSeconds = Crossing.minSeconds(Config, plan, Manor)
+	-- the position guard measures this night's walk from where the character is about to be put (PosGuard.luau)
+	do
+		local fx, fz = Crossing.start(Config, plan)
+		run.footing = PosGuard.seed(Config, fx, fz)
+	end
 
 	buildManor(plr, zone, plan, index)
 
@@ -1843,6 +1927,11 @@ local function onPlayerAdded(plr: Player)
 		local idx = tonumber(z:GetAttribute("Index")) or 0
 		if run.phase == "NIGHT" and run.plan then
 			local sx, sz = Crossing.start(Config, run.plan)
+			-- the server is moving the character: the position guard measures from here again (PosGuard.reseed), or
+			-- the trip back from wherever the old character stood would read as a teleport
+			if run.footing then
+				PosGuard.reseed(Config, run.footing, sx, sz)
+			end
 			teleport(plr, manorOrigin(idx) + Vector3.new(sx, 4, sz))
 			lightPlayer(plr) -- the light lived on the old character; respawning replaced it
 			return

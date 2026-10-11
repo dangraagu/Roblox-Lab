@@ -829,6 +829,18 @@ h:advance(5)
 print(string.format("  all three nights: %d ticks (%.1f s of night) and %.0f studs of walking",
 	ticks, ticks * DT, walked))
 
+-- The position guard (PosGuard.luau, 2026-10-11) watched every tick of that, as it ships: a walk against the real
+-- walls and furniture, at WalkSpeed, must never read as a teleport or as standing outside the manor.
+do
+	truthy(Config.Guard.PositionChecks ~= false, "the position guard was ON for all of it, as it ships")
+	local voids = 0
+	for _, s in noticeRemote:sentTo(me) do
+		local p = s.args[1]
+		if type(p) == "table" and string.find(tostring(p.text), "VOID", 1, true) then voids += 1 end
+	end
+	eq(voids, 0, string.format("...and never voided a night: %.0f studs on foot, 0 VOID notices", walked))
+end
+
 --=========================================================================================== done
 
 print("")

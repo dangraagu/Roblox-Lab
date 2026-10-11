@@ -88,6 +88,9 @@ function Kit.extract(h: any, plr: any, userId: number, since: number, advance: (
 	local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
 	local W = h:_require(h.ReplicatedStorage:FindFirstChild("Config")).Watcher
 	local sight, catch = W.SightRange, W.CatchRadius
+	-- This helper TELEPORTS to the door, which is what the position guard (PosGuard.luau) voids a night for: a check
+	-- that extracts this way runs with the guard off from here on (Kit.posGuard). The guard's own check walks.
+	Kit.posGuard(h, false)
 	W.SightRange, W.CatchRadius = 0, 0
 	if at and hrp then hrp.CFrame = CFrame.new(at) end
 	local left = Kit.crossSeconds(h, userId) + 0.25 - (h.scheduler:now() - since)
@@ -103,13 +106,27 @@ function Kit.extract(h: any, plr: any, userId: number, since: number, advance: (
 	return true
 end
 
+-- Switch the position guard on or off in the running server's Config (see Kit.boot's posGuard). For the checks that
+-- boot their own Harness.
+function Kit.posGuard(h: any, on: boolean)
+	local Config = h:_require(h.ReplicatedStorage:FindFirstChild("Config"))
+	if type(Config.Guard) == "table" then
+		Config.Guard.PositionChecks = on
+	end
+end
+
 -- opts = { name, userId, profile = { night, stash, best, levels } | nil, viewport = {w,h}, touch,
 --          beforeClient = function(ctx) end (runs after the server boots and the player joins, before
 --          the client scripts load: the place to change Config in memory), slowLoad = seconds | nil,
---          noSpawn = true | nil, publicLayouts = true | nil }
+--          noSpawn = true | nil, publicLayouts = true | nil, posGuard = true | nil }
 -- publicLayouts: plan every night from the old public seed (the server's ServerStorage switch, the one the
 -- thumbnail recipe uses), for checks that find their rooms through Manor.plan(Rng.new(Manor.seedFor(...))). Without
 -- it every night is a fresh server-salted manor, as in the game (Salt.luau); ctx.plan() rebuilds the one standing.
+-- posGuard: keep the position guard (PosGuard.luau, 2026-10-11) as it ships. WITHOUT it the kit switches the guard
+-- off in memory (Config.Guard.PositionChecks = false) once the server has booted: these checks place the character
+-- by writing its CFrame (to the exit, onto the Nightwatcher, across the manor), which is exactly what the guard voids
+-- a night for. The same reason, and the same way, Kit.extract blinds the Nightwatcher. The guard itself is
+-- check_nightwatchmanor_posguard (the real server, as shipped) and tests/PosGuard.spec.luau.
 function Kit.boot(opts: any)
 	local h = Harness.new({
 		bundle = require("./build/nightwatch-manor"),
@@ -151,6 +168,9 @@ function Kit.boot(opts: any)
 	h:advance(1)
 	ctx.RS = h.ReplicatedStorage
 	ctx.Config = h:_require(ctx.RS:FindFirstChild("Config"))
+	if opts.posGuard ~= true then
+		Kit.posGuard(h, false) -- (never switched ON here: with posGuard the check runs whatever Config ships)
+	end
 	ctx.remotes = ctx.RS:FindFirstChild("ManorRemotes")
 	ctx.stateRemote = ctx.remotes:FindFirstChild("State")
 	ctx.noticeRemote = ctx.remotes:FindFirstChild("Notice")

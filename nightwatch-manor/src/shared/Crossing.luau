@@ -12,8 +12,11 @@
 --     where the night starts).
 --   * TIME: the night has run at least `minSeconds`: the shortest walk that can possibly get from where the night puts
 --     you (`start`) to within reach of the door (`exitDoor`), through the doorways, at Config.Player.WalkSpeed, less
---     Config.Guard.ClockSlack. A script that teleports has to wait as long as a perfect runner, so it gains nothing a
---     person could not.
+--     Config.Guard.ClockSlack. A script that teleports to the door has to wait as long as a perfect runner.
+-- These two are NOT enough on their own, and this header used to say they were ("it gains nothing a person could
+-- not"). The Nightwatcher sees by room, so a script could wait out the clock OUTSIDE every room, never seen, and
+-- then teleport to the door (second review, 2026-10-09, HIGH). What the character does between the night's start and
+-- the press is the position guard's (PosGuard.luau), which voids a night that was not walked.
 --
 -- `minDistance` is a LOWER BOUND on every legal walk, never an estimate: a player walking the perfect line must never
 -- be refused. A walk crosses a sequence of doorway gaps, each leg inside one room, and every leg is at least the
@@ -133,12 +136,17 @@ local GAP_STEPS = 10
 -- points with those shortened legs is therefore never longer than any real walk, and at most about h per gap short of
 -- the best one. (A first version measured gap-to-gap as the distance between the two gaps; that is also a lower bound
 -- but lets a walk slide along each gap for free, and was up to 29 studs loose on nights 1-150; now 7.)
-function Crossing.minDistance(cfg: any, plan: any, sx: number, sz: number, dx: number, dz: number, reach: number): number
+--
+-- `walkBound` is that bound between ANY two points: from (sx, sz) in room `fromId` to within `reach` of (dx, dz) in
+-- room `toId`. The exit's guard asks it for the foyer and the door (`minDistance`); the position guard (PosGuard.luau)
+-- asks it what the shortest legal walk between two samples of a character was, so a hop through a wall costs the
+-- walk round by the doorway.
+function Crossing.walkBound(cfg: any, plan: any, fromId: number, sx: number, sz: number, toId: number, dx: number, dz: number, reach: number): number
 	local segs = Crossing.doorways(cfg, plan)
 	local h = cfg.Manor.DoorWidth / GAP_STEPS
-	local near: { [number]: boolean } = { [plan.exitId] = true } -- the only room a press is accepted from
+	local near: { [number]: boolean } = { [toId] = true } -- the room the walk ends in
 	local best = math.huge
-	if near[plan.entranceId] then
+	if near[fromId] then
 		best = math.max(0, math.sqrt((sx - dx) ^ 2 + (sz - dz) ^ 2) - reach)
 	end
 	-- grid points: node = (gap, k)
@@ -157,7 +165,7 @@ function Crossing.minDistance(cfg: any, plan: any, sx: number, sz: number, dx: n
 	local done = table.create(n, false)
 	for v = 1, n do
 		local sg = segs[ngap[v]]
-		if sg.a == plan.entranceId or sg.b == plan.entranceId then
+		if sg.a == fromId or sg.b == fromId then
 			dist[v] = math.max(0, math.sqrt((sx - nx[v]) ^ 2 + (sz - nz[v]) ^ 2) - h / 2)
 		end
 	end
@@ -188,6 +196,12 @@ function Crossing.minDistance(cfg: any, plan: any, sx: number, sz: number, dx: n
 	end
 	-- nothing reaches the door (a broken plan): the guard must not lock the exit forever
 	return if best == math.huge then 0 else best
+end
+
+-- From where the night puts you to within `reach` of the door: the walk ENDS in the exit room, the only room a press
+-- is accepted from (verdictFor).
+function Crossing.minDistance(cfg: any, plan: any, sx: number, sz: number, dx: number, dz: number, reach: number): number
+	return Crossing.walkBound(cfg, plan, plan.entranceId, sx, sz, plan.exitId, dx, dz, reach)
 end
 
 -- The least time the night must have run before the exit may open.
