@@ -231,6 +231,12 @@ Config.Save = {
 	Leaderboard = "DeepVein_LB_v2",
 	AutosaveSeconds = 20, -- also renews the session lock; MUST be < SessionLockSeconds
 	SessionLockSeconds = 45,
+	-- A load that finds the record locked, or that fails, is tried again this many times, this far apart, before the
+	-- session settles for read-only (Main.server loadProfile). 3 x 2 s covers a server hop, where the old server's
+	-- final save releases its lock a moment after the new server's first read. It is NOT meant to outlast a crashed
+	-- server's lock (SessionLockSeconds): nobody should stare at an empty mouth for 45 s.
+	LoadRetries = 3,
+	LoadRetrySeconds = 2,
 }
 
 -- ── The board: public + friends (docs/complete-game-standard.md §3) ──────────────────────────

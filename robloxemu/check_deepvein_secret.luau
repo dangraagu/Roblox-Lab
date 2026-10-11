@@ -319,7 +319,8 @@ end
 --======================================================================= 6. a read-only session digs a throwaway cave
 do
 	local plrRO = h:join("Locked", RO)
-	h:advance(1)
+	-- a locked load is retried before it settles for read-only (Config.Save.LoadRetries, 2026-10-11)
+	h:advance(1 + (Config.Save.LoadRetries or 0) * (Config.Save.LoadRetrySeconds or 0))
 	h.Players:simulateSpawn(plrRO, h.workspace)
 	h:advance(2)
 	eq(stateOf(plrRO).canSave, false, "set-up: the record is held by another server, so this session is read-only")

@@ -1510,7 +1510,7 @@ One independent read-only reviewer. Verdicts: **654ad07 SHIP-WITH-DEFERRED; 6c96
   rebuilds a band, and "up" also sells. An exploiter alternating up and down from a deep shaft can lag the
   server. Fix: a per-player cooldown.
 - **MEDIUM, not fixed. No Studio gate** (`tryStore`, `:76-88`).
-- **MEDIUM, not fixed. A leave during the load leaves `lockUntil` set** (`:1706-1709`). A crash plus a fast
+- **MEDIUM, FIXED 2026-10-11 (see the lock section below). A leave during the load left `lockUntil` set** (`:1706-1709`). A crash plus a fast
   rejoin, or a failed load, gives a read-only session, and a read-only session never retries.
 - **LOW, suspected.** BindToClose loops over `Players:GetPlayers()` and does not wait for in-flight leave saves.
   A same-JobId rejoin can roll back one autosave.
@@ -1562,3 +1562,49 @@ it gets a fresh bucket either way, and check 6 would pass without them. They onl
 The numbers 2 and 0.75 are a judgement, not a measurement of real server frame time; nobody has timed a ride in
 real Roblox. **Needs Studio:** that the "still moving" toast reads well, and that 0.75 s does not feel sticky on
 the HUD's two elevator buttons.
+
+---
+
+## Night shift 2026-10-11: the session lock is not leaked, and a locked load is retried (MEDIUM fix)
+
+**What changed** (`src/server/Main.server.luau`, `Config.Save.LoadRetries = 3`, `LoadRetrySeconds = 2`):
+- `loadProfile` tries again when the record is locked by another session or the call fails: up to 3 more
+  attempts, 2 s apart. Every attempt reads the record again, so the profile is the newest one. A player who
+  leaves stops the waiting. A lock that outlasts the 6 s window (a crashed server) still gives a read-only
+  session, as before, after that bounded wait.
+- `releaseLoadLock`: a load that finishes for a player who has already left gives its lock back at once, and
+  only while the record still carries that load's own token and this server's jobId.
+- Each join runs on its own thread (`task.spawn(onPlayerAdded, plr)`), so one locked record does not hold up
+  the joins behind it.
+
+**Test first.** `robloxemu/check_deepvein_lockleak.luau` went 18/5 red on the old bundle: the lock stayed for
+45 s after a leave during the load; a hop whose old lock went 1 s later stayed read-only with the stale cash
+(100, not 777); a single failed call left the profile at defaults (cash 0, not 321). Now 27/0.
+
+**One existing check had to change:** `check_deepvein_secret.luau` section 6 joins a record locked for an hour
+and expected the read-only session after 1 s. It now waits the retry window first. Nothing else moved.
+
+**All gates** (luau 0.742, bundle sha256 7cffa34828134942): 14 files in `tests/` green; the 15
+`robloxemu/check_deepvein*` green (144, 92, 589, 10, 14, PASS, 22, 13, 13, 49, 27, 29, 15, 27, 45).
+
+**Mutation sweep** (each proved present in the rebuilt bundle):
+
+| Mutant | Result |
+|---|---|
+| L1 no retries | KILLED (4) |
+| L2 the lock is never given back | KILLED (1) |
+| L3 the retry keeps going for a player who left | KILLED (1), after a call counter was added; it SURVIVED the first sweep |
+| L4 the release ignores ownership | KILLED (1) |
+| L5 the retries do not wait | KILLED (2) |
+| L6 a locked load is not retried | KILLED (2) |
+| L7 a gone player keeps its slot in `profiles` | SURVIVED: not observable from outside (memory only; that line predates this change) |
+| CONTROL comment-only edit | SURVIVED |
+
+**Not covered, said plainly.**
+- The emulated DataStore never yields, so "left during the load" is staged by wrapping the store's
+  `UpdateAsync` in the test. Real yields and real ordering have not been seen in Roblox.
+- A session that ends up read-only still never recovers later in the same session. Taking the lock late would
+  mean swapping the throwaway cave for the saved one under a player who is digging; that was not attempted.
+- A locked player now waits up to 6 s on the spawn pad before their shaft exists. **Needs Studio:** what that
+  wait looks like, and whether it needs a "loading your mine" line.
+- The reviewer's LOW (BindToClose does not wait for in-flight leave saves) is untouched.

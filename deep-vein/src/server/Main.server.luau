@@ -175,7 +175,18 @@ local function loadProfile(plr: Player)
 	end
 	local acquired = false
 	local token = newSessionToken(plr)
-	local ok, err = pcall(function()
+	-- A LOCKED OR FAILED LOAD IS TRIED AGAIN (second review 2026-10-09). An ordinary server hop loads here a moment
+	-- before the old server's final save releases its lock, and one DataStore hiccup fails a call; either used to
+	-- make the whole session read-only. A few spaced attempts (Config.Save.LoadRetries x LoadRetrySeconds) cover
+	-- both, and every attempt reads the record again, so the profile is the newest one. A crashed server's lock
+	-- outlasts the window and the session is read-only, as before. A player who leaves stops the waiting.
+	local ok, err
+	for attempt = 0, Config.Save.LoadRetries do
+		if attempt > 0 then
+			task.wait(Config.Save.LoadRetrySeconds)
+			if plr.Parent == nil then break end
+		end
+	ok, err = pcall(function()
 		store:UpdateAsync(key(plr.UserId), function(old)
 			old = old or {}
 			local now = os.time()
@@ -215,6 +226,8 @@ local function loadProfile(plr: Player)
 			return old
 		end)
 	end)
+		if ok and acquired then break end
+	end
 	if not ok then
 		p.canSave = false
 		warn("[DeepVein] load failed for " .. plr.Name .. ": " .. tostring(err))
@@ -239,6 +252,23 @@ local function loadProfile(plr: Player)
 		p.bestAt = os.time()
 	end
 	return p
+end
+
+-- A LOAD THAT FINISHED FOR SOMEBODY WHO HAS ALREADY LEFT gives its lock straight back (second review 2026-10-09).
+-- PlayerRemoving ran while the profile did not exist yet, so nothing else ever would, and the record stayed locked
+-- for SessionLockSeconds: a rejoin on another server inside that window was read-only. Only the lock is touched,
+-- and only while the record still carries this load's own token.
+local function releaseLoadLock(plr: Player, p: any)
+	if not store or not p.canSave or p.session == nil then return end
+	pcall(function()
+		store:UpdateAsync(key(plr.UserId), function(old)
+			if type(old) ~= "table" or old.session ~= p.session or old.jobId ~= game.JobId then
+				return nil
+			end
+			old.lockUntil = 0
+			return old
+		end)
+	end)
 end
 
 -- Forward-declared: packing the cave needs the live per-player tables, which are built with the
@@ -1726,7 +1756,9 @@ local function onPlayerAdded(plr: Player)
 	-- server. Found by review in the sibling game; the emulator cannot reproduce it, because its
 	-- DataStore is synchronous and never yields.
 	if plr.Parent == nil then
+		local gone = profiles[plr]
 		profiles[plr] = nil
+		if gone then releaseLoadLock(plr, gone) end
 		return
 	end
 
@@ -1817,8 +1849,10 @@ local function onPlayerRemoving(plr: Player)
 	buildQueue[plr] = nil
 end
 
-Players.PlayerAdded:Connect(onPlayerAdded)
-for _, plr in ipairs(Players:GetPlayers()) do onPlayerAdded(plr) end
+-- Each join on its OWN thread: loadProfile may now wait between attempts, and one miner's locked record must not
+-- hold up the joins queued behind it (the loop below used to run them one after another).
+Players.PlayerAdded:Connect(function(plr) task.spawn(onPlayerAdded, plr) end)
+for _, plr in ipairs(Players:GetPlayers()) do task.spawn(onPlayerAdded, plr) end
 Players.PlayerRemoving:Connect(onPlayerRemoving)
 
 game:BindToClose(function()
