@@ -165,10 +165,13 @@ card is the point (clips 4 and 5, below), and their manifest staging list says "
 started directly, monsters off". Start a level with `StartRun:FireServer(<level>, "solo")` from the lobby (§9 step 3)
 and wait 6 s (the free-break sign) before recording.
 
-**The walk guard (2026-10-01).** The server does not count an exit reached faster than anyone could walk there
-(`EYECANDY.md` §15). A clip that teleports next to the exit and touches it gets "Too fast: nobody can run this maze
-in ..." and no level card. So the clips that end on an exit (2 and 5) walk the whole way: `laby_collect` already
-navigates cell by cell at walking speed. Never switch the guard off to make a card appear: that would be the faked
+**The walk guard (2026-10-01) and the path guard (2026-10-11).** The server does not count an exit reached faster
+than anyone could walk there (`EYECANDY.md` §15), nor one it did not see the character walk to, however long the
+clip waits first (`EYECANDY.md`, "Night shift 2026-10-11"). A clip that teleports next to the exit and touches it
+gets "Too fast: nobody can run this maze in ..." or "That exit only counts when you walk the maze to it ..." and no
+level card. So the clips that end on an exit (2 and 5) walk the whole way from the level's start: `laby_collect`
+already navigates cell by cell at walking speed. A staging teleport inside a maze loses the path: put the character
+back on the start cell and walk from there. Never switch a guard off to make a card appear: that would be the faked
 progress the rules forbid.
 
 **Never film a real friends list** (clip 8): the Friends view shows Roblox usernames. Use a Studio Local Server test
