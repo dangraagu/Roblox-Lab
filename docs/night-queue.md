@@ -2,6 +2,40 @@
 
 Newest night first. Each job: done / in progress (with exact resume point) / blocked (why).
 
+## Night of 2026-10-11, second run (started 02:17 on the owner's word "du kan kjøre i natt")
+
+Clock: Bash `date` and PowerShell `Get-Date` both 02:17. Weekly usage 5 % (the 99 % from 00:17 was gone).
+
+### 1. Emu gates on luau 0.742: ALL GREEN
+- All 16 committed games' bundles rebuilt, then all 231 tracked `robloxemu/check_*.luau`: 231 green
+  (`check_nightwatchmanor_fairgate` and `_flash` need `-a`; run with every argument: 12, 6, 8, 31, 27).
+- All 278 files in the games' `tests/` folders: 276 green. The other two are
+  `facility-nightmare/tests/hazards.measure.luau` and `pacing.measure.luau`: measurement scripts, not gates.
+  They do not finish in 240 s and the first took 6.3 GB of RAM before it was stopped. Do not run them in a
+  sweep.
+
+### 2. Publish plus1-jump and grow-a-crystal: BLOCKED (permission), owner step
+The session's permission classifier refused the publish command ("Production Deploy"). It was not worked
+around. Both games are ready: gates green, `check_glyphs` 0, tree clean at 656aeb9/d35112e.
+**Owner: double-click `plus1-jump/publish_plus1.bat` and `grow-a-crystal/publish_crystal.bat`, check for a new
+`versionNumber` in each `publish_response.json`, then Shut Down All Servers.** That ships the Redeem freeze fix.
+
+### 4-5. deep-vein: DONE (79e6e25, da2616a)
+- Elevator ride budget (token bucket, burst 2, one per 0.75 s). 8 mutants killed, control survived.
+- Lock leak: a leave during the load releases the lock; a locked or failed load is retried 3 x 2 s. 6 mutants
+  killed, 1 not observable, control survived. See `deep-vein/EYECANDY.md`, the two 2026-10-11 sections.
+
+### 3. HIGHs: IN PROGRESS at the time of writing (three worktrees under D:/Claude/Roblox-wt/)
+- labyrint-spill path guard: branch `night/2026-10-11-laby-pathguard`
+- nightwatch-manor position guard: branch `night/2026-10-11-nightwatch-posguard`
+- vault-runners flier gate (owner decision): branch `night/2026-10-11-vault-fliergate`
+Each must be reviewed and its gates re-run before it is merged. If this entry still says IN PROGRESS, the
+branches were NOT merged: check `git branch --list "night/2026-10-11*"` and `git worktree list`.
+
+### Not done
+- anomaly MEDIUM 1 (spares readable on the client): inherent, the anomaly must replicate to be seen. Left.
+- The lock leaks in vault-runners and nightwatch-manor: their servers are being changed on the branches above.
+
 ## Owner decisions 2026-10-11 (daytime, in chat)
 
 - **luau CLI restored.** The owner approved the download. Official release `0.742` from
