@@ -9,7 +9,8 @@
 --   * TIME:  the night has run at least Crossing.minSeconds: the SHORTEST possible walk from where the night puts
 --            you to within reach of the door, through the doorways, at Config.Player.WalkSpeed.
 -- minDistance must be a true LOWER BOUND on every legal walk (a player walking the perfect line is never refused),
--- and tight enough to bind (a script gains nothing by being faster than a person).
+-- and tight enough to bind (the clock is not loose). The clock and the room are NOT the whole guard: what the
+-- character did in between is PosGuard's (tests/PosGuard.spec.luau), which also spends Crossing.walkBound.
 local Crossing = require("../src/shared/Crossing")
 local Manor = require("../src/shared/Manor")
 local Rng = require("../src/shared/Rng")

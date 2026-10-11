@@ -1321,6 +1321,7 @@ One independent read-only reviewer. Verdicts: **0ed378f SHIP-WITH-DEFERRED; 95ca
    - The claim in CLAUDE.md and Crossing.luau ("gains nothing a person could not") is false.
    - Fix: check the position every tick. Treat outside the footprint, or a jump larger than WalkSpeed·dt plus
      slack, as a forfeit.
+   - **FIXED 2026-10-11** (the section at the end of this file).
 2. **MEDIUM. No Studio gate on the live stores** (`:64-76`).
 3. **MEDIUM. A session can go unsaved for its whole length.** A leave during `claimProfile` never releases the
    lock (`:1895-1897`), and a pcall failure counts as "lock held" (`:519-521`). A read-only session never
@@ -1330,3 +1331,136 @@ One independent read-only reviewer. Verdicts: **0ed378f SHIP-WITH-DEFERRED; 95ca
 
 Checked and clean: there are no client→server remotes; rest earns nothing; the save token and `keepHigher` are
 correct; the precision holds; the empty public board has text.
+
+---
+
+## Night shift 2026-10-11: position guard (HIGH fix)
+
+Finding 1 above, reproduced first against the real server (`robloxemu/check_nightwatchmanor_posguard.luau` on the
+unfixed tree: out of the manor, wait, into the exit room, E: "got out", night 7 to 8, board store written
+`14208320271`; 24 assertions red), then fixed test-first. Not published, not pushed, never run in Roblox.
+
+**What changed.**
+- `src/shared/PosGuard.luau` (new, pure): `seed` / `reseed` / `cost` / `step`. `Crossing.walkBound` is
+  `minDistance` generalised to any two points (the old function now calls it; Crossing.spec unchanged, 40 / 0).
+- `Main.server.luau`: `checkFooting` samples the root every tick of a night (`stepNight`) and at the exit's press,
+  before the old verdict (the time floor and the exit-room test are untouched). `beginNight` seeds the guard,
+  `placeCharacter` re-seeds it on a respawn, `resolveNight(plr, outcome, void)` ends a void night.
+- `Config.Guard`: `PositionChecks`, `SpeedSlack` 0.1, `JumpSlack` 8, `LagSeconds` 3, `OutsideGraceSeconds` 0.5,
+  `SettleSeconds` 2.
+- **The outcome: a VOID night is a forfeit**, resolved through the existing EVICTED path with an emptied bag. Why
+  not merely a barred exit: the game has three outcomes and only EXTRACTED advances the night, so an eviction
+  cannot touch the best night or the board; a player who really is outside the walls has no way back in and would
+  otherwise wait for the dread clock; and a script must not keep (a Lockbox share of) relics it took on the way.
+  The notice is kind EVICTED and its TEXT is the reason: "NIGHT VOID: you were outside the manor's halls" or
+  "NIGHT VOID: you moved faster than anyone can walk".
+- The two rules: **OUTSIDE** (in no room for more than 0.5 s of the night in total; the bank does not refill out
+  there) and **JUMP** (a bank of studs: 8 to start, +22 studs/s, capped at 74, spent by the shortest LEGAL walk
+  between two samples, through the doorways). After a server placement nothing is judged for 2 s, then the walk is
+  measured from where the server put the character; the exit's press is judged even inside that window. A dead
+  character is not judged and cannot use the exit.
+
+**An honest player, in numbers** (`tests/PosGuard.spec.luau`, and `tests/check_walk` with the guard as shipped).
+There is no sprint, speed boost or hiding spot in this game; rest is safehouse-only (`Nightfall.validateRest`).
+
+| case | result |
+|---|---|
+| the perfect line at WalkSpeed, public nights 1-150, plus the press | never void; least bank after a judged sample 12.2 studs |
+| 240 salted manors, a tour through every doorway at random gap points (to the gap's edge), ticks 0.05-0.25 s, latency swinging 0-0.3 s | never void; least bank 12.7 studs |
+| a latency swing on the very first judged sample | covered up to 0.41 s, +0.1 s per second walked after |
+| a lag gap (client walks on, server sees nothing, one sample makes it up) | 1 / 2 / 3 / 3.5 s fine, walking or after standing 30 s; the limit is 74 / 20 = 3.7 s; 5.2 s is a void |
+| one 8 s server tick with the player walking through it | fine (a tick's own time is always usable) |
+| a hazard's knock (16 studs/s for 0.8 s) | slower than the bank refills |
+| dithering across every doorway plane of night 12 at WalkSpeed, 2 minutes each | never void |
+| a root against any wall (19 studs from a room's centre) | in its room, a stud clear of the edge |
+| death (the root drifts out through the wall), then a respawn onto the safehouse pad | not judged while dead or for 2 s after the placement; the walk after it counts |
+| `tests/check_walk`: three nights, 1050 studs against the built walls and furniture | 0 VOID notices |
+| the move's cost against a real doorway-middle walk, 960 point pairs | never over the real walk |
+
+**The cheats** (spec section 5, and the emulator check through the real server).
+
+| cheat | result |
+|---|---|
+| parked outside, 400 studs out or 3 studs behind a wall, nights 1-150 | void for OUTSIDE within 0.6 s of being judged |
+| outside from the first tick, then the door and E the moment before the grace runs out, 3000 salted manors | void on all: the bank then holds 52 studs, the shortest walk to any door is longer |
+| wait a minute in the foyer, teleport to the door | void for JUMP on 150 of 150 public nights and on every salted manor whose walk is over 74 studs (2965 of 3000) |
+| the same, E in the same tick; or after a respawn, inside the settle window | void: the press is judged |
+| 1.5 x / 1.25 x WalkSpeed on a legal route | void within 1.5 s / 3.5 s (1.05 x is inside the slack) |
+| a 4-stud hop through a wall with no doorway | void (it costs the way round: at least 30 studs) |
+| out, along the outside, back in at the exit | void: charged from where it last stood inside |
+
+**Gates.** 42 suites (the 40 of §8 plus `tests/PosGuard.spec` and `robloxemu/check_nightwatchmanor_posguard`), run
+twice on the final tree, 42 of 42 green both times. Changed counts: `tests/check_walk` 62 to 64 (the guard stayed
+silent), new `PosGuard.spec` 224, new `check_nightwatchmanor_posguard` 71. Every other check boots through the kit,
+which switches the guard OFF in memory (`Kit.posGuard`; `Kit.extract` and `check_nightwatch` too): they place the
+character by CFrame, which is what the guard voids a night for. That is the same move as the kit blinding the
+Nightwatcher, and it means those checks say nothing about the guard.
+
+**Mutation sweep** (driver in the session scratchpad; each mutant grepped in BOTH rebuilt bundles before the gates
+ran; five gates per mutant: PosGuard.spec, Crossing.spec, check_walk, the posguard check, the guard check; all four
+sources sha256-identical afterwards and the five gates green again). The number is the count of FAIL lines.
+
+| # | mutant | killed by |
+|---|---|---|
+| M1 | PosGuard: the OUTSIDE rule never fires | PosGuard.spec (9), posguard check (1) |
+| M2 | PosGuard: the JUMP rule never fires | PosGuard.spec (12), posguard check (12) |
+| M3 | PosGuard: the bank is not capped | PosGuard.spec (155), posguard check (12) |
+| M4 | PosGuard: the press is not judged inside the settle window | PosGuard.spec (1) |
+| M5 | PosGuard: a move costs the straight line (walls free) | PosGuard.spec (6) |
+| M6 | PosGuard: an outside sample becomes the place measured from | PosGuard.spec (2) |
+| M7 | PosGuard: a re-seed wipes the outside time | PosGuard.spec (1) |
+| M8 | server: the exit's press is not sampled | posguard check (12) |
+| M9 | server: the night's ticks are not sampled | check_walk (6), posguard check (11) |
+| M10 | server: a respawn does not re-seed | posguard check (3) |
+| M11 | server: a void keeps the bag | posguard check (1) |
+| M12 | server: evidence only refuses, the night goes on | posguard check (5) |
+| M13 | Config: `PositionChecks = false` | PosGuard.spec (1), check_walk (1), posguard check (26) |
+| M14 | Config: `LagSeconds = 30` | PosGuard.spec (7), posguard check (13) |
+| M15 | Crossing.walkBound always ends in the exit room | PosGuard.spec (14), check_walk (15), posguard check (19) |
+| M16 | PosGuard: the bank refills outside | PosGuard.spec (2) |
+| M17 | server: a dead character's root is judged | posguard check (6) |
+| M18 | server: a dead character can use the exit | posguard check (5) |
+| C1 | CONTROL: a comment-only edit in PosGuard | survived all five |
+| C2 | CONTROL: a comment-only edit in Main.server | survived all five |
+
+18 of 18 killed, 2 of 2 controls survived. Found on the way: M10 survived the first sweep (the respawn scenario
+walked only 30 studs in, which the bank could pay for; it now respawns deeper than the bank ever holds), and M13
+survived the emulator check (the kit forced the guard ON; it now leaves Config alone when asked to keep the guard).
+A spec loop with no bound hung the sweep under M1; it is bounded now.
+
+**An independent read-only review of the diff** (one reviewer, same night) found no HIGH and no logic bug. Taken:
+the bank no longer refills outside (it had let a script sit outside for the first 2.5 s and hop to a door within 63
+studs); a dead character is not judged and cannot use the exit (a root that drifts out through a wall after a reset
+would have voided an honest night); outside time is counted a tick at a time; spec 5a counted untested nights as
+voided (it had really tested 49 of 150 for the near-wall case; now 150). Not taken: re-placing a respawned
+character that is still outside the manor after 0.2 s (today it is voided 2.5 s after the placement and sent home,
+where before it was stuck; no headless test could be written for it).
+
+**Residual: what is NOT closed.**
+1. **A script that walks.** A bot that paths through the doorways at WalkSpeed is a person to the server. It can
+   still take a night per crossing (2-10 s plus the 2.5 s beat), so the board can still be climbed by automation;
+   only the Nightwatcher and the dread clock stand in its way. Nothing position-based can close this.
+2. **A hop inside the bank.** Up to 74 legal studs after standing 3 s looks exactly like a 3.7 s lag gap. Foyer to
+   door in one hop is possible on 35 of 3000 salted manors (1.2%), still only after the clock's minimum. Short hops
+   to dodge the chase are not seen as cheating.
+3. **Unjudged windows.** 2 s after every server placement plus 0.5 s of outside grace; a reset buys them again
+   about every 7 s (respawn time + window). They buy invisibility, not ground: the walk is measured from the foyer.
+4. **No character / a dead character** is neither judged nor seen by the Nightwatcher (no character: true before).
+   Neither can use the exit, and a respawn starts from the foyer.
+5. **Height is not measured** (the Nightwatcher sees and catches on x/z too, so above the ceiling is not hidden).
+6. **Relic prompts** are not position-checked by this change: a void empties the bag, but a script that takes
+   relics from afar and then walks out honestly keeps them. The board is not affected.
+7. Review findings 2-5 above are untouched.
+
+**Needs real Studio** (nothing here has run in Roblox).
+* After the server's `PivotTo` at the night's start and on a respawn, how long can the server still read the OLD
+  position from a client's in-flight updates? The guard allows 2 s + 0.5 s. Test with the network simulator at
+  300-500 ms: start 20 nights, reset in 10 of them; no night may end "NIGHT VOID".
+* A dead character: does the root really drop and drift, and is `Humanoid.Health` 0 on the server for all of it
+  (the guard reads Health, not the state)?
+* Walk a whole night hugging walls, jumping on furniture, through every doorway at its edge, and get knocked by a
+  hazard next to a wall: no void. Read `Humanoid.WalkSpeed` on the server: 20, and the measured speed not over 22.
+* A real lag spike (a 3 s freeze with the network simulator): no void up to about 3.7 s.
+* Teleport from the command bar (Client context) out of the manor, and across it: the void comes, its toast is
+  readable for its 3 s, and the board does not move.
+* The two VOID lines on a phone: do they fit the toast?

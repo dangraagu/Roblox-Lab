@@ -70,8 +70,12 @@ server credited you with surviving; ties go to whoever got there first. Its prom
 (the top 10, read at most once a minute) and your Roblox friends (read only when you ask, up to 200, cached and
 throttled), and an empty friends board says what to do about it. Names are looked up, never stored. The only way to
 survive a night is the Servants' Exit, and it opens only to a character the server measures standing in the exit room
-at the door, after the night has run the shortest walk there at walking speed (`Crossing.luau`), so a script that
-teleports gains nothing a person could not. A refusal says why.
+at the door, after the night has run the shortest walk there at walking speed (`Crossing.luau`). And the night has to
+have been WALKED: the server samples the character every tick, and a night in which it stood outside the manor's rooms
+(where the Nightwatcher cannot see it) or covered more ground than walking covers is void, with nothing banked
+(`PosGuard.luau`, 2026-10-11; before that a script could wait outside and teleport to the door, a night every ~12 s).
+A refusal or a void says why. What this does not stop: a script that walks the doorways like a person, and a hop
+short enough to look like a lag gap (`EYECANDY.md`, "Night shift 2026-10-11").
 
 The size rule used to be false too. The SEED was only `WorldSeed + night`, but `Manor.roomCount` folded
 in the player's hub level, so the room target, the exit, the relics and the patrol all moved with

@@ -125,11 +125,37 @@ Config.Player = {
 -- from the foyer to that reach at WalkSpeed (- ClockSlack). A player never meets it (the shortest crossing is 2.9-8.9 s
 -- on the public manors of nights 1-150 and 1.85-10.44 s on 3000 salted ones, Crossing.spec; a real night out takes
 -- minutes); a script that teleports to the door is told why it has to wait, and waits as long as a perfect runner
--- would. The best night survived is the highscore board's metric, so this is what stops a script inflating it.
+-- would. The best night survived is the highscore board's metric. The clock and the room alone did NOT stop a
+-- script inflating it (it could wait outside the manor, unseen); the position guard below is the other half.
 Config.Guard = {
 	ExitPromptDistance = 12, -- the ESCAPE prompt's MaxActivationDistance (the server builds it with this)
 	ReachSlack = 4, -- studs: 0.2 s of latency at WalkSpeed
 	ClockSlack = 0.5, -- seconds: the night clock steps every TickSeconds (0.1), plus replication
+
+	-- THE POSITION GUARD (PosGuard.luau, 2026-10-11). The clock and the room at the moment of the press are not
+	-- enough: a character parked OUTSIDE every room is never seen by the Nightwatcher (sight works on rooms), so a
+	-- script could wait out the clock in safety and teleport to the door. The server therefore samples the root every
+	-- tick of a night, and a night with either kind of evidence is VOID (nothing banked, the night does not advance,
+	-- the board is not written). The numbers are in walks: there is no sprint and no speed boost in this game (a
+	-- hazard's knock is 0.8 x WalkSpeed, validated), and if one is ever added the bank's rate has to follow it.
+	--   * OUTSIDE: the root is in no room of the manor for more than OutsideGraceSeconds of the night, in total
+	--     (and the bank below does not refill out there);
+	--   * JUMP: the root covered more ground than a walk allows. The allowance is a bank of studs: it starts at
+	--     JumpSlack, refills at WalkSpeed * (1 + SpeedSlack) per second, holds at most LagSeconds of refill (waiting
+	--     buys nothing more; a client silent for that long may still catch up in one sample), and every sample
+	--     spends the shortest LEGAL walk from the last one (through the doorways, Crossing.walkBound).
+	-- After the server itself places the character (the night's start, a respawn) nothing is judged for
+	-- SettleSeconds, then the walk is measured from where the server put it. The exit's own press is always judged.
+	-- A DEAD character is not judged (its root drifts through walls) and cannot use the exit; the respawn re-seeds.
+	PositionChecks = true, -- only an explicit false switches it off (the headless kit does, in memory: its checks teleport)
+	SpeedSlack = 0.1, -- the bank refills 10% faster than WalkSpeed: 22 studs/s
+	JumpSlack = 8, -- studs in hand from the start: 0.4 s of latency swing at WalkSpeed
+	LagSeconds = 3, -- the bank holds at most 8 + 22 * 3 = 74 studs: a 3.7 s silence at WalkSpeed is made up
+	OutsideGraceSeconds = 0.5, -- a player's root is never outside (walls); this forgives a stray sample or five
+	-- After a server placement. Why a fixed window and not "until it is seen there": the server reads its own write
+	-- back at once, and only THEN can a client's in-flight updates show the old place again (unverified in Studio:
+	-- EYECANDY.md). With the outside grace, a placement may take 2.5 s to be acknowledged before a night is voided.
+	SettleSeconds = 2,
 }
 
 -- ------------------------------------------------------------------ The Nightwatcher
@@ -232,10 +258,11 @@ Config.Save = {
 }
 
 -- ------------------------------------------------------------------ The highscore board (public + friends)
--- docs/complete-game-standard.md §3. The metric is the best night the SERVER credited you with surviving; a
--- script cannot raise it, because the only way to survive a night is the Servants' Exit, and the exit opens only
--- to a character standing at it after a walk no faster than Config.Player.WalkSpeed allows (Config.Guard,
--- Crossing.luau). Ties go to whoever reached the night first. A physical board stands in every safehouse, a few
+-- docs/complete-game-standard.md §3. The metric is the best night the SERVER credited you with surviving. The only
+-- way to survive a night is the Servants' Exit, which opens only to a character standing at it after the shortest
+-- walk there (Crossing.luau), in a night the server saw it WALK (PosGuard.luau: never outside the rooms, never more
+-- ground than WalkSpeed covers). A script that teleports cannot raise it; one that walks like a person still can.
+-- Ties go to whoever reached the night first. A physical board stands in every safehouse, a few
 -- steps from the spawn pad; its prompt switches Public / Friends. Names are looked up and kept in memory, never
 -- stored.
 Config.Board = {

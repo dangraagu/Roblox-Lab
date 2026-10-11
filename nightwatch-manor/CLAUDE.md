@@ -115,6 +115,25 @@ thumbnail shot list are in `EYECANDY.md`.
   night 9 saved 77 studs; a salted night-45 manor was 0.13 s from the start). Shortest crossings: 2.9-8.9 s on public
   nights 1-150, 1.85-10.44 s on 3000 salted manors. `minDistance` is a LOWER bound on every legal walk (Crossing.spec).
   A refusal says why in the toast's TEXT (the HUD drops a DENIED notice's detail).
+- **The position guard** (`src/shared/PosGuard.luau`, `Config.Guard`, `checkFooting` in `Main.server`; 2026-10-11,
+  the HIGH finding of the 2026-10-09 review). The exit's guard alone was NOT enough, and the claim that stood here
+  and in `Crossing.luau` ("a script that teleports gains nothing a person could not") was false: the Nightwatcher
+  sees by room, so a character parked outside every room was never seen, and a script could wait out the clock
+  there and teleport to the door (a night per ~12 s). Now the server samples the root every tick of a night and at
+  the exit's press, and a night is **VOID** (ends at once as an eviction with an EMPTY bag; the night does not
+  advance, so the best night and the board cannot move; the notice's text says why) on either:
+  - **OUTSIDE**: in no room for more than 0.5 s of the night in total;
+  - **JUMP**: more ground than a walk covers. A bank of studs: 8 to start, refilled at 22 studs/s (WalkSpeed + 10%),
+    capped at 74 (waiting buys nothing more; a 3.7 s lag gap is made up in one sample), spent by the shortest LEGAL
+    walk between two samples (`Crossing.walkBound`: through the doorways, so a hop through a wall costs the way round).
+  After the server itself places the character (the night's start, a respawn: `PosGuard.reseed` in `placeCharacter`)
+  nothing is judged for 2 s, then the walk is measured from where the server put it; the exit's press is judged
+  even inside that window. **Keep these when editing:** every server-side teleport during a NIGHT must re-seed the
+  guard (or it reads as a jump); any sprint or speed boost must raise the bank's rate with it; `PositionChecks` is
+  switched off only in memory by the headless kit (`Kit.posGuard`), because its checks place the character by CFrame.
+  What it does NOT close (be honest in any store copy): a script that WALKS the doorways at WalkSpeed is a person
+  to the server and can still take a night per crossing; a hop inside the bank looks like a lag gap (foyer to door
+  in one hop on 1.2% of salted manors); short hops to dodge the Nightwatcher. `EYECANDY.md`, "Night shift 2026-10-11".
 - **The NIGHTS SURVIVED board** (`src/shared/Board.luau`, `Config.Board`, `buildBoard` in `Main.server`): an
   OrderedDataStore `NightwatchManorBoard_v1`, key `u_<userId>`, value `night * 2e9 + (2e9 - reachedAtUnix)`
   (`prof.bestAt`, stamped at the extraction that first set the best), written through `UpdateAsync` +
@@ -129,6 +148,16 @@ thumbnail shot list are in `EYECANDY.md`.
   on 31 first-time players on salted manors (a salt per night, the shift after 3 failures), as the game ships.
 
 ## State — NOT published, NEVER run in Roblox. Current counts: `EYECANDY.md` §8.
+
+**2026-10-11 (night shift: the position guard).** The HIGH finding of the 2026-10-09 review (a script could wait
+outside the manor, unseen, and teleport to the door: a night per ~12 s) was reproduced against the real server and
+fixed test-first: `PosGuard.luau`, `Crossing.walkBound`, `checkFooting` in `Main.server` (above, "The position
+guard"). Every gate, run twice on the final tree with identical counts: **42 of 42 green** (17 specs 1653 passed;
+headless 116 in `tests/` + 826 in `robloxemu/` + the HUD PASS; 0 failed). New gates: `tests/PosGuard.spec` (224),
+`robloxemu/check_nightwatchmanor_posguard` (71); `check_walk` 62 to 64. Mutation sweep: 18 of 18 killed, 2 controls
+survived. One independent read-only review of the diff: no HIGH, four findings taken. Residual risk, the mutation
+table and the Studio list: `EYECANDY.md`, "Night shift 2026-10-11". The review's findings 2-5 are still open. Not
+published, not pushed.
 
 **2026-10-01 (pass 2 of 2).** The unfinished board / salt / crossing-guard work that pass 1 had archived
 (`scratchpad/nwm_p1_1001/wip_board_archive/`) was put back byte-for-byte and finished: its five red suites were the
@@ -150,7 +179,7 @@ client checks use unseeded randomness):
 
 ```
 cd nightwatch-manor
-for f in tests/*.spec.luau; do luau "$f"; done                    # 16 specs, from the game directory
+for f in tests/*.spec.luau; do luau "$f"; done                    # 17 specs, from the game directory
 cd tests && py -3 ../../robloxemu/wrap.py --game .. --out build/nightwatch-manor.luau
 luau check_walk.luau
 luau check_world.luau
@@ -182,6 +211,9 @@ Traps this game has shown (keep them in mind before trusting a green run):
 - A check that says "every X visited had Y" needs a CONTROL that X was visited (the night-50 hall tour visited 0).
 - Prompts need no line of sight here: anything a prompt guards must check the room on the server.
 - Layout-bound checks set `PublicLayouts`; a check that wants the game as it ships must not.
+- The headless kit switches the position guard OFF (`Kit.posGuard`; `Kit.boot{ posGuard = true }` keeps it): its
+  checks place the character by CFrame, which is what the guard voids a night for. A check that moves the character
+  with the guard on has to WALK it (2 studs a tick), as `check_nightwatchmanor_posguard` and `tests/check_walk` do.
 
 
 History, newest first.
@@ -269,7 +301,7 @@ The state on 2026-09-10, after REVIEW-3 (history; today's counts are `EYECANDY.m
 - **`roomCount` is a TARGET, not an exact count** — the repair pass may exceed it by up to
   `MaxRepairRooms`. Manor.spec asserts the band rather than equality.
 - **The exit is always the deepest room**, so every night is a full crossing, and ESCAPE works only from inside the
-  exit room after the shortest possible walk there (`Crossing.luau`).
+  exit room after the shortest possible walk there (`Crossing.luau`), in a night the character walked (`PosGuard.luau`).
 - **Walls block sight with no raycast**: `Watcher.spots` is the cone AND a `roomOk` flag the server
   computes from `Manor.roomAtWorld` + `Manor.linked`. Roblox's `Raycast` is not modelled by the
   headless emulator, and this design does not need it.
@@ -286,7 +318,8 @@ The state on 2026-09-10, after REVIEW-3 (history; today's counts are `EYECANDY.m
   silent and green to every unit test.
 - **Nothing the client sends is trusted, because the client sends nothing.** Every action is an
   in-world ProximityPrompt whose handler checks `who == plr`. The only remotes are `State` and
-  `Notice`, both server -> client.
+  `Notice`, both server -> client. The one thing a client DOES control is where its own character is (Roblox gives
+  it the physics); the server measures that itself, every tick of a night (`PosGuard.luau`).
 - **Zone indices are recycled** through a free list on `PlayerRemoving`, so a long-lived server
   never marches out to where float precision degrades.
 - **DataStore**: `GetDataStore` is pcall'd (it RAISES in an unpublished place and would otherwise
@@ -338,6 +371,8 @@ The state on 2026-09-10, after REVIEW-3 (history; today's counts are `EYECANDY.m
 - `src/shared/Salt.luau` — the server-only 64-bit generator every manor is planned from (`new`, `next`, `below`, `step`).
 - `src/shared/Crossing.luau` — the Servants' Exit's guard: `minDistance` (a lower bound on every legal walk),
   `minSeconds`, `verdictFor` (reach, room, time).
+- `src/shared/PosGuard.luau` — the position guard: `seed` / `reseed`, `cost` (the shortest legal walk between two
+  samples), `step` (outside, jump, the bank, the settle window). `Crossing.walkBound` is the walk bound it spends.
 - `src/shared/Board.luau` — the NIGHTS SURVIVED board's pure rules: `encode` / `decode`, `keepHigher`, `rank`,
   `publicView`, `friendsView`, `rowText`, a TTL cache and a token bucket.
 - `src/server/Main.server.luau` — world building, the night loop, persistence.
@@ -353,6 +388,7 @@ The state on 2026-09-10, after REVIEW-3 (history; today's counts are `EYECANDY.m
 - `tests/check_world.luau` — the join-time guards and the exit door, in the built world.
 - `tests/check_boot_guard.luau` — four hostile-Config boots; takes a case argument.
 - `tests/Board.spec`, `tests/Crossing.spec`, `tests/Salt.spec` — the board's, the guard's and the salt's pure rules.
+- `tests/PosGuard.spec` — the position guard: honest walkers are never voided (with the margins), the cheats are.
 - `MARKETING.md` — the clip list (8 clips for `tools/film_game.py`, with staging and honest captions).
 - `tests/_mutate.py` — the mutation driver that produced the table below.
 - `../robloxemu/check_nightwatch.luau`, `../robloxemu/check_nightwatch_hud.luau` — NOT ours to
@@ -361,7 +397,8 @@ The state on 2026-09-10, after REVIEW-3 (history; today's counts are `EYECANDY.m
   checks; `_kit` is their shared setup; `_fairgate` takes `-a light|hazards|rest`; `_flash` takes
   `-a storm|calm`; `_sitdrop`, `_save` and `_caps` came with the second review; `_board` (the NIGHTS SURVIVED board,
   public and friends, through the real server) and `_guard` (the salt never leaves ServerStorage, a retry is the same
-  manor until it shifts, the exit's guard) with pass 2).
+  manor until it shifts, the exit's guard) with pass 2; `_posguard` (2026-10-11: the exploit, an honest walk, a lag
+  gap and a respawn through the real server, the guard as it ships; every other check runs with it off, see the kit)).
 
 ## Mutation results (all restored afterwards)
 
