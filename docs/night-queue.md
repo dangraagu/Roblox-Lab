@@ -2,6 +2,17 @@
 
 Newest night first. Each job: done / in progress (with exact resume point) / blocked (why).
 
+## Owner instruction for the night of 2026-10-12 (given 2026-10-11 21:46, in chat)
+
+«Ikke lag nye videoer i natt, du kan fortsatt laste opp videoer vi har laget før.»
+- **Do NOT record or render new clips tonight** (job C, and the "record new clips after job H" rule in 3c, are off
+  for this night). No `tools/film_game.py`, `tools/film_anomaly.py` or `tools/record_studio.py` runs.
+- **Uploading clips that already exist is allowed tonight.** This is a one-night exception to section 3 of the
+  task file. If the shift uploads, it follows `docs/marketing/youtube-daily-upload.md` exactly, takes posts
+  from schedule.json in order, stops at the daily cap, and remembers that every night upload is spent from the
+  11:30 day task's rolling 24 h cap. Uploading is optional, not a job; the queue's code and Studio work come first.
+- This applies to this one night only, unless the owner repeats it.
+
 ## Night of 2026-10-11, second run (started 02:17 on the owner's word "du kan kjøre i natt")
 
 Clock: Bash `date` and PowerShell `Get-Date` both 02:17. Weekly usage 5 % (the 99 % from 00:17 was gone).
