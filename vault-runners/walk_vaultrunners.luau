@@ -335,7 +335,7 @@ end
 print("Vault Runners — walking the real server. WalkSpeed on the Humanoid: "
 	.. tostring(me.Character:FindFirstChildOfClass("Humanoid").WalkSpeed))
 print("")
-print("tier    floor | countdown | runner  | took   | outcome  | banked / gems | falls (lost s)")
+print("tier    floor | countdown | runner  | took   | outcome  | banked / gems | ranked | falls (lost s)")
 for _, tf in ipairs({ { 1, 1 }, { 3, 1 }, { 3, 30 }, { 3, 100 }, { 3, 400 } }) do
 	for _, style in ipairs({ "solver", "grabber", "fumbler" }) do
 		local r = playFloor(tf[1], tf[2], style)
@@ -343,9 +343,12 @@ for _, tf in ipairs({ { 1, 1 }, { 3, 1 }, { 3, 30 }, { 3, 100 }, { 3, 400 } }) d
 			print(string.format("%-7s %5d | %s", Config.Tiers[tf[1]].name, tf[2], r.error))
 		else
 			local e = r.ended or {}
-			print(string.format("%-7s %5d | %6ds   | %-7s | %5.1fs | %-8s | %3d / %-3d     | %d (%.1fs fall, %.1fs waiting)",
+			-- `ranked`: did the flier gate (src/shared/FlierGate.luau) follow this run to the exit. All three
+			-- runners walk the corridors and climb the pads, so every escape here must read yes.
+			print(string.format("%-7s %5d | %6ds   | %-7s | %5.1fs | %-8s | %3d / %-3d     | %-6s | %d (%.1fs fall, %.1fs waiting)",
 				Config.Tiers[tf[1]].id, tf[2], r.countdown, style, r.elapsed,
 				tostring(e.reason), e.banked or 0, r.gemsOnFloor,
+				if e.ok then (if e.ranked then "yes" else "NO") else "-",
 				r.falls, r.fallSeconds, r.waitedForPads))
 		end
 	end

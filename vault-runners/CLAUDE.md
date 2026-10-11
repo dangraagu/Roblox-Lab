@@ -19,6 +19,11 @@ own (invariant 19). `MARKETING.md` has the clip list. The seed is deliberately N
 invariant 17 says why. What is left is Studio and people: nobody has
 played it, seen it, or seen the board (EYECANDY.md §8).
 
+**Fliers are kept off the board (owner decision 2026-10-11, invariant 20, EYECANDY.md "Night shift
+2026-10-11: flier gate").** `FlierGate` follows the client's claim through the corridors and stairwells;
+an escape it cannot follow is banked as before and not ranked, and the board counts `traced` escapes, not
+`floors`. Green and mutation-tested headless, never run in Studio, not published.
+
 **The eye candy (owner's brief 2026-09-17) is built and green, through two adversarial reviews
 (EYECANDY.md §12 and §13, all findings closed), and NOT yet seen in Studio: read `EYECANDY.md`
 first.** Five strata by depth, and past depth 44 the Volcano Temple turns through three halls (owner
@@ -51,28 +56,31 @@ tests/Collapse.spec.luau       282 passed, 0 failed   IS THE VAULT WINNABLE AT A
 tests/Curve.spec.luau           29 passed, 0 failed   IS "DEEPER" ACTUALLY HARDER; the rolled climb and a rolled miss
 tests/Ascent.spec.luau          77 passed, 0 failed   THE PADS CRUMBLE, EVERY ONE COMES BACK, the stand box is derived
 tests/Trace.spec.luau           28 passed, 0 failed   the anti-teleport throttle + its BOUNDS
+tests/FlierGate.spec.luau      103 passed, 0 failed   WHICH ESCAPES COUNT FOR THE BOARD: fliers never, an honest runner always (margins printed)
 tests/EnvBands.spec.luau       124 passed, 0 failed   (the eye candy, EYECANDY.md, from here...)
 tests/Rest.spec.luau            55 passed, 0 failed
 tests/Hazards.spec.luau         91 passed, 0 failed
 tests/VaultEnv.spec.luau       171 passed, 0 failed   (+ critters: placed from (storey, cell, seed) only, never in a wall)
 tests/EnvConfig.spec.luau      432 passed, 0 failed   THE PADS, GEMS AND RING STAY READABLE; gems never the pads' colour; critters neither
 tests/Pacing.spec.luau          51 passed, 0 failed   (...to here) the brag at 30-45 min; the halls turn
-tests/Board.spec.luau           69 passed, 0 failed   the board's pure rules: stored value, ties, views, cache, limiter
+tests/Board.spec.luau           70 passed, 0 failed   the board's pure rules: stored value, ties, views, cache, limiter
 check_vaultrunners.luau        157 passed, 0 failed   (headless boot: builds vaults, plays runs; owner token, RespawnLocation, rejoin, sparse keys, shutdown)
 check_vaulthud.luau            PASS                   (11 viewports x {hub, mid-run}, HUD + Vault.client)
 ../robloxemu/check_vaultrunners_env.luau      340 passed, 0 failed   the strata, real client + server; §4b each stratum's critters
 ../robloxemu/check_vaultrunners_hazards.luau   50 passed, 0 failed   the drops (emulator Random unseeded)
 ../robloxemu/check_vaultrunners_shaft.luau     63 passed, 0 failed   the shaft stays readable; the server sees a chained hopper
 ../robloxemu/check_vaultrunners_cards.luau     20 passed, 0 failed   returning player's cards; forced guards
-../robloxemu/check_vaultrunners_static.luau   100 passed, 0 failed   compiles; no remote, no attribute (Vault.client AND Board.client); Config's obby comment
+../robloxemu/check_vaultrunners_static.luau   102 passed, 0 failed   compiles; no remote, no attribute (Vault.client AND Board.client); Config's obby comment
 ../robloxemu/check_vaultrunners_readable.luau  50 passed, 0 failed   gems, exit, drop ring readable; not the pads' colour
 ../robloxemu/check_vaultrunners_budget.luau    17 passed, 0 failed   every Config.Budget is a CAP (forced demand + budgets); critters yield first
 ../robloxemu/check_vaultrunners_halls.luau     68 passed, 0 failed   the Volcano Temple's halls, through the real client
-../robloxemu/check_vaultrunners_board.luau     90 passed, 0 failed   the board, public + friends, through the real server and Board.client
+../robloxemu/check_vaultrunners_board.luau     90 passed, 0 failed   the board, public + friends, through the real server and Board.client (its escapes are WALKED)
+../robloxemu/check_vaultrunners_fliergate.luau 59 passed, 0 failed   a noclip escape is NOT written to the board; an honest one is; traced count saved
 py -3 check_store_text.py      10 passed, 0 failed    the store description: <= 1000 chars, no coloured squares, no false brief claims
 walk_vaultrunners.luau         5 floors x 3 runners   (walks the real server, prints outcomes)
 measure_curve.luau             the tuning instrument  (where Config.Collapse's numbers came from)
 mutate_obby.sh                 the obby's mutation gate (21 mutations: 20 killed, 1 disclosed; 2 controls survive; RUN IT ON A SCRATCH COPY)
+mutate_fliergate.sh            the flier gate's mutation gate (12 killed of 12, 2 controls survive; proves each mutant is in the bundle; ONE WRITER PER TREE)
 ```
 
 Regenerate the emulator bundle after ANY edit under `src/`, or the headless checks measure the
@@ -163,7 +171,8 @@ cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runne
    position `watchRunner` left in `a.trusted`. At 0.2 s the server never counted 18 of 48 chained
    landings (`check_vaultrunners_shaft` §6). `StandRadius` is DERIVED (pad half-width + runner
    half-width = 2.5), never typed.
-9b. **Every rule in the run loop reads `Trace`, never `hrp.Position`.** The client owns its own
+9b. **Every rule in the run loop reads `Trace`, never `hrp.Position`** (the one reader of the claim
+   is the flier gate, which decides nothing but the board: invariant 20). The client owns its own
    character's physics, so the position the server reads is a claim. `Trace` moves the server's
    own position toward that claim at walking pace and the gem, exit and kill tests all read the
    trusted one. If you add a rule that reads a player position, read `local_`, not `claimed`.
@@ -222,11 +231,12 @@ cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runne
     because the pads, gems and floor are the stratum's own.
 15. **The board ranks the DEEPEST VAULT ESCAPED, and only the server moves it** (Config.Board,
    `src/shared/Board.luau`, docs/complete-game-standard.md §3). The metric is
-   `VaultEnv.deepestCleared(p.floors)`; `floors` moves only in `finishRun` when `RunState.tryEscape`
-   banks a run judged on `Trace`, and no remote carries a depth, a floor or a time. Stored in the
+   `VaultEnv.deepestCleared(p.traced)` (`boardDepth` in Main.server; NEVER `p.floors`, see invariant
+   20); it moves only in `finishRun` when `RunState.tryEscape` banks a run judged on `Trace` AND the
+   flier gate could follow it, and no remote carries a depth, a floor or a time. Stored in the
    OrderedDataStore `Config.Save.Board`, key `u_<userId>`, value `depth * 2e9 + (2e9 - bestAt)`;
    `bestAt` is stamped in `finishRun` only when the escape is DEEPER than any before (never on a
-   shallower one, never at the board write), saved with the floors, and offered to the board after the
+   shallower one, never on one the gate could not trace, never at the board write), saved with the floors, and offered to the board after the
    profile write lands and again at every join, through `UpdateAsync` + `Board.keepHigher` (a tie keeps
    the first reach time, the board is never lowered). Public: one `GetSortedAsync(false, 10)` per
    `PublicCacheSeconds` while anyone is here; a failed read keeps the last list. Friends: only when the
@@ -259,6 +269,27 @@ cd ../robloxemu && py -3 wrap.py --game ../vault-runners --out build/vault-runne
    `Budget.MaxCritters`, within `CritterReach` cells of the runner; they yield FIRST (before props)
    when the parts budget is tight. A critter's body colour stays `MinGemPadDistance` from every gem
    and pad on its floor (`EnvConfig.spec`). A new stratum needs a critter kind VaultArt can draw.
+
+20. **FLIERS DO NOT TOP THE BOARD** (owner decision 2026-10-11, `src/shared/FlierGate.luau`,
+   `Config.Gate`, EYECANDY.md "Night shift 2026-10-11"). `Trace` bounds speed, not geometry, so a
+   noclip client escapes every vault. `watchRunner` hands every sample of the CLAIM (not the trusted
+   position) to the gate, which keeps a validated position and accepts a sample only if it is in an
+   open cell and reachable from there along the corridors, and between storeys only through the
+   stairwell, inside an allowance that banks 4 s. `finishRun` asks once: can the validated position be
+   at the exit. If yes, `p.traced[tier]` advances with `p.floors[tier]`; if no, only `floors` does, the
+   escape is banked exactly as before, and the player gets ONE toast (`Board.Text.Untraced`).
+   Rules that must hold: **the gate never touches the economy and never throttles** (every rule still
+   reads `a.trusted`); **everything that ranks reads `boardDepth(p)`** (writeBoard, liveValue, the
+   bestAt stamp); **a refused sample does nothing by itself** (no strike, no sticky flag: only the
+   verdict at the escape counts, which is why a stray sample or a short freeze cannot cost a rank);
+   **the bank stays capped** (uncapped, waiting at the drop-in buys the route); **a move is priced at
+   the true geodesic** (`FlierGate.path`, a funnel; a longer estimate refuses honest runners, a
+   shorter one sells wall hops); **`traced` is never more than `floors`** (clamped on load). The board
+   therefore counts TRACED ESCAPES per tier, not the deepest floor reached: flying to floor 99 and
+   walking one vault is depth 1. A profile saved before the field existed keeps its floors' depth.
+   Any new move the SERVER makes inside a run (a checkpoint, a teleport) must call `FlierGate.reseed`.
+   If a speed upgrade is ever added, `Config.Movement.WalkSpeed` is no longer the top speed and the
+   gate (and Trace) must read the upgraded one; `FlierGate.spec` fails on a pet field named *speed*.
 
 ## How the vault is put together
 

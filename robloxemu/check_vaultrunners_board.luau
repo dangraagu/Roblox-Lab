@@ -9,9 +9,11 @@
 -- throttle-safe; a physical board near spawn with a ProximityPrompt that toggles Public/Friends; names
 -- resolved and cached, never stored; an empty friends board says something useful.
 --
--- The metric is the DEEPEST VAULT ESCAPED (VaultEnv.deepestCleared of the saved floors). The escapes in
--- §3 are real runs on the real server: the runner claims the exit and the server's own trusted position
--- (Trace) walks there at runner speed before RunState banks it, exactly as check_vaultrunners' CONTROL.
+-- The metric is the DEEPEST VAULT ESCAPED, counting the escapes the server could trace (owner decision
+-- 2026-10-11: VaultEnv.deepestCleared of the saved `traced`, which for an honest runner equals `floors`).
+-- The escapes in §3 are real runs on the real server, WALKED: corridor by corridor and pad by pad. They used
+-- to claim the exit and wait for the trusted position (Trace) to get there, which is exactly the noclip run
+-- the flier gate now keeps off the board (check_vaultrunners_fliergate.luau holds that half).
 -- The emulator has no Players:GetFriendsAsync, so this file supplies one (FriendPages-shaped) and counts
 -- the calls. Shaped after robloxemu/check_plus1jump_board.luau, the template game's check.
 
@@ -266,22 +268,78 @@ local function lastRunEvent(plr, kind)
 	end
 	return nil, 0
 end
--- A real run: enter, claim the exit, and let the server's trusted position get there at runner speed.
+-- A real run, WALKED: enter, cross every storey along its corridor cell by cell at WalkSpeed, climb every
+-- shaft pad by pad, and step onto the exit. Nothing is passed through, so the flier gate can follow it.
+-- `early` is the board's write count a few ticks in, with the runner already heading for the exit.
+local Progression = h:_require(RS:FindFirstChild("Progression"))
+local VaultFloor = h:_require(RS:FindFirstChild("VaultFloor"))
+local VaultPath = h:_require(RS:FindFirstChild("VaultPath"))
+local MazeGen = h:_require(RS:FindFirstChild("MazeGen"))
+local Rng = h:_require(RS:FindFirstChild("Rng"))
 local function escape(plr, tier)
 	local _, endsBefore = lastRunEvent(plr, "end")
 	Enter:simulateFireServer(plr, tier)
 	h:advance(0.5)
-	local v = h.workspace:FindFirstChild("Vaults"):FindFirstChild("Vault_" .. plr.UserId)
-	local pad = v and v:FindFirstChild("ExitPad")
-	if not pad then return nil end
+	local vaultsFolder = h.workspace:FindFirstChild("Vaults")
+	local v = vaultsFolder:FindFirstChild("Vault_" .. plr.UserId)
+	if not v then return nil end
 	local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
-	hrp.CFrame = CFrame.new(pad.Position)
-	h:advance(Config.Run.TickSeconds * 3)
-	local early = writes
-	for _ = 1, 80 do
+	local spec = Progression.difficulty(Config, tier, v:GetAttribute("Floor"))
+	spec.seed = Progression.seedFor(Config, tier, v:GetAttribute("Floor"))
+	local model = VaultFloor.build(Config, spec, MazeGen, Rng)
+	local origin = v:FindFirstChild("Floor_0").Position + Vector3.new(0, Config.Vault.FloorThickness / 2, 0)
+	local S, HS, ROOT = model.cellSize, model.storeyHeight, Config.Run.RunnerRootHeight
+	local DT = Config.Ascent.SampleSeconds
+	local at = hrp.Position - origin
+	local px, py, pz = at.X, ROOT, at.Z
+	local early, steps = nil, 0
+	local function moveTo(x, y, z)
+		for _ = 1, 4000 do
+			if vaultsFolder:FindFirstChild("Vault_" .. plr.UserId) == nil then return end
+			local dx, dz, dy = x - px, z - pz, y - py
+			local flat = math.sqrt(dx * dx + dz * dz)
+			if flat < 1e-6 and math.abs(dy) < 1e-6 then return end
+			local m = math.min(flat, Config.Movement.WalkSpeed * DT)
+			if flat > 1e-6 then px += dx / flat * m; pz += dz / flat * m end
+			py += if dy > 0 then math.min(dy, 6 * DT) else dy
+			hrp.CFrame = CFrame.new(origin + Vector3.new(px, py, pz))
+			h:advance(DT)
+			steps += 1
+			if steps == 12 then early = writes end
+		end
+	end
+	local function centre(c) return (2 * c.cx + 1 - model.cells) * S, (2 * c.cy + 1 - model.cells) * S end
+	for s = 0, model.storeys - 1 do
+		local to = model.exitCells[s + 1]
+		local dist = VaultPath.distances(model, s, model.entryCells[s + 1])
+		local cells, cur = { to }, to
+		local d = dist[to.cy * model.cells + to.cx]
+		while d > 0 do
+			for _, dd in { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } } do
+				local nx, ny = cur.cx + dd[1], cur.cy + dd[2]
+				if nx >= 0 and nx < model.cells and ny >= 0 and ny < model.cells
+					and model.grids[s + 1][2 * cur.cy + 1 + dd[2]][2 * cur.cx + 1 + dd[1]] == false
+					and dist[ny * model.cells + nx] == d - 1 then
+					cur = { cx = nx, cy = ny }; d -= 1
+					table.insert(cells, 1, cur)
+					break
+				end
+			end
+		end
+		for _, c in cells do
+			local x, z = centre(c)
+			moveTo(x, s * HS + ROOT, z)
+		end
+		if s < model.storeys - 1 then
+			for _, pad in model.shafts[s + 1].pads do moveTo(pad.x, pad.y + ROOT, pad.z) end
+			local x, z = centre(to)
+			moveTo(x, (s + 1) * HS + ROOT, z)
+		end
+	end
+	for _ = 1, 20 do
 		local e, i = lastRunEvent(plr, "end")
 		if i > endsBefore then return e, early end
-		h:advance(5)
+		h:advance(0.5)
 	end
 	return nil, early
 end
@@ -295,7 +353,7 @@ do
 	local w0 = writes
 	local ended, early = escape(E, 1)
 	truthy(ended ~= nil and ended.ok, "set-up: Eli escapes Bronze floor 3 (" .. tostring(ended and ended.reason) .. ")")
-	eq(early, w0, "claiming the exit wrote nothing to the board: the claim is not an escape")
+	eq(early, w0, "heading for the exit wrote nothing to the board: only the escape does")
 	local escapedAt = os.time()
 	eq(writes, w0 + 1, "a deeper escape: exactly one write to the board")
 	local m, t = decode(stored(507))

@@ -18,7 +18,10 @@
 -- WHAT THIS DOES NOT DO, so nobody reads more into it than is here:
 --   * it does not test walls. The trusted position moves in straight lines, so a flier still
 --     gets the straight-line route rather than the maze route. That is a real advantage and it
---     is bounded by speed rather than removed.
+--     is bounded by speed rather than removed. FOR THE ECONOMY that is still the whole answer.
+--     For the BOARD it no longer is: src/shared/FlierGate.luau (owner decision 2026-10-11) follows
+--     the claim through the corridors and stairwells, and an escape it cannot follow is banked
+--     here as before and not ranked there.
 --   * it does not punish. There is no kick, no flag, no counter shown to anybody. A lagging
 --     honest player is indistinguishable from a slow cheat, and the correct response to both is
 --     the same: nothing happens any faster than a runner could make it happen.

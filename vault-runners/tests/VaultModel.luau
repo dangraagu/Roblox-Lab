@@ -81,7 +81,8 @@ function VaultModel.vault(self: any, tier: number, floor: number, seed: number?)
 end
 
 -- Play ONE run. opts = { profile, retry: boolean, rand, hazards: "off"|"reacts"|"ignores"|"freezes",
---   hazardState (a Hazards scheduler carried across runs), hazRand, dt }.
+--   hazardState (a Hazards scheduler carried across runs), hazRand, dt,
+--   onSample(x, y, z, t): called with the runner's position every step }.
 -- Returns { escaped, time, gems, hazards = { spawned, hits, near, landings = { distance } }, lost }.
 function VaultModel.play(self: any, model: any, spec: any, opts: any): any
 	local C = self.Config
@@ -257,6 +258,9 @@ function VaultModel.play(self: any, model: any, spec: any, opts: any): any
 				end
 			end
 		end
+
+		-- where the modelled runner is this step (tests/FlierGate.spec.luau hands it to the flier gate)
+		if opts.onSample then opts.onSample(px, py, pz, t) end
 
 		-- the collapse and the seal, by the real rules
 		if self.RunState.caught(run, model, py, t) then

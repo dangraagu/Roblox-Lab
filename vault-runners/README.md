@@ -29,9 +29,11 @@ behind you. **Rest is the hub, between runs**; a run never pauses. All of it is 
 part, particle, light and beam budgets are enforced in code. Not yet seen in Studio.
 
 **The board.** West of the hub spawn stands the DEEPEST ESCAPES sign: the deepest vault each runner
-escaped, measured by the server (a script cannot raise it: `floors` only moves when the server banks
+escaped, measured by the server (a script cannot raise it: it only moves when the server banks
 an escape judged on its own trusted position), public top 10 or your friends, toggled with its
-ProximityPrompt. Ties go to whoever got there first. See CLAUDE.md invariant 15.
+ProximityPrompt. Ties go to whoever got there first. **Only escapes the server could follow through
+the vault count** (owner decision 2026-10-11): a noclip run to the exit still banks its gems and
+its floor, and is not ranked (`src/shared/FlierGate.luau`). See CLAUDE.md invariants 15 and 20.
 
 ---
 
@@ -118,6 +120,7 @@ vault-runners/
   src/shared/VaultPath.luau     how long the vault takes to walk -> the countdown, PURE
   src/shared/Ascent.luau        which pads of the climb shaft are THERE right now, PURE
   src/shared/Trace.luau         the server's own position for the runner, PURE
+  src/shared/FlierGate.luau     which escapes count for the board: the claim followed through the maze, PURE
   src/shared/RunState.luau      the banking rule, PURE
   src/shared/Progression.luau   unlocks + the floor curve, PURE
   src/shared/Pets.luau          the stall, PURE
@@ -169,13 +172,14 @@ luau tests/Collapse.spec.luau       # 282 passed, 0 failed   IS THE VAULT WINNAB
 luau tests/Curve.spec.luau          #  29 passed, 0 failed   IS "DEEPER" ACTUALLY HARDER
 luau tests/Ascent.spec.luau         #  77 passed, 0 failed   THE PADS CRUMBLE, AND COME BACK
 luau tests/Trace.spec.luau          #  28 passed, 0 failed   the anti-teleport throttle
+luau tests/FlierGate.spec.luau      # 103 passed, 0 failed   fliers are not ranked; an honest runner always is (margins printed)
 luau tests/EnvBands.spec.luau       # 124 passed, 0 failed   (EYECANDY.md from here down)
 luau tests/Rest.spec.luau           #  55 passed, 0 failed
 luau tests/Hazards.spec.luau        #  91 passed, 0 failed
 luau tests/VaultEnv.spec.luau       # 171 passed, 0 failed
 luau tests/EnvConfig.spec.luau      # 432 passed, 0 failed   THE PADS, GEMS AND RING STAY READABLE
 luau tests/Pacing.spec.luau         #  51 passed, 0 failed   when each stratum and hall arrives, how rare a drop is
-luau tests/Board.spec.luau          #  69 passed, 0 failed   the board's stored value, ties, views, cache, limiter
+luau tests/Board.spec.luau          #  70 passed, 0 failed   the board's stored value, ties, views, cache, limiter
 ```
 
 Then the headless boot, which runs the REAL server script inside `robloxemu`:
@@ -190,11 +194,12 @@ luau check_vaultrunners_env.luau     # 340 passed, 0 failed   the five strata (a
 luau check_vaultrunners_hazards.luau #  50 passed, 0 failed   the drops through the real client
 luau check_vaultrunners_shaft.luau   #  63 passed, 0 failed   the shaft stays readable; the server sees a chained hopper
 luau check_vaultrunners_cards.luau   #  20 passed, 0 failed   a returning player's cards; forced guards
-luau check_vaultrunners_static.luau  # 100 passed, 0 failed   compiles; the clients cannot talk to the server
+luau check_vaultrunners_static.luau  # 102 passed, 0 failed   compiles; the clients cannot talk to the server
 luau check_vaultrunners_readable.luau #  50 passed, 0 failed  gems, exit, drop ring readable; hub signs never overlap
 luau check_vaultrunners_budget.luau  #  17 passed, 0 failed   every client budget is a cap in code
 luau check_vaultrunners_halls.luau   #  68 passed, 0 failed   the Volcano Temple's three halls
 luau check_vaultrunners_board.luau   #  90 passed, 0 failed   the board, public + friends, real server + Board.client
+luau check_vaultrunners_fliergate.luau #  59 passed, 0 failed  a noclip escape is NOT written to the board, an honest one is
 cd ../vault-runners
 py -3 check_store_text.py            #  10 passed, 0 failed   the store description
 ```
@@ -253,12 +258,17 @@ Honest list. The concept brief and the paste-ready store description promise som
 - **No sound.** Not one Sound instance in the game.
 - **No "give up" button.** Once you are in a vault the only ways out are the exit and the
   collapse.
-- **The anti-cheat is a throttle, not a wall.** `Trace` moves the server's trusted position toward
-  the client's claim no faster than a runner moves, so teleporting to the exit no longer banks
-  anything instantly. It does **not** test walls: a flier still gets the straight-line route
-  instead of the maze route, at walking pace. That is a real remaining advantage, bounded by speed
-  rather than removed. Closing it needs a walkability test against the storey's grid, which risks
-  throttling honest players who cut corners and was left out on purpose.
+- **The economy's anti-cheat is a throttle, not a wall; the board's is a wall.** `Trace` moves the
+  server's trusted position toward the client's claim no faster than a runner moves, so teleporting
+  to the exit no longer banks anything instantly. It does **not** test walls: a flier still gets the
+  straight-line route instead of the maze route, at walking pace, and still banks gems and floors
+  that way. That is a real remaining advantage for the cheater's OWN economy, bounded by speed.
+  **The board is separate since 2026-10-11** (owner decision): `FlierGate` follows the client's
+  claim through the corridors and stairwells and an escape it cannot follow is not ranked. It never
+  throttles anybody, so an honest runner who cuts corners loses nothing. What it does not stop is a
+  cheat that follows the real route (up to 1.35x a runner on the flat, and without the pads' cost in
+  the shaft), and a runner frozen for more than 5.4 s at full speed loses the rank for that one run.
+  EYECANDY.md, "Night shift 2026-10-11", has the numbers.
   **It does not stop a lying client skipping the obby either**, and that is measured rather than
   hoped: standing still banks enough upward allowance to move 25 studs in one tick, and a climb
   shaft is 18. A cheating client climbs a whole vault in 8.65s of trusted time against an honest

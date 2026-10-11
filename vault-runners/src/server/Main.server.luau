@@ -32,6 +32,7 @@ local RunState = require(ReplicatedStorage:WaitForChild("RunState"))
 local Pets = require(ReplicatedStorage:WaitForChild("Pets"))
 local Trace = require(ReplicatedStorage:WaitForChild("Trace"))
 local Ascent = require(ReplicatedStorage:WaitForChild("Ascent"))
+local FlierGate = require(ReplicatedStorage:WaitForChild("FlierGate"))   -- which escapes count for the board
 local Fx = require(ReplicatedStorage:WaitForChild("Fx"))
 local VaultEnv = require(ReplicatedStorage:WaitForChild("VaultEnv"))   -- deepestCleared: the board's metric
 local Board = require(ReplicatedStorage:WaitForChild("Board"))
@@ -118,6 +119,12 @@ local function defaultProfile()
 		pets = {},
 		equipped = nil,
 		floors = floors,     -- [tierIndex] = next floor number in that vault
+		-- THE BOARD'S OWN COUNT (owner decision 2026-10-11: fliers must not top the board). Shaped like
+		-- `floors`: [tierIndex] = 1 + the escapes in that vault the server could TRACE through its
+		-- corridors and stairwells (src/shared/FlierGate.luau). An honest runner's is equal to `floors`.
+		-- A noclip escape advances `floors` (the economy is not the gate's business) and not this, so
+		-- flying to floor 99 and walking one vault is one, not a hundred. Never more than `floors`.
+		traced = table.clone(floors),
 		escapes = 0,
 		wipes = 0,
 		-- When the deepest escape (the board's metric) was reached, in unix seconds. Saved, so a board
@@ -171,6 +178,15 @@ local function loadProfile(plr)
 				p.bestAt = tonumber(d.bestAt) or 0
 				local f = numKeys(d.floors)
 				for i = 1, #Config.Tiers do p.floors[i] = math.max(1, tonumber(f[i]) or 1) end
+				-- A record saved before the flier gate existed has no `traced`: it keeps the depth its
+				-- floors gave it (the game was not public, so there is nobody to take a row from). One
+				-- that has it is held to 1..floors: the board never counts more than was cleared.
+				local tr = if type(d.traced) == "table" then numKeys(d.traced) else nil
+				for i = 1, #Config.Tiers do
+					local v = if tr then tonumber(tr[i]) or 1 else p.floors[i]
+					if v ~= v then v = 1 end
+					p.traced[i] = math.clamp(math.floor(v), 1, p.floors[i])
+				end
 			end
 			if lockedByOther then
 				acquired = false
@@ -195,10 +211,16 @@ local function loadProfile(plr)
 	end
 	-- A profile saved before bestAt existed still has a deepest escape; it is stamped with the session
 	-- it came back in (the true time is unknown, and a later stamp can only lose a tie, never steal one).
-	if p.bestAt <= 0 and VaultEnv.deepestCleared(Config, p.floors) > 0 then
+	if p.bestAt <= 0 and VaultEnv.deepestCleared(Config, p.traced) > 0 then
 		p.bestAt = os.time()
 	end
 	return p
+end
+
+-- THE BOARD'S METRIC: the deepest vault escaped, counting only the escapes the server could trace
+-- (`traced`, above). Every place that ranks a player reads this, never `floors`.
+local function boardDepth(p)
+	return VaultEnv.deepestCleared(Config, p.traced)
 end
 
 -- EXACTLY the fields flush() writes, as one comparable string. A profile whose fingerprint has
@@ -217,11 +239,15 @@ local function saveFingerprint(p)
 	for _, pet in ipairs(Config.Pets.List) do
 		if p.pets and p.pets[pet.id] == true then owned[#owned + 1] = pet.id end
 	end
-	local floors = {}
-	for i = 1, #Config.Tiers do floors[i] = tostring(p.floors[i] or 1) end
+	local floors, traced = {}, {}
+	for i = 1, #Config.Tiers do
+		floors[i] = tostring(p.floors[i] or 1)
+		traced[i] = tostring(p.traced[i] or 1)
+	end
 	return table.concat({
 		tostring(p.gems), tostring(p.totalBanked), tostring(p.escapes), tostring(p.wipes),
 		tostring(p.equipped), table.concat(owned, ","), table.concat(floors, ","), tostring(p.bestAt),
+		table.concat(traced, ","),
 	}, "|")
 end
 
@@ -231,13 +257,13 @@ end
 -- re-offers a depth the board already holds, and Board.keepHigher aborts that write.
 local boardSent = {}   -- [player] = depth
 
--- Offer this player's deepest escape to the board. Only while this session can save (so the board
+-- Offer this player's deepest TRACED escape to the board. Only while this session can save (so the board
 -- never holds a depth the profile would roll back), only when it is deeper than what this session
 -- already confirmed, and through UpdateAsync + Board.keepHigher, so the stored value only ever moves
 -- when the DEPTH improves and a tie keeps its first reach time.
 local function writeBoard(plr, p)
 	if not boardStore or not p or not p.canSave then return end
-	local depth = VaultEnv.deepestCleared(Config, p.floors)
+	local depth = boardDepth(p)
 	if depth <= 0 or depth <= (boardSent[plr] or 0) then return end
 	local value = Board.encode(depth, p.bestAt, Config.Board)
 	local ok = pcall(function()
@@ -288,7 +314,7 @@ local function flush(plr, releaseLock)
 				gems = p.gems, totalBanked = p.totalBanked,
 				pets = p.pets, equipped = p.equipped,
 				floors = p.floors, escapes = p.escapes, wipes = p.wipes,
-				bestAt = p.bestAt,
+				bestAt = p.bestAt, traced = p.traced,
 			}
 			wrote = true
 			return old
@@ -777,8 +803,14 @@ local function watchRunner(plr, a, dt)
 		-- ...and where a runner could actually have got to by now. Every rule reads the second
 		-- one. In Roblox the client owns its character's physics, so the first is a claim; writing
 		-- the root part onto the exit pad used to bank a whole vault instantly.
-		local t = Trace.step(a.trace, { x = claimed.X, y = claimed.Y, z = claimed.Z }, dt)
+		local claim = { x = claimed.X, y = claimed.Y, z = claimed.Z }
+		local t = Trace.step(a.trace, claim, dt)
 		a.trusted = Vector3.new(t.x, t.y, t.z)
+		-- ...and whether a runner could have got to the CLAIM through the corridors and stairwells.
+		-- The gate decides nothing here: it keeps its own validated position, and finishRun asks it
+		-- once whether the escape counts for the board. Every rule still reads `a.trusted`.
+		-- pcall'd: the gate is new code beside the economy, and a fault in it must cost a rank, never a run.
+		pcall(FlierGate.step, a.gate, a.model, claim, dt)
 
 		-- THE CLIMB SHAFT. Standing on a pad starts its crumble; the pad is gone a beat later and
 		-- back a few seconds after that. This reads the TRUSTED position like every rule in the run
@@ -890,23 +922,37 @@ function finishRun(plr, cause)
 		-- sealed. Reaching the exit is not the win condition; reaching it in time is.
 		local res = RunState.tryEscape(run, Pets.multiplier(Config, p), now)
 		if res.ok then
-			local deepestBefore = VaultEnv.deepestCleared(Config, p.floors)
+			local deepestBefore = boardDepth(p)
 			p.gems += res.banked
 			p.totalBanked += res.banked
 			p.escapes += 1
 			p.floors[a.tierIndex] = (p.floors[a.tierIndex] or 1) + 1
+			-- THE FLIER GATE (owner decision 2026-10-11). The escape is banked either way: gems, the
+			-- floor and the run were judged on Trace and stay exactly as they were. What the gate
+			-- decides is whether it counts for the BOARD: only if the position it validated sample by
+			-- sample, through the vault's own corridors and stairwells, can be at the exit now.
+			local gateOk, verdict = pcall(FlierGate.traced, Config, a.gate, a.model)
+			local traced = gateOk and verdict == true
+			if traced then
+				p.traced[a.tierIndex] = math.min((p.traced[a.tierIndex] or 1) + 1, p.floors[a.tierIndex])
+			end
 			-- THE BOARD'S REACH TIME. Stamped here, when the server banks an escape DEEPER than any
 			-- before it, and saved with the floors in the flush below: a tie on the board goes to
 			-- whoever got there first, so the time must be the escape's, never the board write's
 			-- (a write can fail and be retried a session later). An escape that is not the deepest
-			-- (Silver floor 1 after Bronze floor 29) leaves it alone.
-			if VaultEnv.deepestCleared(Config, p.floors) > deepestBefore then
+			-- (Silver floor 1 after Bronze floor 29) leaves it alone, and so does one that was not traced.
+			if boardDepth(p) > deepestBefore then
 				p.bestAt = os.time()
 			end
 			outcome = { ok = true, reason = "escaped", banked = res.banked, carried = res.carried,
-				time = now, floor = a.floor, tier = a.tierIndex }
-			toast(plr, string.format("💎 Banked %d gems — %s floor %d cleared!",
-				res.banked, Config.Tiers[a.tierIndex].name, a.floor))
+				time = now, floor = a.floor, tier = a.tierIndex, ranked = traced }
+			if traced then
+				toast(plr, string.format("💎 Banked %d gems — %s floor %d cleared!",
+					res.banked, Config.Tiers[a.tierIndex].name, a.floor))
+			else
+				-- Told once, here, in one line with what they banked (the HUD shows one toast at a time).
+				toast(plr, string.format(Config.Board.Text.Untraced, res.banked))
+			end
 		else
 			p.wipes += 1
 			outcome = { ok = false, reason = "sealed", banked = 0, carried = res.carried,
@@ -991,6 +1037,9 @@ local function beginRun(plr, tierIndex)
 		-- said. If the trace started at the client's claimed position, a client that claimed to
 		-- be at the exit before the run began would start there.
 		trace = Trace.new(Config, model.spawn.position),
+		-- ...and so is the flier gate's validated position: the drop-in is the one move the SERVER
+		-- makes in a run (a death or a respawn ends the run, onCharacter), so this is its only seed.
+		gate = FlierGate.new(Config, model, model.spawn.position),
 	}
 	active[plr] = a
 
@@ -1098,7 +1147,8 @@ end
 --============================================================================ the highscore board
 
 -- docs/complete-game-standard.md §3, Config.Board. The metric is the deepest vault escaped, measured
--- by this server (finishRun, behind RunState and Trace), stored encoded so a tie goes to whoever got
+-- by this server (finishRun, behind RunState and Trace) and counted only for escapes it could trace
+-- through the vault (FlierGate, `boardDepth`), stored encoded so a tie goes to whoever got
 -- there FIRST (Board.encode), and written only when it deepens (writeBoard, above). The sign stands in
 -- the hub, west of the spawn with its face turned to it; its ProximityPrompt toggles PUBLIC / FRIENDS
 -- per player, and each player's view goes to their own client (Board.client draws it on the sign).
@@ -1186,7 +1236,7 @@ end
 -- depth after the profile holding it is saved).
 local function liveValue(p)
 	if not p then return 0 end
-	local depth = VaultEnv.deepestCleared(Config, p.floors)
+	local depth = boardDepth(p)
 	if depth <= 0 then return 0 end
 	return Board.encode(depth, p.bestAt, BC)
 end
