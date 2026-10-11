@@ -25,12 +25,23 @@ around. Both games are ready: gates green, `check_glyphs` 0, tree clean at 656ae
 - Lock leak: a leave during the load releases the lock; a locked or failed load is retried 3 x 2 s. 6 mutants
   killed, 1 not observable, control survived. See `deep-vein/EYECANDY.md`, the two 2026-10-11 sections.
 
-### 3. HIGHs: IN PROGRESS at the time of writing (three worktrees under D:/Claude/Roblox-wt/)
-- labyrint-spill path guard: branch `night/2026-10-11-laby-pathguard`
-- nightwatch-manor position guard: branch `night/2026-10-11-nightwatch-posguard`
-- vault-runners flier gate (owner decision): branch `night/2026-10-11-vault-fliergate`
-Each must be reviewed and its gates re-run before it is merged. If this entry still says IN PROGRESS, the
-branches were NOT merged: check `git branch --list "night/2026-10-11*"` and `git worktree list`.
+### 3. HIGHs: DONE, merged to main (all gates re-run by the shift before each merge)
+- **vault-runners flier gate** (owner decision), merge 4e46bc8: a noclip escape is banked but not ranked; the
+  board counts traced escapes. 12 mutants killed, 2 controls survived. Owner call left: a freeze over 5.4 s
+  costs an honest runner that run's rank.
+- **labyrint-spill path guard**, merge 27e7201: wait-then-teleport to the exit no longer counts. 16 mutants
+  killed. Also fixed: the time floor's grid had the secret doors shut. **Labyrinth is LIVE: do the Studio
+  list in its EYECANDY section "Night shift 2026-10-11" before publishing it.**
+- **nightwatch-manor position guard**, merge (see git log): outside the halls or a jump no walk explains voids
+  the night. 18 mutants killed, 2 controls survived.
+- Not closed in any of the three: a script that walks the real route. Each EYECANDY section lists its residue.
+- The three worktrees are removed; the branches `night/2026-10-11-*` remain locally.
+
+### Next night
+1. Owner publishes plus1-jump and grow-a-crystal (or allows the publish command for the shift).
+2. Studio: the needs-Studio lists of the three guards (labyrint first, it is live), then thumbnails (job H step 3).
+3. Lock leaks in vault-runners and nightwatch-manor (deep-vein's fix da2616a is the model), labyrint MEDIUM 2-3.
+4. plus1-jump MEDIUM (guard bound = ideal jump).
 
 ### Not done
 - anomaly MEDIUM 1 (spares readable on the client): inherent, the anomaly must replicate to be seen. Left.
