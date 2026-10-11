@@ -52,11 +52,16 @@ Config.Save = {
 -- docs/complete-game-standard.md §3 (owner, 2026-09-16). One board, PUBLIC or FRIENDS, on a physical
 -- sign by the hub spawn with a ProximityPrompt that toggles the view per player.
 --
--- THE METRIC IS THE DEEPEST VAULT ESCAPED, as a depth: VaultEnv.deepestCleared(floors), the tier's
--- buried depth (Env.TierDepth) plus the last floor cleared in it. It is the number the strata are
--- drawn from, so the brag (the Frozen Vault, depth 18+) is a row on the board. A script cannot
--- inflate it: `floors` moves only in finishRun, when RunState.tryEscape banks a run the server judged
--- on its own trusted position (Trace), and no remote carries a depth, a floor or a time.
+-- THE METRIC IS THE DEEPEST VAULT ESCAPED, as a depth: the tier's buried depth (Env.TierDepth) plus
+-- the escapes made in it. It is the number the strata are drawn from, so the brag (the Frozen Vault,
+-- depth 18+) is a row on the board. A script cannot inflate it: it moves only in finishRun, when
+-- RunState.tryEscape banks a run the server judged on its own trusted position (Trace), and no remote
+-- carries a depth, a floor or a time.
+-- AND ONLY ESCAPES THE SERVER COULD TRACE COUNT (owner decision 2026-10-11, Config.Gate below,
+-- src/shared/FlierGate.luau). Trace bounds speed, not geometry: a noclip client flies to the exit
+-- through the walls and escapes every vault. Such an escape still banks and still advances `floors`,
+-- but the board reads the profile's `traced` (VaultEnv.deepestCleared(traced)), which it does not move.
+-- For an honest runner the two are the same number.
 -- Stored as `depth * 2e9 + (2e9 - reachedAtUnix)` (src/shared/Board.luau) so a tie goes to whoever
 -- escaped that deep FIRST, and written only when the depth improves.
 Config.Board = {
@@ -87,6 +92,9 @@ Config.Board = {
 		Loading = "Loading...",
 		Prompt = "Public / Friends",
 		Offline = "The board is offline this session (saving is off), so nothing is ranked.",
+		-- The toast for an escape the flier gate could not follow (Config.Gate): what was banked, and
+		-- that it is not ranked, in one line. %d = gems banked. Short: the HUD's toast is one 520 px line.
+		Untraced = "💎 Banked %d gems. 🧭 Not on the board: the server lost your path.",
 	},
 }
 
@@ -197,6 +205,32 @@ Config.Run = {
 	TrustedSpeedFactor = 1.35,   -- horizontal, over Movement.WalkSpeed — jitter, not speed
 	TrustedClimbFactor = 2.5,    -- upward, over the modelled climb rate; players skip treads
 	TrustedBurstSeconds = 3,     -- how much unused allowance can bank, for replication jitter
+}
+
+--============================================================================ the flier gate
+
+-- WHICH ESCAPES COUNT FOR THE BOARD (owner decision 2026-10-11: fliers must not top it).
+-- src/shared/FlierGate.luau keeps a VALIDATED position per run and accepts a sample of the client's
+-- claim only if it is reachable from there through the vault's corridors and stairwells inside what
+-- a runner could have covered. An escape whose validated position cannot be at the exit is banked
+-- exactly as before (gems, floor, everything `Trace` judged) and is NOT counted for the board.
+-- Nothing here touches the economy, and nothing here slows anybody down.
+--
+-- Every number is a MARGIN for the honest runner, measured in tests/FlierGate.spec.luau:
+Config.Gate = {
+	-- On the flat, over Movement.WalkSpeed. The same 1.35 Trace allows, so the two cannot disagree
+	-- about how fast a runner is: 32.4 studs/s against the 24 the server writes onto the Humanoid.
+	SpeedFactor = 1.35,
+	-- Upward, over the fastest any chain of jumps climbs (JumpPower / 2 = 25 studs/s, each jump landed
+	-- at its apex). The pads themselves allow about 15 studs/s; this is 37.5.
+	ClimbFactor = 1.5,
+	-- How much unused allowance BANKS. This is the lag a runner at full speed can have and still be
+	-- ranked: BurstSeconds x SpeedFactor = 5.4 s of freeze (129.6 studs of corridor in one move).
+	-- It is also the longest hop a route-following cheat can make, so it is a few seconds, not thirty.
+	BurstSeconds = 4,
+	-- A root this far inside a wall is read as leaning out of the corridor next to it. A root part is
+	-- half a stud deep and physics is not exact; a wall is 12 studs thick.
+	WallTolerance = 1.5,
 }
 
 --============================================================================ movement

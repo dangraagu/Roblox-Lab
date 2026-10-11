@@ -1392,3 +1392,130 @@ One independent read-only reviewer. Verdicts: **511793d SHIP; 3c45502 SHIP-WITH-
 5. **LOW.** An escape followed by a leave reaches the board only at the next join.
 6. **LOW.** The caches never evict.
 7. **LOW, suspected.** "Loading..." can stay forever if every GetSortedAsync fails.
+
+---
+
+## Night shift 2026-10-11: flier gate (owner decision)
+
+Owner decision 2026-10-11, closing finding 1 of the second review above: **fliers must NOT top the board.**
+Built test first, mutation-tested, NOT published, NOT pushed, never run in Studio.
+
+**What changed.** `Trace` still judges the run (gems, exit, collapse, seal) and still only bounds speed. Next to
+it the server now steps `src/shared/FlierGate.luau` (pure, new) on every sample of the client's CLAIM. The gate
+keeps a validated position, seeded from the drop-in the server wrote. A sample is accepted, and becomes the
+validated position, only if it is in an open cell of its storey and reachable from the validated position along
+the corridors (between storeys only through the stairwell cell, which is the one opening in a floor) inside an
+allowance that accrues at 32.4 studs/s on the flat and 37.5 studs/s upward and banks 4 s of itself. A refused
+sample does nothing: no strike, no flag. When the server banks an escape it asks once whether the validated
+position can be at the exit. If not, the escape is "untraced": gems, the floor and the escape count are banked
+exactly as before, the board is not written, and the player gets one toast ("Banked N gems. Not on the board:
+the server lost your path.").
+
+**The board's metric moved from `floors` to `traced`.** A new saved profile field, shaped like `floors`: per
+tier, 1 + the escapes the gate could follow. An untraced escape advances `floors` and not `traced`, so flying to
+floor 99 and then walking one vault is depth 1, not 100. `writeBoard`, the friends view's live value and the
+`bestAt` stamp all read `boardDepth(p)`. A profile saved before the field existed keeps its floors' depth (the
+game is not public); a saved count is held to 1..floors. Owner should know: **an honest runner who does lose a
+rank (a freeze past the bank, below) is one depth behind their own floor count for good**, because each floor is
+played once. The alternative (rank the deepest traced floor) lets a flier skip to floor 99 and walk once.
+
+**Why the bank is capped.** Uncapped, waiting at the drop-in for as long as the route takes and then teleporting
+is "reachable in the time". With 4 s, no accepted move is longer than 129.6 studs of corridor, so the validated
+position only reaches the exit by being seen along the way.
+
+**Numbers** (`tests/FlierGate.spec.luau`, printed every run; `Config.Gate`):
+
+| what | measured | allowance | margin |
+| --- | --- | --- | --- |
+| flat speed, the shortest line there is, 28 full runs (3 tiers, floors 1-400) | 24 studs/s, 0 samples refused | 32.4 studs/s | 1.35x: no sample refused up to 1.35x WalkSpeed |
+| the fastest climb the pads allow (double hops, 6-stud rises) | 18 studs in 1.05 s = 17.1 studs/s | 37.5 studs/s | 2.19x |
+| start of a jump, one 0.05 s sample | 2.25 studs up | 1.88 a sample + a bank of 150 | paid by the bank |
+| ceiling-drop knock | 16 studs/s for 0.9 s | 32.4 studs/s | 2.0x |
+| lag gap at full speed, dropped anywhere in a Gold floor-30 run | ranked up to 5.0 s (tested in 0.5-1 s steps), lost at 5.5 s | 5.4 s (BurstSeconds x SpeedFactor) | a slower runner has more: 8 s at 60% speed is ranked |
+| falls off pad 4 of every shaft, a drop back down the hole, jumping the whole way, 0.2 s replication bursts, a stray/nan sample | all ranked, 0 samples refused | | |
+| the game's own player model (`tests/VaultModel.luau`) at SpeedFactor 1, 72 runs | 56 escaped, 56 ranked, 0 of 163 245 samples refused | | |
+| `walk_vaultrunners.luau` on the real server (solver, grabber, fumbler; gem detours, rolled misses) | 13 escapes, 13 ranked | | |
+| fliers: teleport, straight flight at 24 studs/s, straight flight at the gate's own rates; 38 vaults | 114 escaped (fastest 3.2 s), **0 ranked** | | |
+| patience (wait out the route, then teleport), back-in-step for the last sample, up through a ceiling at 2 studs/s, a wall hop past the bank | none ranked / all refused | | |
+
+The honest side is an argument, not only a measurement: a move is priced at the true geodesic (a funnel over the
+one corridor a perfect maze has between two cells), which no body can walk shorter. The spec checks that length
+against a brute-force lattice search that shares no code with it: 1440 point pairs, never longer than a real
+route, ratio 0.927-1.000; and points exactly on a cell edge against their neighbours. There is no speed upgrade in the game (pets multiply gems only); the spec fails if one
+appears.
+
+`robloxemu/check_vaultrunners_fliergate.luau` (59 / 0) drives the real server from the bundle: (a) a teleport
+and a straight-line noclip flight escape, advance the floor, bank the gems and write NOTHING to the board's
+store; (b) an honest walk is written at depth 1. Also: flying two floors then walking one is depth 1; a flown
+escape after a ranked one leaves the row untouched; waiting out the countdown on the top storey is not ranked;
+walking through walls with honest climbs is not ranked; a 4 s freeze and a drop down the hole are; rejoin,
+legacy and over-claiming profiles; the friends view. RED first on HEAD 929ad00 (bundle cfc5088c): 27 passed, 23
+failed, among them "(a) the teleported escape is NOT in the board's store -> got 2208319587, want nil".
+`check_vaultrunners_board.luau` used to prove its escapes by claiming the exit and waiting, which is the noclip
+run; its escapes are now walked (90 / 0).
+
+**Mutation gate** (`bash mutate_fliergate.sh`, 2026-10-11, on the final source; baseline bundle e4a4a17b2125,
+restored to the same sha, suites green after). Every mutant line was found in the rebuilt bundle and the
+original line was gone.
+
+| mutant | bundle | verdict | noticed by (failed assertions) |
+| --- | --- | --- | --- |
+| M1 a move is priced at the straight line, not the corridor | 6797f8ecd55b | KILLED | spec 6, emu fliergate 20 |
+| M2 the bank is never capped | 9e6858d04517 | KILLED | spec 10, emu fliergate 2 |
+| M3 floors do not exist (any column is a stairwell) | d7d13b3905e3 | KILLED | spec 4, emu fliergate 15 |
+| M4 walls do not exist | 2f7f5f56f847 | KILLED | spec 10, emu fliergate 3 |
+| M5 the server ignores the gate's verdict | dde5e5c3a5ba | KILLED | emu fliergate 20 |
+| M6 the board's depth reads `floors`, not `traced` | 6728b96390e7 | KILLED | emu fliergate 12 |
+| M7 `traced` forgives any distance to the exit | 3664239bf275 | KILLED | spec 5, emu fliergate 20 |
+| M8 a saved traced count is not held to the floors | 8d0b8c30be1f | KILLED | emu fliergate 1 |
+| M9 height gained is free | 9e828513cda4 | KILLED | spec 1 (the emulator checks do not see it) |
+| M10 the wall tolerance is a whole wall thick | f232b7d83980 | KILLED | spec 1 (the bound on the number, not a behaviour) |
+| M11 a traced escape is never counted (nobody ranked) | 4f90fb8bb41f | KILLED | emu fliergate 10, emu board 5 |
+| M12 an end point on a cell edge keeps its zero-width portal (the review's over-pricing) | 43d9f512e763 | KILLED | spec 2 |
+| C1 CONTROL: a comment reworded | 5a4e9844f3af | SURVIVES | nothing |
+| C2 CONTROL: the diagnostic nothing reads is dropped | 0534da72559f | SURVIVES | nothing |
+
+12 of 12 killed, 2 of 2 controls survive.
+
+**The review** (one independent read-only reviewer on the uncommitted diff, same night). Fixed: the funnel
+priced a point lying EXACTLY on a cell edge up to 23.5 studs too long (31.90 for a 16.88-stud move), the
+direction that refuses an honest runner; an end on a shared edge now drops the cell it was filed under, and
+the spec compares 8960 edge and corner points with the points a hair beside them (worst 0.000001 studs; M12).
+The gate's two calls in the server are pcall'd, so a fault in it costs a rank and never a run. Two spec
+assertions that could not fail were rewritten or said so. The reviewer found no geometric bypass and no change
+to the economy. Not fixed, listed below: 1 (sized), 3, 6.
+
+**Residual risk, not closed.**
+1. **A cheat that follows the route is a runner.** A script that walks the real corridors, or teleports along
+   them in hops the bank can pay for (129.6 studs), is ranked. It keeps 1.35x of speed on the flat, pays nothing
+   for the pads (the stairwell column can be flown at 37.5 studs/s, about 0.5 s a storey against 1-5 s), never
+   misses a hop and knows the maze. The flat and upward banks accrue side by side and the upward one (150 studs)
+   is taller than any vault (72), so the shaft costs such a bot no time, and each storey change forgives about
+   17 studs of corridor. Net: about 1.35x a perfect runner with free climbs, against a countdown whose slack
+   never goes under 1.21. Geometry cannot tell it from a very good player. It does have to spend the route's
+   time for every depth it is ranked at.
+2. **The economy is untouched by decision.** A flier still banks gems, advances floors, unlocks tiers and buys
+   pets as before; `Trace` is still the only bound there.
+3. **A freeze longer than 5.4 s at full speed** (129.6 studs of corridor in one move) loses the rank for that
+   run, and with it one depth for good (above). It does not heal within the run: once the runner is more than
+   129.6 corridor studs past the validated position, standing still does not help, only going back does. Five
+   such freezes in a tier are five depths behind. Nobody has measured how often a real phone does that.
+4. **The model of a body.** The margins assume a root that is never more than 1.5 studs inside a wall, never
+   under the floor it stands on, and gains height no faster than 25 studs/s sustained. Real Humanoid physics
+   (flings, landing compression, scaled avatars) has not been measured against them.
+5. **A perfect maze is assumed** (one corridor between two cells; asserted for sampled vaults). A generator with
+   loops could make the funnel take the long way round and refuse an honest runner.
+6. **A profile without `traced` is read as fully traced.** Right for a save from before the gate, and a
+   laundering path if an OLD server build ever writes a profile after the gate is live (it saves without the
+   field; the next load then credits every floor). The game has never been published, so no old server exists;
+   if that changes (a rollback, a staggered update), a missing field must stop meaning full credit first.
+
+**Needs real Studio / a real device.**
+1. The server's view of `hrp.Position` for a client-owned character: its cadence and jitter at 20 Hz, and whether
+   the first samples after the server's teleport into the vault are stale (the gate ignores them either way).
+2. A real run, a real 8-stud hop chain and a skip hop, a fall, a hazard knock, a tall and a short avatar: every
+   one must end "ranked" (the run's end event carries `ranked`).
+3. A real noclip or fly script on a test account: banked, not ranked, the toast shown once and readable on a phone.
+4. The DataStore round trip of `traced` (sparse integer keys come back as strings; `numKeys` handles it, on a
+   real store nobody has watched), and the board's row after a rejoin.
+5. Mobile lag: how long real freezes are, against the 5.4 s the bank covers.
