@@ -373,6 +373,8 @@ local cellDefs = {} -- [player] = { [cellKey] = Mine.Cell }
 local cellHp = {} -- [player] = { [cellKey] = remaining hit points }
 local deepestOpen = {} -- [player] = { x, y, z } — where the "DESCEND" elevator drops you
 local lastSwing = {} -- [player] = tick() of the last accepted swing
+local rideBucket = {} -- [player] = Mine.RideBucket, the elevator's ride budget (Config.Mine.Elevator)
+local lastRideToast = {} -- [player] = tick() of the last "still moving" toast
 local lastWallToast = {} -- [player] = tick() of the last "this is the edge of your claim" toast
 local lampOf = {} -- [player] = PointLight on the character
 local buildQueue = {} -- [player] = { cells, head, folder } — solids waiting for a frame's budget
@@ -1322,6 +1324,23 @@ ElevatorEvent.OnServerEvent:Connect(function(plr, dir)
 		toast(plr, "The elevator needs you to be standing somewhere first.")
 		return
 	end
+	if dir ~= "up" and dir ~= "down" then return end
+	-- THE RIDE BUDGET (Config.Mine.Elevator, Mine.takeRide). Every ride below moves the band and builds layers in
+	-- this very frame, so the remote is rate-limited here, before any of it. `tick()` for the same reason the swing
+	-- limit uses it: os.clock is CPU time and barely moves in a headless run.
+	do
+		local now = tick()
+		local ok, bucket = Mine.takeRide(rideBucket[plr], now, Config.Mine.Elevator)
+		rideBucket[plr] = bucket
+		if not ok then
+			local last = lastRideToast[plr]
+			if not last or (now - last) >= Config.Mine.Elevator.ToastSeconds then
+				lastRideToast[plr] = now
+				toast(plr, "⏳ The elevator is still moving. Give it a moment.")
+			end
+			return
+		end
+	end
 	if dir == "up" then
 		-- Load the mouth BEFORE arriving in it, for the same reason DESCEND does: an elevator that
 		-- lands you a frame before your floor exists is an elevator that drops you down your own
@@ -1792,6 +1811,8 @@ local function onPlayerRemoving(plr: Player)
 	profiles[plr] = nil
 	lastSwing[plr] = nil
 	lastWallToast[plr] = nil
+	rideBucket[plr] = nil
+	lastRideToast[plr] = nil
 	lampOf[plr] = nil
 	buildQueue[plr] = nil
 end

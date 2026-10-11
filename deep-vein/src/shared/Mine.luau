@@ -597,4 +597,21 @@ function Mine.column(cfg: any, w: World, toLayer: number): { { x: number, y: num
 	return out
 end
 
+-- THE ELEVATOR'S RIDE BUDGET: a token bucket (Config.Mine.Elevator). `bucket` is the miner's last state, or nil for
+-- one who has not ridden yet (a full bucket). Returns whether THIS ride is served, and the new state. Pure: the
+-- server passes its own clock. A refused ride takes nothing, so a flood of presses never pushes the next real ride
+-- further away; a clock that steps backwards mints nothing and the bucket simply refills from the new time.
+export type RideBucket = { tokens: number, at: number }
+function Mine.takeRide(bucket: RideBucket?, now: number, cfg: { Burst: number, RefillSeconds: number }): (boolean, RideBucket)
+	local tokens, at = cfg.Burst, now
+	if bucket ~= nil then
+		local waited = math.max(0, now - bucket.at)
+		tokens = math.min(cfg.Burst, bucket.tokens + waited / cfg.RefillSeconds)
+	end
+	if tokens >= 1 then
+		return true, { tokens = tokens - 1, at = at }
+	end
+	return false, { tokens = tokens, at = at }
+end
+
 return Mine

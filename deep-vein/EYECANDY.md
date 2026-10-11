@@ -1506,7 +1506,7 @@ Every suite ran on the real tree after the last source edit, the bundle rebuilt 
 
 One independent read-only reviewer. Verdicts: **654ad07 SHIP-WITH-DEFERRED; 6c96b11 SHIP-WITH-DEFERRED.**
 - **Fixed tonight (5afef06):** the blank HUD DEEPEST panel (its finding 9), and the tofu emoji.
-- **MEDIUM, not fixed. `ElevatorEvent` has no cooldown** (`Main.server.luau:1313-1347`). Each up or down
+- **MEDIUM, FIXED 2026-10-11 (see the section below). `ElevatorEvent` had no cooldown** (`Main.server.luau:1313-1347`). Each up or down
   rebuilds a band, and "up" also sells. An exploiter alternating up and down from a deep shaft can lag the
   server. Fix: a per-player cooldown.
 - **MEDIUM, not fixed. No Studio gate** (`tryStore`, `:76-88`).
@@ -1517,3 +1517,48 @@ One independent read-only reviewer. Verdicts: **654ad07 SHIP-WITH-DEFERRED; 6c96
 
 Checked and clean: Buy and Rebirth with any arguments; swing rate limits; rebirth inside the save; exact board
 encoding; rest and knocks are client-only; nothing is pay-to-win.
+
+---
+
+## Night shift 2026-10-11: the elevator's ride budget (MEDIUM fix)
+
+**What changed.** `ElevatorEvent` is now rate-limited per miner by a token bucket, before any band is moved:
+`Mine.takeRide` (pure, `src/shared/Mine.luau`), `Config.Mine.Elevator = { Burst = 2, RefillSeconds = 0.75,
+ToastSeconds = 2 }`, and the wiring at the top of the handler in `Main.server.luau`. A direction that is neither
+`"up"` nor `"down"` is dropped before it takes a ride. A refused press toasts "⏳ The elevator is still moving.
+Give it a moment." at most once per 2 s. The bucket is cleared when the miner leaves.
+
+**Why a bucket and not a plain cooldown.** Down and straight back up is a real double tap, and
+`tests/walk.luau` fires exactly that in one frame to observe the drain's band re-check. A burst of 2 keeps both;
+a sustained loop is held to one ride per 0.75 s.
+
+**Test first.** `tests/Mine.spec.luau` section 7 went 228/7 red before the code existed, and
+`robloxemu/check_deepvein_elevator.luau` went 10/3 red on the old bundle: 60 fires in one frame were all served,
+and 600 fires over one second were all served.
+
+**Measured after the fix** (luau 0.742, bundle sha256 67d0fd5c73e27a5c):
+- 60 fires in one frame: 2 served. 600 fires over one second: at most 5 served.
+- A ride every 3 s, twenty times: none refused. Five double taps, one per full refill: none refused.
+- Another miner rides while the spammer's bucket is empty (the budget is per player).
+- `Mine.spec` 235/0, `check_deepvein_elevator` 13/0, `walk.luau` and the other 12 files in `tests/` green,
+  all 14 `robloxemu/check_deepvein*` green (144, 92, 589, 10, 14, PASS, 22, 13, 13, 49, 29, 15, 27, 45).
+
+**Mutation sweep** (each proved present in the rebuilt bundle):
+
+| Mutant | Result |
+|---|---|
+| M1 the server never refuses | KILLED (check 3) |
+| M2 the bucket serves at 0 tokens | KILLED (spec 3, check 1) |
+| M3 no burst cap on the refill | KILLED (spec 1, check 2) |
+| M4 `Burst = 60` | KILLED (check 1) |
+| M5 the bucket is never stored | KILLED (check 3) |
+| M6 the refusal toast is not rate-limited | KILLED (check 1) |
+| M7 the refill is 100x faster | KILLED (spec 2, check 1) |
+| M8 a refused ride costs a token | KILLED (spec 3, check 1) |
+| CONTROL comment-only edit | SURVIVED |
+
+**Not covered.** Removing the two `= nil` lines at leave is not observable: a rejoin is a new Player object, so
+it gets a fresh bucket either way, and check 6 would pass without them. They only stop the table from growing.
+The numbers 2 and 0.75 are a judgement, not a measurement of real server frame time; nobody has timed a ride in
+real Roblox. **Needs Studio:** that the "still moving" toast reads well, and that 0.75 s does not feel sticky on
+the HUD's two elevator buttons.

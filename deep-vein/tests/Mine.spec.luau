@@ -1243,5 +1243,78 @@ do
 	truthy(noticed > 50, "the same comparison DOES notice a real change to the carving threshold")
 end
 
+-- 7. THE ELEVATOR'S RIDE BUDGET (second review 2026-10-09, MEDIUM: ElevatorEvent had no cooldown). Every ride moves
+-- the streamed band and builds layers synchronously, and SURFACE also sells, so a client alternating up and down
+-- could spend the server's frame for everybody. Mine.takeRide is a token bucket: Burst rides at once (a real
+-- double tap, down then straight back up, is never refused), then one more per RefillSeconds.
+do
+	local E = Config.Mine.Elevator
+	truthy(type(E) == "table" and E.Burst >= 2 and E.RefillSeconds > 0, "Config.Mine.Elevator has a burst of at least 2 and a refill time")
+	truthy(type(Mine.takeRide) == "function", "Mine.takeRide exists")
+	local take = Mine.takeRide or function() return true, nil end
+	local burst, refill = E and E.Burst or 2, E and E.RefillSeconds or 1
+
+	-- a fresh rider (no bucket yet) has the whole burst, and not one ride more
+	local b, ok = nil, nil
+	local served = 0
+	for _ = 1, burst + 5 do
+		ok, b = take(b, 100, E)
+		if ok then served += 1 end
+	end
+	eq(served, burst, "in one instant exactly Burst rides are served")
+
+	-- one refill later: exactly one more
+	ok, b = take(b, 100 + refill, E)
+	eq(ok, true, "one RefillSeconds later a ride is served again")
+	ok, b = take(b, 100 + refill, E)
+	eq(ok, false, "...and only one")
+
+	-- a long wait banks the burst and nothing more
+	served = 0
+	for _ = 1, burst + 5 do
+		ok, b = take(b, 100 + 3600, E)
+		if ok then served += 1 end
+	end
+	eq(served, burst, "an hour of waiting banks Burst rides, not an hour's worth")
+
+	-- a spammer: 60 fires a second for 60 s is held to the refill rate
+	b, served = nil, 0
+	for i = 0, 60 * 60 do
+		ok, b = take(b, 500 + i / 60, E)
+		if ok then served += 1 end
+	end
+	inRange(served, burst, burst + math.floor(60 / refill) + 1, "60 s of spamming is served at the refill rate")
+
+	-- a refused ride costs nothing: spamming does not push the next real ride further away
+	b = nil
+	for _ = 1, burst do ok, b = take(b, 900, E) end
+	for i = 1, 30 do ok, b = take(b, 900 + i * refill / 60, E) end -- 30 refused presses inside half a refill
+	ok, b = take(b, 900 + refill, E)
+	eq(ok, true, "refused presses do not delay the refill")
+
+	-- an honest rider: down, look around, up, every few seconds, for ever
+	b = nil
+	local refused = 0
+	for i = 0, 200 do
+		ok, b = take(b, 2000 + i * 3, E)
+		if not ok then refused += 1 end
+	end
+	eq(refused, 0, "a ride every 3 s is never refused")
+
+	-- the double tap: down and straight back up, then again a moment later
+	b = nil
+	ok, b = take(b, 3000, E); local d1 = ok
+	ok, b = take(b, 3000, E); local d2 = ok
+	truthy(d1 and d2, "down then up in the same frame are both served")
+
+	-- a clock that steps backwards mints nothing and breaks nothing
+	b = nil
+	for _ = 1, burst do ok, b = take(b, 5000, E) end
+	ok, b = take(b, 4000, E)
+	eq(ok, false, "a clock stepping backwards does not mint a ride")
+	ok, b = take(b, 4000 + refill, E)
+	eq(ok, true, "...and the bucket refills from the new time")
+end
+
 print(string.format("Mine: %d passed, %d failed", passed, failed))
 assert(failed == 0, "Mine tests failed")

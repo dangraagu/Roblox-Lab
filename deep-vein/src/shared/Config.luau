@@ -66,6 +66,17 @@ Config.Mine = {
 	-- swing: it uses its own clock, so a missed click never costs a real swing its cooldown.
 	WallToastSeconds = 2,
 
+	-- THE ELEVATOR'S RIDE BUDGET (second review 2026-10-09). A ride moves the streamed band and builds the landing's
+	-- layers in the caller's own frame, and SURFACE also sells, so a client firing the remote in a loop could spend
+	-- the server's frame for everybody in it. Mine.takeRide is a token bucket per miner: `Burst` rides at once (down
+	-- and straight back up is a real double tap and is never refused), then one more per `RefillSeconds`. A refused
+	-- press says why, at most once per `ToastSeconds`.
+	Elevator = {
+		Burst = 2,
+		RefillSeconds = 0.75,
+		ToastSeconds = 2,
+	},
+
 	-- ── Streaming: only the layers around the miner hold Parts ───────────────
 	--
 	-- NOTHING USED TO UNLOAD, AND THE CAVE IS SAVED, so a veteran's whole excavation was rebuilt
