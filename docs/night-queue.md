@@ -2,6 +2,31 @@
 
 Newest night first. Each job: done / in progress (with exact resume point) / blocked (why).
 
+## Night of 2026-10-12 (run started 00:17, stopped at about 00:25 on purpose: weekly budget)
+
+Clock: Bash `date` and PowerShell `Get-Date` both read 00:17 at start. FPL gate: open (next deadline
+17.10 12:00 is after the weekly reset 14.10 17:00).
+
+**Why the night stopped early:** `get_usage` reported "Weekly · all models" at **95 % used**, reset
+2026-10-14 17:00 (5-hour window 73 %). The rule from 2026-10-11 is to stop at about 95 % or above. The
+remaining 5 % has to carry the `roblox-daily-shorts` task on 12, 13 and 14 October and the owner's own work.
+Every unblocked job tonight is Studio work (the three guards' needs-Studio lists, thumbnails) or a code fix
+with a reviewer agent, and each would spend several percent. No game folder was touched, nothing was
+published, nothing was uploaded, no clips were made (owner instruction below).
+
+- **plus1-jump and grow-a-crystal are still NOT published.** Both `publish_response.json` files are unchanged
+  (versions 7 and 11, written 2026-09-10). The Redeem server freeze is still live on both. Owner step as
+  written under 2026-10-11, section 2.
+- Untracked daytime-run folders (disaster-rounds, find-it-chapters, gnome-garden-defense, outpost-zero and
+  their robloxemu checks) were left untouched. No tracked file had uncommitted changes.
+- Shorts plan: unpublished posts 2026-10-12: 6, then 12 per day 2026-10-13 .. 2026-10-19 (7 days ahead). No
+  extension needed. No night upload: it would spend the day task's cap and the weekly budget.
+- G (Reddit): not attempted (budget).
+
+**Next night:** the "Next night" list under 2026-10-11 (second run) is unchanged and still the resume order.
+Check `get_usage` first; the weekly window resets 2026-10-14 17:00, so the night of 2026-10-15 is the first
+with a full budget.
+
 ## Owner instruction for the night of 2026-10-12 (given 2026-10-11 21:46, in chat)
 
 «Ikke lag nye videoer i natt, du kan fortsatt laste opp videoer vi har laget før.»
