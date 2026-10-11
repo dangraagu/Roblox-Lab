@@ -30,6 +30,9 @@ end
 -- ALLE hemmelige dører åpne (hver fin-celle er `cellSize` studs). Selv en løper som skjærer hvert hjørne på skrå går
 -- minst fineSteps * cellSize / sqrt(2) studs (trappa gjennom hjørnene er det korteste en 4-sammenhengende rute kan
 -- bli); én celle trekkes fra i hver ende. `maxSpeed` = raskeste gangfart (med speed-perken), `slack` < 1 er margin.
+-- MERK (11.10, andre review 09.10): dette er BARE et tidsgulv. Det sier NÅR en utgang tidligst kan telle, ikke
+-- HVORDAN spilleren kom dit: et skript som venter ut gulvet på starten og så teleporterer, passerer det. Sti-beviset
+-- (serveren har sett figuren gå dit) ligger i PathGuard.luau og serverens CONFIG.PathGuard; begge må holde.
 function Progression.minClearSeconds(fineSteps: number, cellSize: number, maxSpeed: number, slack: number?): number
 	local studs = math.max(0, fineSteps * cellSize / math.sqrt(2) - 2 * cellSize)
 	return studs / maxSpeed * (slack or 1)

@@ -117,10 +117,23 @@ local CONFIG = {
 	-- hemmelige dører åpne, hjørner skåret på skrå, i toppfart med speed-perken) teller ikke, og spilleren får vite
 	-- hvorfor. Slack < 1 er margin; tests/Progression.spec viser at modellens raske spiller bruker minst 2x gulvet.
 	-- Gude-runder hoppes over (de teller uansett ikke). Enabled = false slår vakta av.
+	-- Dette er et TIDSGULV og ikke mer: det stopper ikke den som venter og så teleporterer. Det gjør PathGuard under.
 	WalkGuard = {
 		Enabled = true,
 		Slack = 0.85,
 		NoticeEverySeconds = 3,
+	},
+	-- STI-VAKTA (11.10, andre review 09.10 funn 1 HIGH): gå-vakta over er bare et TIDSGULV. Et skript kunne stå på
+	-- starten til gulvet var passert og så teleportere til utgangen. Serveren tar derfor prøver av rot-posisjonen
+	-- til hver løper (PathGuard.Config.SampleSeconds) og holder én GODKJENT posisjon per spiller; en prøve flytter den
+	-- bare dit en som GÅR kunne ha kommet gjennom labyrinten (alle planlagte hemmelige dører åpne, så vakta er aldri
+	-- strengere enn banen), betalt fra en konto som fylles i toppfart * slakk og har tak på noen sekunder. Å vente
+	-- kjøper altså ingenting, mens et lagg-hull betaler seg selv. Utgangen teller bare når den godkjente cella står
+	-- ved utgangen. Tallene bor i src/shared/PathGuard.luau (én kilde, målt i tests/PathGuard.spec.luau). Den lukker
+	-- IKKE et skript som hopper langs den ekte ruta; der er det fortsatt tidsgulvet som holder (se modulen).
+	-- Enabled = false slår den av (da gjelder bare tidsgulvet, som før 11.10).
+	PathGuard = {
+		Enabled = true,
 	},
 
 	Assist = {
@@ -173,6 +186,7 @@ local LightingPresets = require(ReplicatedStorage:WaitForChild("LightingPresets"
 local MazeRef = require(ReplicatedStorage:WaitForChild("MazeRef"))
 local Board = require(ReplicatedStorage:WaitForChild("Board"))             -- +1 Jumps mal, ordrett
 local BoardConfig = require(ReplicatedStorage:WaitForChild("BoardConfig"))
+local PathGuard = require(ReplicatedStorage:WaitForChild("PathGuard"))     -- sti-vakta (ren logikk)
 
 -- Presetene lagrer farger som {r, g, b} 0-255 så de kan enhetstestes uten Roblox-API.
 local function rgb(c: { number }): Color3
@@ -198,6 +212,10 @@ local MAX_WALK_SPEED = (function()
 	for _, p in ipairs(PerkDefs.List) do bonus = math.max(bonus, p.speedBonus or 0) end
 	return CONFIG.PlayerWalkSpeed + bonus
 end)()
+
+-- Sti-vakta (CONFIG.PathGuard): modulens tall + den samme toppfarten som gå-vakta bruker.
+local PG_CFG = table.clone(PathGuard.Config)
+PG_CFG.MaxSpeed = MAX_WALK_SPEED
 
 -- Visuell polish (kun kode, KONSERVATIV): Maze-presetet setter BEVISST ingen Lighting-
 -- felter — kun post-fx (Atmosphere/Bloom/ColorCorrection/DepthOfField) LAGT OPPÅ. Det
@@ -332,6 +350,7 @@ local playerData = {}         -- [player] = {coins, gems, trophies, best}
 local startClock = {}         -- [player] = os.clock() ved level-start
 local runStartAt = {}         -- [player] = clock() da spilleren ble satt på starten av nivået (gå-vakta)
 local guardNoticeAt = {}      -- [player] = clock() da gå-vakta sist sa fra (ikke spam banneret)
+local pathState = {}          -- [player] = { maze, st }: sti-vaktas godkjente posisjon i gjeldende labyrint (PathGuard)
 local shieldUsed = {}         -- [player] = true hvis skjold-perk er brukt på gjeldende nivå
 local invulnUntil = {}        -- [player] = os.clock()-tid uskadelig til (kort vindu etter skjold)
 local godActive = {}          -- [player] = true hvis gudemodus er på (kun GodUsers)
@@ -2061,6 +2080,7 @@ Players.PlayerRemoving:Connect(function(plr)
 	boardFetching[plr] = nil
 	runStartAt[plr] = nil
 	guardNoticeAt[plr] = nil
+	pathState[plr] = nil
 end)
 
 game:BindToClose(function()
@@ -2177,6 +2197,7 @@ local function buildInstance(inst)
 	inst.hadGod = false
 	inst.assist = false   -- "Hjelp meg"-guiden hører til nivået: nullstilles pr bygging (applyKeptGuide tenner en beholdt)
 	inst.trail = nil
+	inst.guardMaze = nil  -- sti-vaktas rutenett for DENNE byggingen (settes nederst; nil = vakta slipper alle gjennom)
 
 	local diff = MazeGen.getDifficulty(inst.level, CONFIG.Curve)
 	local cols, rows = diff.size, diff.size
@@ -2219,6 +2240,10 @@ local function buildInstance(inst)
 		local c = table.remove(doorCandidates, rng:NextInteger(1, #doorCandidates))
 		table.insert(plannedDoors, c[1] .. "," .. c[2])
 	end
+	-- En KOPI av hele planen, for gå-vakta og sti-vakta nederst. Knappe-løkka lenger ned TØMMER `plannedDoors`
+	-- (table.remove pr knapp), så den som leste `plannedDoors` etterpå fikk bare dørene som IKKE fikk knapp: de ekte
+	-- hemmelige dørene sto som vegger i vaktas rutenett, og en ærlig snarvei gjennom en åpnet dør kunne bli nektet.
+	local allPlannedDoors = table.clone(plannedDoors)
 	local wallByKey = {}
 	for y = 0, gRows - 1 do
 		for x = 0, gCols - 1 do
@@ -2445,14 +2470,11 @@ local function buildInstance(inst)
 	-- Gå-vakta: korteste rute med ALLE planlagte hemmelige dører åpne (også en som ikke fikk knapp: det kan bare
 	-- senke gulvet), i toppfart med den raskeste speed-perken. Se CONFIG.WalkGuard.
 	do
-		local openGrid = {}
-		for y = 0, gRows - 1 do openGrid[y] = table.clone(grid[y]) end
-		for _, k in ipairs(plannedDoors) do
-			local dx, dy = string.match(k, "^(%d+),(%d+)$")
-			if dx and openGrid[tonumber(dy)] then openGrid[tonumber(dy)][tonumber(dx)] = false end
-		end
+		local openGrid = PathGuard.openGrid(grid, gRows, allPlannedDoors)
 		local openSteps = Medals.solveRoute(openGrid, gCols, gRows, startFine, exitFine, {})
 		inst.minClear = openSteps and Progression.minClearSeconds(openSteps, S, MAX_WALK_SPEED, CONFIG.WalkGuard.Slack) or 0
+		-- Sti-vakta dømmer på det SAMME åpne rutenettet (aldri strengere enn banen spilleren faktisk står i).
+		inst.guardMaze = PathGuard.maze(openGrid, gCols, gRows, S, origin.X, origin.Z, exitFine[1], exitFine[2])
 	end
 
 	-- Ruta til "Hjelp meg"-guiden regnes NÅ (mens vi har grid-en) og lagres som
@@ -2676,6 +2698,7 @@ teardownPlayerInstance = function(plr, voluntary)
 		stuckState[plr] = Assist.noteFail(stuckState[plr], inst.level)
 	end
 	playerInstance[plr] = nil
+	pathState[plr] = nil
 	plr:SetAttribute(MazeRef.ATTRIBUTE, nil)
 	if inst.participants then inst.participants[plr] = nil end
 	if not inst.participants or not next(inst.participants) then
@@ -2697,6 +2720,43 @@ end
 
 local endInstance, advanceInstance
 
+-- STI-VAKTA (CONFIG.PathGuard, src/shared/PathGuard.luau). To små funksjoner, resten er ren logikk i modulen.
+-- seedPath: SERVEREN flyttet nettopp spilleren til starten av inst (placeInInstance / advanceInstance), så den
+-- godkjente posisjonen ER starten. Må kalles ved hver slik flytting; ellers står den gamle posisjonen igjen og en
+-- ærlig løper blir nektet.
+local function seedPath(plr, inst)
+	local maze = inst.guardMaze
+	if not (CONFIG.PathGuard.Enabled and maze) then pathState[plr] = nil; return end
+	pathState[plr] = { maze = maze, st = PathGuard.seed(maze, inst.spawnPos.X, inst.spawnPos.Z, clock(), PG_CFG) }
+end
+
+-- samplePath: én prøve av rot-posisjonen. En død figur, en figur uten rot, eller en posisjon utenfor rutenettet
+-- endrer ingenting (PathGuard.sample flytter bare den godkjente posisjonen når prøven er nåbar til fots).
+local function samplePath(plr, inst)
+	local ps = pathState[plr]
+	if not ps or ps.maze ~= inst.guardMaze then return end
+	local char = plr.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not root or (hum and hum.Health <= 0) then return end
+	local pos = root.Position
+	local now = clock()
+	PathGuard.sample(ps.st, ps.maze, pos.X, pos.Z, now, PG_CFG)
+	-- Mistet sporet (et lagg-hull lengre enn kontoen, eller en teleport): si fra MED EN GANG, mens veien tilbake er
+	-- kort, ikke først ved utgangen. Én beskjed pr tap, og én når sporet er funnet igjen. Ikke til gude-runder (de
+	-- flyr gjennom vegger og teller uansett ikke).
+	if notifyPlayer and not inst.hadGod and not godActive[plr] then
+		local lost = PathGuard.lostFor(ps.st, now)
+		if lost >= PG_CFG.LostNoticeSeconds and not ps.told then
+			ps.told = true
+			notifyPlayer(plr, "The game lost track of your path (lag?). Walk back the way you came a little, until it says you are back on track. Until then the exit will not count.")
+		elseif lost == 0 and ps.told then
+			ps.told = false
+			notifyPlayer(plr, "Back on track. The exit counts again.")
+		end
+	end
+end
+
 -- Plasser en spiller inn i en (allerede bygd) instans.
 local function placeInInstance(plr, inst)
 	inst.participants[plr] = true
@@ -2706,6 +2766,7 @@ local function placeInInstance(plr, inst)
 	if char then pcall(function() char:PivotTo(CFrame.new(inst.spawnPos)) end) end
 	startClock[plr] = os.clock()
 	runStartAt[plr] = clock()
+	seedPath(plr, inst)   -- sti-vakta: serveren satte dem på starten
 	shieldUsed[plr] = false
 	-- Merk spilleren med SIN egen labyrint-mappe. Klientene (tema-omfarging, minikart) sto og
 	-- lette etter `workspace.MazeGame`, som bare den ubrukte buildLevel lager -- derfor var
@@ -2790,6 +2851,7 @@ end
 endInstance = function(inst)
 	for _, p in ipairs(participantList(inst)) do
 		playerInstance[p] = nil
+		pathState[p] = nil
 		-- Fjern merkelappen her ogsaa. teardownPlayerInstance gjor det, denne gjorde det ikke, og
 		-- asymmetrien var bare ufarlig fordi nextInstanceId aldri gjenbruker et navn: en spiller
 		-- sto igjen merket med en revet mappe. MazeRef faller riktignok tilbake, men en peker som
@@ -2818,6 +2880,7 @@ advanceInstance = function(inst)
 		if char then pcall(function() char:PivotTo(CFrame.new(inst.spawnPos)) end) end
 		startClock[p] = os.clock()
 		runStartAt[p] = clock()
+		seedPath(p, inst)   -- sti-vakta: nytt nivå, serveren satte dem på starten
 		shieldUsed[p] = false
 		sendInstanceInfo(p, inst)
 		sendAssistState(p)   -- nytt nivå = ny (u)tilbudt guide
@@ -2834,7 +2897,8 @@ finishRun = function(solverPlr, inst)
 	-- rett før mål). Fanger ALLE gud-veier — ellers kunne Mio "rent" løse nivået.
 	local hadGod = inst.hadGod
 	for p in pairs(inst.participants) do if godActive[p] then hadGod = true end end
-	-- Gå-vakta: raskere enn noen kan gå hit = teller ikke (et teleport-skript), og spilleren får vite hvorfor.
+	-- Gå-vakta (tidsgulvet): raskere enn noen kan gå hit = teller ikke, og spilleren får vite hvorfor. Den som
+	-- venter ut gulvet og SÅ teleporterer, tas av sti-vakta rett under.
 	-- Ingenting endres: løsningen er fortsatt åpen for en ekte ankomst senere.
 	if CONFIG.WalkGuard.Enabled and not hadGod and (inst.minClear or 0) > 0 then
 		local now = clock()
@@ -2846,6 +2910,28 @@ finishRun = function(solverPlr, inst)
 					"Too fast: nobody can run this maze in %.1f s. That exit only counts when you walk there.", walked))
 			end
 			return
+		end
+	end
+	-- Sti-vakta: utgangen teller bare når serveren har SETT løperen gå hit (den godkjente cella står ved utgangen).
+	-- En fersk prøve først, så en ærlig ankomst mellom to prøver ikke henger etter. Som gå-vakta: ingenting endres,
+	-- spilleren får vite hvorfor, og løpet teller så snart sporet er funnet igjen (etter et lagg-hull lengre enn
+	-- kontoen betyr det å gå TILBAKE til der hullet begynte: samplePath sier fra med en gang det skjer). Mangler
+	-- tilstanden (skal ikke skje: seedPath kjøres ved hver plassering), eller kaster prøven eller atExit en feil,
+	-- slipper vakta gjennom: en ærlig spiller skal aldri stoppes av vår egen feil.
+	if CONFIG.PathGuard.Enabled and not hadGod then
+		local ps = pathState[solverPlr]
+		if ps and ps.maze == inst.guardMaze then
+			local okSample = pcall(samplePath, solverPlr, inst)
+			local okAt, atExit = pcall(PathGuard.atExit, ps.st, ps.maze, PG_CFG)
+			if okSample and okAt and not atExit then
+				local now = clock()
+				if notifyPlayer and now - (guardNoticeAt[solverPlr] or -math.huge) >= CONFIG.WalkGuard.NoticeEverySeconds then
+					guardNoticeAt[solverPlr] = now
+					notifyPlayer(solverPlr,
+						"That exit only counts when you walk the maze to it. If the game lagged, walk back the way you came until it says you are back on track, then return.")
+				end
+				return
+			end
 		end
 	end
 	inst.solving = true
@@ -3138,6 +3224,16 @@ else
 	applyDarkness()
 	buildLevel()
 	print("[Labyrint] Lastet. Level " .. currentLevel .. " bygget. Lykke til!")
+end
+
+-- Sti-vakta: én løkke tar prøver av alle som er inne i en labyrint (CONFIG.PathGuard, PathGuard.Config.SampleSeconds).
+if CONFIG.UseLobby and CONFIG.PathGuard.Enabled then
+	task.spawn(function()
+		while true do
+			task.wait(PG_CFG.SampleSeconds)
+			for plr, inst in pairs(playerInstance) do pcall(samplePath, plr, inst) end
+		end
+	end)
 end
 
 -- Topplista: den gamle tavlas topp 10 bæres over, så hentes den offentlige topp 10 høyst én gang per

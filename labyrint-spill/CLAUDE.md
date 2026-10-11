@@ -98,9 +98,10 @@ TrackMania-inspirert nivå-HUD + oppsummering.
   (`bestByLevel`, nøkkel = `tostring(level)` fordi DataStore gjør heltalls-nøkler om
   til tekst). Global rekord pr nivå i egen DataStore `LabyrintRekord_v1` (atomisk
   `UpdateAsync`, cachet, oppdatering skjer async så nivå-bygging ikke bremses).
-- **Kjent begrensning**: Roblox har klient-styrt bevegelse, så en juksemaker kan
-  teleportere til utgangen for falsk tid/rekord. Plattform-begrensning (ingen
-  server-side bevegelses-validering her) — greit for et lite venne-spill.
+- **Kjent begrensning**: Roblox har klient-styrt bevegelse. Siden 01.10 har serveren et tidsgulv
+  (gå-vakta) og siden 11.10 sti-bevis (sti-vakta), se "Komplett-standarden" under: en teleport til
+  utgangen teller ikke lenger, heller ikke etter å ha ventet. Det som IKKE er stoppet: et skript som
+  følger den ekte ruta (i hopp eller til fots) og dermed kan sette en tid ned mot tidsgulvet.
 
 ## Perk-butikk + polish + lyd + mobil + gaver — BYGGET
 - **Perk-butikk** (mynter): `src/shared/PerkDefs.luau` (torch/shield/speed/minimap) +
@@ -226,8 +227,20 @@ Pass 2 bygde det som manglet (01.10 00:09-00:50, kuttet før dokumentasjonen) og
   ved spawn ("TOP MAZE RUNNERS", lobbyen (-15, 5, 2)) med en ProximityPrompt som bytter Public/Friends. Navn slås opp
   og huskes i minnet, aldri lagret. Den gamle HUD-tavla virker som før, og den gamle `LabyrintTopp_v2` bæres over.
   Er lageret nede, sier tavla det (ikke "Loading..." for alltid), og en tapt skriving prøves igjen ved autolagring.
-- **Gå-vakta** (`Progression.minClearSeconds`, `CONFIG.WalkGuard`): en utgang nådd raskere enn noen kan gå dit
-  teller ikke, og spilleren får vite hvorfor. Bevegelse er klientens; dette er det serveren kan måle.
+- **Gå-vakta** (`Progression.minClearSeconds`, `CONFIG.WalkGuard`): et TIDSGULV. En utgang nådd raskere enn noen
+  kan gå dit teller ikke, og spilleren får vite hvorfor. Den sjekker bare NÅR, ikke HVORDAN: alene stoppet den ikke
+  et skript som ventet ut gulvet på starten og så teleporterte (andre review 09.10, HIGH).
+- **Sti-vakta** (11.10, `src/shared/PathGuard.luau`, `CONFIG.PathGuard`, `seedPath`/`samplePath` i serveren): serveren
+  tar prøver av rot-posisjonen 4 ganger i sekundet og holder én GODKJENT posisjon per løper. En prøve flytter den bare
+  dit en som går kunne ha kommet gjennom labyrinten (alle planlagte hemmelige dører åpne), betalt fra en konto som
+  fylles i 19 studs/s * 1,3 og har tak på 4 s. Venting kjøper altså aldri mer enn 4 s gange; et lagg-hull betaler seg
+  selv (tålt: 5,0 s i toppfart med perk, 6,0 s i vanlig fart, målt). Utgangen teller bare når den godkjente cella står
+  ved utgangen; ellers får spilleren beskjed og ingenting endres. Mister serveren sporet (alle prøver nektet i 1,5 s)
+  får spilleren beskjed MED EN GANG, og igjen når sporet er funnet. Etter et lagg-hull lengre enn kontoen hjelper det
+  ikke å gå videre: man må gå TILBAKE til innen én konto fra der hullet begynte (eller ut Lobby-døra og inn igjen). Hver gang SERVEREN
+  flytter en løper (`placeInInstance`, `advanceInstance`) må `seedPath` kalles. Gude-runder er utenfor som før.
+  Sjekker IKKE: at ruta ble gått av et menneske. Et skript som hopper langs den ekte ruta slipper gjennom og holdes
+  bare av tidsgulvet (ca. 0,6 av raskeste ærlige tid, `tests/PathGuard.spec` §4). Alt målt: `EYECANDY.md`, siste seksjon.
 - **Økt-lås + eier-token** (`loadPlayer`/`savePlayer`, mønsteret fra fork-tower): lasten og hver lagring er én
   `UpdateAsync`; en annen levende server sin lås gjør økta read-only (og spilleren får beskjed); en utløpt lås tas
   over; å gå slipper låsen; engangs-gaver gis inne i én skriving (`grantOnce`) eller ikke i det hele tatt.
@@ -297,12 +310,14 @@ Kjør så hver port med `luau <fil> 2>&1`: spec-ene fra spillmappa, sjekkene fra
 | `tests/EnvBands.spec.luau` | spillmappa | +1 Jump-malen, ordrett |
 | `tests/Hazard.spec.luau` | spillmappa | lava-pulsen |
 | `tests/Pacing.spec.luau` | spillmappa | minutter til hver biome (brag-vinduet 30-45 min), sjeldenhet, medalje-rettferd |
+| `tests/PathGuard.spec.luau` | spillmappa | sti-vakta: vent-og-teleporter nektes, vegg-hopp nektes, en ærlig løper (toppfart, hjørnekutt, hemmelige dører, lagg-hull, etter død) nektes aldri; marginene og det som IKKE er lukket skrives ut |
 | `tests/Progression.spec.luau` | spillmappa | `accepted`, rekord-rett, gå-vakta (`minClearSeconds`) |
 | `tests/Rest.spec.luau` | spillmappa | +1 Jump-malen, ordrett |
 | `tests/lightingpresets.spec.luau`, `tests/mazeref.spec.luau`, `tests/responsive.spec.luau`, `tests/touchtarget.spec.luau` | spillmappa | lys, labyrint-peker, mobil-skalering, 44 px trykkflater |
 | `tests/docs_check.py` | spillmappa: `py -3 tests/docs_check.py` (sett `LUAU=<sti til luau.exe>` om luau ikke er på PATH) | butikk-teksten i README (maks 1000 tegn, ingen fargede firkanter, hvert tall mot kilden), klipp-lista i MARKETING, 1920x1080 og Studio-lista i EYECANDY, og at denne tabellen nevner hver port |
 | `check_labyrint` | `robloxemu/` | HUD-passform, de 11 opprinnelige klientene |
 | `check_labyrint_spawn` | `robloxemu/` | hvor figuren FAKTISK havner; `RespawnLocation` |
+| `check_labyrint_pathguard` | `robloxemu/` | sti-vakta gjennom ekte server: vent 120 s + teleporter til utgangen = nektet og ingenting skrevet i `LabyrintRekord_v1`/`LabyrintTopp_v3`; gått ærlig = godkjent; neste nivå, etter død, lagg-hull og gjennom en åpnet hemmelig dør |
 | `check_labyrintspill_biomes` | `robloxemu/` | biomene gjennom ekte server og klienter, sømmene, siktlåsen, start-cella |
 | `check_labyrintspill_board` | `robloxemu/` | topplista i verden: tavla ved spawn, prompten, Public/Friends, 60 s cache, 200-taket, navn aldri lagret |
 | `check_labyrintspill_boarddown` | `robloxemu/` | tavla når lageret er nede: sier det (ikke "Loading..." for alltid), og en tapt skriving prøves igjen |
@@ -331,9 +346,16 @@ Kjør så hver port med `luau <fil> 2>&1`: spec-ene fra spillmappa, sjekkene fra
   medaljetidene og rekordene bare betyr noe når alle løper den samme banen. Banen er dessuten synlig geometri: å
   pugge den er å lære en speedrun-rute, ikke å jukse, og topplista rangerer på hvor langt du har klart nivåene i
   rekkefølge, ikke på flaks. Et salt ville brutt rettferdigheten og ikke stoppet noen.
-- **Gå-vakta og filming:** en utgang nådd raskere enn noen kan gå dit teller ikke (`Progression.minClearSeconds`,
-  `CONFIG.WalkGuard`). Et klipp eller en sjekk som teleporterer til utgangen får "Too fast..." og ingen nivå-kort;
-  gå hele veien (`check_labyrintspill_journey` viser hvordan, `MARKETING.md` "Clip list" for Studio).
+- **Gå-vakta, sti-vakta og filming:** en utgang teller bare når den er nådd tidligst etter tidsgulvet
+  (`Progression.minClearSeconds`, `CONFIG.WalkGuard`) OG serveren har sett figuren gå dit (`PathGuard`,
+  `CONFIG.PathGuard`). Et klipp eller en sjekk som teleporterer til utgangen får "Too fast..." eller "That exit only
+  counts when you walk the maze to it..." og ingen nivå-kort, uansett hvor lenge den venter først. Gå hele veien fra
+  starten (`Lib.walk` + `Lib.exitRoute` i `check_labyrintspill_lib`, `check_labyrintspill_journey`, `MARKETING.md`
+  "Clip list" for Studio). Et verktøy som flytter figuren på serveren uten `placeInInstance` blir IKKE seedet: flytt
+  den tilbake til start-cella og gå derfra.
+- **Hemmelige dører i vaktenes rutenett:** knappe-løkka i `buildInstance` tømmer `plannedDoors`; vaktene må lese
+  kopien `allPlannedDoors` (før 11.10 sto de ekte dørene som vegger i gå-vaktas rutenett, så gulvet var for høyt
+  for en ærlig snarvei). `check_labyrint_pathguard` §5 holder det.
 - **Studio uten API-tilgang:** feiler DataStore-kallene, er økta read-only (banneret: "could not be loaded ... will
   not be saved") og tavla sier "Couldn't load the board right now"; kan lageret ikke åpnes i det hele tatt, lagres
   ingenting og tavla sier "No one on the board yet". Begge er riktig oppførsel, ikke en feil (`EYECANDY.md` §8, 20/22).

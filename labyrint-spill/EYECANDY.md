@@ -624,6 +624,8 @@ Not mutated here: `EnvBands.luau` and `Rest.luau` are byte-identical to +1 Jump'
 23. **The walk guard on a real fast player.** With the speed perk and corner cutting, a clean run must never get "Too
     fast: nobody can run this maze in ..." (the floor is `Progression.minClearSeconds` at 0.85 slack; the model's fast
     player needs at least twice the floor, `Progression.spec`). Try the fastest real runs of the smallest levels.
+    Since 2026-10-11 the same run must also never get "That exit only counts when you walk the maze to it ..." (the
+    path guard; its own Studio list is in "Night shift 2026-10-11" at the end of this file).
 24. **The records panel over a bought minimap on a tablet** (pass 2 fix in `LeaderboardClient`, measured headless at
     1024 x 768 only): the panel must move aside when the minimap is shown.
 
@@ -1110,7 +1112,7 @@ Not committed, pushed or published; Studio not opened.
 
 * **The highscore board** (`Board.luau` = +1 Jump's template, `BoardConfig.luau`, `BoardClient`, the server's board
   section): metric `accepted`, the highest level cleared in sequence, measured by the server at the exit behind the
-  walk guard, never by a god-mode run; `LabyrintTopp_v3`, key `u_<userId>`, value `level * 2e9 + (2e9 - reachedAtUnix)`
+  walk guard (and, since 2026-10-11, the path guard), never by a god-mode run; `LabyrintTopp_v3`, key `u_<userId>`, value `level * 2e9 + (2e9 - reachedAtUnix)`
   (`acceptedAt` is saved with the profile), written only when it rises (`writeBoard` + `Board.keepHigher` in an
   `UpdateAsync`); the public top 10 fetched at most every 60 s and shown both on the old HUD panel and on the board;
   friends only on demand (`GetFriendsAsync`, at most 200, cached 300 s, every friend's value cached 120 s, a 40 + 1/s
@@ -1129,6 +1131,11 @@ Not committed, pushed or published; Studio not opened.
 * **The walk guard** (`Progression.minClearSeconds`, `CONFIG.WalkGuard`, slack 0.85): an exit reached faster than the
   shortest route (secret doors open, corners cut) can be walked at the top speed does not count, and the player is
   told "Too fast: nobody can run this maze in ... s". `tests/Progression.spec` (43), `check_labyrintspill_journey`.
+  **Corrected 2026-10-11:** this is a time floor and nothing else. It checks WHEN an exit is reached, not HOW: a
+  script that waited the floor out at the spawn and then teleported passed it (second review, 2026-10-09). The path
+  evidence is the path guard, in "Night shift 2026-10-11" at the end of this file. Until that date the floor was
+  also computed on a grid with the real secret doors SHUT (the door plan was read after the button loop had emptied
+  it), so it was too high for an honest shortcut run.
 * **`plr.RespawnLocation`** = the lobby pad, set on join and for players who were in before the lobby existed.
 * **Critters in every biome** (`Biomes.Critters`, `crittersAt`, `critterPose`, `BiomeArt`, `Biome.client`): rats,
   butterflies, bats, salamanders, beetles, spiders, swallows, star jellies; 2-3 near the player, inert, in open cells,
@@ -1332,3 +1339,107 @@ Findings, none fixed tonight:
 8. **LOW, suspected.** The per-server caches never shrink.
 
 **Publish:** held. The HIGH has to be fixed or the docs corrected first, and the robloxemu gates need to run.
+
+---
+
+## Night shift 2026-10-11: path guard (HIGH fix)
+
+Closes finding 1 of the second review above. Not published, not pushed; Studio not opened.
+
+**The defect.** `finishRun` refused only an exit reached sooner than `inst.minClear` (a time floor). A script could
+wait that long at the spawn and teleport onto the pad. Red, on the old server, through the real bundle
+(`check_labyrint_pathguard` §1): after 120 s of standing still and one teleport, `accepted` went 60 to 61, a record
+was written to `LabyrintRekord_v1` and the board row in `LabyrintTopp_v3` rose (22 assertions failed).
+
+**What changed.**
+* `src/shared/PathGuard.luau` (new, pure): one VALIDATED position per runner. A sample of the root position moves
+  it only if its cost fits the runner's bank: cost = the larger of the straight-line studs and
+  `(cell steps through the maze - StepPad 3) * cellSize / 2`, on the fine grid with every planned secret door open.
+  The bank fills at 19 * 1.3 = 24.7 studs/s, is capped at 4 s (98.8 studs) and starts a level at 1 s. A refused
+  sample changes nothing. `atExit`: the validated cell is the exit cell or the passage beside it.
+* `MazeGame.server.luau`: `CONFIG.PathGuard`, `seedPath` (in `placeInInstance` and `advanceInstance`: every move the
+  server itself makes), `samplePath` (a 0.25 s loop over everyone in a maze, and once more inside `finishRun`), and
+  the refusal in `finishRun` after the time floor, which is kept. State is dropped in `teardownPlayerInstance`,
+  `endInstance` and `PlayerRemoving`. God-mode runs skip it, as they skip the floor.
+* A refusal writes nothing and says why ("That exit only counts when you walk the maze to it ..."). A runner whose
+  samples have all been refused for 1.5 s is told at once ("The game lost track of your path (lag?). Walk back ..."),
+  and told again when found ("Back on track ..."), so nobody learns it only at the exit.
+* **A second defect, found on the way:** the time floor's grid had the real secret doors SHUT. `buildInstance` read
+  `plannedDoors` after the button loop had emptied it, so only doors WITHOUT a button were opened. The floor was
+  too high for an honest shortcut (level 55: 124 cells without the door, 72 with it). Both guards now read
+  `allPlannedDoors`, copied before the loop.
+* `robloxemu/check_labyrintspill_lib.luau`: `finishLevel` walks the level (`Lib.exitRoute`, `Lib.walk`) instead of
+  waiting at the start and touching the exit from there, which is the exploit. `check_labyrintspill_board` §3 did
+  the same and now walks.
+
+**Numbers** (`tests/PathGuard.spec.luau`, on the game's own mazes, levels 1 to 500, two seeds each):
+* Exploit: wait the floor, or an hour, then teleport; or teleport first and stand on the pad for an hour: refused on
+  all 40 mazes. The cheapest spawn-to-exit move costs at least 1.20 full banks. 1734 hops through a wall refused.
+* The charge never exceeds what was walked: 119 178 pairs of points on the shortest line a character can take (root
+  0.5 studs from the walls, shorter than a real character can walk; down to 0.737 of the centre line). Cell steps
+  minus `2 * walked / cellSize` is at most 1.67; `StepPad` is 3. (Charging `cellSize / sqrt(2)` a step, the first
+  attempt, needs a pad of 3.59 on hairpins: it is not a lower bound and was dropped. Mutant M3 holds this.)
+* Honest runs: 324 at 19 and 16 studs/s on that line and the centre line, sampled every 0.25 to 0.4 s with 1 s
+  server stalls and 0.05 to 0.35 s latency: 0 samples refused, the bank never under 27.2 studs. 16 exploring runs
+  with dead ends: 0 refused. 111 walks through a secret door, and every maze with its doors shut: 0 refused.
+* Lag gaps (nothing seen for G seconds, then all at once): never a refusal up to **5.0 s at 19 studs/s** and
+  **6.0 s at 16 studs/s**. Beyond that the runner IS lost (5.5 s at 19: 4 of 120 runs; 10 s: 52 of 75).
+* After a death, a run seeded again is accepted from its first step.
+
+**Mutation table** (final code; each mutant grepped in the rebuilt bundle, original line gone; sources restored,
+module sha256 58e3336808d6, server 1232a281f1f1). Gates: `PathGuard.spec`, `check_labyrint_pathguard`, `_journey`.
+
+| mutant | what | verdict | killed by |
+|---|---|---|---|
+| C0 | control: a comment edited | **SURVIVED** (as it must) | |
+| M1 | the bank's cap removed | KILLED | spec, `_pathguard` |
+| M2 | an unreachable cell treated as 0 steps | KILLED | spec |
+| M3 | step charge `S / sqrt2` instead of `S / 2` | KILLED | spec |
+| M4 | `atExit` always true | KILLED | spec, `_pathguard` |
+| M5 | `SpeedSlack` 0.9 | KILLED | spec |
+| M6 | `openGrid` leaves the doors shut | KILLED | spec, `_pathguard` |
+| M7 | straight-line charge dropped | KILLED | spec |
+| M8 | an accepted sample does not end "lost" | KILLED | spec, `_pathguard` |
+| S1 | `finishRun` never refuses on the path | KILLED | `_pathguard` |
+| S2 | no re-seed in `advanceInstance` | KILLED | `_pathguard` |
+| S3 | guard grid from the emptied door plan | KILLED | `_pathguard` |
+| S4 | the sampler takes no samples | KILLED | `_pathguard`, `_journey` |
+| S5 | no seed in `placeInInstance` | KILLED | `_pathguard` |
+| S6 | no fresh sample in `finishRun` | KILLED | `_pathguard` |
+| S7 | a lost path is never announced | KILLED | `_pathguard` |
+| S8 | the lost notice repeats every sample | KILLED | `_pathguard` |
+
+The first sweep had two survivors, both test defects, fixed before this table: S2 (a missed re-seed makes the guard
+fail OPEN, and §3 only walked honestly; it now tries the exploit on the second level too) and S3 (§5 walked from the
+button, which lay behind the door, so the run never crossed it; it now walks through the door cell).
+
+**Residual risk, stated.**
+1. **A script that follows the real route is not stopped.** Hopping along it as far as the bank allows, it finishes
+   in as little as 0.41 of the fastest honest time (level 30); the time floor on top holds it to 0.59. So a record
+   about 0.6 of a perfect human run can still be written, and `accepted` can still be climbed by a bot that walks.
+   The guard closed the one-teleport script, not route-following ones.
+2. The guard's grid has every planned door open, opened or not, and from level 340 doors that never get a button.
+   A script may pass those walls; so may any wall whose way round is at most 24 cells, for the price of that walk.
+3. **An honest player can be lost:** more than about 5 s (19 studs/s) or 6 s (16) of running while the server sees
+   nothing. Walking on does not recover it; walking back to within a bank of where the gap began does (after 10 s
+   blind: at most 109 of the 190 studs, asserted), or leaving through the Lobby door. They are told after 1.5 s. Nothing is written.
+4. Group and friends runs: only the solver's path is judged; every other participant still gets the clear (finding
+   2 of the review, untouched). No emulator check covers several participants.
+5. The rollback path (`CONFIG.UseLobby = false`, `onEscape`) has no path guard.
+6. If `GetServerTimeNow` ever stepped backwards the bank would not fill until it caught up. Not observed.
+7. `src/shared/PathGuard.luau` must ship with the server: without it `WaitForChild("PathGuard")` never returns.
+
+**Needs real Studio / a real server** (none of it can be seen headless: the emulator has no physics or network):
+1. What the server really reads from a client-owned `HumanoidRootPart` while walking, jumping and cutting corners
+   with the speed perk: a clean fast run of levels 1 to 5 must get neither notice.
+2. A real lag gap (network throttled 3 to 5 s while running): no notice; at 8 s: the lost notice, then "Back on
+   track" after walking back, and the exit counts.
+3. Right after `PivotTo` (entering a level, and moving on to the next): no lost notice from stale positions.
+4. A knock-down by a falling hazard, a shove from a monster with the shield perk, and two players pushing each
+   other in a Friends run: no notice.
+5. A run through a secret door while it is still sinking.
+6. The two new banners read on a phone (they use the existing broadcast banner).
+
+**Gates** (2026-10-11): 16 specs, 2933 assertions, 0 failed (`PathGuard.spec` 543, new); `docs_check` 148; 24
+emulator checks green (`check_labyrint_pathguard` 48, new; the others unchanged in count except `_compile` 50, one
+more source).

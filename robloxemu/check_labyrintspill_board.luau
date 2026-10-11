@@ -222,11 +222,11 @@ do
 	local folder = h.workspace:FindFirstChild(A:GetAttribute("MazeFolder") or "")
 	local exit = folder and folder:FindFirstChild("Exit")
 	truthy(exit ~= nil, "set-up: Ava is in level 13")
-	-- walk time: more than any maze this size can be crossed in (the walk guard, check_labyrintspill_journey)
-	h:advance(60)
+	-- she WALKS it (2026-10-11): waiting out the walk guard's time floor and then teleporting to the exit, as this
+	-- check used to, is exactly what the server's path guard now refuses (check_labyrint_pathguard)
 	local hrp = A.Character:FindFirstChild("HumanoidRootPart")
 	if exit then
-		hrp.CFrame = CFrame.new(exit.Position + Vector3.new(0, 3, 0))
+		Lib.walk(hrp, Lib.exitRoute(folder, hrp.Position), 16, function(dt) h:advance(dt) end)
 		exit.Touched:Fire(hrp)
 	end
 	local clearedAt = os.time()

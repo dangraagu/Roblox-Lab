@@ -61,7 +61,7 @@ local summarySeen, cardWhileSummary = false, 0
 local firstCardAt, summaryGoneAt, subText = nil, nil, nil
 local t0 = ctx.clock
 ctx.finishLevel()
--- (2026-10-01) finishLevel now waits at the start until the server's walk guard lets the exit count. While it waits,
+-- (2026-10-01, 2026-10-11) finishLevel walks the level (the server's walk guard and path guard). While it walks,
 -- level 25's own quiet card comes back once the daily-reward popup has gone (the designed comeback, pass-1 F3); that
 -- card belongs to level 25, not to this section, which is about what the player sees AFTER finishing it.
 shown = {}

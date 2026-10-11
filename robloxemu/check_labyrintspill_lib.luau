@@ -130,25 +130,31 @@ function Lib.boot(opts: any): any
 		-- 0.55 s lobby fade must finish before the next run starts, exactly as it does in the game
 		ctx.run(1.0)
 	end
-	-- finish the current level: touch its exit (the server's own finishRun, then advanceInstance). Since 2026-10-01
-	-- the server's walk guard (CONFIG.WalkGuard, Progression.minClearSeconds) refuses an exit reached faster than
-	-- anyone can walk there, so this stands at the start until that time has passed (frames keep running, as for a
-	-- player on their way) and then touches the exit, the way check_labyrintspill_journey walks it for real.
+	-- finish the current level the way a player does: WALK it. Since 2026-10-01 the server's walk guard
+	-- (CONFIG.WalkGuard, Progression.minClearSeconds) refuses an exit reached faster than anyone can walk there, and
+	-- since 2026-10-11 its path guard (CONFIG.PathGuard, shared/PathGuard) refuses an exit the server did not see the
+	-- character walk to. So this puts the character back on the start cell (where the server seeded the guard; a
+	-- check may have moved it about since) and walks the route cell by cell at 16 studs/s, frames running as for a
+	-- player on their way, then touches the exit. ctx.guardWaits keeps the seconds each level took.
 	function ctx.finishLevel()
 		local f = ctx.folder()
 		local exit = f and f:FindFirstChild("Exit")
 		assert(exit, "no exit to touch")
 		local lc = h.ReplicatedStorage:WaitForChild("HudRemotes"):WaitForChild("LevelComplete")
 		local n0 = #lc:sentTo(ctx.plr)
-		local waited = 0
-		ctx.guardWaits = ctx.guardWaits or {}
-		for _ = 1, 400 do
+		local spawn = f:FindFirstChild("MazeSpawn")
+		assert(spawn, "no start marker")
+		ctx.hrp.CFrame = CFrame.new(spawn.Position.X, ctx.hrp.Position.Y, spawn.Position.Z)
+		ctx.run(0.3)
+		local walked = Lib.walk(ctx.hrp, Lib.exitRoute(f, ctx.hrp.Position), 16, ctx.frame)
+		for _ = 1, 20 do
 			exit.Touched:Fire(ctx.hrp)
 			if #lc:sentTo(ctx.plr) > n0 then break end
 			ctx.run(0.25)
-			waited += 0.25
 		end
-		table.insert(ctx.guardWaits, waited)
+		assert(#lc:sentTo(ctx.plr) > n0, "finishLevel: the server refused a walked exit (walk guard or path guard)")
+		ctx.guardWaits = ctx.guardWaits or {}
+		table.insert(ctx.guardWaits, walked)
 		ctx.run(0.1)
 	end
 	function ctx.moveTo(pos: Vector3)
@@ -191,6 +197,53 @@ function Lib.grid(folder: Instance): any
 	end
 	return { S = S, gCols = gCols, gRows = gRows, cols = (gCols - 1) // 2, rows = (gRows - 1) // 2, walls = walls,
 		traps = traps, fine = fine, world = world, origin = o }
+end
+
+-- The cell route from a world position to the level's exit (walls as built: secret doors shut), as world points.
+function Lib.exitRoute(folder: Instance, fromPos: Vector3): { Vector3 }
+	local g = Lib.grid(folder)
+	local exit = folder:FindFirstChild("Exit") :: any
+	local from, to = { g.fine(fromPos) }, { g.fine(exit.Position) }
+	local key = function(x, y) return x .. "," .. y end
+	local prev, q, head = { [key(from[1], from[2])] = false }, { from }, 1
+	while head <= #q do
+		local cur = q[head]; head += 1
+		if cur[1] == to[1] and cur[2] == to[2] then break end
+		for _, dd in { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } } do
+			local nx, ny = cur[1] + dd[1], cur[2] + dd[2]
+			if nx >= 0 and ny >= 0 and nx < g.gCols and ny < g.gRows and not g.walls[key(nx, ny)] and prev[key(nx, ny)] == nil then
+				prev[key(nx, ny)] = cur
+				table.insert(q, { nx, ny })
+			end
+		end
+	end
+	local out, cur = {}, to
+	while cur do
+		table.insert(out, 1, g.world(cur[1], cur[2]))
+		cur = prev[key(cur[1], cur[2])]
+	end
+	return out
+end
+
+-- Walk a root part through `points` (their X and Z; the height is kept) in straight segments at `speed` studs/s,
+-- 30 frames a second; `frame(dt)` runs one frame. This is what "walking" is headless: there is no physics, and the
+-- server's path guard sees exactly what it sees of a real walker, a root position that moves a little every frame.
+function Lib.walk(hrp: any, points: { Vector3 }, speed: number, frame: (number) -> ()): number
+	local seconds = 0
+	for _, w in points do
+		local a = hrp.Position
+		local b = Vector3.new(w.X, a.Y, w.Z)
+		local dist = (b - a).Magnitude
+		if dist > 1e-6 then
+			local n = math.max(1, math.ceil(dist / speed * 30))
+			for k = 1, n do
+				hrp.CFrame = CFrame.new(a:Lerp(b, k / n))
+				frame(1 / 30)
+			end
+			seconds += n / 30
+		end
+	end
+	return seconds
 end
 
 -- Everything this client built in its own folders.
