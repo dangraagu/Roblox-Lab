@@ -1,0 +1,104 @@
+== Part 1: the generator (2000 rooms per chapter)
+ ch  N k  S  | gen attempts mean/max | candidates exact k + disjoint | partial share of fillers | brute/clue spot ratio
+  1  3 3 16  | 1.000 / 1 | 0 rooms off | 0.18 | 1.78
+  2  4 3 20  | 1.000 / 1 | 0 rooms off | 0.25 | 1.67
+  3  4 4 26  | 1.000 / 2 | 0 rooms off | 0.30 | 1.62
+  4  5 4 30  | 1.004 / 2 | 0 rooms off | 0.30 | 1.50
+  5  5 4 34  | 1.002 / 2 | 0 rooms off | 0.35 | 1.70
+  6  6 4 38  | 1.008 / 2 | 0 rooms off | 0.35 | 1.58
+  7  6 4 42  | 1.009 / 2 | 0 rooms off | 0.40 | 1.75
+  8  6 5 46  | 1.010 / 2 | 0 rooms off | 0.40 | 1.53
+  9  7 5 50  | 1.024 / 3 | 0 rooms off | 0.46 | 1.43
+ 10  7 5 52  | 1.020 / 3 | 0 rooms off | 0.45 | 1.49
+ 11  7 5 54  | 1.022 / 3 | 0 rooms off | 0.45 | 1.54
+ 12  8 5 56  | 1.048 / 3 | 0 rooms off | 0.49 | 1.40
+ 13  8 5 58  | 1.046 / 3 | 0 rooms off | 0.50 | 1.45
+ 14  8 5 60  | 1.040 / 3 | 0 rooms off | 0.51 | 1.50
+ 15  9 5 64  | 1.084 / 4 | 0 rooms off | 0.50 | 1.42
+ daily  6 4 44  | 1.010 / 2 | 0 rooms off | 0.40 | 1.83
+ uniform hiding, ch8 room, 120000 hides: chi-square 26.2 on 24 dof (p=0.001 critical about 46); worst cell off by 1.65%
+ client parts, worst of 3900 rooms: props+tables+shelves 171, + capped extras {'screens': 4, 'decor': 40, 'critters': 10, 'found items': 27, 'hazard': 3, 'lamps': 4} = 259
+== Part 2: the chapters. Clocks from the normal profile's UNCAPPED clear time (hint off, no hazards)
+ ch | normal uncapped p50 / target quantile -> clock | first-try with clock+hint+hazards: found / swift / sharp  (fast; normal; slow)
+  1 |  35.4 s / p97  66.2 ->  70 s | 1.00/0.97/0.99 (0 out of looks); 0.99/0.75/0.85 (3 out of looks); 0.93/0.48/0.42 (1 out of looks)
+  2 |  50.7 s / p97  92.7 ->  95 s | 1.00/0.97/0.98 (0 out of looks); 0.99/0.74/0.80 (0 out of looks); 0.89/0.42/0.28 (1 out of looks)
+  3 |  62.8 s / p97 115.3 -> 120 s | 1.00/0.98/0.97 (1 out of looks); 0.99/0.76/0.75 (0 out of looks); 0.90/0.49/0.28 (1 out of looks)
+  4 |  82.3 s / p90 120.1 -> 125 s | 1.00/0.92/0.94 (0 out of looks); 0.98/0.53/0.58 (0 out of looks); 0.72/0.21/0.09 (0 out of looks)
+  5 |  86.0 s / p90 125.8 -> 130 s | 1.00/0.89/0.95 (0 out of looks); 0.97/0.47/0.53 (0 out of looks); 0.70/0.23/0.09 (0 out of looks)
+  6 | 109.1 s / p90 152.3 -> 155 s | 1.00/0.86/0.92 (1 out of looks); 0.96/0.43/0.48 (0 out of looks); 0.63/0.15/0.05 (0 out of looks)
+  7 | 110.8 s / p90 157.8 -> 160 s | 1.00/0.88/0.92 (0 out of looks); 0.96/0.42/0.45 (0 out of looks); 0.65/0.17/0.04 (0 out of looks)
+  8 | 122.4 s / p90 173.5 -> 175 s | 1.00/0.86/0.89 (0 out of looks); 0.95/0.40/0.40 (0 out of looks); 0.66/0.17/0.05 (0 out of looks)
+  9 | 148.9 s / p90 206.7 -> 210 s | 1.00/0.87/0.86 (0 out of looks); 0.96/0.37/0.36 (0 out of looks); 0.59/0.13/0.02 (0 out of looks)
+ 10 | 151.4 s / p90 206.0 -> 210 s | 1.00/0.84/0.87 (0 out of looks); 0.95/0.33/0.29 (0 out of looks); 0.59/0.11/0.02 (0 out of looks)
+ 11 | 153.3 s / p90 213.4 -> 215 s | 1.00/0.86/0.85 (0 out of looks); 0.95/0.37/0.33 (0 out of looks); 0.61/0.13/0.03 (0 out of looks)
+ 12 | 177.6 s / p90 240.4 -> 245 s | 1.00/0.87/0.84 (0 out of looks); 0.95/0.36/0.29 (0 out of looks); 0.57/0.11/0.02 (0 out of looks)
+ 13 | 178.0 s / p90 240.7 -> 245 s | 1.00/0.86/0.84 (0 out of looks); 0.94/0.34/0.28 (0 out of looks); 0.54/0.10/0.02 (0 out of looks)
+ 14 | 181.0 s / p90 246.1 -> 250 s | 1.00/0.88/0.83 (0 out of looks); 0.95/0.38/0.30 (0 out of looks); 0.56/0.11/0.02 (0 out of looks)
+ 15 | 207.1 s / p90 273.3 -> 275 s | 1.00/0.85/0.81 (0 out of looks); 0.94/0.28/0.22 (0 out of looks); 0.49/0.06/0.01 (0 out of looks)
+ CLOCKS equals the derivation
+ the bot (script with the rules), the teleporting bot, and the tap-everything player (mean s with unlimited looks;
+ 'solves' = P(found within the clock AND the looks, N*k+2)
+  1 | bot   7.7, teleport   6.1, brute  27.2 (solves 0.32) | on-clue searches: bot 6.07, normal 5.99, expected N(k+1)/2 = 6.0
+  2 | bot  10.1, teleport   8.1, brute  36.4 (solves 0.21) | on-clue searches: bot 8.03, normal 7.99, expected N(k+1)/2 = 8.0
+  3 | bot  13.3, teleport  10.1, brute  47.8 (solves 0.19) | on-clue searches: bot 10.09, normal 10.16, expected N(k+1)/2 = 10.0
+  4 | bot  16.2, teleport  12.7, brute  56.0 (solves 0.20) | on-clue searches: bot 12.57, normal 12.68, expected N(k+1)/2 = 12.5
+  5 | bot  16.8, teleport  12.6, brute  63.4 (solves 0.10) | on-clue searches: bot 12.55, normal 12.51, expected N(k+1)/2 = 12.5
+  6 | bot  19.8, teleport  15.2, brute  72.4 (solves 0.08) | on-clue searches: bot 15.11, normal 15.08, expected N(k+1)/2 = 15.0
+  7 | bot  19.7, teleport  14.8, brute  79.8 (solves 0.06) | on-clue searches: bot 14.99, normal 15.11, expected N(k+1)/2 = 15.0
+  8 | bot  22.7, teleport  17.9, brute  85.8 (solves 0.12) | on-clue searches: bot 17.82, normal 17.90, expected N(k+1)/2 = 18.0
+  9 | bot  26.8, teleport  20.8, brute  97.4 (solves 0.10) | on-clue searches: bot 20.69, normal 20.80, expected N(k+1)/2 = 21.0
+ 10 | bot  27.4, teleport  21.1, brute 100.7 (solves 0.08) | on-clue searches: bot 21.15, normal 20.87, expected N(k+1)/2 = 21.0
+ 11 | bot  27.3, teleport  20.8, brute 104.3 (solves 0.05) | on-clue searches: bot 21.08, normal 21.09, expected N(k+1)/2 = 21.0
+ 12 | bot  30.9, teleport  24.2, brute 109.2 (solves 0.08) | on-clue searches: bot 24.26, normal 23.99, expected N(k+1)/2 = 24.0
+ 13 | bot  31.0, teleport  23.9, brute 112.3 (solves 0.09) | on-clue searches: bot 24.28, normal 23.84, expected N(k+1)/2 = 24.0
+ 14 | bot  30.6, teleport  24.2, brute 116.3 (solves 0.06) | on-clue searches: bot 24.09, normal 23.92, expected N(k+1)/2 = 24.0
+ 15 | bot  33.9, teleport  27.2, brute 124.9 (solves 0.05) | on-clue searches: bot 26.98, normal 26.94, expected N(k+1)/2 = 27.0
+ sensitivity: the SWEEPER (systematic walk, 0.35 s + 0.1 s per unfound clue to check each prop, search what fits)
+  1 | p50  23.8 s | found 1.00, swift 1.00, sharp 0.97
+  2 | p50  32.4 s | found 1.00, swift 1.00, sharp 0.92
+  3 | p50  41.6 s | found 1.00, swift 1.00, sharp 0.90
+  4 | p50  49.4 s | found 1.00, swift 1.00, sharp 0.86
+  5 | p50  55.3 s | found 1.00, swift 1.00, sharp 0.81
+  6 | p50  65.1 s | found 1.00, swift 1.00, sharp 0.78
+  7 | p50  68.4 s | found 1.00, swift 1.00, sharp 0.71
+  8 | p50  73.9 s | found 1.00, swift 1.00, sharp 0.66
+  9 | p50  88.7 s | found 1.00, swift 1.00, sharp 0.65
+ 10 | p50  89.2 s | found 1.00, swift 1.00, sharp 0.67
+ 11 | p50  91.1 s | found 1.00, swift 1.00, sharp 0.61
+ 12 | p50 102.3 s | found 1.00, swift 1.00, sharp 0.60
+ 13 | p50 103.8 s | found 1.00, swift 1.00, sharp 0.57
+ 14 | p50 104.4 s | found 1.00, swift 1.00, sharp 0.52
+ 15 | p50 117.8 s | found 1.00, swift 1.00, sharp 0.56
+== Part 3: pacing. Cumulative minutes from join (cards, moves, retries and hazards included)
+ fast   BOOK ONE SOLVED p10 22.7 / p50 24.7 / p90 26.7 min | attempts to clear the book p50 15 | minutes per band (3 chapters each) 2.2 / 3.8 / 5.0 / 6.2 / 7.2
+        Gold Book (45 stars) p50 30.3 min (p90 37.0; 0 of 1000 not by 600 min) | first find p50 15.2 s, chapter 1 cleared p50 36.7 s from join
+        hazards on the way to BOOK ONE SOLVED: p50 10; one per 2.47 min of play (466 hit of 10029)
+ normal BOOK ONE SOLVED p10 30.4 / p50 33.4 / p90 38.3 min | attempts to clear the book p50 15 | minutes per band (3 chapters each) 3.0 / 5.0 / 6.6 / 8.3 / 9.7
+        Gold Book (45 stars) p50 104.9 min (p90 143.8; 0 of 1000 not by 600 min) | first find p50 18.1 s, chapter 1 cleared p50 46.9 s from join
+        hazards on the way to BOOK ONE SOLVED: p50 14; one per 2.38 min of play (2174 hit of 14490)
+ slow   BOOK ONE SOLVED p10 48.8 / p50 63.9 / p90 85.2 min | attempts to clear the book p50 23 | minutes per band (3 chapters each) 3.8 / 8.0 / 11.7 / 16.3 / 20.1
+        Gold Book (45 stars) p50 600.0 min (p90 600.0; 998 of 1000 not by 600 min) | first find p50 22.6 s, chapter 1 cleared p50 58.8 s from join
+        hazards on the way to BOOK ONE SOLVED: p50 29; one per 2.20 min of play (8990 hit of 29911)
+ sweeper  BOOK ONE SOLVED p10 19.8 / p50 20.6 / p90 21.4 min | Gold Book p50 30.1 min
+== Part 4: hazard rate on a normal player's way to BOOK ONE SOLVED, per minute of PLAY (rooms + cards + moves)
+ interval 80-120 s exposed: one hazard per 1.94 min of play (p10 1.86, p90 2.03), one near-miss (dodged) per 2.27 min; exposed share of play 0.88
+ interval 100-140 s exposed: one hazard per 2.34 min of play (p10 2.25, p90 2.45), one near-miss (dodged) per 2.74 min; exposed share of play 0.89
+ interval 120-180 s exposed: one hazard per 2.93 min of play (p10 2.78, p90 3.13), one near-miss (dodged) per 3.42 min; exposed share of play 0.89
+== Part 5: the Daily Case (6 items, k 4, 44 spots: chapter 7's size)
+ normal uncapped p50 110.5 s, p98 190.6 -> clock 195 s
+ fast   solves on the first attempt 1.000; one attempt takes p50 1.5 min
+ normal solves on the first attempt 0.994; one attempt takes p50 2.0 min
+ slow   solves on the first attempt 0.837; one attempt takes p50 2.6 min
+ tap-everything solves 0.038; the rules bot takes 19.6 s mean
+== Part 6: the board value and the store text
+ Cases Solved after ten years: 3668; encoded 7.336209e+12 < 2^53 = 9.007199e+15: True
+ store text: 896 characters, ASCII only (read as ascii)
+== Part 7: the pause rule (re-dress on resume) against the looks budget
+ ch1   careful, a pause before ~1 search in 7: out of looks 0 of 20000; with 7% slips 48 (never pausing: 44)
+        tap-everything solves 0.292 never pausing, 0.189 pausing to refill under the design rule, 0.525 if a pause reset clues and looks
+ ch7   careful, a pause before ~1 search in 7: out of looks 0 of 20000; with 7% slips 9 (never pausing: 13)
+        tap-everything solves 0.046 never pausing, 0.020 pausing to refill under the design rule, 0.228 if a pause reset clues and looks
+ ch15  careful, a pause before ~1 search in 7: out of looks 0 of 20000; with 7% slips 2 (never pausing: 2)
+        tap-everything solves 0.052 never pausing, 0.024 pausing to refill under the design rule, 0.208 if a pause reset clues and looks
+ daily careful, a pause before ~1 search in 7: out of looks 0 of 20000; with 7% slips 13 (never pausing: 3)
+        tap-everything solves 0.033 never pausing, 0.015 pausing to refill under the design rule, 0.287 if a pause reset clues and looks
