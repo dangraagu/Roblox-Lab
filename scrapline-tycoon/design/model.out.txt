@@ -1,0 +1,222 @@
+
+== M1 economy tables ==
+Shredder   Junk (  1) -> Scrap (  2)  build        0  twin     240  speed L1   1.0/s  first upgrade      8 pays back in 32 s  upgrade 10->11        308  20->21         17735  30->31         1022672
+Furnace    Scrap(  2) -> Ingot (  5)  build      650  twin    1140  speed L1   1.6/s  first upgrade     38 pays back in 32 s  upgrade 10->11       1461  20->21         84240  30->31         4857694
+Press      Ingot(  5) -> Plate ( 12)  build    13000  twin    4380  speed L1   2.6/s  first upgrade    146 pays back in 32 s  upgrade 10->11       5613  20->21        323658  30->31        18663770
+Cutter     Plate( 12) -> Gear  ( 30)  build   130000  twin   17700  speed L1   4.1/s  first upgrade    590 pays back in 32 s  upgrade 10->11      22682  20->21       1307934  30->31        75422083
+Assembler  Gear ( 30) -> Robot ( 75)  build  1100000  twin   71400  speed L1   6.6/s  first upgrade   2380 pays back in 32 s  upgrade 10->11      91495  20->21       5276074  30->31       304245014
+Rocket Bay Robot( 75) -> Rocket(200)  build  9500000  twin  315000  speed L1  10.5/s  first upgrade  10500 pays back in 32 s  upgrade 10->11     403655  20->21      23276797  30->31      1342257415
+payback of an upgrade at level L, relative to level 1: x(1.50 / 1.25)^(L-1) = x1.200 per level
+a twin doubles a station; that equals log(2)/log(1.25) = 3.11 levels of upgrades
+
+== M2 first-run pacing (20 seeds, to the first Rocket, no recycle) ==
+-- fast
+  band 1 junkyard     entered (first Scrap  shipped) at min: p10 0.1  median 0.1  p90 0.1
+  band 2 foundry      entered (first Ingot  shipped) at min: p10 2.2  median 2.3  p90 2.3
+  band 3 pressworks   entered (first Plate  shipped) at min: p10 5.8  median 5.9  p90 6.1
+  band 4 machineshop  entered (first Gear   shipped) at min: p10 11.7  median 11.8  p90 12.0
+  band 5 robotworks   entered (first Robot  shipped) at min: p10 20.5  median 20.6  p90 20.8
+  band 6 launchsite   entered (first Rocket shipped) at min: p10 33.0  median 33.1  p90 33.3
+  FIRST ROCKET at min: p10 33.0  median 33.1  p90 33.3
+  purchases to the rocket: median 134; longest wait between purchases: median 120 s, max 120 s
+  sputters to the rocket (median) 10, saved in the warning 10, machine-seconds jammed 0.0, income lost to jams 0.0000
+  hazards before the first rocket: median 13 (p10 12, p90 13)
+-- normal
+  band 1 junkyard     entered (first Scrap  shipped) at min: p10 0.1  median 0.1  p90 0.1
+  band 2 foundry      entered (first Ingot  shipped) at min: p10 2.4  median 2.6  p90 2.6
+  band 3 pressworks   entered (first Plate  shipped) at min: p10 6.4  median 6.6  p90 6.6
+  band 4 machineshop  entered (first Gear   shipped) at min: p10 12.1  median 12.2  p90 12.3
+  band 5 robotworks   entered (first Robot  shipped) at min: p10 20.8  median 20.9  p90 21.1
+  band 6 launchsite   entered (first Rocket shipped) at min: p10 33.8  median 33.9  p90 34.1
+  FIRST ROCKET at min: p10 33.8  median 33.9  p90 34.1
+  purchases to the rocket: median 137; longest wait between purchases: median 120 s, max 120 s
+  sputters to the rocket (median) 10, saved in the warning 10, machine-seconds jammed 0.0, income lost to jams 0.0000
+  hazards before the first rocket: median 12 (p10 12, p90 13)
+  seed 1 build at the first rocket: ['Shre L30x2', 'Furn L28x2', 'Pres L25x2', 'Cutt L23x2', 'Asse L20x2', 'Rock L6x2']
+  seed 1 at   60 s: income 7.6/s  ['Shre L7']
+  seed 1 at  300 s: income 144.3/s  ['Shre L14x2', 'Furn L10x2']
+  seed 1 at  600 s: income 1217.2/s  ['Shre L19x2', 'Furn L17x2', 'Pres L14x2']
+  seed 1 at 1200 s: income 11380.4/s  ['Shre L26x2', 'Furn L23x2', 'Pres L20x2', 'Cutt L18x2']
+  seed 1 at 1800 s: income 60166.4/s  ['Shre L29x2', 'Furn L27x2', 'Pres L24x2', 'Cutt L22x2', 'Asse L19x2']
+-- slow
+  band 1 junkyard     entered (first Scrap  shipped) at min: p10 0.1  median 0.1  p90 0.1
+  band 2 foundry      entered (first Ingot  shipped) at min: p10 2.6  median 2.8  p90 3.1
+  band 3 pressworks   entered (first Plate  shipped) at min: p10 7.1  median 7.3  p90 7.6
+  band 4 machineshop  entered (first Gear   shipped) at min: p10 13.1  median 13.3  p90 13.6
+  band 5 robotworks   entered (first Robot  shipped) at min: p10 21.5  median 21.7  p90 22.1
+  band 6 launchsite   entered (first Rocket shipped) at min: p10 35.6  median 35.8  p90 36.1
+  FIRST ROCKET at min: p10 35.6  median 35.8  p90 36.1
+  purchases to the rocket: median 142; longest wait between purchases: median 135 s, max 135 s
+  sputters to the rocket (median) 10, saved in the warning 10, machine-seconds jammed 0.0, income lost to jams 0.0000
+  hazards before the first rocket: median 13 (p10 12, p90 13)
+-- mixed
+  band 1 junkyard     entered (first Scrap  shipped) at min: p10 0.1  median 0.1  p90 0.1
+  band 2 foundry      entered (first Ingot  shipped) at min: p10 2.4  median 2.6  p90 2.7
+  band 3 pressworks   entered (first Plate  shipped) at min: p10 6.1  median 6.3  p90 6.6
+  band 4 machineshop  entered (first Gear   shipped) at min: p10 11.9  median 12.6  p90 13.2
+  band 5 robotworks   entered (first Robot  shipped) at min: p10 20.8  median 21.5  p90 23.3
+  band 6 launchsite   entered (first Rocket shipped) at min: p10 35.1  median 36.1  p90 39.9
+  FIRST ROCKET at min: p10 35.1  median 36.1  p90 39.9
+  purchases to the rocket: median 140; longest wait between purchases: median 100 s, max 140 s
+  sputters to the rocket (median) 11, saved in the warning 11, machine-seconds jammed 0.0, income lost to jams 0.0000
+  hazards before the first rocket: median 13 (p10 12, p90 15)
+-- cheapest
+  band 1 junkyard     entered (first Scrap  shipped) at min: p10 0.1  median 0.1  p90 0.1
+  band 2 foundry      entered (first Ingot  shipped) at min: p10 2.7  median 2.9  p90 3.0
+  band 3 pressworks   entered (first Plate  shipped) at min: p10 8.1  median 8.2  p90 8.3
+  band 4 machineshop  entered (first Gear   shipped) at min: p10 16.2  median 16.3  p90 16.4
+  band 5 robotworks   entered (first Robot  shipped) at min: p10 30.7  median 30.9  p90 31.0
+  band 6 launchsite   entered (first Rocket shipped) at min: p10 53.2  median 53.3  p90 53.5
+  FIRST ROCKET at min: p10 53.2  median 53.3  p90 53.5
+  purchases to the rocket: median 160; longest wait between purchases: median 80 s, max 80 s
+  sputters to the rocket (median) 16, saved in the warning 16, machine-seconds jammed 0.0, income lost to jams 0.0000
+  hazards before the first rocket: median 20 (p10 20, p90 21)
+-- random
+  band 1 junkyard     entered (first Scrap  shipped) at min: p10 0.1  median 0.1  p90 0.1
+  band 2 foundry      entered (first Ingot  shipped) at min: p10 2.3  median 2.6  p90 3.0
+  band 3 pressworks   entered (first Plate  shipped) at min: p10 7.2  median 8.0  p90 8.5
+  band 4 machineshop  entered (first Gear   shipped) at min: p10 14.7  median 16.6  p90 17.6
+  band 5 robotworks   entered (first Robot  shipped) at min: p10 28.8  median 30.5  p90 32.6
+  band 6 launchsite   entered (first Rocket shipped) at min: p10 49.4  median 52.9  p90 56.2
+  FIRST ROCKET at min: p10 49.4  median 52.9  p90 56.2
+  purchases to the rocket: median 156; longest wait between purchases: median 80 s, max 80 s
+  sputters to the rocket (median) 16, saved in the warning 16, machine-seconds jammed 0.0, income lost to jams 0.0000
+  hazards before the first rocket: median 20 (p10 18, p90 21)
+-- saver
+  band 1 junkyard     entered (first Scrap  shipped) at min: p10 0.1  median 0.1  p90 0.1
+  band 2 foundry      entered (first Ingot  shipped) at min: p10 4.5  median 4.6  p90 4.7
+  band 3 pressworks   entered (first Plate  shipped) at min: p10 17.8  median 17.9  p90 18.1
+  band 4 machineshop  entered (first Gear   shipped) at min: p10 43.8  median 43.9  p90 44.1
+  band 5 robotworks   entered (first Robot  shipped) at min: p10 nan  median nan  p90 nan
+  band 6 launchsite   entered (first Rocket shipped) at min: p10 nan  median nan  p90 nan
+  FIRST ROCKET at min: p10 nan  median nan  p90 nan
+  purchases to the rocket: median 131; longest wait between purchases: median 260 s, max 260 s
+  sputters to the rocket (median) 28, saved in the warning 28, machine-seconds jammed 0.0, income lost to jams 0.0000
+  hazards before the first rocket: median 34 (p10 34, p90 35)
+-- bot
+  band 1 junkyard     entered (first Scrap  shipped) at min: p10 0.1  median 0.1  p90 0.1
+  band 2 foundry      entered (first Ingot  shipped) at min: p10 2.0  median 2.0  p90 2.0
+  band 3 pressworks   entered (first Plate  shipped) at min: p10 5.5  median 5.5  p90 5.5
+  band 4 machineshop  entered (first Gear   shipped) at min: p10 11.1  median 11.1  p90 11.1
+  band 5 robotworks   entered (first Robot  shipped) at min: p10 19.9  median 19.9  p90 19.9
+  band 6 launchsite   entered (first Rocket shipped) at min: p10 32.2  median 32.2  p90 32.2
+  FIRST ROCKET at min: p10 32.2  median 32.2  p90 32.2
+  purchases to the rocket: median 133; longest wait between purchases: median 126 s, max 126 s
+  sputters to the rocket (median) 10, saved in the warning 10, machine-seconds jammed 0.0, income lost to jams 0.0000
+  hazards before the first rocket: median 12 (p10 12, p90 13)
+
+== M3 band durations, normal profile (20 seeds) ==
+band 1 junkyard     lasts min: min 2.3  median 2.5  max 2.6
+band 2 foundry      lasts min: min 3.7  median 4.0  max 4.0
+band 3 pressworks   lasts min: min 5.7  median 5.7  max 6.3
+band 4 machineshop  lasts min: min 8.0  median 8.7  max 9.3
+band 5 robotworks   lasts min: min 12.7  median 13.0  max 13.7
+
+== M4 recycles over 6 h (20 seeds) ==
+-- fast
+  recycle  1 (n=20): at min median   42.4  run  42.4 min  bolts +1  rockets 568991  multiplier before x1.00
+  recycle  2 (n=20): at min median   73.6  run  31.2 min  bolts +1  rockets 629621  multiplier before x1.50
+  recycle  3 (n=20): at min median   99.8  run  26.2 min  bolts +1  rockets 882836  multiplier before x2.00
+  recycle  4 (n=20): at min median  125.3  run  25.5 min  bolts +1  rockets 1479484  multiplier before x2.50
+  recycle  5 (n=20): at min median  149.4  run  24.2 min  bolts +1  rockets 1893906  multiplier before x3.00
+  recycle  6 (n=20): at min median  173.9  run  24.5 min  bolts +1  rockets 2707934  multiplier before x3.50
+  recycle  7 (n=20): at min median  200.9  run  27.0 min  bolts +1  rockets 4754806  multiplier before x4.00
+  recycle  8 (n=20): at min median  228.6  run  27.7 min  bolts +1  rockets 6313721  multiplier before x4.50
+  recycle  9 (n=20): at min median  258.6  run  30.0 min  bolts +1  rockets 9492239  multiplier before x5.00
+  recycle 10 (n=20): at min median  293.8  run  35.2 min  bolts +1  rockets 17451247  multiplier before x5.50
+  recycle 11 (n=20): at min median  331.4  run  37.7 min  bolts +1  rockets 23925127  multiplier before x6.00
+  lifetime bolts at   30 min: p10 0  median 0  p90 0
+  lifetime bolts at   40 min: p10 0  median 0  p90 0
+  lifetime bolts at   60 min: p10 1  median 1  p90 1
+  lifetime bolts at   90 min: p10 2  median 2  p90 2
+  lifetime bolts at  120 min: p10 3  median 3  p90 3
+  lifetime bolts at  180 min: p10 6  median 6  p90 6
+  lifetime bolts at  240 min: p10 8  median 8  p90 8
+  lifetime bolts at  360 min: p10 11  median 11  p90 11
+  run 2 band durations, median min: junkyard 1.7, foundry 2.7, pressworks 3.7, machineshop 5.7, robotworks 9.0, launchsite 8.5
+  run 3 band durations, median min: junkyard 1.3, foundry 2.2, pressworks 2.8, machineshop 3.8, robotworks 6.2, launchsite 9.8
+  run 5 band durations, median min: junkyard 1.2, foundry 1.7, pressworks 2.2, machineshop 2.7, robotworks 3.7, launchsite 12.8
+-- normal
+  recycle  1 (n=20): at min median   43.6  run  43.6 min  bolts +1  rockets 599257  multiplier before x1.00
+  recycle  2 (n=20): at min median   75.2  run  31.7 min  bolts +1  rockets 719700  multiplier before x1.50
+  recycle  3 (n=20): at min median  102.9  run  27.7 min  bolts +1  rockets 919308  multiplier before x2.00
+  recycle  4 (n=20): at min median  129.9  run  27.0 min  bolts +1  rockets 1584066  multiplier before x2.50
+  recycle  5 (n=20): at min median  155.9  run  26.0 min  bolts +1  rockets 1986870  multiplier before x3.00
+  recycle  6 (n=20): at min median  181.9  run  26.0 min  bolts +1  rockets 2748172  multiplier before x3.50
+  recycle  7 (n=20): at min median  210.6  run  28.7 min  bolts +1  rockets 4903628  multiplier before x4.00
+  recycle  8 (n=20): at min median  239.9  run  29.3 min  bolts +1  rockets 6492145  multiplier before x4.50
+  recycle  9 (n=20): at min median  270.9  run  31.0 min  bolts +1  rockets 9568503  multiplier before x5.00
+  recycle 10 (n=20): at min median  307.6  run  36.7 min  bolts +1  rockets 17842805  multiplier before x5.50
+  recycle 11 (n=20): at min median  346.6  run  39.0 min  bolts +1  rockets 24582578  multiplier before x6.00
+  lifetime bolts at   30 min: p10 0  median 0  p90 0
+  lifetime bolts at   40 min: p10 0  median 0  p90 0
+  lifetime bolts at   60 min: p10 1  median 1  p90 1
+  lifetime bolts at   90 min: p10 2  median 2  p90 2
+  lifetime bolts at  120 min: p10 3  median 3  p90 3
+  lifetime bolts at  180 min: p10 5  median 5  p90 5
+  lifetime bolts at  240 min: p10 7  median 8  p90 8
+  lifetime bolts at  360 min: p10 11  median 11  p90 11
+  run 2 band durations, median min: junkyard 1.7, foundry 2.7, pressworks 3.7, machineshop 5.3, robotworks 8.3, launchsite 10.0
+  run 3 band durations, median min: junkyard 1.7, foundry 2.3, pressworks 3.0, machineshop 4.0, robotworks 6.7, launchsite 10.0
+  run 5 band durations, median min: junkyard 1.3, foundry 2.0, pressworks 2.3, machineshop 3.0, robotworks 4.0, launchsite 13.3
+-- slow
+  recycle  1 (n=20): at min median   46.3  run  46.3 min  bolts +1  rockets 667286  multiplier before x1.00
+  recycle  2 (n=20): at min median   81.5  run  35.2 min  bolts +1  rockets 797108  multiplier before x1.50
+  recycle  3 (n=20): at min median  112.3  run  30.8 min  bolts +1  rockets 1043557  multiplier before x2.00
+  recycle  4 (n=20): at min median  143.0  run  30.8 min  bolts +1  rockets 1675610  multiplier before x2.50
+  recycle  5 (n=20): at min median  172.3  run  29.2 min  bolts +1  rockets 2112561  multiplier before x3.00
+  recycle  6 (n=20): at min median  201.5  run  29.2 min  bolts +1  rockets 2968772  multiplier before x3.50
+  recycle  7 (n=20): at min median  233.0  run  31.5 min  bolts +1  rockets 5365191  multiplier before x4.00
+  recycle  8 (n=20): at min median  265.3  run  32.2 min  bolts +1  rockets 7094780  multiplier before x4.50
+  recycle  9 (n=20): at min median  299.8  run  34.5 min  bolts +1  rockets 10159467  multiplier before x5.00
+  recycle 10 (n=20): at min median  339.5  run  39.8 min  bolts +1  rockets 18232645  multiplier before x5.50
+  lifetime bolts at   30 min: p10 0  median 0  p90 0
+  lifetime bolts at   40 min: p10 0  median 0  p90 0
+  lifetime bolts at   60 min: p10 1  median 1  p90 1
+  lifetime bolts at   90 min: p10 2  median 2  p90 2
+  lifetime bolts at  120 min: p10 3  median 3  p90 3
+  lifetime bolts at  180 min: p10 5  median 5  p90 5
+  lifetime bolts at  240 min: p10 7  median 7  p90 7
+  lifetime bolts at  360 min: p10 10  median 10  p90 10
+  run 2 band durations, median min: junkyard 2.2, foundry 3.8, pressworks 3.8, machineshop 6.0, robotworks 9.0, launchsite 10.5
+  run 3 band durations, median min: junkyard 2.2, foundry 3.0, pressworks 3.0, machineshop 4.5, robotworks 6.8, launchsite 11.2
+  run 5 band durations, median min: junkyard 2.2, foundry 2.2, pressworks 3.0, machineshop 3.0, robotworks 4.5, launchsite 14.2
+
+== M5 AFK, macros and bots over 8 h from join (10 seeds) ==
+  normal    lifetime bolts after 8 h: p10 13  median 13  p90 13   first rocket at min 33.9
+  normal    highest station level after 8 h: median 46, max 46 (the cap is 100)
+  bot       lifetime bolts after 8 h: p10 14  median 14  p90 14   first rocket at min 32.2
+  bot       highest station level after 8 h: median 42, max 42 (the cap is 100)
+  afkmacro  lifetime bolts after 8 h: p10 0  median 0  p90 0   first rocket at min never
+  afkmacro seed 1 after 8 h: highest product Plate, line ['Shre L19x2', 'Furn L16x2', 'Pres L14x2']
+  the normal player hands over at  35 min to normal   : bolts gained in the next 8 h: p10 14  median 14  p90 14
+  the normal player hands over at  35 min to bot      : bolts gained in the next 8 h: p10 14  median 14  p90 14
+  the normal player hands over at  35 min to afkmacro : bolts gained in the next 8 h: p10 0  median 0  p90 0
+  the normal player hands over at  35 min to jiggle   : bolts gained in the next 8 h: p10 0  median 0  p90 0
+  the normal player hands over at 130 min to normal   : bolts gained in the next 8 h: p10 11  median 11  p90 11
+  the normal player hands over at 130 min to bot      : bolts gained in the next 8 h: p10 11  median 11  p90 11
+  the normal player hands over at 130 min to afkmacro : bolts gained in the next 8 h: p10 0  median 0  p90 0
+  the normal player hands over at 130 min to jiggle   : bolts gained in the next 8 h: p10 0  median 0  p90 0
+
+== M6 the first 60 seconds (20 seeds) ==
+  fast   free Shredder at 3.0 s; first purchase at s: median 8.5 (p10 7.0, p90 14.6), most often ('up', 1); purchases by 60 s: median 6; income at 30 s 4.39/s, at 60 s 7.63/s
+  normal free Shredder at 3.0 s; first purchase at s: median 14.8 (p10 9.9, p90 23.0), most often ('up', 1); purchases by 60 s: median 6; income at 30 s 3.12/s, at 60 s 7.63/s
+  slow   free Shredder at 3.0 s; first purchase at s: median 31.5 (p10 19.2, p90 44.0), most often ('up', 1); purchases by 60 s: median 3; income at 30 s 2.00/s, at 60 s 3.91/s
+
+== M7 what jams cost: the normal player's 35-minute line, left alone ==
+  line at 35 min: ['Shre L30x2', 'Furn L28x2', 'Pres L25x2', 'Cutt L23x2', 'Asse L20x2', 'Rock L15x2'], income 134894/s tended
+  seed 1: 5 min: now x0.779, so far x0.898; 10 min: now x0.541, so far x0.765; 15 min: now x0.510, so far x0.686; 30 min: now x0.000, so far x0.473; 60 min: now x0.000, so far x0.236; 180 min: now x0.000, so far x0.079
+  seed 2: 5 min: now x0.779, so far x0.934; 10 min: now x0.518, so far x0.781; 15 min: now x0.518, so far x0.693; 30 min: now x0.010, so far x0.435; 60 min: now x0.000, so far x0.218; 180 min: now x0.000, so far x0.073
+  seed 3: 5 min: now x0.807, so far x0.915; 10 min: now x0.057, so far x0.566; 15 min: now x0.057, so far x0.397; 30 min: now x0.000, so far x0.215; 60 min: now x0.000, so far x0.107; 180 min: now x0.000, so far x0.036
+
+== M8 sensitivity of the first rocket (normal, 20 seeds) ==
+  as specified         first rocket median 33.9 min
+  UpgradeGrowth 1.45   first rocket median 25.6 min
+  UpgradeGrowth 1.55   first rocket median 43.9 min
+  SpeedGrowth 1.22     first rocket median 56.6 min
+  SpeedGrowth 1.28     first rocket median 23.2 min
+  BuildPrice x0.8      first rocket median 30.9 min
+  BuildPrice x1.25     first rocket median 37.9 min
+  SaveWindow 0         first rocket median 40.6 min
+  SaveWindow 120       first rocket median 33.3 min
+  no twins             first rocket median 68.3 min
