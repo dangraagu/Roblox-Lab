@@ -1,0 +1,86 @@
+=== MapGen (500 maps) ===
+  tries_mean         1.024
+  tries_max          2
+  accept_rate        0.9765625
+  high_min           18
+  high_med           45.0
+  high_max           49
+  level_share        [0.339, 0.232, 0.183, 0.136, 0.11]
+  worst_escape_max   76.0
+  worst_escape_med   36.0
+  esc_p90            {1: 28.0, 2: 20.0, 3: 20.0}
+  esc_med            {1: 12.0, 2: 12.0, 3: 12.0}
+
+=== per-round tables ===
+aimed rings per player per round (mean):
+  meteor   h0 8.7 h1 10.3 h2 12.3 h3 14.8 h4 17.2 h5 20.6
+  other    h0 3.4 h1 4.3 h2 5.5 h3 6.9 h4 8.7 h5 10.4
+global threats per player per round (mean, normal):  {'flood': 1.0, 'tornado': 1.19, 'quake': 4.45}
+quake collapsed share: p50 0.45 max 0.45   bot's tightest quake margin 1.97 s
+
+P(survive round) = global x rings, by heat 0..5:
+  fast   meteor   glob 1.000 | 0.956 0.936 0.922 0.918 0.914 0.912
+  fast   flood    glob 1.000 | 0.976 0.982 0.958 0.970 0.948 0.946
+  fast   tornado  glob 0.996 | 0.973 0.978 0.955 0.967 0.945 0.943
+  fast   quake    glob 0.978 | 0.955 0.961 0.937 0.949 0.927 0.925
+  fast   AVERAGE        | 0.965 0.964 0.943 0.951 0.933 0.932
+  normal meteor   glob 1.000 | 0.868 0.850 0.806 0.802 0.740 0.748
+  normal flood    glob 1.000 | 0.946 0.920 0.920 0.914 0.872 0.860
+  normal tornado  glob 0.986 | 0.932 0.907 0.907 0.901 0.860 0.848
+  normal quake    glob 0.944 | 0.893 0.868 0.868 0.862 0.823 0.811
+  normal AVERAGE        | 0.910 0.886 0.875 0.870 0.824 0.817
+  slow   meteor   glob 1.000 | 0.642 0.612 0.572 0.500 0.410 0.372
+  slow   flood    glob 1.000 | 0.864 0.798 0.804 0.748 0.666 0.616
+  slow   tornado  glob 0.987 | 0.853 0.788 0.794 0.739 0.658 0.608
+  slow   quake    glob 0.834 | 0.720 0.665 0.670 0.624 0.555 0.514
+  slow   AVERAGE        | 0.770 0.716 0.710 0.653 0.572 0.527
+  bot    meteor   glob 1.000 | 1.000 1.000 1.000 1.000 1.000 1.000
+  bot    flood    glob 1.000 | 1.000 1.000 1.000 1.000 1.000 1.000
+  bot    tornado  glob 1.000 | 1.000 1.000 1.000 1.000 1.000 1.000
+  bot    quake    glob 1.000 | 1.000 1.000 1.000 1.000 1.000 1.000
+  bot    AVERAGE        | 1.000 1.000 1.000 1.000 1.000 1.000
+
+=== crowded plateau: 8 players, heat 5, Flood hold (18 s), 18 dry cells ===
+  bot    survive the hold: 1.000
+  normal survive the hold: 0.970
+  bot    8 players, heat 5 Meteor Shower, open island: 1.000
+
+=== fairness floor: 8 bots at heat 5, Meteor Shower, open island (bot-rounds lost) ===
+  placement rule OFF, naive dodger   33 / 1200
+  placement rule ON, naive dodger    1 / 1200
+  placement rule OFF, smart dodger   0 / 1200
+  placement rule ON, smart dodger    0 / 1200
+
+=== sessions ===
+round cycle 88 s -> 0.68 rounds/min
+first time on the island after joining (s, p10/p50/p90): 3.0 / 3.0 / 28.2  max 37.0
+first aimed ring at you after joining (s): meteor round 9.2 / 13.2 / 39.7 | other round 10.5 / 19.5 / 44.9
+
+minutes to each band (p10 / median / p90):
+  band 2 Windy Point  (  2 survivals): normal 2.7 / 3.4 / 4.7 | fast 2.7 / 3.3 / 3.9 | slow 2.8 / 3.8 / 6.0
+  band 3 Storm Coast  (  6 survivals): normal 8.7 / 9.9 / 12.0 | fast 8.6 / 9.4 / 10.8 | slow 9.4 / 11.9 / 15.4
+  band 4 Ember Isles  ( 12 survivals): normal 18.0 / 20.0 / 22.7 | fast 17.5 / 18.6 / 20.5 | slow 20.5 / 23.9 / 28.6
+  band 5 Falling Sky  ( 21 survivals): normal 32.6 / 35.2 / 38.6 | fast 30.9 / 32.7 / 34.9 | slow 37.4 / 41.8 / 47.6
+  band 6 New Dawn     (100 survivals): normal 162.5 / 168.4 / 175.0 | fast 151.7 / 155.7 / 160.4 | slow 190.1 / 200.4 / 211.5
+  normal median minutes spent in bands 2..5: 5.9 / 10.3 / 14.7 / 133.5
+  fast   median minutes spent in bands 2..5: 5.9 / 8.8 / 13.2 / 123.2
+  slow   median minutes spent in bands 2..5: 7.3 / 11.7 / 17.6 / 158.4
+  normal first MAX HEAT (streak 10): 14.8 / 28.8 / 73.9  (reached in 4 h by 100 %)
+  fast   first MAX HEAT (streak 10): 14.5 / 15.5 / 32.4  (reached in 4 h by 100 %)
+  slow   first MAX HEAT (streak 10): 26.8 / 97.8 / 202.9  (reached in 4 h by 59 %)
+  bot    first MAX HEAT (streak 10): 14.4 / 15.0 / 15.6  (reached in 4 h by 100 %)
+  normal best streak at 30/60/120/240 min (median): 10.0 / 13.0 / 16.0 / 17.0
+  normal Codex entries at 30/60/120/240 min (median): 17.0 / 22.0 / 24.0 / 24.0
+  normal survived per hour (median): 35.8   Lookout share 0.27 -> one stray (ambient) per 4.6 min of play
+  fast   best streak at 30/60/120/240 min (median): 15.0 / 22.0 / 30.0 / 34.0
+  fast   Codex entries at 30/60/120/240 min (median): 23.0 / 24.0 / 24.0 / 24.0
+  fast   survived per hour (median): 38.5   Lookout share 0.25 -> one stray (ambient) per 5.1 min of play
+  slow   best streak at 30/60/120/240 min (median): 6.0 / 8.0 / 9.0 / 9.0
+  slow   Codex entries at 30/60/120/240 min (median): 10.0 / 13.0 / 16.0 / 17.0
+  slow   survived per hour (median): 30.0   Lookout share 0.32 -> one stray (ambient) per 3.9 min of play
+  normal Codex 24/24 (hours): 0.5 / 1.3 / 3.3, finished in 40 h: 100 %
+  fast   Codex 24/24 (hours): 0.4 / 0.6 / 1.1, finished in 40 h: 100 %
+
+=== sensitivity: normal player's band 5 (brag) median minutes ===
+  lapse x0.5: band 5 31.6 / 33.3 / 35.7 ; band 6 155.7 / 159.7 / 164.5 ; avg P(survive) h0 0.951 h5 0.877
+  lapse x2.0: band 5 35.0 / 38.7 / 43.5 ; band 6 177.3 / 185.9 / 195.3 ; avg P(survive) h0 0.814 h5 0.712
