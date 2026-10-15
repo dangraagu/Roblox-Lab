@@ -95,6 +95,16 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `grow-a-crystal/marketing/clips/harvest.mp4` | Harvest day in the cavern | 2026-10-12 06:00 | https://youtube.com/shorts/ACGvxwSVD_g | Planlagt (verified in Studio 2026-10-11) |
 | `labyrint-spill/marketing/clips/lobby_enter.mp4` | Three doors into the maze | 2026-10-12 08:00 | https://youtube.com/shorts/8hQgfOGHwlY | Planlagt (verified in Studio 2026-10-11) |
 | `anomaly-observatory/marketing/pairs/figure_ceiling/spot.mp4` | Look up before you advance | 2026-10-12 10:00 | https://youtube.com/shorts/fPZo7hbJV50 | Planlagt (verified in Studio 2026-10-11) |
+| `grow-a-crystal/marketing/clips/cavern_climb.mp4` | Eight terraces of crystal sockets | 2026-10-15 16:00 | https://youtube.com/shorts/bXdw_aww41U | Planlagt (verified in Studio 2026-10-15) |
+| `labyrint-spill/marketing/clips/lobby_enter.mp4` | Pick a door: solo, group or friends | 2026-10-15 18:00 | https://youtube.com/shorts/1nVLMx60_Qs | Planlagt (verified in Studio 2026-10-15) |
+| `anomaly-observatory/marketing/pairs/door_extra/spot.mp4` | Count the doors | 2026-10-15 20:00 | https://youtube.com/shorts/NbLaMrVl5n8 | Planlagt (verified in Studio 2026-10-15) |
+| `plus1-jump/marketing/clips/saw_tier5.mp4` | Tier 5 is where the obstacles start | 2026-10-15 22:00 | https://youtube.com/shorts/oat52VVwU0s | Planlagt (verified in Studio 2026-10-15) |
+| `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Coins, gems, exit. Level 1 done | 2026-10-16 00:00 | https://youtube.com/shorts/Puh7PyWfWlQ | Planlagt (verified in Studio 2026-10-15) |
+| `anomaly-observatory/marketing/pairs/scope_gone/spot.mp4` | 4 seconds. One thing is gone. Find it | 2026-10-16 02:00 | https://youtube.com/shorts/CIplEUrWUaM | Planlagt (verified in Studio 2026-10-15) |
+| `plus1-jump/marketing/clips/pendulum_tier6.mp4` | Tier 6: steps at 17 studs and climbing | 2026-10-16 04:00 | https://youtube.com/shorts/lxkrEUGqx-w | Planlagt (verified in Studio 2026-10-15) |
+| `grow-a-crystal/marketing/clips/plant_seed.mp4` | Planting the first seed | 2026-10-16 06:00 | https://youtube.com/shorts/jvi2Ik_6HDw | Planlagt (verified in Studio 2026-10-15) |
+| `labyrint-spill/marketing/clips/level2_run.mp4` | Can you find the exit faster? | 2026-10-16 08:00 | https://youtube.com/shorts/IQjhWM2qHD0 | Planlagt (verified in Studio 2026-10-15) |
+| `anomaly-observatory/marketing/pairs/twin_scope/spot.mp4` | Something in this hall is doubled | 2026-10-16 10:00 | https://youtube.com/shorts/SzAAuEPiyos | Planlagt (verified in Studio 2026-10-15) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
