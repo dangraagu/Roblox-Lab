@@ -1,0 +1,88 @@
+[M1] geometry: lots inside the shelf, gaps between lots, walks from the pad
+  furthest lot corner from the centre: 72.01 (limit 73, rail 79)
+  nearest lot corner to the centre: 33.06 (plaza radius 26)
+  smallest gap between two lots of one district: 4.00 studs (rule >= 4)
+  smallest gap between lots of neighbouring districts: 6.09 studs
+  walk from the pad to a lot (to prompt reach): median 48.5, max 76.3 studs
+  nearest district-1 lot from the pad: 17.1 studs = 1.26 s at the normal walk
+  across the shelf (pad to the furthest lot): 5.61 s at the normal walk
+  closest two sign posts over 1000 seeds: 14.00 studs
+
+[M2] economy per district: capacity per storey, prices, value, and the full city
+  d1: cap      4  storey1     15.0  storey10     223.4  storey22      8.19K  cap/credit at storey 1 0.2667  opens at pop 0.0
+  d2: cap     20  storey1     90.0  storey10     1.34K  storey22     49.12K  cap/credit at storey 1 0.2222  opens at pop 80.0
+  d3: cap    100  storey1    540.0  storey10     8.04K  storey22    294.72K  cap/credit at storey 1 0.1852  opens at pop 900.0
+  d4: cap    500  storey1    3.24K  storey10    48.26K  storey22      1.77M  cap/credit at storey 1 0.1543  opens at pop 6.40K
+  d5: cap   2500  storey1   19.44K  storey10   289.53K  storey22     10.61M  cap/credit at storey 1 0.1286  opens at pop 35.00K
+  d6: cap  12500  storey1  116.64K  storey10     1.74M  storey22     63.66M  cap/credit at storey 1 0.1072  opens at pop 185.00K
+  full city (36 lots x 22 storeys): population 1031184, income 257.80K/s
+  board encoding pop*2e9 + (2e9 - at): max value 2.0624e+15 vs 2^53 = 9.0072e+15
+  dearest storey (d6 storey 22) 63.66M = 250.0 s of the income of a city one storey short of complete
+  ... and 256.3 s when all three d6 Homes (or Workshops) are one storey short; rule: <= half the Orders (300 s)
+  starting city: 2 builds (30.0) -> population 4, income 1.00/s
+
+[M3] minutes to ENTER each band (district), 40 seeds each, 240 min sessions
+  fast      b2    3.3 (p10    3.3 p90    3.3)  b3   12.0 (p10   12.0 p90   12.0)  b4   36.8 (p10   36.7 p90   36.8)  b5   75.7 (p10   75.7 p90   75.7)  b6  133.3 (p10  133.3 p90  133.4)
+            orders lapses 0; longest gap between purchases: median 256.8 s, max 258.6 s
+  normal    b2    3.4 (p10    3.4 p90    3.4)  b3   12.2 (p10   12.2 p90   12.3)  b4   37.1 (p10   37.0 p90   37.2)  b5   76.1 (p10   76.1 p90   76.2)  b6  133.9 (p10  133.8 p90  133.9)
+            orders lapses 0; longest gap between purchases: median 258.0 s, max 262.5 s
+  slow      b2    3.6 (p10    3.6 p90    3.7)  b3   13.3 (p10   13.0 p90   13.6)  b4   38.8 (p10   38.3 p90   39.1)  b5   78.2 (p10   77.8 p90   78.5)  b6  136.3 (p10  135.9 p90  136.5)
+            orders lapses 0; longest gap between purchases: median 258.8 s, max 265.3 s
+  walker    b2    3.2 (p10    3.2 p90    3.2)  b3   11.9 (p10   11.9 p90   11.9)  b4   36.6 (p10   36.5 p90   36.6)  b5   75.5 (p10   75.5 p90   75.5)  b6  133.1 (p10  133.1 p90  133.1)
+            orders lapses 0; longest gap between purchases: median 256.3 s, max 256.3 s
+  teleport  b2    3.2 (p10    3.2 p90    3.2)  b3   11.9 (p10   11.9 p90   11.9)  b4   36.5 (p10   36.5 p90   36.5)  b5   75.4 (p10   75.4 p90   75.4)  b6  133.0 (p10  133.0 p90  133.0)
+            orders lapses 0; longest gap between purchases: median 256.3 s, max 256.3 s
+
+[M4] how long each band lasts (normal profile, minutes)
+  band 1: median 3.42, min 3.38
+  band 2: median 8.81, min 8.73
+  band 3: median 24.88, min 24.80
+  band 4: median 39.01, min 38.97
+  band 5: median 57.74, min 57.69
+  population after 240 min: median 1.01M
+
+[M5] the first purchases of a normal player (seed 1..5)
+  seed 1: 3.3s Home d1 storey 1 (pop 0); 5.8s Workshop d1 storey 1 (pop 4); 24.4s Home d1 storey 1 (pop 4); 38.9s Workshop d1 storey 1 (pop 8); 47.2s Home d1 storey 1 (pop 8); 55.5s Workshop d1 storey 1 (pop 12)
+  seed 2: 3.6s Workshop d1 storey 1 (pop 0); 6.3s Home d1 storey 1 (pop 4); 22.8s Workshop d1 storey 1 (pop 4); 38.8s Home d1 storey 1 (pop 8); 46.5s Workshop d1 storey 1 (pop 8); 53.8s Home d1 storey 1 (pop 12)
+  seed 3: 3.9s Workshop d1 storey 1 (pop 0); 6.5s Home d1 storey 1 (pop 4); 24.0s Workshop d1 storey 1 (pop 4); 38.5s Home d1 storey 1 (pop 8); 48.5s Workshop d1 storey 1 (pop 8); 54.8s Home d1 storey 1 (pop 12)
+  seed 4: 3.9s Workshop d1 storey 1 (pop 0); 6.5s Home d1 storey 1 (pop 4); 25.0s Workshop d1 storey 1 (pop 4); 37.9s Home d1 storey 1 (pop 8); 47.3s Workshop d1 storey 1 (pop 8); 55.5s Home d1 storey 1 (pop 12)
+  seed 5: 3.3s Workshop d1 storey 1 (pop 0); 5.8s Home d1 storey 1 (pop 4); 22.2s Workshop d1 storey 1 (pop 4); 39.6s Home d1 storey 1 (pop 8); 46.9s Workshop d1 storey 1 (pop 8); 54.0s Home d1 storey 1 (pop 12)
+  purchases in the first 60 s: median 7, min 7
+
+[M6] hazards for a normal player (none in band 1)
+  hazards launched before the brag: median 13 (min 13, max 14)
+  hazard-free start (band 1) lasts: median 3.42 min
+
+[M7] AFK and macros, starting from the normal player's state when the brag band opens (seed 1..10)
+  seed 1 state: population 6400, income 1.60K/s, credits 15.98K
+  idle (AFK or an anti-AFK jiggle): the city earns at most 10.00 more minutes of income, then stops; population +0
+  one-lot prompt macro, best lot, 8 h: population x1.000 (median x1.000), that lot ends at storey 22
+  two-lot route macro, best pair, 8 h: population x2.719 (median x2.719)
+  the normal human, 8 more hours:      population x161.123 .. x161.123
+  safety net (the city also works while no storey is affordable): engaged 0 of 70 stalls
+
+[M8] sensitivity (normal profile, median of 40 seeds): brag (band 4) and long goal (band 6) minutes
+  Growth 1.30: brag 25.6, long goal 81.3
+  Growth 1.33: brag 31.9, long goal 109.4
+  Growth 1.35: brag 37.1, long goal 133.9
+  Growth 1.37: brag 43.4, long goal 164.2
+  Growth 1.40: brag 55.2, long goal 223.7
+
+[M9] dead-end check: walker macro (perfect play) for 48 h, seeds 1..5
+  seed 1: worst wait for the cheapest storey 256.1 s (Orders 600 s); lapses 0; city complete at 4.28 h; pop 1.03M
+  seed 2: worst wait for the cheapest storey 256.1 s (Orders 600 s); lapses 0; city complete at 4.28 h; pop 1.03M
+  seed 3: worst wait for the cheapest storey 256.1 s (Orders 600 s); lapses 0; city complete at 4.28 h; pop 1.03M
+  seed 4: worst wait for the cheapest storey 256.1 s (Orders 600 s); lapses 0; city complete at 4.28 h; pop 1.03M
+  seed 5: worst wait for the cheapest storey 256.1 s (Orders 600 s); lapses 0; city complete at 4.28 h; pop 1.03M
+
+[M10] share of a normal player's first 60 min spent in idle rest, by IdleSeconds (stormgrow REVIEW-1 B2)
+  IdleSeconds  20: median 16.6%, max 18.7%
+  IdleSeconds  45: median 1.7%, max 2.9%
+  IdleSeconds  60: median 0.5%, max 1.2%
+  IdleSeconds  90: median 0.0%, max 0.1%
+  longest standing span in the first hour: median 79.1 s, max 92.6 s
+
+[M11] skyline: average and highest storey per open district when a band opens (normal, seeds 1..10)
+  band 4 opens: d1 avg 18.3 max 19; d2 avg 18.0 max 18; d3 avg 17.0 max 17
+  band 6 opens: d1 avg 22.0 max 22; d2 avg 21.0 max 21; d3 avg 21.0 max 21; d4 avg 20.0 max 20; d5 avg 19.7 max 20
+  normal player completes the city (every lot at 22 storeys): median 4.30 h (seeds 1..5: 4.30, 4.30, 4.30, 4.30, 4.30)
