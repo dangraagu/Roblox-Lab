@@ -105,6 +105,17 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `grow-a-crystal/marketing/clips/plant_seed.mp4` | Planting the first seed | 2026-10-16 06:00 | https://youtube.com/shorts/jvi2Ik_6HDw | Planlagt (verified in Studio 2026-10-15) |
 | `labyrint-spill/marketing/clips/level2_run.mp4` | Can you find the exit faster? | 2026-10-16 08:00 | https://youtube.com/shorts/IQjhWM2qHD0 | Planlagt (verified in Studio 2026-10-15) |
 | `anomaly-observatory/marketing/pairs/twin_scope/spot.mp4` | Something in this hall is doubled | 2026-10-16 10:00 | https://youtube.com/shorts/SzAAuEPiyos | Planlagt (verified in Studio 2026-10-15) |
+| `anomaly-observatory/marketing/pairs/mirror_extra/spot.mp4` | Would you have turned back here? | 2026-10-17 16:00 | https://youtube.com/shorts/ZnZ0kiSY6gk | Planlagt (verified in Studio 2026-10-17) |
+| `plus1-jump/marketing/clips/saw_tier5.mp4` | Climbing past the first obstacle | 2026-10-17 18:00 | https://youtube.com/shorts/3MTARqS8-Po | Planlagt (verified in Studio 2026-10-17) |
+| `grow-a-crystal/marketing/clips/plant_seed.mp4` | One click, one crystal | 2026-10-17 20:00 | https://youtube.com/shorts/XqJEso_T5Kk | Planlagt (verified in Studio 2026-10-17) |
+| `labyrint-spill/marketing/clips/lobby_enter.mp4` | Pick a door: solo, group or friends | 2026-10-17 22:00 | https://youtube.com/shorts/lKW_ekMA5qw | Planlagt (verified in Studio 2026-10-17) |
+| `plus1-jump/marketing/clips/pendulum_tier6.mp4` | Six more platforms, six more jump power | 2026-10-18 00:00 | https://youtube.com/shorts/LAchDp8qDTg | Planlagt (verified in Studio 2026-10-17) |
+| `grow-a-crystal/marketing/clips/cavern_descend.mp4` | Down through the crystal cavern | 2026-10-18 02:00 | https://youtube.com/shorts/NHO0qpYtkR8 | Planlagt (verified in Studio 2026-10-17) |
+| `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Coins, gems, exit. Level 1 done | 2026-10-18 04:00 | https://youtube.com/shorts/oXq-ZcP47vQ | Planlagt (verified in Studio 2026-10-17) |
+| `anomaly-observatory/marketing/pairs/figure_ceiling/spot.mp4` | There is someone else in this hall | 2026-10-18 06:00 | https://youtube.com/shorts/r-1iru625z4 | Planlagt (verified in Studio 2026-10-17) |
+| `plus1-jump/marketing/clips/climb_tier1.mp4` | Every step you take gives +1 jump | 2026-10-18 08:00 | https://youtube.com/shorts/dk_UchNgKWs | Planlagt (verified in Studio 2026-10-17) |
+| `grow-a-crystal/marketing/clips/grow_timelapse.mp4` | Watch a Shard crystal grow | 2026-10-18 10:00 | https://youtube.com/shorts/8w3avkBYSIo | Planlagt (verified in Studio 2026-10-17) |
+| `labyrint-spill/marketing/clips/level2_run.mp4` | Can you find the exit faster? | 2026-10-18 12:00 | https://youtube.com/shorts/lk16CuycdFQ | Planlagt (verified in Studio 2026-10-17) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
