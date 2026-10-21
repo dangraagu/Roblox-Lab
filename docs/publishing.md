@@ -125,6 +125,11 @@ player standing between ADVANCE and TURN BACK saw one of their two choices — i
 interface is those two keys. Nobody would have noticed from the repo, and the Reddit announcement
 for that game was already queued.
 
+**Published 2026-10-21 17:27, from main 9bb2d14** (all gates re-run green on luau 0.742 just before: +1 Jump 34/34 files,
+Grow a Crystal 41/41, check_glyphs 0): **+1 Jump version 8** and **Grow a Crystal version 12**. These carry the eye candy,
+the highscore boards and the Redeem server-freeze fix. Labyrinth (24) and Anomaly (11) are still on their September builds:
+Labyrinth waits for the Studio list of its path guard, Anomaly for the two review fixes (docs/night-queue.md).
+
 **Where to look.** The dashboard page is
 `https://create.roblox.com/dashboard/creations/experiences/{universeId}/places/{placeId}/version-history`
 — note `version-history`, not `versions`, which 404s. The table's top row is the live version and
