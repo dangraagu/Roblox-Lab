@@ -127,8 +127,10 @@ for that game was already queued.
 
 **Published 2026-10-21 17:27, from main 9bb2d14** (all gates re-run green on luau 0.742 just before: +1 Jump 34/34 files,
 Grow a Crystal 41/41, check_glyphs 0): **+1 Jump version 8** and **Grow a Crystal version 12**. These carry the eye candy,
-the highscore boards and the Redeem server-freeze fix. Labyrinth (24) and Anomaly (11) are still on their September builds:
-Labyrinth waits for the Studio list of its path guard, Anomaly for the two review fixes (docs/night-queue.md).
+the highscore boards and the Redeem server-freeze fix. Then, the same evening (21:42, from main f0a9e63, gates re-run green first: Labyrinth 41/41 files plus docs_check 148/0,
+Anomaly 29/29, check_glyphs 0), on the owner's word: **Labyrinth version 25** and **Anomaly version 12**. Labyrinth
+carries the path guard, which has not been tried in real Studio yet (its needs-Studio list is in labyrint-spill/EYECANDY.md,
+"Night shift 2026-10-11"). No game had a running server, so none needed shutting down.
 
 **Where to look.** The dashboard page is
 `https://create.roblox.com/dashboard/creations/experiences/{universeId}/places/{placeId}/version-history`

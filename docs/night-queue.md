@@ -7,6 +7,9 @@ Newest night first. Each job: done / in progress (with exact resume point) / blo
 - All gates re-run on luau 0.742 at 9bb2d14 first: plus1-jump 34/34 files green, grow-a-crystal 41/41, check_glyphs 0.
 - +1 Jump **version 8**, Grow a Crystal **version 12** (HTTP 200, versionNumber read back from publish_response.json).
 - Running servers keep the old build until they are shut down (Creator Dashboard, Shut Down All Servers).
+- 21:42 the same day, on the owner's word: **Labyrinth version 25** and **Anomaly version 12** (gates green first). Labyrinth's
+  path guard is live WITHOUT its Studio check: do its needs-Studio list (EYECANDY "Night shift 2026-10-11") first when work resumes.
+- No running servers on any of the four games, so nothing to shut down.
 - The "Next night" item 1 below is done. Thumbnails for both are still candidates only (not uploaded).
 
 ## Night of 2026-10-12 (run started 00:17, stopped at about 00:25 on purpose: weekly budget)
