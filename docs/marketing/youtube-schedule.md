@@ -166,6 +166,16 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `plus1-jump/marketing/clips/climb_tier3.mp4` | When the steps get taller, so does your jump | 2026-10-26 06:00 | https://youtube.com/shorts/O2o51-_hHYQ | Planlagt (verified in Studio 2026-10-25) |
 | `grow-a-crystal/marketing/clips/grow_timelapse.mp4` | Watch a Shard crystal grow | 2026-10-26 08:00 | https://youtube.com/shorts/Js46LT5_J8w | Planlagt (verified in Studio 2026-10-25) |
 | `labyrint-spill/marketing/clips/level2_run.mp4` | Can you find the exit faster? | 2026-10-26 10:00 | https://youtube.com/shorts/__3c6kYi5ec | Planlagt (verified in Studio 2026-10-25) |
+| `grow-a-crystal/marketing/clips/harvest.mp4` | Clicking a grown crystal for Gem Dust | 2026-10-26 16:00 | https://youtube.com/shorts/OrWaemHa584 | Planlagt (verified in Studio 2026-10-26) |
+| `labyrint-spill/marketing/clips/lobby_enter.mp4` | Three doors into the maze | 2026-10-26 18:00 | https://youtube.com/shorts/YggaKdBiy68 | Planlagt (verified in Studio 2026-10-26) |
+| `anomaly-observatory/marketing/pairs/static_screen/spot.mp4` | A tiny detail changed. Did you see it? | 2026-10-26 20:00 | https://youtube.com/shorts/Gf9elAmO-Fw | Planlagt (verified in Studio 2026-10-26) |
+| `plus1-jump/marketing/clips/pendulum_tier6.mp4` | Six more platforms, six more jump power | 2026-10-26 22:00 | https://youtube.com/shorts/8LQkteEEzK4 | Planlagt (verified in Studio 2026-10-26) |
+| `anomaly-observatory/marketing/pairs/scale_bench/spot.mp4` | Something in this hall is the wrong size | 2026-10-27 00:00 | https://youtube.com/shorts/SDoW-CODzR0 | Planlagt (verified in Studio 2026-10-26) |
+| `plus1-jump/marketing/clips/climb_tier3.mp4` | Tier 3: taller steps, same +1 | 2026-10-27 02:00 | https://youtube.com/shorts/dlg6PvqGWbk | Planlagt (verified in Studio 2026-10-26) |
+| `grow-a-crystal/marketing/clips/harvest.mp4` | Clicking a grown crystal for Gem Dust | 2026-10-27 04:00 | https://youtube.com/shorts/gthtjrJ1beY | Planlagt (verified in Studio 2026-10-26) |
+| `labyrint-spill/marketing/clips/level2_run.mp4` | Can you find the exit faster? | 2026-10-27 06:00 | https://youtube.com/shorts/8zon6YftBYA | Planlagt (verified in Studio 2026-10-26) |
+| `anomaly-observatory/marketing/pairs/scope_tilt/spot.mp4` | Look at the telescope. Now look again | 2026-10-27 08:00 | https://youtube.com/shorts/kIh8y-s4sTQ | Planlagt (verified in Studio 2026-10-26) |
+| `plus1-jump/marketing/clips/tower_path.mp4` | Every platform up to tier 6 | 2026-10-27 10:00 | https://youtube.com/shorts/VYVWnzVlFPc | Planlagt (verified in Studio 2026-10-26) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
