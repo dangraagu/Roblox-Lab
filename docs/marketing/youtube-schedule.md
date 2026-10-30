@@ -206,6 +206,16 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `grow-a-crystal/marketing/clips/harvest.mp4` | Clicking a grown crystal for Gem Dust | 2026-10-30 06:00 | https://youtube.com/shorts/Hy1q0Qr498o | Planlagt (verified in Studio 2026-10-29) |
 | `labyrint-spill/marketing/clips/level2_run.mp4` | Can you find the exit faster? | 2026-10-30 08:00 | https://youtube.com/shorts/ZpZQkfn-Zdk | Planlagt (verified in Studio 2026-10-29) |
 | `anomaly-observatory/marketing/pairs/static_screen/spot.mp4` | A tiny detail changed. Did you see it? | 2026-10-30 10:00 | https://youtube.com/shorts/5ImA0Fv4FT4 | Planlagt (verified in Studio 2026-10-29) |
+| `labyrint-spill/marketing/clips/lobby_enter.mp4` | Three doors into the maze | 2026-10-30 16:00 | https://youtube.com/shorts/Yp52XJ_a534 | Planlagt (verified in Studio 2026-10-30) |
+| `anomaly-observatory/marketing/pairs/chair_moved/spot.mp4` | Nothing is missing. Something moved | 2026-10-30 18:00 | https://youtube.com/shorts/6Pf3wgNOhLI | Planlagt (verified in Studio 2026-10-30) |
+| `plus1-jump/marketing/clips/climb_tier1.mp4` | Every step you take gives +1 jump | 2026-10-30 20:00 | https://youtube.com/shorts/wBP1txis0rE | Planlagt (verified in Studio 2026-10-30) |
+| `grow-a-crystal/marketing/clips/plant_seed.mp4` | Planting the first seed | 2026-10-30 22:00 | https://youtube.com/shorts/jQK1mVT-ynw | Planlagt (verified in Studio 2026-10-30) |
+| `anomaly-observatory/marketing/pairs/door_extra/spot.mp4` | Count the doors | 2026-10-31 00:00 | https://youtube.com/shorts/yjYD6v47f68 | Planlagt (verified in Studio 2026-10-30) |
+| `plus1-jump/marketing/clips/code_launch.mp4` | What +100 jump power does to one jump | 2026-10-31 02:00 | https://youtube.com/shorts/EGNh7MJaBmw | Planlagt (verified in Studio 2026-10-30) |
+| `grow-a-crystal/marketing/clips/cavern_descend.mp4` | From the basin to the first socket | 2026-10-31 04:00 | https://youtube.com/shorts/8z7OZNUhW5E | Planlagt (verified in Studio 2026-10-30) |
+| `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Clearing level 1 of the maze | 2026-10-31 06:00 | https://youtube.com/shorts/h9YG27y_900 | Planlagt (verified in Studio 2026-10-30) |
+| `anomaly-observatory/marketing/pairs/scope_gone/spot.mp4` | 4 seconds. One thing is gone. Find it | 2026-10-31 08:00 | https://youtube.com/shorts/4LxZMrJe-8Q | Planlagt (verified in Studio 2026-10-30) |
+| `plus1-jump/marketing/clips/tower_path.mp4` | The whole sky tower in 12 seconds | 2026-10-31 10:00 | https://youtube.com/shorts/2AbYDtRs93g | Planlagt (verified in Studio 2026-10-30) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
