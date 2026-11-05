@@ -266,6 +266,16 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `plus1-jump/marketing/clips/code_launch.mp4` | What +100 jump power does to one jump | 2026-11-05 06:00 | https://youtube.com/shorts/cqgiLvkHj3o | Planlagt (verified in Studio 2026-11-04) |
 | `grow-a-crystal/marketing/clips/cavern_climb.mp4` | The cavern you unlock one chamber at a time | 2026-11-05 08:00 | https://youtube.com/shorts/G_iyvPBviDw | Planlagt (verified in Studio 2026-11-04) |
 | `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Clearing level 1 of the maze | 2026-11-05 10:00 | https://youtube.com/shorts/G2deJ3d2BKA | Planlagt (verified in Studio 2026-11-04) |
+| `grow-a-crystal/marketing/clips/plant_seed.mp4` | One click, one crystal | 2026-11-05 16:00 | https://youtube.com/shorts/SX6wQtsq-QM | Planlagt (verified in Studio 2026-11-05) |
+| `labyrint-spill/marketing/clips/level2_run.mp4` | Level 2, start to exit | 2026-11-05 18:00 | https://youtube.com/shorts/RYpGcUP0QOA | Planlagt (verified in Studio 2026-11-05) |
+| `anomaly-observatory/marketing/pairs/twin_scope/spot.mp4` | Clean hall or not? Look twice | 2026-11-05 20:00 | https://youtube.com/shorts/rqmhUP-gdEU | Planlagt (verified in Studio 2026-11-05) |
+| `plus1-jump/marketing/clips/climb_tier3.mp4` | Tier 3: taller steps, same +1 | 2026-11-05 22:00 | https://youtube.com/shorts/aeiPFipicwo | Planlagt (verified in Studio 2026-11-05) |
+| `labyrint-spill/marketing/clips/lobby_enter.mp4` | Pick a door: solo, group or friends | 2026-11-06 00:00 | https://youtube.com/shorts/tajlsb4u4Jw | Planlagt (verified in Studio 2026-11-05) |
+| `anomaly-observatory/marketing/pairs/lights_out/spot.mp4` | This hall looks wrong. Why? | 2026-11-06 02:00 | https://youtube.com/shorts/2VW4k6Y75uM | Planlagt (verified in Studio 2026-11-05) |
+| `plus1-jump/marketing/clips/saw_tier5.mp4` | Tier 5 is where the obstacles start | 2026-11-06 04:00 | https://youtube.com/shorts/tcSGzbXlEco | Planlagt (verified in Studio 2026-11-05) |
+| `grow-a-crystal/marketing/clips/cavern_descend.mp4` | Down through the crystal cavern | 2026-11-06 06:00 | https://youtube.com/shorts/8cRpa-LI_cU | Planlagt (verified in Studio 2026-11-05) |
+| `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Coins, gems, exit. Level 1 done | 2026-11-06 08:00 | https://youtube.com/shorts/oyi2reQrPAY | Planlagt (verified in Studio 2026-11-05) |
+| `anomaly-observatory/marketing/pairs/scope_tilt/spot.mp4` | One object is pointing the wrong way | 2026-11-06 10:00 | https://youtube.com/shorts/_vpe-Dqolkk | Planlagt (verified in Studio 2026-11-05) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
