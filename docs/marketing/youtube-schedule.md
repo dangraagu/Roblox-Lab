@@ -286,6 +286,16 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `labyrint-spill/marketing/clips/lobby_enter.mp4` | Three doors into the maze | 2026-11-07 06:00 | https://youtube.com/shorts/TBlnENpy7gw | Planlagt (verified in Studio 2026-11-06) |
 | `anomaly-observatory/marketing/pairs/figure_ceiling/spot.mp4` | Look up before you advance | 2026-11-07 08:00 | https://youtube.com/shorts/CDMloQnr9QU | Planlagt (verified in Studio 2026-11-06) |
 | `plus1-jump/marketing/clips/tower_path.mp4` | Every platform up to tier 6 | 2026-11-07 10:00 | https://youtube.com/shorts/wHwiH80ptrM | Planlagt (verified in Studio 2026-11-06) |
+| `anomaly-observatory/marketing/pairs/scale_bench/spot.mp4` | Something in this hall is the wrong size | 2026-11-07 16:00 | https://youtube.com/shorts/9AtDh5bw7lI | Planlagt (verified in Studio 2026-11-07) |
+| `plus1-jump/marketing/clips/climb_tier3.mp4` | When the steps get taller, so does your jump | 2026-11-07 18:00 | https://youtube.com/shorts/JcNxruT22cw | Planlagt (verified in Studio 2026-11-07) |
+| `grow-a-crystal/marketing/clips/cavern_descend.mp4` | From the basin to the first socket | 2026-11-07 20:00 | https://youtube.com/shorts/LJV0S9MOY0c | Planlagt (verified in Studio 2026-11-07) |
+| `labyrint-spill/marketing/clips/level2_run.mp4` | Level 2, start to exit | 2026-11-07 22:00 | https://youtube.com/shorts/YDxdsK0DqHo | Planlagt (verified in Studio 2026-11-07) |
+| `plus1-jump/marketing/clips/saw_tier5.mp4` | Climbing past the first obstacle | 2026-11-08 00:00 | https://youtube.com/shorts/7DFmoJZJW2s | Planlagt (verified in Studio 2026-11-07) |
+| `grow-a-crystal/marketing/clips/grow_timelapse.mp4` | A crystal growing in 60 seconds, sped up | 2026-11-08 02:00 | https://youtube.com/shorts/D1Vu6N8vYw0 | Planlagt (verified in Studio 2026-11-07) |
+| `labyrint-spill/marketing/clips/lobby_enter.mp4` | Pick a door: solo, group or friends | 2026-11-08 04:00 | https://youtube.com/shorts/JQFkhRtI6p0 | Planlagt (verified in Studio 2026-11-07) |
+| `anomaly-observatory/marketing/pairs/static_screen/spot.mp4` | A tiny detail changed. Did you see it? | 2026-11-08 06:00 | https://youtube.com/shorts/uircYyTtGJw | Planlagt (verified in Studio 2026-11-07) |
+| `plus1-jump/marketing/clips/pendulum_tier6.mp4` | Six more platforms, six more jump power | 2026-11-08 08:00 | https://youtube.com/shorts/IXikK927XYs | Planlagt (verified in Studio 2026-11-07) |
+| `grow-a-crystal/marketing/clips/harvest.mp4` | Harvest day in the cavern | 2026-11-08 10:00 | https://youtube.com/shorts/HWBKaoyyi8k | Planlagt (verified in Studio 2026-11-07) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
