@@ -296,6 +296,16 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `anomaly-observatory/marketing/pairs/static_screen/spot.mp4` | A tiny detail changed. Did you see it? | 2026-11-08 06:00 | https://youtube.com/shorts/uircYyTtGJw | Planlagt (verified in Studio 2026-11-07) |
 | `plus1-jump/marketing/clips/pendulum_tier6.mp4` | Six more platforms, six more jump power | 2026-11-08 08:00 | https://youtube.com/shorts/IXikK927XYs | Planlagt (verified in Studio 2026-11-07) |
 | `grow-a-crystal/marketing/clips/harvest.mp4` | Harvest day in the cavern | 2026-11-08 10:00 | https://youtube.com/shorts/HWBKaoyyi8k | Planlagt (verified in Studio 2026-11-07) |
+| `plus1-jump/marketing/clips/climb_tier1.mp4` | Every step you take gives +1 jump | 2026-11-08 16:00 | https://youtube.com/shorts/7Lmamxj843g | Planlagt (verified in Studio 2026-11-08) |
+| `grow-a-crystal/marketing/clips/cavern_climb.mp4` | The cavern you unlock one chamber at a time | 2026-11-08 18:00 | https://youtube.com/shorts/7VSOGKZkk7A | Planlagt (verified in Studio 2026-11-08) |
+| `labyrint-spill/marketing/clips/level2_run.mp4` | Can you find the exit faster? | 2026-11-08 20:00 | https://youtube.com/shorts/euQaS3xeLGw | Planlagt (verified in Studio 2026-11-08) |
+| `anomaly-observatory/marketing/pairs/door_extra/spot.mp4` | Count the doors | 2026-11-08 22:00 | https://youtube.com/shorts/UiiaYnSsyWY | Planlagt (verified in Studio 2026-11-08) |
+| `grow-a-crystal/marketing/clips/plant_seed.mp4` | One click, one crystal | 2026-11-09 00:00 | https://youtube.com/shorts/rtVIhnweEH4 | Planlagt (verified in Studio 2026-11-08) |
+| `labyrint-spill/marketing/clips/lobby_enter.mp4` | Three doors into the maze | 2026-11-09 02:00 | https://youtube.com/shorts/uVPSBGUeP8w | Planlagt (verified in Studio 2026-11-08) |
+| `anomaly-observatory/marketing/pairs/scope_gone/spot.mp4` | 4 seconds. One thing is gone. Find it | 2026-11-09 04:00 | https://youtube.com/shorts/BtuEjVQLrW8 | Planlagt (verified in Studio 2026-11-08) |
+| `plus1-jump/marketing/clips/code_launch.mp4` | What +100 jump power does to one jump | 2026-11-09 06:00 | https://youtube.com/shorts/NnsC_ChVAgU | Planlagt (verified in Studio 2026-11-08) |
+| `grow-a-crystal/marketing/clips/cavern_descend.mp4` | Down through the crystal cavern | 2026-11-09 08:00 | https://youtube.com/shorts/eq16KtCdCtw | Planlagt (verified in Studio 2026-11-08) |
+| `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Clearing level 1 of the maze | 2026-11-09 10:00 | https://youtube.com/shorts/YuItIKccrOY | Planlagt (verified in Studio 2026-11-08) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
