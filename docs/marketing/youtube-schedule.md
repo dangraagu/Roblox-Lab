@@ -316,6 +316,16 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `anomaly-observatory/marketing/pairs/scope_tilt/spot.mp4` | Look at the telescope. Now look again | 2026-11-12 12:00 | https://youtube.com/shorts/tMY1PsABDWI | Planlagt (verified in Studio 2026-11-11) |
 | `plus1-jump/marketing/clips/tower_path.mp4` | Every platform up to tier 6 | 2026-11-12 14:00 | https://youtube.com/shorts/Qw3uETq2vYA | Planlagt (verified in Studio 2026-11-11) |
 | `grow-a-crystal/marketing/clips/harvest.mp4` | Harvest day in the cavern | 2026-11-12 16:00 | https://youtube.com/shorts/nBRg2EVjGXw | Planlagt (verified in Studio 2026-11-11) |
+| `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Coins, gems, exit. Level 1 done | 2026-11-13 16:00 | https://youtube.com/shorts/j3SV7GlGJm8 | Planlagt (verified in Studio 2026-11-13) |
+| `anomaly-observatory/marketing/pairs/door_extra/spot.mp4` | The far end of this hall is wrong | 2026-11-13 18:00 | https://youtube.com/shorts/rkijGm-Z38A | Planlagt (verified in Studio 2026-11-13) |
+| `plus1-jump/marketing/clips/climb_tier1.mp4` | Every step you take gives +1 jump | 2026-11-13 20:00 | https://youtube.com/shorts/om0V_J9XWH0 | Planlagt (verified in Studio 2026-11-13) |
+| `grow-a-crystal/marketing/clips/cavern_descend.mp4` | Down through the crystal cavern | 2026-11-13 22:00 | https://youtube.com/shorts/GapNNRXTrDo | Planlagt (verified in Studio 2026-11-13) |
+| `anomaly-observatory/marketing/pairs/scope_gone/spot.mp4` | Spot what is missing before the reveal | 2026-11-14 00:00 | https://youtube.com/shorts/zLdRD_oKHtg | Planlagt (verified in Studio 2026-11-13) |
+| `plus1-jump/marketing/clips/code_launch.mp4` | What +100 jump power does to one jump | 2026-11-14 02:00 | https://youtube.com/shorts/WB3QdZ7Cz1s | Planlagt (verified in Studio 2026-11-13) |
+| `grow-a-crystal/marketing/clips/grow_timelapse.mp4` | Watch a Shard crystal grow | 2026-11-14 04:00 | https://youtube.com/shorts/e2vKV6BHnAM | Planlagt (verified in Studio 2026-11-13) |
+| `labyrint-spill/marketing/clips/level2_run.mp4` | Can you find the exit faster? | 2026-11-14 06:00 | https://youtube.com/shorts/IrZ-ZG0Bdio | Planlagt (verified in Studio 2026-11-13) |
+| `anomaly-observatory/marketing/pairs/twin_scope/spot.mp4` | Clean hall or not? Look twice | 2026-11-14 08:00 | https://youtube.com/shorts/MQyzACSXS-0 | Planlagt (verified in Studio 2026-11-13) |
+| `plus1-jump/marketing/clips/tower_path.mp4` | The whole sky tower in 12 seconds | 2026-11-14 10:00 | https://youtube.com/shorts/lWr6_73b1Cs | Planlagt (verified in Studio 2026-11-13) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
