@@ -416,6 +416,16 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `plus1-jump/marketing/clips/pendulum_tier6.mp4` | Tier 6: steps at 17 studs and climbing | 2026-11-23 06:00 | https://youtube.com/shorts/HbOCl9MbeZY | Planlagt (verified in Studio 2026-11-22) |
 | `grow-a-crystal/marketing/clips/plant_seed.mp4` | One click, one crystal | 2026-11-23 08:00 | https://youtube.com/shorts/xx5hHJuqY3A | Planlagt (verified in Studio 2026-11-22) |
 | `labyrint-spill/marketing/clips/lobby_enter.mp4` | Pick a door: solo, group or friends | 2026-11-23 10:00 | https://youtube.com/shorts/6eE3hbEuCCs | Planlagt (verified in Studio 2026-11-22) |
+| `grow-a-crystal/marketing/clips/cavern_descend.mp4` | Down through the crystal cavern | 2026-11-23 16:00 | https://youtube.com/shorts/4rr1xTOgIRA | Planlagt (verified in Studio 2026-11-23) |
+| `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Coins, gems, exit. Level 1 done | 2026-11-23 18:00 | https://youtube.com/shorts/OPgnSTeKkQc | Planlagt (verified in Studio 2026-11-23) |
+| `anomaly-observatory/marketing/pairs/scale_bench/spot.mp4` | Hardest one so far. Find it | 2026-11-23 20:00 | https://youtube.com/shorts/CGf5ZRhq3AU | Planlagt (verified in Studio 2026-11-23) |
+| `plus1-jump/marketing/clips/code_launch.mp4` | Same jump. Before and after one code | 2026-11-23 22:00 | https://youtube.com/shorts/a9sag6Kb4Ik | Planlagt (verified in Studio 2026-11-23) |
+| `anomaly-observatory/marketing/pairs/chair_moved/spot.mp4` | Nothing is missing. Something moved | 2026-11-24 00:00 | https://youtube.com/shorts/8EBN5ysbLBg | Planlagt (verified in Studio 2026-11-23) |
+| `plus1-jump/marketing/clips/pendulum_tier6.mp4` | Six more platforms, six more jump power | 2026-11-24 02:00 | https://youtube.com/shorts/iU5Hfym83w8 | Planlagt (verified in Studio 2026-11-23) |
+| `grow-a-crystal/marketing/clips/cavern_climb.mp4` | The cavern you unlock one chamber at a time | 2026-11-24 04:00 | https://youtube.com/shorts/to_dx_sDMAo | Planlagt (verified in Studio 2026-11-23) |
+| `labyrint-spill/marketing/clips/lobby_enter.mp4` | Pick a door: solo, group or friends | 2026-11-24 06:00 | https://youtube.com/shorts/LnGFQ0E_N2w | Planlagt (verified in Studio 2026-11-23) |
+| `anomaly-observatory/marketing/pairs/scope_tilt/spot.mp4` | Look at the telescope. Now look again | 2026-11-24 08:00 | https://youtube.com/shorts/eB4CEpxdP2Q | Planlagt (verified in Studio 2026-11-23) |
+| `plus1-jump/marketing/clips/saw_tier5.mp4` | Tier 5 is where the obstacles start | 2026-11-24 10:00 | https://youtube.com/shorts/RUwN7pdLtFM | Planlagt (verified in Studio 2026-11-23) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
