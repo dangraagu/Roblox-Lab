@@ -446,6 +446,16 @@ Every Short that has gone out or is queued on @GusGamesNor (`UCbeSe83K2QOwYBHZ0C
 | `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Clearing level 1 of the maze | 2026-11-28 06:00 | https://youtube.com/shorts/hXiY-OAIZzE | Planlagt (verified in Studio 2026-11-27) |
 | `anomaly-observatory/marketing/pairs/figure_ceiling/spot.mp4` | Look up before you advance | 2026-11-28 08:00 | https://youtube.com/shorts/-Ybhja_d1uk | Planlagt (verified in Studio 2026-11-27) |
 | `plus1-jump/marketing/clips/climb_tier1.mp4` | Watch the counter go up with every jump | 2026-11-28 10:00 | https://youtube.com/shorts/vUAFu0JwHXU | Planlagt (verified in Studio 2026-11-27) |
+| `anomaly-observatory/marketing/pairs/scale_bench/spot.mp4` | Something in this hall is the wrong size | 2026-11-28 16:00 | https://youtube.com/shorts/QDx_d2tYbEw | Planlagt (verified in Studio 2026-11-28) |
+| `plus1-jump/marketing/clips/code_launch.mp4` | Same jump. Before and after one code | 2026-11-28 18:00 | https://youtube.com/shorts/2_AWHgTSZpQ | Planlagt (verified in Studio 2026-11-28) |
+| `grow-a-crystal/marketing/clips/harvest.mp4` | Clicking a grown crystal for Gem Dust | 2026-11-28 20:00 | https://youtube.com/shorts/2AQiYo9NxWQ | Planlagt (verified in Studio 2026-11-28) |
+| `labyrint-spill/marketing/clips/lobby_enter.mp4` | Pick a door: solo, group or friends | 2026-11-28 22:00 | https://youtube.com/shorts/a8A9b7wmVY4 | Planlagt (verified in Studio 2026-11-28) |
+| `plus1-jump/marketing/clips/tower_path.mp4` | Every platform up to tier 6 | 2026-11-29 00:00 | https://youtube.com/shorts/haZsySEELnM | Planlagt (verified in Studio 2026-11-28) |
+| `grow-a-crystal/marketing/clips/cavern_climb.mp4` | Eight terraces of crystal sockets | 2026-11-29 02:00 | https://youtube.com/shorts/JD22sKjcFSw | Planlagt (verified in Studio 2026-11-28) |
+| `labyrint-spill/marketing/clips/coins_and_exit.mp4` | Coins, gems, exit. Level 1 done | 2026-11-29 04:00 | https://youtube.com/shorts/Q63qv4YCto0 | Planlagt (verified in Studio 2026-11-28) |
+| `anomaly-observatory/marketing/pairs/static_screen/spot.mp4` | A tiny detail changed. Did you see it? | 2026-11-29 06:00 | https://youtube.com/shorts/MCuxKWxm4uk | Planlagt (verified in Studio 2026-11-28) |
+| `plus1-jump/marketing/clips/climb_tier3.mp4` | When the steps get taller, so does your jump | 2026-11-29 08:00 | https://youtube.com/shorts/TIpnc_lQRx4 | Planlagt (verified in Studio 2026-11-28) |
+| `grow-a-crystal/marketing/clips/plant_seed.mp4` | Planting the first seed | 2026-11-29 10:00 | https://youtube.com/shorts/nmRI5NduYhU | Planlagt (verified in Studio 2026-11-28) |
 
 All uploads: audience "Nei, den er ikke laget for barn", description ends with the AI-assistant line and the game link, `#shorts #roblox` in the title.
 
